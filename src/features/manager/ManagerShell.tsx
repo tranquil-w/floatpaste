@@ -113,20 +113,20 @@ export function ManagerShell() {
   const selectedSummary = clips.data?.items.find((item) => item.id === selectedItemId) ?? detail.data;
 
   return (
-    <div className="min-h-screen px-5 py-6 text-ink md:px-8">
-      <div className="mx-auto grid max-w-7xl gap-5 lg:grid-cols-[280px_minmax(360px,1fr)_420px]">
-        <Panel className="flex flex-col gap-5">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-accentDeep">
+    <div className="flex h-screen flex-col px-5 py-6 text-ink md:px-8">
+      <div className="mx-auto grid w-full max-w-7xl flex-1 min-h-0 gap-5 lg:grid-cols-[280px_minmax(360px,1fr)_420px]">
+        <Panel className="flex flex-col gap-5 overflow-hidden">
+          <div className="shrink-0">
+            <div className="inline-flex items-center rounded-full border border-accent/20 bg-accent/5 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.3em] text-accentDeep">
               FloatPaste / 浮贴
-            </p>
-            <h1 className="mt-2 font-display text-3xl leading-tight">MVP 资料库窗口</h1>
-            <p className="mt-3 text-sm leading-6 text-slate-600">
+            </div>
+            <h1 className="mt-3 font-display text-3xl font-medium tracking-tight">MVP 资料库窗口</h1>
+            <p className="mt-3 text-sm leading-relaxed text-slate-600">
               这一版优先打通文本记录、搜索、编辑、收藏和设置，速贴面板与系统回贴链路继续沿当前骨架推进。
             </p>
           </div>
 
-          <div className="flex flex-wrap gap-2">
+          <div className="flex shrink-0 flex-wrap gap-2">
             <StatusBadge tone={settings.data?.pauseMonitoring ? "paused" : "running"}>
               {settings.data?.pauseMonitoring ? "监听已暂停" : "监听中"}
             </StatusBadge>
@@ -135,30 +135,33 @@ export function ManagerShell() {
             </StatusBadge>
           </div>
 
-          <div className="rounded-2xl bg-slate-900 px-4 py-4 text-white">
-            <p className="text-xs uppercase tracking-[0.25em] text-white/70">快捷键</p>
-            <p className="mt-2 text-2xl font-semibold">{settings.data?.shortcut ?? "Ctrl+`"}</p>
-            <p className="mt-2 text-sm text-white/70">当前仅完成 Manager 主窗口，Picker 与全局唤起链路在下一阶段接入。</p>
+          <div className="relative shrink-0 overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 to-slate-800 px-5 py-5 text-white shadow-lg">
+            <div className="relative z-10">
+              <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-white/60">快捷键</p>
+              <p className="mt-1.5 text-2xl font-semibold tracking-wide">{settings.data?.shortcut ?? "Ctrl+`"}</p>
+              <p className="mt-3 text-[13px] leading-relaxed text-white/70">当前仅完成 Manager 主窗口，Picker 与全局唤起链路在下一阶段接入。</p>
+            </div>
+            <div className="absolute -right-4 -top-4 h-24 w-24 rounded-full bg-white/5 blur-2xl"></div>
           </div>
 
-          <div>
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="mb-3 flex shrink-0 items-center justify-between">
+              <h2 className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">
                 收藏预览
               </h2>
               <button
-                className="text-sm font-medium text-accentDeep"
+                className="text-[13px] font-medium text-accentDeep transition-colors hover:text-accent"
                 onClick={() => setViewMode("history")}
                 type="button"
               >
                 查看全部
               </button>
             </div>
-            <div className="space-y-3">
+            <div className="flex-1 space-y-3 overflow-y-auto pr-2">
               {favorites.data?.length ? (
                 favorites.data.map((item) => (
                   <button
-                    className="w-full rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 text-left transition hover:-translate-y-0.5 hover:border-amber-300"
+                    className="group w-full rounded-2xl border border-amber-200/50 bg-gradient-to-br from-amber-50 to-orange-50/30 px-4 py-3 text-left transition-all duration-300 hover:-translate-y-0.5 hover:border-amber-300/80 hover:shadow-[0_4px_12px_-4px_rgba(217,119,6,0.15)]"
                     key={item.id}
                     onClick={() => {
                       setViewMode("history");
@@ -166,8 +169,8 @@ export function ManagerShell() {
                     }}
                     type="button"
                   >
-                    <p className="line-clamp-2 text-sm font-medium">{item.contentPreview}</p>
-                    <p className="mt-2 text-xs text-slate-500">{formatDateTime(item.lastUsedAt ?? item.createdAt)}</p>
+                    <p className="line-clamp-2 text-sm font-medium leading-relaxed text-slate-800">{item.contentPreview}</p>
+                    <p className="mt-2 text-[11px] font-medium text-amber-700/60">{formatDateTime(item.lastUsedAt ?? item.createdAt)}</p>
                   </button>
                 ))
               ) : (
@@ -176,19 +179,19 @@ export function ManagerShell() {
             </div>
           </div>
 
-          <div className="mt-auto flex gap-2">
+          <div className="mt-auto flex shrink-0 gap-2 pt-4">
             <button
-              className="rounded-2xl bg-amber-500 px-4 py-3 text-sm font-semibold text-white transition hover:bg-amber-600"
+              className="whitespace-nowrap rounded-2xl bg-gradient-to-b from-amber-400 to-amber-500 px-4 py-3 text-sm font-semibold text-white shadow-[0_2px_10px_rgba(217,119,6,0.2)] transition-all duration-300 hover:to-amber-600 hover:shadow-[0_4px_14px_rgba(217,119,6,0.3)]"
               onClick={() => void showPicker()}
               type="button"
             >
               打开速贴
             </button>
             <button
-              className={`flex-1 rounded-2xl px-4 py-3 text-sm font-semibold transition ${
+              className={`whitespace-nowrap flex-1 rounded-2xl px-4 py-3 text-sm font-semibold transition-all duration-300 ${
                 viewMode === "history"
-                  ? "bg-ink text-white"
-                  : "bg-white text-slate-700 ring-1 ring-slate-200"
+                  ? "bg-slate-900 text-white shadow-md"
+                  : "bg-white text-slate-700 ring-1 ring-inset ring-slate-200 hover:bg-slate-50 hover:text-slate-900"
               }`}
               onClick={() => setViewMode("history")}
               type="button"
@@ -196,10 +199,10 @@ export function ManagerShell() {
               历史库
             </button>
             <button
-              className={`flex-1 rounded-2xl px-4 py-3 text-sm font-semibold transition ${
+              className={`whitespace-nowrap flex-1 rounded-2xl px-4 py-3 text-sm font-semibold transition-all duration-300 ${
                 viewMode === "settings"
-                  ? "bg-ink text-white"
-                  : "bg-white text-slate-700 ring-1 ring-slate-200"
+                  ? "bg-slate-900 text-white shadow-md"
+                  : "bg-white text-slate-700 ring-1 ring-inset ring-slate-200 hover:bg-slate-50 hover:text-slate-900"
               }`}
               onClick={() => setViewMode("settings")}
               type="button"
@@ -209,18 +212,19 @@ export function ManagerShell() {
           </div>
         </Panel>
 
-        <Panel className="flex flex-col gap-4">
+        <Panel className="flex flex-col gap-4 overflow-hidden">
           {viewMode === "history" ? (
             <>
-              <div className="flex flex-col gap-3 sm:flex-row">
+              <div className="flex shrink-0 flex-col gap-3 sm:flex-row">
                 <input
-                  className="flex-1 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none transition focus:border-accent focus:bg-white"
+                  className="flex-1 rounded-2xl border border-slate-200 bg-slate-50/50 px-5 py-3.5 text-sm outline-none transition-all focus:border-accent focus:bg-white focus:ring-4 focus:ring-accent/10"
                   onChange={(event) => setKeyword(event.target.value)}
                   placeholder="搜索全文、来源应用或关键短语"
                   value={keyword}
                 />
-                <label className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                <label className="inline-flex cursor-pointer items-center gap-2 rounded-2xl border border-slate-200 bg-white px-5 py-3.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50">
                   <input
+                    className="h-4 w-4 rounded border-slate-300 text-accent focus:ring-accent"
                     checked={favoritedOnly}
                     onChange={(event) => setFavoritedOnly(event.target.checked)}
                     type="checkbox"
@@ -229,45 +233,45 @@ export function ManagerShell() {
                 </label>
               </div>
 
-              <div className="flex items-center justify-between text-sm text-slate-500">
+              <div className="flex shrink-0 items-center justify-between px-1 text-xs font-medium text-slate-400">
                 <span>共 {clips.data?.total ?? 0} 条记录</span>
                 <span>{keyword.trim() ? "按相关度排序" : "按最近使用排序"}</span>
               </div>
 
-              <div className="space-y-3 overflow-y-auto pr-1">
+              <div className="flex-1 space-y-3 overflow-y-auto pr-2 pl-1 py-1">
                 {clips.data?.items.length ? (
                   clips.data.items.map((item, index) => {
                     const isSelected = item.id === selectedItemId;
                     return (
                       <button
-                        className={`w-full rounded-3xl border px-4 py-4 text-left transition ${
+                        className={`group w-full rounded-3xl border px-5 py-4 text-left transition-all duration-300 ${
                           isSelected
-                            ? "border-accent bg-amber-50 shadow-sm"
-                            : "border-slate-200 bg-white hover:-translate-y-0.5 hover:border-slate-300"
+                            ? "scale-[1.01] border-accent/40 bg-white shadow-[0_4px_20px_-4px_rgba(217,119,6,0.15)] ring-1 ring-accent/30"
+                            : "border-slate-200/60 bg-white/60 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white hover:shadow-sm"
                         }`}
                         key={item.id}
                         onClick={() => setSelectedItemId(item.id)}
                         type="button"
                       >
                         <div className="flex items-start justify-between gap-4">
-                          <div>
-                            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">
+                          <div className="flex-1">
+                            <div className="flex h-5 w-5 items-center justify-center rounded-md bg-slate-100/80 text-[10px] font-bold text-slate-400 transition-colors group-hover:bg-slate-200 group-hover:text-slate-500">
                               {String(index + 1).padStart(2, "0")}
-                            </p>
-                            <p className="mt-2 line-clamp-3 text-sm leading-6 text-slate-800">
+                            </div>
+                            <p className="mt-2.5 line-clamp-3 text-sm leading-relaxed text-slate-800">
                               {item.contentPreview}
                             </p>
                           </div>
                           {item.isFavorited ? (
-                            <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-700">
+                            <span className="shrink-0 rounded-full bg-amber-100/80 px-2 py-1 text-[10px] font-semibold text-amber-700">
                               收藏
                             </span>
                           ) : null}
                         </div>
-                        <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-500">
-                          <span>{item.sourceApp ?? "未知来源"}</span>
-                          <span>创建于 {formatDateTime(item.createdAt)}</span>
-                          <span>最近使用 {formatDateTime(item.lastUsedAt)}</span>
+                        <div className="mt-3.5 flex flex-wrap gap-x-4 gap-y-2 text-[11px] font-medium text-slate-400">
+                          <span className="flex items-center gap-1.5"><span className="h-1 w-1 rounded-full bg-slate-300"></span>{item.sourceApp ?? "未知来源"}</span>
+                          <span className="flex items-center gap-1.5"><span className="h-1 w-1 rounded-full bg-slate-300"></span>创建于 {formatDateTime(item.createdAt)}</span>
+                          <span className="flex items-center gap-1.5"><span className="h-1 w-1 rounded-full bg-slate-300"></span>最近使用 {formatDateTime(item.lastUsedAt)}</span>
                         </div>
                       </button>
                     );
@@ -281,26 +285,28 @@ export function ManagerShell() {
               </div>
             </>
           ) : (
-            <SettingsPanel
-              isPending={updateSettingsMutation.isPending}
-              onSave={(nextValue) => updateSettingsMutation.mutate(nextValue)}
-            />
+            <div className="h-full overflow-y-auto pr-2">
+              <SettingsPanel
+                isPending={updateSettingsMutation.isPending}
+                onSave={(nextValue) => updateSettingsMutation.mutate(nextValue)}
+              />
+            </div>
           )}
         </Panel>
 
-        <Panel className="flex flex-col gap-4">
+        <Panel className="flex flex-col gap-4 overflow-hidden">
           {detail.data && selectedSummary ? (
             <>
-              <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+                  <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">
                     详情编辑
                   </p>
-                  <h2 className="mt-2 font-display text-2xl">文本剪贴项</h2>
+                  <h2 className="mt-1 font-display text-2xl font-medium tracking-tight">文本剪贴项</h2>
                 </div>
                 <div className="flex gap-2">
                   <button
-                    className="rounded-2xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700"
+                    className="rounded-xl bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm ring-1 ring-inset ring-slate-200 transition-all hover:bg-slate-50 hover:text-slate-900"
                     onClick={() =>
                       favoritedMutation.mutate({
                         id: detail.data.id,
@@ -312,7 +318,7 @@ export function ManagerShell() {
                     {detail.data.isFavorited ? "取消收藏" : "加入收藏"}
                   </button>
                   <button
-                    className="rounded-2xl bg-amber-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-600"
+                    className="rounded-xl bg-gradient-to-b from-amber-400 to-amber-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all hover:to-amber-600 hover:shadow"
                     onClick={() =>
                       pasteMutation.mutate({
                         id: detail.data.id,
@@ -329,34 +335,34 @@ export function ManagerShell() {
                 </div>
               </div>
 
-              <div className="grid gap-3 rounded-3xl bg-slate-50 p-4 text-sm text-slate-600 sm:grid-cols-2">
+              <div className="grid shrink-0 gap-3 rounded-2xl border border-slate-100 bg-slate-50/50 p-5 text-sm text-slate-600 sm:grid-cols-2">
                 <div>
-                  <p className="text-xs uppercase tracking-[0.18em] text-slate-400">来源应用</p>
-                  <p className="mt-1 font-medium text-slate-800">{selectedSummary.sourceApp ?? "未知来源"}</p>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">来源应用</p>
+                  <p className="mt-1.5 font-medium text-slate-800">{selectedSummary.sourceApp ?? "未知来源"}</p>
                 </div>
                 <div>
-                  <p className="text-xs uppercase tracking-[0.18em] text-slate-400">最近使用</p>
-                  <p className="mt-1 font-medium text-slate-800">{formatDateTime(selectedSummary.lastUsedAt)}</p>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">最近使用</p>
+                  <p className="mt-1.5 font-medium text-slate-800">{formatDateTime(selectedSummary.lastUsedAt)}</p>
                 </div>
                 <div>
-                  <p className="text-xs uppercase tracking-[0.18em] text-slate-400">创建时间</p>
-                  <p className="mt-1 font-medium text-slate-800">{formatDateTime(selectedSummary.createdAt)}</p>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">创建时间</p>
+                  <p className="mt-1.5 font-medium text-slate-800">{formatDateTime(selectedSummary.createdAt)}</p>
                 </div>
                 <div>
-                  <p className="text-xs uppercase tracking-[0.18em] text-slate-400">更新时间</p>
-                  <p className="mt-1 font-medium text-slate-800">{formatDateTime(selectedSummary.updatedAt)}</p>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">更新时间</p>
+                  <p className="mt-1.5 font-medium text-slate-800">{formatDateTime(selectedSummary.updatedAt)}</p>
                 </div>
               </div>
 
               <textarea
-                className="min-h-[320px] w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-4 leading-7 outline-none transition focus:border-accent focus:bg-white"
+                className="min-h-[200px] flex-1 w-full resize-none rounded-2xl border border-slate-200 bg-slate-50/50 px-5 py-5 text-[15px] leading-relaxed outline-none transition-all duration-300 focus:border-accent focus:bg-white focus:ring-4 focus:ring-accent/10"
                 onChange={(event) => setDraftText(event.target.value)}
                 value={draftText}
               />
 
-              <div className="flex flex-wrap gap-2">
+              <div className="flex shrink-0 flex-wrap gap-2 pt-2">
                 <button
-                  className="rounded-2xl bg-ink px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-700"
+                  className="rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white shadow-md transition-all hover:bg-slate-800 hover:shadow-lg disabled:opacity-50"
                   disabled={updateTextMutation.isPending}
                   onClick={() =>
                     updateTextMutation.mutate({
@@ -369,7 +375,7 @@ export function ManagerShell() {
                   保存文本
                 </button>
                 <button
-                  className="rounded-2xl bg-white px-4 py-3 text-sm font-semibold text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+                  className="rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-red-600 shadow-sm ring-1 ring-inset ring-red-200 transition-all hover:bg-red-50 hover:text-red-700 disabled:opacity-50"
                   disabled={deleteMutation.isPending}
                   onClick={() => {
                     deleteMutation.mutate(detail.data.id, {
@@ -383,7 +389,7 @@ export function ManagerShell() {
               </div>
 
               {pasteMutation.data ? (
-                <p className="rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                <p className="shrink-0 rounded-2xl bg-amber-50/80 px-4 py-3 text-sm text-amber-800 ring-1 ring-inset ring-amber-500/20">
                   {pasteMutation.data.message}
                 </p>
               ) : null}
@@ -437,28 +443,28 @@ function SettingsPanel({ isPending, onSave }: SettingsPanelProps) {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <div>
-        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">设置</p>
-        <h2 className="mt-2 font-display text-2xl">MVP 运行参数</h2>
-        <p className="mt-2 text-sm leading-6 text-slate-600">
+        <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">设置</p>
+        <h2 className="mt-1 font-display text-2xl font-medium tracking-tight">MVP 运行参数</h2>
+        <p className="mt-3 text-sm leading-relaxed text-slate-600">
           当前设置直接映射到后端持久化配置。排除应用与真正的前台应用识别将在 Windows 平台适配阶段继续细化。
         </p>
       </div>
 
       <label className="block">
-        <span className="mb-2 block text-sm font-medium text-slate-700">全局快捷键</span>
+        <span className="mb-2.5 block text-sm font-medium text-slate-700">全局快捷键</span>
         <input
-          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+          className="w-full rounded-2xl border border-slate-200 bg-slate-50/50 px-5 py-3.5 text-sm outline-none transition-all focus:border-accent focus:bg-white focus:ring-4 focus:ring-accent/10"
           onChange={(event) => setShortcut(event.target.value)}
           value={shortcut}
         />
       </label>
 
       <label className="block">
-        <span className="mb-2 block text-sm font-medium text-slate-700">历史记录上限</span>
+        <span className="mb-2.5 block text-sm font-medium text-slate-700">历史记录上限</span>
         <input
-          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+          className="w-full rounded-2xl border border-slate-200 bg-slate-50/50 px-5 py-3.5 text-sm outline-none transition-all focus:border-accent focus:bg-white focus:ring-4 focus:ring-accent/10"
           min={100}
           onChange={(event) => setHistoryLimit(Number(event.target.value) || 1000)}
           step={100}
@@ -468,53 +474,59 @@ function SettingsPanel({ isPending, onSave }: SettingsPanelProps) {
       </label>
 
       <label className="block">
-        <span className="mb-2 block text-sm font-medium text-slate-700">排除应用</span>
+        <span className="mb-2.5 block text-sm font-medium text-slate-700">排除应用</span>
         <textarea
-          className="min-h-[120px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+          className="min-h-[120px] w-full rounded-2xl border border-slate-200 bg-slate-50/50 px-5 py-3.5 text-sm leading-relaxed outline-none transition-all focus:border-accent focus:bg-white focus:ring-4 focus:ring-accent/10"
           onChange={(event) => setExcludedAppsText(event.target.value)}
           placeholder={"每行一个可执行文件名，例如：\nKeePass.exe\nWindowsTerminal.exe"}
           value={excludedAppsText}
         />
       </label>
 
-      <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3">
-        <input
-          checked={restoreClipboardAfterPaste}
-          onChange={(event) => setRestoreClipboardAfterPaste(event.target.checked)}
-          type="checkbox"
-        />
-        回贴后恢复原始剪贴板
-      </label>
+      <div className="space-y-3">
+        <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-4 transition-colors hover:bg-slate-50">
+          <input
+            className="h-4 w-4 rounded border-slate-300 text-accent focus:ring-accent"
+            checked={restoreClipboardAfterPaste}
+            onChange={(event) => setRestoreClipboardAfterPaste(event.target.checked)}
+            type="checkbox"
+          />
+          <span className="text-sm font-medium text-slate-700">回贴后恢复原始剪贴板</span>
+        </label>
 
-      <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3">
-        <input
-          checked={pauseMonitoring}
-          onChange={(event) => setPauseMonitoring(event.target.checked)}
-          type="checkbox"
-        />
-        暂停监听
-      </label>
+        <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-4 transition-colors hover:bg-slate-50">
+          <input
+            className="h-4 w-4 rounded border-slate-300 text-accent focus:ring-accent"
+            checked={pauseMonitoring}
+            onChange={(event) => setPauseMonitoring(event.target.checked)}
+            type="checkbox"
+          />
+          <span className="text-sm font-medium text-slate-700">暂停监听</span>
+        </label>
+      </div>
 
-      <button
-        className="rounded-2xl bg-ink px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-700"
-        disabled={isPending}
-        onClick={() =>
-          onSave({
-            shortcut,
-            launchOnStartup: false,
-            historyLimit,
-            excludedApps: excludedAppsText
-              .split(/\r?\n/)
-              .map((value) => value.trim())
-              .filter(Boolean),
-            restoreClipboardAfterPaste,
-            pauseMonitoring,
-          })
-        }
-        type="button"
-      >
-        保存设置
-      </button>
+      <div className="pt-2">
+        <button
+          className="rounded-2xl bg-slate-900 px-6 py-3.5 text-sm font-semibold text-white shadow-md transition-all hover:bg-slate-800 hover:shadow-lg disabled:opacity-50"
+          disabled={isPending}
+          onClick={() =>
+            onSave({
+              shortcut,
+              launchOnStartup: false,
+              historyLimit,
+              excludedApps: excludedAppsText
+                .split(/\r?\n/)
+                .map((value) => value.trim())
+                .filter(Boolean),
+              restoreClipboardAfterPaste,
+              pauseMonitoring,
+            })
+          }
+          type="button"
+        >
+          保存设置
+        </button>
+      </div>
     </div>
   );
 }
