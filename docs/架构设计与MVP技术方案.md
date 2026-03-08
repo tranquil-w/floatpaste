@@ -1,4 +1,4 @@
-# FloatPaste / 浮贴 架构设计与 MVP 技术方案（合并最终稿）
+# FloatPaste / 浮贴 架构设计与 MVP 技术方案
 
 ## 1. 文档目标
 

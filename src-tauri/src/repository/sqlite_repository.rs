@@ -49,8 +49,8 @@ impl SqliteRepository {
             .transpose()?
             .unwrap_or_default();
 
-        let mut statement =
-            connection.prepare("SELECT executable_name FROM excluded_apps ORDER BY executable_name ASC")?;
+        let mut statement = connection
+            .prepare("SELECT executable_name FROM excluded_apps ORDER BY executable_name ASC")?;
         let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
         let excluded_apps = rows.collect::<Result<Vec<_>, _>>()?;
         if !excluded_apps.is_empty() {
@@ -167,7 +167,11 @@ impl SqliteRepository {
             })
     }
 
-    pub fn update_text(&self, id: &str, text: &NewClipTextItem) -> Result<ClipItemDetail, AppError> {
+    pub fn update_text(
+        &self,
+        id: &str,
+        text: &NewClipTextItem,
+    ) -> Result<ClipItemDetail, AppError> {
         let now = Utc::now().timestamp_millis();
         {
             let connection = self.connection.lock()?;

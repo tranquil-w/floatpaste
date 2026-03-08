@@ -12,8 +12,8 @@ use crate::{
     platform::windows::clipboard_monitor::ClipboardMonitor,
     repository::sqlite_repository::SqliteRepository,
     services::{
-        privacy_service::SelfWriteGuard, shortcut_manager::ShortcutManager, tray_service::TrayService,
-        window_coordinator::WindowCoordinator,
+        privacy_service::SelfWriteGuard, shortcut_manager::ShortcutManager,
+        tray_service::TrayService, window_coordinator::WindowCoordinator,
     },
 };
 
@@ -23,6 +23,7 @@ pub struct AppState {
     settings: Arc<RwLock<UserSetting>>,
     self_write_guard: SelfWriteGuard,
     picker_session: Arc<Mutex<PickerSession>>,
+    picker_active: Arc<AtomicBool>,
     quitting: Arc<AtomicBool>,
 }
 
@@ -39,6 +40,7 @@ impl AppState {
             settings: Arc::new(RwLock::new(settings)),
             self_write_guard: SelfWriteGuard::default(),
             picker_session: Arc::new(Mutex::new(PickerSession::default())),
+            picker_active: Arc::new(AtomicBool::new(false)),
             quitting: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -73,6 +75,17 @@ impl AppState {
         Ok(self.picker_session.lock()?.clone())
     }
 
+    pub fn begin_picker_activation(&self) {
+        self.picker_active.store(true, Ordering::SeqCst);
+    }
+
+    pub fn end_picker_activation(&self) {
+        self.picker_active.store(false, Ordering::SeqCst);
+    }
+
+    pub fn is_picker_active(&self) -> bool {
+        self.picker_active.load(Ordering::SeqCst)
+    }
     pub fn begin_quit(&self) {
         self.quitting.store(true, Ordering::SeqCst);
     }
@@ -92,9 +105,10 @@ pub fn bootstrap(app: &mut App) -> Result<(), AppError> {
 
     app.manage(state.clone());
     WindowCoordinator::configure_existing_windows(&app.handle());
-    if let Err(error) =
-        ShortcutManager::sync_registered_shortcut(&app.handle(), &state.current_settings()?.shortcut)
-    {
+    if let Err(error) = ShortcutManager::sync_registered_shortcut(
+        &app.handle(),
+        &state.current_settings()?.shortcut,
+    ) {
         warn!("启动时注册全局快捷键失败，应用将继续运行，但快捷键暂不可用: {error}");
     }
     TrayService::setup(&app.handle())?;

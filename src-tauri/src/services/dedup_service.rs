@@ -15,7 +15,11 @@ impl Default for DedupService {
 }
 
 impl DedupService {
-    pub fn should_store(&self, repository: &SqliteRepository, hash: &str) -> Result<bool, AppError> {
+    pub fn should_store(
+        &self,
+        repository: &SqliteRepository,
+        hash: &str,
+    ) -> Result<bool, AppError> {
         let cutoff = Utc::now() - self.window;
         Ok(!repository.has_recent_hash(hash, cutoff.timestamp_millis())?)
     }

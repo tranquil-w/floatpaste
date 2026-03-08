@@ -8,7 +8,9 @@ use windows::{
             OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
             PROCESS_QUERY_LIMITED_INFORMATION,
         },
-        UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId, IsWindow, SetForegroundWindow},
+        UI::WindowsAndMessaging::{
+            GetForegroundWindow, GetWindowThreadProcessId, IsWindow, SetForegroundWindow,
+        },
     },
 };
 
@@ -44,7 +46,8 @@ impl ActiveAppResolver {
             return None;
         }
 
-        let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id).ok()? };
+        let handle =
+            unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id).ok()? };
         let mut buffer = vec![0u16; 260];
         let mut length = buffer.len() as u32;
         let query_result = unsafe {

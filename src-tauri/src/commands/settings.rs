@@ -1,8 +1,7 @@
 use tauri::{AppHandle, State};
 
 use crate::{
-    app_bootstrap::AppState,
-    domain::settings::UserSetting,
+    app_bootstrap::AppState, domain::settings::UserSetting,
     services::shortcut_manager::ShortcutManager,
 };
 
@@ -50,7 +49,10 @@ pub fn pause_monitoring(app: AppHandle, state: State<'_, AppState>) -> Result<Us
 }
 
 #[tauri::command]
-pub fn resume_monitoring(app: AppHandle, state: State<'_, AppState>) -> Result<UserSetting, String> {
+pub fn resume_monitoring(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<UserSetting, String> {
     let previous_settings = state.current_settings().map_err(map_error)?;
     let mut settings = previous_settings.clone();
     settings.pause_monitoring = false;

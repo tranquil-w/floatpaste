@@ -1,5 +1,8 @@
 use crate::{
-    domain::{clip_item::{SearchQuery, SearchResult}, error::AppError},
+    domain::{
+        clip_item::{SearchQuery, SearchResult},
+        error::AppError,
+    },
     repository::sqlite_repository::SqliteRepository,
 };
 

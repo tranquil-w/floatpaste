@@ -3,10 +3,15 @@ use tauri::{AppHandle, Emitter, State};
 use crate::{
     app_bootstrap::AppState,
     domain::{
-        clip_item::{ClipItemDetail, ClipItemSummary, PasteOption, PasteResult, SearchQuery, SearchResult},
+        clip_item::{
+            ClipItemDetail, ClipItemSummary, PasteOption, PasteResult, SearchQuery, SearchResult,
+        },
         events::CLIPS_CHANGED_EVENT,
     },
-    services::{normalize_service::NormalizeService, paste_executor::PasteExecutor, search_service::SearchService},
+    services::{
+        normalize_service::NormalizeService, paste_executor::PasteExecutor,
+        search_service::SearchService,
+    },
 };
 
 fn map_error(error: impl ToString) -> String {
@@ -14,7 +19,10 @@ fn map_error(error: impl ToString) -> String {
 }
 
 #[tauri::command]
-pub fn list_recent_items(state: State<'_, AppState>, limit: u32) -> Result<Vec<ClipItemSummary>, String> {
+pub fn list_recent_items(
+    state: State<'_, AppState>,
+    limit: u32,
+) -> Result<Vec<ClipItemSummary>, String> {
     state.repository.list_recent(limit).map_err(map_error)
 }
 
@@ -32,7 +40,10 @@ pub fn get_item_detail(state: State<'_, AppState>, id: String) -> Result<ClipIte
 }
 
 #[tauri::command]
-pub fn search_items(state: State<'_, AppState>, query: SearchQuery) -> Result<SearchResult, String> {
+pub fn search_items(
+    state: State<'_, AppState>,
+    query: SearchQuery,
+) -> Result<SearchResult, String> {
     SearchService::search(&state.repository, query).map_err(map_error)
 }
 
@@ -67,7 +78,10 @@ pub fn set_item_favorited(
     id: String,
     value: bool,
 ) -> Result<(), String> {
-    state.repository.set_favorited(&id, value).map_err(map_error)?;
+    state
+        .repository
+        .set_favorited(&id, value)
+        .map_err(map_error)?;
     let _ = app.emit(CLIPS_CHANGED_EVENT, &id);
     Ok(())
 }

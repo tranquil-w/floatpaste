@@ -5,19 +5,14 @@ use tauri::{AppHandle, Emitter};
 use tracing::{debug, warn};
 
 use crate::{
-    app_bootstrap::AppState,
-    domain::events::CLIPS_CHANGED_EVENT,
-    platform::windows::active_app::ActiveAppResolver,
-    services::history_service::HistoryService,
+    app_bootstrap::AppState, domain::events::CLIPS_CHANGED_EVENT,
+    platform::windows::active_app::ActiveAppResolver, services::history_service::HistoryService,
 };
 
 pub struct ClipboardMonitor;
 
 impl ClipboardMonitor {
-    pub fn start(
-        app: AppHandle,
-        state: AppState,
-    ) -> Result<(), crate::domain::error::AppError> {
+    pub fn start(app: AppHandle, state: AppState) -> Result<(), crate::domain::error::AppError> {
         thread::spawn(move || {
             let mut last_observed_text = String::new();
 

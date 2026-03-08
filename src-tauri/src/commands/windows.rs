@@ -1,8 +1,10 @@
-use std::{thread, time::Duration};
+use tauri::{AppHandle, State};
+use tracing::warn;
 
-use tauri::{AppHandle, Manager, State};
-
-use crate::{app_bootstrap::AppState, services::window_coordinator::WindowCoordinator};
+use crate::{
+    app_bootstrap::AppState,
+    services::{shortcut_manager::ShortcutManager, window_coordinator::WindowCoordinator},
+};
 
 fn map_error(error: impl ToString) -> String {
     error.to_string()
@@ -10,27 +12,25 @@ fn map_error(error: impl ToString) -> String {
 
 #[tauri::command]
 pub fn show_picker(state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
-    WindowCoordinator::show_picker(&app, &state).map_err(map_error)
+    WindowCoordinator::show_picker(&app, &state).map_err(map_error)?;
+    if let Err(error) = ShortcutManager::register_picker_session_shortcuts(&app) {
+        warn!("通过命令打开 Picker 时注册会话快捷键失败: {error}");
+    }
+    Ok(())
 }
 
 #[tauri::command]
-pub fn show_picker_from_manager(_state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
-    let app_for_thread = app.clone();
-    thread::spawn(move || {
-        thread::sleep(Duration::from_millis(30));
-        let app_for_ui = app_for_thread.clone();
-        let _ = app_for_thread.run_on_main_thread(move || {
-            if let Some(state) = app_for_ui.try_state::<AppState>() {
-                let _ = WindowCoordinator::show_picker(&app_for_ui, &state);
-            }
-        });
-    });
-
+pub fn show_picker_from_manager(state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
+    WindowCoordinator::show_picker(&app, &state).map_err(map_error)?;
+    if let Err(error) = ShortcutManager::register_picker_session_shortcuts(&app) {
+        warn!("从资料库打开 Picker 时注册会话快捷键失败: {error}");
+    }
     Ok(())
 }
 
 #[tauri::command]
 pub fn hide_picker(state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
+    ShortcutManager::unregister_picker_session_shortcuts(&app);
     WindowCoordinator::hide_picker_and_restore_target(&app, &state).map_err(map_error)
 }
 

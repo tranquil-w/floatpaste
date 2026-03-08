@@ -32,6 +32,8 @@ export function PickerShell() {
   const recent = usePickerRecentQuery();
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [lastMessage, setLastMessage] = useState("");
+  const itemsRef = useRef<ClipItemSummary[]>([]);
+  const selectedIndexRef = useRef(0);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   const items = useMemo(
@@ -45,7 +47,7 @@ export function PickerShell() {
   };
 
   const confirmSelection = async (index: number) => {
-    const item = items[index];
+    const item = itemsRef.current[index];
     if (!item) {
       return;
     }
@@ -55,11 +57,20 @@ export function PickerShell() {
   };
 
   useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
+
+  useEffect(() => {
+    selectedIndexRef.current = selectedIndex;
+  }, [selectedIndex]);
+
+  useEffect(() => {
     if (selectedIndex >= items.length) {
+      selectedIndexRef.current = 0;
       setSelectedIndex(0);
     }
   }, [items.length, selectedIndex]);
-  
+
   useEffect(() => {
     const currentItem = itemRefs.current[selectedIndex];
     if (currentItem) {
@@ -89,6 +100,7 @@ export function PickerShell() {
       ]);
 
       if (!disposed) {
+        selectedIndexRef.current = 0;
         setSelectedIndex(0);
         setLastMessage("");
       }
@@ -106,16 +118,18 @@ export function PickerShell() {
     });
 
     void listen<string>(PICKER_NAVIGATE_EVENT, async (event) => {
-      if (disposed || !items.length) {
+      const itemCount = itemsRef.current.length;
+      if (disposed || !itemCount) {
         return;
       }
 
       setSelectedIndex((current) => {
-        if (event.payload === "up") {
-          return (current - 1 + items.length) % items.length;
-        }
-
-        return (current + 1) % items.length;
+        const nextIndex =
+          event.payload === "up"
+            ? (current - 1 + itemCount) % itemCount
+            : (current + 1) % itemCount;
+        selectedIndexRef.current = nextIndex;
+        return nextIndex;
       });
     }).then((cleanup) => {
       unlistenNavigate = cleanup;
@@ -126,17 +140,19 @@ export function PickerShell() {
         return;
       }
 
-      await confirmSelection(selectedIndex);
+      await confirmSelection(selectedIndexRef.current);
     }).then((cleanup) => {
       unlistenConfirm = cleanup;
     });
 
     void listen<number>(PICKER_SELECT_INDEX_EVENT, async (event) => {
-      if (disposed || !items.length) {
+      const itemCount = itemsRef.current.length;
+      if (disposed || !itemCount) {
         return;
       }
 
-      const index = Math.max(0, Math.min(event.payload, items.length - 1));
+      const index = Math.max(0, Math.min(event.payload, itemCount - 1));
+      selectedIndexRef.current = index;
       setSelectedIndex(index);
       await confirmSelection(index);
     }).then((cleanup) => {
@@ -151,11 +167,16 @@ export function PickerShell() {
       unlistenConfirm?.();
       unlistenSelectIndex?.();
     };
-  }, [items.length, selectedIndex]);
+  }, []);
 
   useEffect(() => {
+    if (isTauriRuntime()) {
+      return;
+    }
+
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (!items.length && event.key !== "Escape") {
+      const itemCount = itemsRef.current.length;
+      if (!itemCount && event.key !== "Escape") {
         return;
       }
 
@@ -167,26 +188,35 @@ export function PickerShell() {
 
       if (event.key === "ArrowUp") {
         event.preventDefault();
-        setSelectedIndex((current) => (current - 1 + items.length) % items.length);
+        setSelectedIndex((current) => {
+          const nextIndex = (current - 1 + itemCount) % itemCount;
+          selectedIndexRef.current = nextIndex;
+          return nextIndex;
+        });
         return;
       }
 
       if (event.key === "ArrowDown") {
         event.preventDefault();
-        setSelectedIndex((current) => (current + 1) % items.length);
+        setSelectedIndex((current) => {
+          const nextIndex = (current + 1) % itemCount;
+          selectedIndexRef.current = nextIndex;
+          return nextIndex;
+        });
         return;
       }
 
       if (event.key === "Enter") {
         event.preventDefault();
-        void confirmSelection(selectedIndex);
+        void confirmSelection(selectedIndexRef.current);
         return;
       }
 
       if (/^[1-9]$/.test(event.key)) {
         event.preventDefault();
-        const index = Math.min(Number(event.key) - 1, items.length - 1);
+        const index = Math.min(Number(event.key) - 1, itemCount - 1);
         if (index >= 0) {
+          selectedIndexRef.current = index;
           setSelectedIndex(index);
           void confirmSelection(index);
         }
@@ -195,7 +225,7 @@ export function PickerShell() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [items.length, selectedIndex, items]);
+  }, []);
 
   return (
     <div className="flex h-screen w-screen items-start justify-center bg-transparent p-0 text-ink overflow-hidden">
@@ -205,75 +235,78 @@ export function PickerShell() {
             <div className="h-2.5 w-2.5 rounded-full bg-accent/80"></div>
             <span className="text-xs font-semibold tracking-wide text-slate-700">FloatPaste</span>
           </div>
-          <button
-            className="flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-medium text-slate-500 transition-colors hover:bg-slate-200/50 hover:text-slate-800"
-            onClick={() => void openManagerFromPicker()}
-            type="button"
-          >
-            资料库
-            <svg className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" /></svg>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              className="flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-medium text-slate-500 transition-colors hover:bg-slate-200/50 hover:text-slate-800"
+              onClick={() => void openManagerFromPicker()}
+              type="button"
+            >
+              资料库
+              <svg className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" /></svg>
+            </button>
+          </div>
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col px-2 py-2">
           <div className="grid flex-1 gap-1 overflow-y-auto pr-1">
-          {items.length ? (
-            items.map((item, index) => {
-              const isSelected = index === selectedIndex;
-              return (
-                <button
-                  ref={(el) => {
-                    itemRefs.current[index] = el;
-                  }}
-                  className={`group relative flex w-full items-start gap-2.5 rounded-xl px-2.5 py-2.5 text-left transition-all duration-150 ${
-                    isSelected
-                      ? "bg-amber-50 shadow-sm ring-1 ring-inset ring-amber-500/30"
-                      : "hover:bg-slate-100/50"
-                  }`}
-                  key={item.id}
-                  onClick={() => setSelectedIndex(index)}
-                  onDoubleClick={() => {
-                    void confirmSelection(index);
-                  }}
-                  type="button"
-                >
-                  <div className="mt-0.5 flex shrink-0 items-center justify-center">
-                    <kbd className={`flex h-5 w-5 items-center justify-center rounded-md border-b-2 font-mono text-[10px] font-bold ${
-                      isSelected 
-                        ? "border-amber-600/40 bg-amber-500 text-white" 
-                        : "border-slate-300 bg-slate-100 text-slate-500 group-hover:border-slate-400 group-hover:bg-slate-200 group-hover:text-slate-700"
-                    }`}>
-                      {index + 1}
-                    </kbd>
-                  </div>
-                  
-                  <div className="flex-1 min-w-0">
-                    <p className={`line-clamp-2 text-xs leading-relaxed ${isSelected ? "font-medium text-amber-950" : "text-slate-700"}`}>
-                      {item.contentPreview}
-                    </p>
-                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] font-medium text-slate-400">
-                      <span className="truncate max-w-[100px]">{item.sourceApp ?? "未知来源"}</span>
-                      <span className="w-0.5 h-0.5 rounded-full bg-slate-300"></span>
-                      <span>{formatDateTime(item.lastUsedAt ?? item.createdAt)}</span>
-                      {item.isFavorited ? (
-                        <>
-                           <span className="w-0.5 h-0.5 rounded-full bg-slate-300"></span>
-                           <span className="text-amber-600">★</span>
-                        </>
-                      ) : null}
+            {items.length ? (
+              items.map((item, index) => {
+                const isSelected = index === selectedIndex;
+                return (
+                  <button
+                    ref={(el) => {
+                      itemRefs.current[index] = el;
+                    }}
+                    className={`group relative flex w-full items-start gap-2.5 rounded-xl px-2.5 py-2.5 text-left transition-all duration-150 ${isSelected
+                        ? "bg-amber-50 shadow-sm ring-1 ring-inset ring-amber-500/30"
+                        : "hover:bg-slate-100/50"
+                      }`}
+                    key={item.id}
+                    onClick={() => {
+                      selectedIndexRef.current = index;
+                      setSelectedIndex(index);
+                    }}
+                    onDoubleClick={() => {
+                      void confirmSelection(index);
+                    }}
+                    type="button"
+                  >
+                    <div className="mt-0.5 flex shrink-0 items-center justify-center">
+                      <kbd className={`flex h-5 w-5 items-center justify-center rounded-md border-b-2 font-mono text-[10px] font-bold ${isSelected
+                          ? "border-amber-600/40 bg-amber-500 text-white"
+                          : "border-slate-300 bg-slate-100 text-slate-500 group-hover:border-slate-400 group-hover:bg-slate-200 group-hover:text-slate-700"
+                        }`}>
+                        {index + 1}
+                      </kbd>
                     </div>
-                  </div>
-                </button>
-              );
-            })
-          ) : (
-            <div className="flex flex-col items-center justify-center py-8 text-center">
-              <div className="mb-2.5 flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 ring-4 ring-white">
-                <div className="h-1.5 w-1.5 rounded-sm bg-slate-300" />
+
+                    <div className="flex-1 min-w-0">
+                      <p className={`line-clamp-2 text-xs leading-relaxed ${isSelected ? "font-medium text-amber-950" : "text-slate-700"}`}>
+                        {item.contentPreview}
+                      </p>
+                      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] font-medium text-slate-400">
+                        <span className="truncate max-w-[100px]">{item.sourceApp ?? "未知来源"}</span>
+                        <span className="w-0.5 h-0.5 rounded-full bg-slate-300"></span>
+                        <span>{formatDateTime(item.lastUsedAt ?? item.createdAt)}</span>
+                        {item.isFavorited ? (
+                          <>
+                            <span className="w-0.5 h-0.5 rounded-full bg-slate-300"></span>
+                            <span className="text-amber-600">★</span>
+                          </>
+                        ) : null}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })
+            ) : (
+              <div className="flex flex-col items-center justify-center py-8 text-center">
+                <div className="mb-2.5 flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 ring-4 ring-white">
+                  <div className="h-1.5 w-1.5 rounded-sm bg-slate-300" />
+                </div>
+                <p className="text-xs font-medium text-slate-600">暂无历史记录</p>
               </div>
-              <p className="text-xs font-medium text-slate-600">暂无历史记录</p>
-            </div>
-          )}
+            )}
           </div>
         </div>
 
@@ -283,7 +316,9 @@ export function PickerShell() {
             <span className="flex items-center gap-1"><kbd className="font-sans font-bold">↵</kbd> 粘贴</span>
             <span className="flex items-center gap-1"><kbd className="font-sans font-bold">Esc</kbd> 取消</span>
           </div>
-          {lastMessage ? <span className="text-amber-600 font-semibold">{lastMessage}</span> : null}
+          <div className="flex items-center gap-3">
+            {lastMessage ? <span className="text-amber-600 font-semibold">{lastMessage}</span> : null}
+          </div>
         </div>
       </div>
     </div>

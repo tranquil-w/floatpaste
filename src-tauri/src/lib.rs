@@ -5,8 +5,8 @@ mod platform;
 mod repository;
 mod services;
 
-use tracing_subscriber::{fmt, EnvFilter};
 use tauri_plugin_global_shortcut::Builder as GlobalShortcutBuilder;
+use tracing_subscriber::{fmt, EnvFilter};
 
 use crate::services::shortcut_manager::ShortcutManager;
 
@@ -14,7 +14,10 @@ fn init_logging() {
     let env_filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("floatpaste=info"));
 
-    let _ = fmt().with_env_filter(env_filter).with_target(false).try_init();
+    let _ = fmt()
+        .with_env_filter(env_filter)
+        .with_target(false)
+        .try_init();
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

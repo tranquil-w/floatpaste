@@ -19,6 +19,19 @@
         "resizable": true,
         "center": true,
         "visible": true
+      },
+      {
+        "label": "picker",
+        "title": "FloatPaste Picker",
+        "width": 360,
+        "height": 420,
+        "resizable": false,
+        "visible": false,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "transparent": true,
+        "shadow": false
       }
     ],
     "security": {

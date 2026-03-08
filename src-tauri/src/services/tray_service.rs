@@ -7,10 +7,7 @@ use tracing::warn;
 
 use crate::{
     app_bootstrap::AppState,
-    domain::{
-        error::AppError,
-        events::MANAGER_OPEN_SETTINGS_EVENT,
-    },
+    domain::{error::AppError, events::MANAGER_OPEN_SETTINGS_EVENT},
     services::{shortcut_manager::ShortcutManager, window_coordinator::WindowCoordinator},
 };
 

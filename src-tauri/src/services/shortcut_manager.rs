@@ -1,5 +1,4 @@
 use std::str::FromStr;
-
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutEvent, ShortcutState};
 use tracing::{error, info, warn};
@@ -37,8 +36,10 @@ impl ShortcutManager {
             .register(shortcut.as_str())
             .map_err(|error| AppError::Message(format!("注册快捷键失败: {error}")))?;
 
-        if picker_is_visible(app) {
-            Self::register_picker_session_shortcuts(app)?;
+        if picker_is_active(app) || has_registered_picker_session_shortcut(app) {
+            if let Err(error) = Self::register_picker_session_shortcuts(app) {
+                warn!("重新注册 Picker 会话快捷键失败，将保留鼠标可用的降级路径: {error}");
+            }
         }
 
         info!("已注册全局快捷键: {shortcut}");
@@ -48,11 +49,24 @@ impl ShortcutManager {
     pub fn register_picker_session_shortcuts(app: &AppHandle) -> Result<(), AppError> {
         let manager = app.global_shortcut();
         Self::unregister_picker_session_shortcuts(app);
+        let mut failures = Vec::new();
         for shortcut in PICKER_SESSION_SHORTCUTS {
-            manager.register(shortcut).map_err(|error| {
-                AppError::Message(format!("注册 Picker 会话快捷键失败: {shortcut}: {error}"))
-            })?;
+            if let Err(error) = manager.register(shortcut) {
+                failures.push(format!("{shortcut}: {error}"));
+            }
         }
+
+        if !failures.is_empty() {
+            return Err(AppError::Message(format!(
+                "注册 Picker 会话快捷键失败: {}",
+                failures.join("; ")
+            )));
+        }
+
+        info!(
+            "已注册 Picker 会话快捷键: {}",
+            PICKER_SESSION_SHORTCUTS.join(", ")
+        );
         Ok(())
     }
 
@@ -72,6 +86,7 @@ impl ShortcutManager {
             warn!("快捷键事件触发时应用状态尚未就绪");
             return;
         };
+        let state = state.inner().clone();
 
         let normalized = shortcut.to_lowercase();
         let settings_shortcut = match state.current_settings() {
@@ -89,19 +104,46 @@ impl ShortcutManager {
         };
 
         if normalized == settings_shortcut {
-            let result = if picker_is_visible(app) {
-                WindowCoordinator::hide_picker_and_restore_target(app, &state)
-            } else {
-                WindowCoordinator::show_picker(app, &state)
-            };
+            info!("命中主快捷键: {normalized}");
+            let is_active = state.is_picker_active();
+            let app_handle = app.clone();
+            let state_clone = state.clone();
 
-            if let Err(error) = result {
-                error!("处理主快捷键失败: {error}");
-            }
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                let app_clone = app_handle.clone();
+                let _ = app_handle.run_on_main_thread(move || {
+                    if is_active {
+                        Self::unregister_picker_session_shortcuts(&app_clone);
+                        if let Err(error) = WindowCoordinator::hide_picker_and_restore_target(
+                            &app_clone,
+                            &state_clone,
+                        ) {
+                            error!("关闭 Picker 失败: {error}");
+                        }
+                    } else {
+                        if let Err(error) = WindowCoordinator::show_picker(&app_clone, &state_clone)
+                        {
+                            error!("显示 Picker 失败: {error}");
+                        } else if let Err(error) =
+                            Self::register_picker_session_shortcuts(&app_clone)
+                        {
+                            warn!("打开 Picker 后注册会话快捷键失败: {error}");
+                        }
+                    }
+                });
+            });
             return;
         }
 
-        if !picker_is_visible(app) {
+        if !state.is_picker_active() {
+            if is_picker_session_shortcut(normalized.as_str()) {
+                warn!("检测到 Picker 已隐藏但会话快捷键仍在注册，正在自动释放这些快捷键");
+                let app_handle = app.clone();
+                let _ = app.run_on_main_thread(move || {
+                    Self::unregister_picker_session_shortcuts(&app_handle);
+                });
+            }
             return;
         }
 
@@ -110,9 +152,22 @@ impl ShortcutManager {
             "down" | "arrowdown" => app.emit(PICKER_NAVIGATE_EVENT, "down"),
             "enter" => app.emit(PICKER_CONFIRM_EVENT, ()),
             "escape" | "esc" => {
-                if let Err(error) = WindowCoordinator::hide_picker_and_restore_target(app, &state) {
-                    error!("关闭 Picker 失败: {error}");
-                }
+                info!("命中 Picker 关闭快捷键: {normalized}");
+                let app_handle = app.clone();
+                let state_clone = state.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                    let app_clone = app_handle.clone();
+                    let _ = app_handle.run_on_main_thread(move || {
+                        Self::unregister_picker_session_shortcuts(&app_clone);
+                        if let Err(error) = WindowCoordinator::hide_picker_and_restore_target(
+                            &app_clone,
+                            &state_clone,
+                        ) {
+                            error!("关闭 Picker 失败: {error}");
+                        }
+                    });
+                });
                 return;
             }
             "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" => {
@@ -136,10 +191,38 @@ impl ShortcutManager {
     }
 }
 
-fn picker_is_visible(app: &AppHandle) -> bool {
-    app.get_webview_window("picker")
-        .and_then(|window| window.is_visible().ok())
+fn picker_is_active(app: &AppHandle) -> bool {
+    app.try_state::<AppState>()
+        .map(|state| state.is_picker_active())
         .unwrap_or(false)
+}
+
+fn has_registered_picker_session_shortcut(app: &AppHandle) -> bool {
+    let manager = app.global_shortcut();
+    PICKER_SESSION_SHORTCUTS
+        .iter()
+        .any(|shortcut| manager.is_registered(*shortcut))
+}
+
+fn is_picker_session_shortcut(shortcut: &str) -> bool {
+    matches!(
+        shortcut,
+        "up" | "arrowup"
+            | "down"
+            | "arrowdown"
+            | "enter"
+            | "escape"
+            | "esc"
+            | "1"
+            | "2"
+            | "3"
+            | "4"
+            | "5"
+            | "6"
+            | "7"
+            | "8"
+            | "9"
+    )
 }
 
 fn normalize_shortcut(shortcut: &str) -> Result<String, AppError> {

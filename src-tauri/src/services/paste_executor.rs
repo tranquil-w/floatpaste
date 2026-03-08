@@ -14,7 +14,10 @@ use crate::{
         error::AppError,
     },
     platform::windows::active_app::ActiveAppResolver,
-    services::{normalize_service::NormalizeService, window_coordinator::WindowCoordinator},
+    services::{
+        normalize_service::NormalizeService, shortcut_manager::ShortcutManager,
+        window_coordinator::WindowCoordinator,
+    },
 };
 
 pub struct PasteExecutor;
@@ -27,7 +30,8 @@ impl PasteExecutor {
         option: PasteOption,
     ) -> Result<PasteResult, AppError> {
         let detail = state.repository.get_item_detail(id)?;
-        let mut clipboard = Clipboard::new().map_err(|error| AppError::Clipboard(error.to_string()))?;
+        let mut clipboard =
+            Clipboard::new().map_err(|error| AppError::Clipboard(error.to_string()))?;
         let previous_text = clipboard.get_text().ok();
 
         if let Some(normalized) = NormalizeService::normalize_text(&detail.full_text, None) {
@@ -40,6 +44,7 @@ impl PasteExecutor {
             .set_text(detail.full_text.clone())
             .map_err(|error| AppError::Clipboard(error.to_string()))?;
 
+        ShortcutManager::unregister_picker_session_shortcuts(app);
         WindowCoordinator::hide_picker(app)?;
 
         let picker_session = state.picker_session()?;
@@ -57,21 +62,25 @@ impl PasteExecutor {
                     PasteResult {
                         success: false,
                         code: "paste_injection_failed".to_string(),
-                        message: "已写入系统剪贴板，但系统按键注入失败。你仍可手动执行 Ctrl+V。".to_string(),
+                        message: "已写入系统剪贴板，但系统按键注入失败。你仍可手动执行 Ctrl+V。"
+                            .to_string(),
                     }
                 }
             } else {
                 PasteResult {
                     success: false,
                     code: "target_window_restore_failed".to_string(),
-                    message: "已写入系统剪贴板，但未能恢复到原目标窗口。你仍可手动执行 Ctrl+V。".to_string(),
+                    message: "已写入系统剪贴板，但未能恢复到原目标窗口。你仍可手动执行 Ctrl+V。"
+                        .to_string(),
                 }
             }
         } else {
             PasteResult {
                 success: false,
                 code: "target_window_missing".to_string(),
-                message: "已写入系统剪贴板，但当前没有可恢复的目标窗口句柄。你仍可手动执行 Ctrl+V。".to_string(),
+                message:
+                    "已写入系统剪贴板，但当前没有可恢复的目标窗口句柄。你仍可手动执行 Ctrl+V。"
+                        .to_string(),
             }
         };
 
