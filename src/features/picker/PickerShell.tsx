@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { queryClient } from "../../app/queryClient";
 import { hidePicker, openManager, pasteItem } from "../../bridge/commands";
@@ -32,6 +32,7 @@ export function PickerShell() {
   const recent = usePickerRecentQuery();
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [lastMessage, setLastMessage] = useState("");
+  const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   const items = useMemo(
     () => mergePickerItems(favorites.data ?? [], recent.data ?? []),
@@ -58,6 +59,16 @@ export function PickerShell() {
       setSelectedIndex(0);
     }
   }, [items.length, selectedIndex]);
+  
+  useEffect(() => {
+    const currentItem = itemRefs.current[selectedIndex];
+    if (currentItem) {
+      currentItem.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+      });
+    }
+  }, [selectedIndex]);
 
   useEffect(() => {
     if (!isTauriRuntime()) {
@@ -187,36 +198,37 @@ export function PickerShell() {
   }, [items.length, selectedIndex, items]);
 
   return (
-    <div className="flex h-screen items-start justify-center bg-transparent px-4 py-4 text-ink">
-      <div className="flex max-h-full w-full max-w-[560px] flex-col rounded-[28px] border border-white/70 bg-[rgba(252,249,244,0.96)] p-4 shadow-[0_24px_80px_rgba(15,23,42,0.28)] backdrop-blur">
-        <div className="flex shrink-0 items-start justify-between gap-4">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-accentDeep">速贴面板</p>
-            <h1 className="mt-2 font-display text-3xl leading-none">FloatPaste Picker</h1>
-            <p className="mt-2 text-sm text-slate-600">
-              使用方向键、数字键、回车和 Esc 完成选择。若需完整搜索或编辑，点右上角进入资料库。
-            </p>
+    <div className="flex h-screen w-screen items-start justify-center bg-transparent p-0 text-ink overflow-hidden">
+      <div className="flex h-full w-full flex-col overflow-hidden rounded-[20px] border border-white/40 bg-white/85 shadow-[0_16px_40px_rgba(15,23,42,0.2)] backdrop-blur-xl">
+        <div className="flex shrink-0 items-center justify-between border-b border-slate-200/50 bg-white/40 px-4 py-2.5">
+          <div className="flex items-center gap-2.5">
+            <div className="h-2.5 w-2.5 rounded-full bg-accent/80"></div>
+            <span className="text-xs font-semibold tracking-wide text-slate-700">FloatPaste</span>
           </div>
           <button
-            className="whitespace-nowrap rounded-2xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white"
+            className="flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-medium text-slate-500 transition-colors hover:bg-slate-200/50 hover:text-slate-800"
             onClick={() => void openManagerFromPicker()}
             type="button"
           >
             资料库
+            <svg className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" /></svg>
           </button>
         </div>
 
-        <div className="mt-4 flex min-h-0 flex-1 flex-col">
-          <div className="grid flex-1 gap-3 overflow-y-auto pr-2 pl-1 py-1">
+        <div className="flex min-h-0 flex-1 flex-col px-2 py-2">
+          <div className="grid flex-1 gap-1 overflow-y-auto pr-1">
           {items.length ? (
             items.map((item, index) => {
               const isSelected = index === selectedIndex;
               return (
                 <button
-                  className={`group w-full rounded-3xl border px-4 py-4 text-left transition-all duration-300 ${
+                  ref={(el) => {
+                    itemRefs.current[index] = el;
+                  }}
+                  className={`group relative flex w-full items-start gap-2.5 rounded-xl px-2.5 py-2.5 text-left transition-all duration-150 ${
                     isSelected
-                      ? "scale-[1.01] border-accent/40 bg-white shadow-[0_4px_20px_-4px_rgba(217,119,6,0.15)] ring-1 ring-accent/30"
-                      : "border-slate-200/60 bg-white/60 hover:border-slate-300 hover:bg-white"
+                      ? "bg-amber-50 shadow-sm ring-1 ring-inset ring-amber-500/30"
+                      : "hover:bg-slate-100/50"
                   }`}
                   key={item.id}
                   onClick={() => setSelectedIndex(index)}
@@ -225,48 +237,53 @@ export function PickerShell() {
                   }}
                   type="button"
                 >
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-slate-100/80 text-[10px] font-bold text-slate-400 group-hover:bg-slate-200 group-hover:text-slate-500 transition-colors">
-                          {index + 1}
-                        </div>
-                      </div>
-                      <p className="mt-2.5 line-clamp-2 text-sm leading-relaxed text-slate-800">{item.contentPreview}</p>
-                    </div>
-                    {item.isFavorited ? (
-                      <span className="shrink-0 rounded-full bg-amber-100/80 px-2 py-1 text-[10px] font-semibold text-amber-700">
-                        收藏
-                      </span>
-                    ) : null}
+                  <div className="mt-0.5 flex shrink-0 items-center justify-center">
+                    <kbd className={`flex h-5 w-5 items-center justify-center rounded-md border-b-2 font-mono text-[10px] font-bold ${
+                      isSelected 
+                        ? "border-amber-600/40 bg-amber-500 text-white" 
+                        : "border-slate-300 bg-slate-100 text-slate-500 group-hover:border-slate-400 group-hover:bg-slate-200 group-hover:text-slate-700"
+                    }`}>
+                      {index + 1}
+                    </kbd>
                   </div>
-                  <div className="mt-3.5 flex flex-wrap gap-x-4 gap-y-2 text-[11px] font-medium text-slate-400">
-                    <span className="flex items-center gap-1.5"><span className="h-1 w-1 rounded-full bg-slate-300"></span>{item.sourceApp ?? "未知来源"}</span>
-                    <span className="flex items-center gap-1.5"><span className="h-1 w-1 rounded-full bg-slate-300"></span>{formatDateTime(item.lastUsedAt ?? item.createdAt)}</span>
+                  
+                  <div className="flex-1 min-w-0">
+                    <p className={`line-clamp-2 text-xs leading-relaxed ${isSelected ? "font-medium text-amber-950" : "text-slate-700"}`}>
+                      {item.contentPreview}
+                    </p>
+                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] font-medium text-slate-400">
+                      <span className="truncate max-w-[100px]">{item.sourceApp ?? "未知来源"}</span>
+                      <span className="w-0.5 h-0.5 rounded-full bg-slate-300"></span>
+                      <span>{formatDateTime(item.lastUsedAt ?? item.createdAt)}</span>
+                      {item.isFavorited ? (
+                        <>
+                           <span className="w-0.5 h-0.5 rounded-full bg-slate-300"></span>
+                           <span className="text-amber-600">★</span>
+                        </>
+                      ) : null}
+                    </div>
                   </div>
                 </button>
               );
             })
           ) : (
-            <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-slate-300 bg-white/50 px-6 py-12 text-center transition-colors hover:border-slate-400 hover:bg-white/80">
-              <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 ring-4 ring-white">
-                <div className="h-3 w-3 rounded-sm bg-slate-300" />
+            <div className="flex flex-col items-center justify-center py-8 text-center">
+              <div className="mb-2.5 flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 ring-4 ring-white">
+                <div className="h-1.5 w-1.5 rounded-sm bg-slate-300" />
               </div>
-              <h3 className="font-display text-base font-medium text-slate-800">暂无历史记录</h3>
-              <p className="mt-1.5 max-w-sm text-xs leading-relaxed text-slate-500">先复制一段文本，再按全局快捷键唤起速贴面板。</p>
+              <p className="text-xs font-medium text-slate-600">暂无历史记录</p>
             </div>
           )}
           </div>
         </div>
 
-        <div className="mt-5 shrink-0 flex flex-col gap-3 rounded-2xl bg-slate-900/95 px-5 py-3.5 text-[11px] font-medium tracking-wide text-white/70 shadow-inner backdrop-blur sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-            <span className="flex items-center gap-1.5"><kbd className="rounded-md border border-white/20 bg-white/10 px-1.5 py-0.5 font-sans text-white">↑</kbd><kbd className="rounded-md border border-white/20 bg-white/10 px-1.5 py-0.5 font-sans text-white">↓</kbd> 选择</span>
-            <span className="flex items-center gap-1.5"><kbd className="rounded-md border border-white/20 bg-white/10 px-1.5 py-0.5 font-sans text-white">1</kbd> - <kbd className="rounded-md border border-white/20 bg-white/10 px-1.5 py-0.5 font-sans text-white">9</kbd> 直选</span>
-            <span className="flex items-center gap-1.5"><kbd className="rounded-md border border-white/20 bg-white/10 px-1.5 py-0.5 font-sans text-white">↵</kbd> 粘贴</span>
-            <span className="flex items-center gap-1.5"><kbd className="rounded-md border border-white/20 bg-white/10 px-1.5 py-0.5 font-sans text-white">Esc</kbd> 关闭</span>
+        <div className="flex shrink-0 items-center justify-between border-t border-slate-200/50 bg-white/60 px-4 py-2 text-[10px] font-medium tracking-wide text-slate-500 backdrop-blur-md">
+          <div className="flex items-center gap-3">
+            <span className="flex items-center gap-1"><kbd className="font-sans font-bold">↑↓</kbd> 导航</span>
+            <span className="flex items-center gap-1"><kbd className="font-sans font-bold">↵</kbd> 粘贴</span>
+            <span className="flex items-center gap-1"><kbd className="font-sans font-bold">Esc</kbd> 取消</span>
           </div>
-          {lastMessage ? <span className="text-amber-400">{lastMessage}</span> : <span className="hidden text-white/40 sm:inline-block">右上角进入资料库</span>}
+          {lastMessage ? <span className="text-amber-600 font-semibold">{lastMessage}</span> : null}
         </div>
       </div>
     </div>

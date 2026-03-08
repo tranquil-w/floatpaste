@@ -15,10 +15,18 @@ export function App() {
 
   useEffect(() => {
     if (!isTauriRuntime()) {
+      document.body.classList.add("theme-manager");
       return;
     }
 
-    setWindowLabel(getCurrentWebviewWindow().label);
+    const label = getCurrentWebviewWindow().label;
+    setWindowLabel(label);
+    
+    if (label === "picker") {
+      document.body.classList.add("theme-picker");
+    } else {
+      document.body.classList.add("theme-manager");
+    }
   }, []);
 
   return windowLabel === "picker" ? <PickerShell /> : <ManagerShell />;

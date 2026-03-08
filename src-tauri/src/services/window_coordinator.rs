@@ -137,7 +137,7 @@ fn ensure_picker_window(app: &AppHandle) -> Result<WebviewWindow, AppError> {
 
     let window = WebviewWindowBuilder::new(app, "picker", WebviewUrl::default())
         .title("FloatPaste Picker")
-        .inner_size(560.0, 520.0)
+        .inner_size(360.0, 420.0)
         .resizable(false)
         .visible(false)
         .focused(true)
@@ -145,7 +145,8 @@ fn ensure_picker_window(app: &AppHandle) -> Result<WebviewWindow, AppError> {
         .decorations(false)
         .always_on_top(true)
         .skip_taskbar(true)
-        .shadow(true)
+        .transparent(true)
+        .shadow(false)
         .build()
         .map_err(|error| AppError::Message(format!("创建 picker 窗口失败: {error}")))?;
 
