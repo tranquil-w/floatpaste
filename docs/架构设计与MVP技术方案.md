@@ -1011,3 +1011,230 @@ floatpaste/
 - 核心卖点：**不打断工作流的历史找回与重新粘贴**
 
 这是当前最适合正式开工的版本。
+
+---
+
+## 20. 当前实现状态（截至 2026-03-08）
+
+下面内容用于同步“设计稿”与“仓库现状”，避免文档与代码脱节。
+
+### 20.1 已完成
+
+当前仓库已经完成以下实现：
+
+- 前端工程骨架：React + Vite + Tailwind + Zustand + TanStack Query
+- Tauri 2 + Rust 后端工程骨架
+- SQLite 初始化迁移与 FTS5 搜索
+- `clip_items`、`clip_items_fts`、`settings`、`excluded_apps` 持久化
+- Manager 基础界面：列表、详情、全文搜索、编辑、删除、收藏、设置分区
+- Picker 基础界面：最近/收藏合并列表、轻量预览
+- 全局快捷键唤起 Picker
+- Picker 本地按键控制：`Up / Down / Enter / Esc / 1..9`
+- Windows 剪贴板文本监听轮询原型
+- 去重、排除应用、暂停监听、自写回抑制基础链路
+- 托盘菜单：打开资料库、打开速贴面板、打开设置、暂停/恢复监听、退出
+- 回贴主链路：写入剪贴板、恢复目标窗口、尝试发送 `Ctrl+V`
+- 回贴结果状态码基础收口
+- Manager 关闭后隐藏到托盘，而不是直接退出进程
+- Picker 当前按需懒创建，不在应用启动时预创建
+- Manager 与 Picker 当前采用单窗口切换策略，不同时显示
+
+### 20.2 当前实现与设计稿的对应关系
+
+按实施阶段看，当前状态为：
+
+- `Phase 1`：已完成基础骨架
+- `Phase 2`：已完成基础骨架
+- `Phase 3`：已完成可运行原型
+- `Phase 4`：已进入稳定性收口，但未完全完成
+
+当前代码中已经落地的关键文件包括：
+
+- 前端入口：`src/app/App.tsx`
+- Manager：`src/features/manager/ManagerShell.tsx`
+- Picker：`src/features/picker/PickerShell.tsx`
+- 前端桥接：`src/bridge/commands.ts`、`src/bridge/events.ts`
+- 应用启动：`src-tauri/src/lib.rs`、`src-tauri/src/app_bootstrap.rs`
+- 剪贴监听：`src-tauri/src/platform/windows/clipboard_monitor.rs`
+- 快捷键：`src-tauri/src/services/shortcut_manager.rs`
+- 托盘：`src-tauri/src/services/tray_service.rs`
+- 窗口协调：`src-tauri/src/services/window_coordinator.rs`
+- 回贴执行：`src-tauri/src/services/paste_executor.rs`
+- SQLite 仓储：`src-tauri/src/repository/sqlite_repository.rs`
+
+### 20.3 尚未完成
+
+以下内容仍属于后续收口项：
+
+- 更细的前台应用识别与敏感场景预设
+- 更稳定的“尽量不打断工作流”窗口体验验证
+- 不同桌面应用下的回贴兼容性收口
+- 回贴失败场景的更细颗粒诊断与灰度策略
+- 更完善的错误提示与日志可视化
+
+### 20.4 当前已知实现取舍
+
+当前代码为 MVP 原型实现，存在以下明确取舍：
+
+- 剪贴监听当前采用轮询方式，而非更底层的原生事件监听
+- Picker 当前采用“可聚焦窗口 + 本地键盘事件处理”的稳定实现，而非文档前文中的“无焦点窗口 + 会话期全局快捷键”目标方案
+- Manager 与 Picker 当前采用单窗口切换策略：打开 Picker 时隐藏 Manager，关闭 Picker 后再按会话来源回到 Manager 或原目标窗口
+- Manager 内“打开速贴”当前通过延迟切回主线程显示 Picker，优先规避在当前聚焦窗口点击事件中直接切换窗口导致的卡顿
+- 回贴当前优先保证“写入剪贴板 + 尝试恢复目标窗口 + 注入 Ctrl+V”，不承诺所有应用都完全一致
+- 浏览器预览模式下前端自动切换到本地 mock 数据，不走真实 Rust 后端
+- 全局快捷键当前已按库的规范化结果进行注册和匹配；设置中仍允许用户输入 `Ctrl+\`` 这类简写，但运行时会转换为规范键名
+
+---
+
+## 21. 运行与调试说明
+
+### 21.1 环境要求
+
+当前仓库的本地开发环境要求：
+
+- Node.js
+- npm
+- Rust 工具链
+- Windows 10 或 Windows 11
+
+若要运行 Tauri 桌面应用，还需要安装：
+
+```bash
+npm install
+```
+
+说明：
+
+- 当前仓库已将 `@tauri-apps/cli` 作为本地开发依赖
+- 默认不再要求手动全局安装 Cargo 版 Tauri CLI
+- 如果确实需要全局安装，正确命令是 `cargo install tauri-cli`
+
+### 21.2 安装依赖
+
+在仓库根目录执行：
+
+```bash
+npm install
+```
+
+### 21.3 仅运行前端预览
+
+用于开发界面、验证布局和交互，不依赖 Tauri：
+
+```bash
+npm run dev
+```
+
+说明：
+
+- 该模式下前端会自动使用 `src/bridge/mockBackend.ts`
+- 可用于调试 Manager 和 Picker 的静态 UI
+- 不会调用真实剪贴板监听、全局快捷键、托盘和回贴注入
+
+### 21.4 运行桌面开发模式
+
+用于调试真实的 Windows 剪贴板、快捷键、托盘和回贴链路：
+
+```bash
+npm run tauri -- dev
+```
+
+等价命令为：
+
+```bash
+npm run dev
+npx tauri dev
+```
+
+说明：
+
+- `npm run tauri -- dev` 会通过项目内的 `@tauri-apps/cli` 调用 Tauri 开发模式
+- Manager 窗口标签为 `manager`
+- Picker 窗口按需创建，首次由全局快捷键、托盘菜单或 Manager 内入口触发时再创建
+- 当前运行时只会显示一个主窗口：Manager 与 Picker 不会同时保持可见
+
+### 21.5 生产构建校验
+
+前端构建：
+
+```bash
+npm run build
+```
+
+后端编译检查：
+
+```bash
+cargo check --manifest-path src-tauri\Cargo.toml
+```
+
+当前仓库至少应保证以上两个命令可以通过。
+
+### 21.6 运行时调试建议
+
+#### 调试前端界面
+
+推荐方式：
+
+- 先用 `npm run dev` 调整界面和交互
+- 浏览器预览模式下验证 Manager 搜索、详情编辑、Picker 布局
+
+重点文件：
+
+- `src/features/manager/ManagerShell.tsx`
+- `src/features/picker/PickerShell.tsx`
+- `src/bridge/commands.ts`
+- `src/bridge/events.ts`
+
+#### 调试桌面链路
+
+推荐方式：
+
+- 使用 `npm run tauri -- dev`
+- 在终端直接观察 Rust `tracing` 输出
+- 重点验证复制文本、唤起 Picker、选择条目、回贴到目标应用的闭环
+
+重点文件：
+
+- `src-tauri/src/platform/windows/clipboard_monitor.rs`
+- `src-tauri/src/services/shortcut_manager.rs`
+- `src-tauri/src/services/window_coordinator.rs`
+- `src-tauri/src/services/paste_executor.rs`
+- `src-tauri/src/services/tray_service.rs`
+
+#### 调试数据库与配置
+
+当前数据默认保存在应用数据目录；若 Tauri 运行时未能解析应用目录，则回退到仓库根目录下的：
+
+```text
+.floatpaste-data/floatpaste.db
+```
+
+重点文件：
+
+- `src-tauri/src/repository/sqlite_repository.rs`
+- `src-tauri/migrations/0001_init.sql`
+- `src-tauri/src/domain/settings.rs`
+
+### 21.7 调试场景建议
+
+建议按下面顺序验证：
+
+1. 运行 `npm run tauri -- dev`
+2. 在任意文本应用中复制一段文本
+3. 打开 Manager，确认记录已入库
+4. 通过全局快捷键唤起 Picker
+5. 用 `Up / Down / Enter / Esc / 1..9` 验证 Picker 本地键盘操作
+6. 在记事本、浏览器输入框、编辑器中验证回贴行为
+7. 在设置中加入排除应用，确认对应前台应用不再入库
+8. 通过托盘切换监听状态，确认暂停后不再继续入库
+9. 关闭 Manager，确认应用仍留在托盘；再通过托盘重新打开 Manager
+
+### 21.8 当前调试限制
+
+截至 2026-03-08，调试时需要明确以下限制：
+
+- 浏览器预览模式无法验证真实系统能力
+- 不同应用对 `Ctrl+V` 注入的响应存在差异
+- 当前实现优先保证稳定可用，因此 Picker 暂未维持“无焦点、不打断”的目标体验
+- 当前 Manager 与 Picker 采用单窗口切换策略，这与文档前文的理想形态存在阶段性差异
+- 当前尚未提供单独的日志查看器界面，主要依赖终端输出和数据库结果观察

@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "picker-capability",
+  "description": "速贴面板窗口权限",
+  "windows": ["picker"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:window:default",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-center",
+    "core:window:allow-unminimize",
+    "core:window:allow-set-focus"
+  ]
+}

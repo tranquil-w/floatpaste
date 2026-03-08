@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "background-capability",
+  "description": "后台能力与基础事件权限",
+  "windows": ["manager", "picker"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:window:default",
+    "core:app:default",
+    "core:path:default",
+    "core:menu:default",
+    "core:tray:default"
+  ]
+}
