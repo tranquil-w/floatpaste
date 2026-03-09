@@ -13,6 +13,7 @@ const now = Date.now();
 let settings: UserSetting = {
   shortcut: "Ctrl+`",
   launchOnStartup: false,
+  silentOnStartup: false,
   historyLimit: 1000,
   excludedApps: ["KeePass.exe", "WindowsTerminal.exe"],
   restoreClipboardAfterPaste: true,
@@ -200,7 +201,10 @@ export async function mockGetSettings(): Promise<UserSetting> {
 }
 
 export async function mockUpdateSettings(payload: UserSetting): Promise<UserSetting> {
-  settings = structuredClone(payload);
+  settings = structuredClone({
+    ...payload,
+    silentOnStartup: payload.launchOnStartup ? payload.silentOnStartup : false,
+  });
   return structuredClone(settings);
 }
 

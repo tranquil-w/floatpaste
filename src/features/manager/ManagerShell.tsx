@@ -127,6 +127,9 @@ export function ManagerShell() {
   }, [detail.data, setDraftText]);
 
   const selectedSummary = clips.data?.items.find((item) => item.id === selectedItemId) ?? detail.data;
+  const settingsSaveError = updateSettingsMutation.error
+    ? getErrorMessage(updateSettingsMutation.error)
+    : null;
 
   return (
     <div className="flex h-screen flex-col px-5 py-6 text-ink md:px-8">
@@ -303,8 +306,13 @@ export function ManagerShell() {
           ) : (
             <div className="h-full overflow-y-auto pr-2">
               <SettingsPanel
+                errorMessage={settingsSaveError}
                 isPending={updateSettingsMutation.isPending}
-                onSave={(nextValue) => updateSettingsMutation.mutate(nextValue)}
+                onDismissError={() => updateSettingsMutation.reset()}
+                onSave={(nextValue) => {
+                  updateSettingsMutation.reset();
+                  updateSettingsMutation.mutate(nextValue);
+                }}
               />
             </div>
           )}
@@ -423,10 +431,13 @@ export function ManagerShell() {
 }
 
 interface SettingsPanelProps {
+  errorMessage: string | null;
   isPending: boolean;
+  onDismissError: () => void;
   onSave: (payload: {
     shortcut: string;
     launchOnStartup: boolean;
+    silentOnStartup: boolean;
     historyLimit: number;
     excludedApps: string[];
     restoreClipboardAfterPaste: boolean;
@@ -434,9 +445,11 @@ interface SettingsPanelProps {
   }) => void;
 }
 
-function SettingsPanel({ isPending, onSave }: SettingsPanelProps) {
+function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: SettingsPanelProps) {
   const { data, isLoading } = useSettingsQuery();
   const [shortcut, setShortcut] = useState("Ctrl+`");
+  const [launchOnStartup, setLaunchOnStartup] = useState(false);
+  const [silentOnStartup, setSilentOnStartup] = useState(false);
   const [historyLimit, setHistoryLimit] = useState(1000);
   const [restoreClipboardAfterPaste, setRestoreClipboardAfterPaste] = useState(true);
   const [pauseMonitoring, setPauseMonitoring] = useState(false);
@@ -448,6 +461,8 @@ function SettingsPanel({ isPending, onSave }: SettingsPanelProps) {
     }
 
     setShortcut(data.shortcut);
+    setLaunchOnStartup(data.launchOnStartup);
+    setSilentOnStartup(data.silentOnStartup);
     setHistoryLimit(data.historyLimit);
     setRestoreClipboardAfterPaste(data.restoreClipboardAfterPaste);
     setPauseMonitoring(data.pauseMonitoring);
@@ -467,6 +482,19 @@ function SettingsPanel({ isPending, onSave }: SettingsPanelProps) {
           当前设置直接映射到后端持久化配置。排除应用与真正的前台应用识别将在 Windows 平台适配阶段继续细化。
         </p>
       </div>
+
+      {errorMessage ? (
+        <div className="flex items-start justify-between gap-3 rounded-2xl bg-red-50/90 px-4 py-3 text-sm text-red-700 ring-1 ring-inset ring-red-200">
+          <p className="leading-relaxed">{errorMessage}</p>
+          <button
+            className="shrink-0 text-xs font-semibold text-red-700 transition-colors hover:text-red-900"
+            onClick={onDismissError}
+            type="button"
+          >
+            关闭
+          </button>
+        </div>
+      ) : null}
 
       <label className="block">
         <span className="mb-2.5 block text-sm font-medium text-slate-700">全局快捷键</span>
@@ -503,6 +531,39 @@ function SettingsPanel({ isPending, onSave }: SettingsPanelProps) {
         <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-4 transition-colors hover:bg-slate-50">
           <input
             className="h-4 w-4 rounded border-slate-300 text-accent focus:ring-accent"
+            checked={launchOnStartup}
+            onChange={(event) => {
+              const checked = event.target.checked;
+              setLaunchOnStartup(checked);
+              if (!checked) {
+                setSilentOnStartup(false);
+              }
+            }}
+            type="checkbox"
+          />
+          <span className="text-sm font-medium text-slate-700">开机自启</span>
+        </label>
+
+        <label
+          className={`flex items-center gap-3 rounded-2xl border px-5 py-4 transition-colors ${
+            launchOnStartup
+              ? "cursor-pointer border-slate-200 bg-white hover:bg-slate-50"
+              : "cursor-not-allowed border-slate-100 bg-slate-50 text-slate-400"
+          }`}
+        >
+          <input
+            className="h-4 w-4 rounded border-slate-300 text-accent focus:ring-accent"
+            checked={silentOnStartup}
+            disabled={!launchOnStartup}
+            onChange={(event) => setSilentOnStartup(event.target.checked)}
+            type="checkbox"
+          />
+          <span className="text-sm font-medium text-slate-700">开机自启时静默启动</span>
+        </label>
+
+        <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-4 transition-colors hover:bg-slate-50">
+          <input
+            className="h-4 w-4 rounded border-slate-300 text-accent focus:ring-accent"
             checked={restoreClipboardAfterPaste}
             onChange={(event) => setRestoreClipboardAfterPaste(event.target.checked)}
             type="checkbox"
@@ -528,7 +589,8 @@ function SettingsPanel({ isPending, onSave }: SettingsPanelProps) {
           onClick={() =>
             onSave({
               shortcut,
-              launchOnStartup: false,
+              launchOnStartup,
+              silentOnStartup: launchOnStartup ? silentOnStartup : false,
               historyLimit,
               excludedApps: excludedAppsText
                 .split(/\r?\n/)
@@ -545,4 +607,16 @@ function SettingsPanel({ isPending, onSave }: SettingsPanelProps) {
       </div>
     </div>
   );
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+
+  if (typeof error === "string" && error.trim()) {
+    return error;
+  }
+
+  return "保存设置失败，请稍后重试。";
 }

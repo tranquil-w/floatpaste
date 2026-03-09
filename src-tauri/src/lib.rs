@@ -1,6 +1,7 @@
 mod app_bootstrap;
 mod commands;
 mod domain;
+mod launch_mode;
 mod platform;
 mod repository;
 mod services;
@@ -8,7 +9,7 @@ mod services;
 use tauri_plugin_global_shortcut::Builder as GlobalShortcutBuilder;
 use tracing_subscriber::{fmt, EnvFilter};
 
-use crate::services::shortcut_manager::ShortcutManager;
+use crate::{launch_mode::LaunchMode, services::shortcut_manager::ShortcutManager};
 
 fn init_logging() {
     let env_filter =
@@ -23,6 +24,18 @@ fn init_logging() {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     init_logging();
+    let launch_mode = LaunchMode::from_env();
+    let _single_instance =
+        match crate::platform::windows::single_instance::acquire_or_focus_existing(launch_mode) {
+            Ok(Some(guard)) => Some(guard),
+            Ok(None) => return,
+            Err(error) => {
+                tracing::warn!(
+                    "单实例检查或唤醒已有实例失败，将继续启动当前实例作为恢复路径: {error}"
+                );
+                None
+            }
+        };
 
     tauri::Builder::default()
         .plugin(
@@ -32,7 +45,7 @@ pub fn run() {
                 })
                 .build(),
         )
-        .setup(|app| app_bootstrap::bootstrap(app).map_err(Into::into))
+        .setup(move |app| app_bootstrap::bootstrap(app, launch_mode).map_err(Into::into))
         .invoke_handler(tauri::generate_handler![
             commands::clips::list_recent_items,
             commands::clips::list_favorite_items,

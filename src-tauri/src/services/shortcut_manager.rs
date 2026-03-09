@@ -7,10 +7,7 @@ use crate::{
     app_bootstrap::AppState,
     domain::{
         error::AppError,
-        events::{
-            PICKER_CONFIRM_EVENT, PICKER_NAVIGATE_EVENT, PICKER_SELECT_INDEX_EVENT,
-            SETTINGS_CHANGED_EVENT,
-        },
+        events::{PICKER_CONFIRM_EVENT, PICKER_NAVIGATE_EVENT, PICKER_SELECT_INDEX_EVENT},
     },
     services::window_coordinator::WindowCoordinator,
 };
@@ -204,14 +201,6 @@ impl ShortcutManager {
         if let Err(error) = emit_result {
             error!("向 Picker 发送快捷键事件失败: {error}");
         }
-    }
-
-    pub fn update_from_settings(app: &AppHandle, state: &AppState) -> Result<(), AppError> {
-        let settings = state.current_settings()?;
-        Self::sync_registered_shortcut(app, &settings.shortcut)?;
-        app.emit(SETTINGS_CHANGED_EVENT, &settings)
-            .map_err(|error| AppError::Message(error.to_string()))?;
-        Ok(())
     }
 }
 

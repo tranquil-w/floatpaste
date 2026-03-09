@@ -2,9 +2,11 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[serde(default)]
 pub struct UserSetting {
     pub shortcut: String,
     pub launch_on_startup: bool,
+    pub silent_on_startup: bool,
     pub history_limit: u32,
     pub excluded_apps: Vec<String>,
     pub restore_clipboard_after_paste: bool,
@@ -16,6 +18,7 @@ impl Default for UserSetting {
         Self {
             shortcut: "Ctrl+`".to_string(),
             launch_on_startup: false,
+            silent_on_startup: false,
             history_limit: 1_000,
             excluded_apps: vec![
                 "KeePass.exe".to_string(),
@@ -35,6 +38,10 @@ impl UserSetting {
             self.shortcut = "Ctrl+`".to_string();
         }
 
+        if !self.launch_on_startup {
+            self.silent_on_startup = false;
+        }
+
         self.history_limit = self.history_limit.clamp(100, 10_000);
         self.excluded_apps = self
             .excluded_apps
@@ -43,5 +50,40 @@ impl UserSetting {
             .filter(|value| !value.is_empty())
             .collect();
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::UserSetting;
+
+    #[test]
+    fn sanitized_turns_off_silent_when_launch_on_startup_is_disabled() {
+        let settings = UserSetting {
+            launch_on_startup: false,
+            silent_on_startup: true,
+            ..UserSetting::default()
+        }
+        .sanitized();
+
+        assert!(!settings.silent_on_startup);
+    }
+
+    #[test]
+    fn deserialize_old_settings_without_silent_on_startup_field() {
+        let settings: UserSetting = serde_json::from_str(
+            r#"{
+                "shortcut":"Ctrl+`",
+                "launchOnStartup":true,
+                "historyLimit":1000,
+                "excludedApps":["KeePass.exe"],
+                "restoreClipboardAfterPaste":true,
+                "pauseMonitoring":false
+            }"#,
+        )
+        .unwrap();
+
+        assert!(settings.launch_on_startup);
+        assert!(!settings.silent_on_startup);
     }
 }

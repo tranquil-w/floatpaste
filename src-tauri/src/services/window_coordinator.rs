@@ -15,6 +15,10 @@ use crate::{
 };
 
 pub struct WindowCoordinator;
+pub const MANAGER_WINDOW_LABEL: &str = "manager";
+pub const MANAGER_WINDOW_TITLE: &str = "FloatPaste / 浮贴";
+pub const PICKER_WINDOW_LABEL: &str = "picker";
+pub const PICKER_WINDOW_TITLE: &str = "FloatPaste Picker";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -25,11 +29,11 @@ struct PickerSessionPayload {
 
 impl WindowCoordinator {
     pub fn configure_existing_windows(app: &AppHandle) {
-        if let Some(window) = app.get_webview_window("manager") {
+        if let Some(window) = app.get_webview_window(MANAGER_WINDOW_LABEL) {
             configure_manager_window(&window);
         }
 
-        if let Some(window) = app.get_webview_window("picker") {
+        if let Some(window) = app.get_webview_window(PICKER_WINDOW_LABEL) {
             configure_picker_window(&window);
         }
     }
@@ -54,7 +58,7 @@ impl WindowCoordinator {
         }
 
         let manager_visible = app
-            .get_webview_window("manager")
+            .get_webview_window(MANAGER_WINDOW_LABEL)
             .and_then(|window| window.is_visible().ok())
             .unwrap_or(false);
         let target_window = if manager_visible {
@@ -93,7 +97,7 @@ impl WindowCoordinator {
         }
 
         if manager_visible {
-            if let Some(manager) = app.get_webview_window("manager") {
+            if let Some(manager) = app.get_webview_window(MANAGER_WINDOW_LABEL) {
                 let _ = manager.hide();
             }
         }
@@ -130,7 +134,7 @@ impl WindowCoordinator {
             crate::platform::windows::picker_mouse_monitor::PickerMouseMonitor::end_session();
         }
 
-        let Some(window) = app.get_webview_window("picker") else {
+        let Some(window) = app.get_webview_window(PICKER_WINDOW_LABEL) else {
             return Ok(());
         };
 
@@ -191,16 +195,16 @@ impl WindowCoordinator {
 }
 
 fn ensure_manager_window(app: &AppHandle) -> Result<WebviewWindow, AppError> {
-    if let Some(window) = app.get_webview_window("manager") {
+    if let Some(window) = app.get_webview_window(MANAGER_WINDOW_LABEL) {
         return Ok(window);
     }
 
-    let window = WebviewWindowBuilder::new(app, "manager", WebviewUrl::default())
-        .title("FloatPaste / 浮贴")
+    let window = WebviewWindowBuilder::new(app, MANAGER_WINDOW_LABEL, WebviewUrl::default())
+        .title(MANAGER_WINDOW_TITLE)
         .inner_size(1480.0, 920.0)
         .resizable(true)
         .center()
-        .visible(true)
+        .visible(false)
         .build()
         .map_err(|error| AppError::Message(format!("重新创建 manager 窗口失败: {error}")))?;
 
@@ -209,12 +213,12 @@ fn ensure_manager_window(app: &AppHandle) -> Result<WebviewWindow, AppError> {
 }
 
 fn ensure_picker_window(app: &AppHandle) -> Result<WebviewWindow, AppError> {
-    if let Some(window) = app.get_webview_window("picker") {
+    if let Some(window) = app.get_webview_window(PICKER_WINDOW_LABEL) {
         return Ok(window);
     }
 
-    let window = WebviewWindowBuilder::new(app, "picker", WebviewUrl::default())
-        .title("FloatPaste Picker")
+    let window = WebviewWindowBuilder::new(app, PICKER_WINDOW_LABEL, WebviewUrl::default())
+        .title(PICKER_WINDOW_TITLE)
         .inner_size(360.0, 420.0)
         .resizable(false)
         .visible(false)

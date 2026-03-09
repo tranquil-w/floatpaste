@@ -8,7 +8,7 @@ use tracing::warn;
 use crate::{
     app_bootstrap::AppState,
     domain::{error::AppError, events::MANAGER_OPEN_SETTINGS_EVENT},
-    services::{shortcut_manager::ShortcutManager, window_coordinator::WindowCoordinator},
+    services::{settings_service::SettingsService, window_coordinator::WindowCoordinator},
 };
 
 pub struct TrayService;
@@ -73,14 +73,19 @@ impl TrayService {
                     };
 
                     match state.current_settings() {
-                        Ok(mut settings) => {
+                        Ok(previous_settings) => {
+                            let mut settings = previous_settings.clone();
                             settings.pause_monitoring = !settings.pause_monitoring;
                             if let Err(error) = state.update_settings(settings) {
                                 warn!("托盘更新监听状态失败: {error}");
                                 return;
                             }
-                            if let Err(error) = ShortcutManager::update_from_settings(app, &state) {
-                                warn!("托盘同步快捷键失败: {error}");
+                            if let Err(error) =
+                                SettingsService::apply_runtime_side_effects(app, &state)
+                            {
+                                let _ = state.update_settings(previous_settings);
+                                let _ = SettingsService::apply_runtime_side_effects(app, &state);
+                                warn!("托盘同步运行设置失败: {error}");
                             }
                         }
                         Err(error) => warn!("托盘读取设置失败: {error}"),

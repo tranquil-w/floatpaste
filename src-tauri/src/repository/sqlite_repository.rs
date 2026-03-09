@@ -664,7 +664,9 @@ mod tests {
         let found = repository.find_existing_by_hash("hash-item-a").unwrap();
         assert_eq!(found, Some("item-a".to_string()));
 
-        let not_found = repository.find_existing_by_hash("nonexistent-hash").unwrap();
+        let not_found = repository
+            .find_existing_by_hash("nonexistent-hash")
+            .unwrap();
         assert_eq!(not_found, None);
 
         drop(repository);

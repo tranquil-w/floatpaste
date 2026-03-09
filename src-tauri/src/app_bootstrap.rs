@@ -9,10 +9,11 @@ use tracing::{info, warn};
 
 use crate::{
     domain::{error::AppError, settings::UserSetting},
+    launch_mode::LaunchMode,
     platform::windows::clipboard_monitor::ClipboardMonitor,
     repository::sqlite_repository::SqliteRepository,
     services::{
-        privacy_service::SelfWriteGuard, shortcut_manager::ShortcutManager,
+        privacy_service::SelfWriteGuard, settings_service::SettingsService,
         tray_service::TrayService, window_coordinator::WindowCoordinator,
     },
 };
@@ -95,7 +96,7 @@ impl AppState {
     }
 }
 
-pub fn bootstrap(app: &mut App) -> Result<(), AppError> {
+pub fn bootstrap(app: &mut App, launch_mode: LaunchMode) -> Result<(), AppError> {
     let data_dir = resolve_app_data_dir(app)?;
     std::fs::create_dir_all(&data_dir)?;
     let db_path = data_dir.join("floatpaste.db");
@@ -105,14 +106,16 @@ pub fn bootstrap(app: &mut App) -> Result<(), AppError> {
 
     app.manage(state.clone());
     WindowCoordinator::configure_existing_windows(&app.handle());
-    if let Err(error) = ShortcutManager::sync_registered_shortcut(
-        &app.handle(),
-        &state.current_settings()?.shortcut,
-    ) {
-        warn!("启动时注册全局快捷键失败，应用将继续运行，但快捷键暂不可用: {error}");
+    if let Err(error) = SettingsService::apply_runtime_side_effects(&app.handle(), &state) {
+        warn!("启动时同步运行设置失败，应用将继续运行，但部分系统能力暂不可用: {error}");
     }
     TrayService::setup(&app.handle())?;
     ClipboardMonitor::start(app.handle().clone(), state)?;
+
+    if !launch_mode.is_silent() {
+        WindowCoordinator::open_manager(&app.handle())?;
+    }
+
     info!("FloatPaste MVP 已初始化，数据库路径: {}", db_path.display());
     Ok(())
 }

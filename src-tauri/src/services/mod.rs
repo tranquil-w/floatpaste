@@ -4,6 +4,8 @@ pub mod normalize_service;
 pub mod paste_executor;
 pub mod privacy_service;
 pub mod search_service;
+pub mod settings_service;
 pub mod shortcut_manager;
+pub mod startup_service;
 pub mod tray_service;
 pub mod window_coordinator;
