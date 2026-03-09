@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { queryClient } from "../../app/queryClient";
-import { hidePicker, openManager, pasteItem } from "../../bridge/commands";
+import { hidePicker, openManagerFromPicker, pasteItem } from "../../bridge/commands";
 import {
   CLIPS_CHANGED_EVENT,
   PICKER_CONFIRM_EVENT,
@@ -41,9 +41,8 @@ export function PickerShell() {
     [favorites.data, recent.data],
   );
 
-  const openManagerFromPicker = async () => {
-    await hidePicker();
-    await openManager();
+  const handleOpenManager = async () => {
+    await openManagerFromPicker();
   };
 
   const confirmSelection = async (index: number) => {
@@ -212,6 +211,12 @@ export function PickerShell() {
         return;
       }
 
+      if (event.key === "Tab") {
+        event.preventDefault();
+        void handleOpenManager();
+        return;
+      }
+
       if (/^[1-9]$/.test(event.key)) {
         event.preventDefault();
         const index = Math.min(Number(event.key) - 1, itemCount - 1);
@@ -228,9 +233,9 @@ export function PickerShell() {
   }, []);
 
   return (
-    <div className="flex h-screen w-screen items-start justify-center bg-transparent p-0 text-ink overflow-hidden">
+    <div className="flex h-screen w-screen items-start justify-center bg-transparent p-0 text-ink overflow-hidden select-none" data-tauri-drag-region>
       <div className="flex h-full w-full flex-col overflow-hidden rounded-[20px] border border-white/40 bg-white/85 shadow-[0_16px_40px_rgba(15,23,42,0.2)] backdrop-blur-xl">
-        <div className="flex shrink-0 items-center justify-between border-b border-slate-200/50 bg-white/40 px-4 py-2.5">
+        <div className="flex shrink-0 items-center justify-between border-b border-slate-200/50 bg-white/40 px-4 py-2.5" data-tauri-drag-region>
           <div className="flex items-center gap-2.5">
             <div className="h-2.5 w-2.5 rounded-full bg-accent/80"></div>
             <span className="text-xs font-semibold tracking-wide text-slate-700">FloatPaste</span>
@@ -238,7 +243,7 @@ export function PickerShell() {
           <div className="flex items-center gap-2">
             <button
               className="flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-medium text-slate-500 transition-colors hover:bg-slate-200/50 hover:text-slate-800"
-              onClick={() => void openManagerFromPicker()}
+              onClick={() => void handleOpenManager()}
               type="button"
             >
               资料库

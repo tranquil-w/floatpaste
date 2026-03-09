@@ -1,27 +1,15 @@
 import { useEffect, useState } from "react";
-import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { ManagerShell } from "../features/manager/ManagerShell";
 import { PickerShell } from "../features/picker/PickerShell";
-import { isTauriRuntime } from "../bridge/runtime";
+import { getCurrentWindowLabel } from "../bridge/window";
 
 export function App() {
-  const [windowLabel, setWindowLabel] = useState(() => {
-    if (!isTauriRuntime()) {
-      return "manager";
-    }
-
-    return getCurrentWebviewWindow().label;
-  });
+  const [windowLabel, setWindowLabel] = useState(() => getCurrentWindowLabel());
 
   useEffect(() => {
-    if (!isTauriRuntime()) {
-      document.body.classList.add("theme-manager");
-      return;
-    }
-
-    const label = getCurrentWebviewWindow().label;
+    const label = getCurrentWindowLabel();
     setWindowLabel(label);
-    
+
     if (label === "picker") {
       document.body.classList.add("theme-picker");
     } else {

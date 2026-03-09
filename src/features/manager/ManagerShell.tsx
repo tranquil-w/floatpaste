@@ -10,6 +10,7 @@ import {
   SETTINGS_CHANGED_EVENT,
 } from "../../bridge/events";
 import { isTauriRuntime } from "../../bridge/runtime";
+import { hideCurrentWindow } from "../../bridge/window";
 import { queryClient } from "../../app/queryClient";
 import type { SearchSort } from "../../shared/types/clips";
 import { formatDateTime } from "../../shared/utils/time";
@@ -102,6 +103,21 @@ export function ManagerShell() {
       offSettings?.();
       offOpenSettings?.();
     };
+  }, []);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        void hideCurrentWindow().catch(console.error);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
   useEffect(() => {

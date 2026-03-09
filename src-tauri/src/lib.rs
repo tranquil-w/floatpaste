@@ -49,7 +49,8 @@ pub fn run() {
             commands::windows::show_picker,
             commands::windows::show_picker_from_manager,
             commands::windows::hide_picker,
-            commands::windows::open_manager
+            commands::windows::open_manager,
+            commands::windows::open_manager_from_picker
         ])
         .run(tauri::generate_context!())
         .expect("运行 Tauri 应用失败");

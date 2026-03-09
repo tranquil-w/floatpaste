@@ -38,3 +38,9 @@ pub fn hide_picker(state: State<'_, AppState>, app: AppHandle) -> Result<(), Str
 pub fn open_manager(_state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
     WindowCoordinator::open_manager(&app).map_err(map_error)
 }
+
+#[tauri::command]
+pub fn open_manager_from_picker(state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
+    ShortcutManager::unregister_picker_session_shortcuts(&app);
+    WindowCoordinator::hide_picker_and_open_manager(&app, &state).map_err(map_error)
+}

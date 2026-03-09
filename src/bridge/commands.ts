@@ -128,3 +128,10 @@ export async function openManager(): Promise<void> {
   }
   return invoke("open_manager");
 }
+
+export async function openManagerFromPicker(): Promise<void> {
+  if (!isTauriRuntime()) {
+    return;
+  }
+  return invoke("open_manager_from_picker");
+}

@@ -85,6 +85,13 @@ impl WindowCoordinator {
 
         state.begin_picker_activation();
 
+        #[cfg(target_os = "windows")]
+        {
+            crate::platform::windows::picker_mouse_monitor::PickerMouseMonitor::begin_session(
+                app.clone(),
+            );
+        }
+
         if manager_visible {
             if let Some(manager) = app.get_webview_window("manager") {
                 let _ = manager.hide();
@@ -115,6 +122,14 @@ impl WindowCoordinator {
         if let Some(state) = app.try_state::<AppState>() {
             state.end_picker_activation();
         }
+        crate::services::shortcut_manager::ShortcutManager::unregister_picker_session_shortcuts(
+            app,
+        );
+        #[cfg(target_os = "windows")]
+        {
+            crate::platform::windows::picker_mouse_monitor::PickerMouseMonitor::end_session();
+        }
+
         let Some(window) = app.get_webview_window("picker") else {
             return Ok(());
         };
@@ -150,6 +165,24 @@ impl WindowCoordinator {
                 } else if session.reopen_manager_on_close {
                     let _ = Self::open_manager(&app_clone);
                 }
+            });
+        });
+
+        Ok(())
+    }
+
+    pub fn hide_picker_and_open_manager(
+        app: &AppHandle,
+        _state: &AppState,
+    ) -> Result<(), AppError> {
+        Self::hide_picker(app)?;
+
+        let app_handle = app.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            let app_clone = app_handle.clone();
+            let _ = app_handle.run_on_main_thread(move || {
+                let _ = Self::open_manager(&app_clone);
             });
         });
 

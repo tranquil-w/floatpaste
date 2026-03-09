@@ -17,8 +17,9 @@ use crate::{
 
 pub struct ShortcutManager;
 
-const PICKER_SESSION_SHORTCUTS: [&str; 13] = [
-    "Up", "Down", "Enter", "Escape", "1", "2", "3", "4", "5", "6", "7", "8", "9",
+const PICKER_SESSION_SHORTCUTS: [&str; 14] = [
+    "Up", "Down", "Enter", "Escape", "Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6",
+    "Digit7", "Digit8", "Digit9", "Tab",
 ];
 
 impl ShortcutManager {
@@ -170,10 +171,33 @@ impl ShortcutManager {
                 });
                 return;
             }
-            "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" => {
-                let index = normalized.parse::<usize>().unwrap_or(1) - 1;
-                app.emit(PICKER_SELECT_INDEX_EVENT, index)
+            "tab" => {
+                info!("命中 Tab 键切换到 Manager");
+                let app_handle = app.clone();
+                let state_clone = state.clone();
+                std::thread::spawn(move || {
+                    let app_clone = app_handle.clone();
+                    let _ = app_handle.run_on_main_thread(move || {
+                        Self::unregister_picker_session_shortcuts(&app_clone);
+                        if let Err(error) = WindowCoordinator::hide_picker_and_open_manager(
+                            &app_clone,
+                            &state_clone,
+                        ) {
+                            error!("从 Picker 切换到 Manager 失败: {error}");
+                        }
+                    });
+                });
+                return;
             }
+            "digit1" => app.emit(PICKER_SELECT_INDEX_EVENT, 0),
+            "digit2" => app.emit(PICKER_SELECT_INDEX_EVENT, 1),
+            "digit3" => app.emit(PICKER_SELECT_INDEX_EVENT, 2),
+            "digit4" => app.emit(PICKER_SELECT_INDEX_EVENT, 3),
+            "digit5" => app.emit(PICKER_SELECT_INDEX_EVENT, 4),
+            "digit6" => app.emit(PICKER_SELECT_INDEX_EVENT, 5),
+            "digit7" => app.emit(PICKER_SELECT_INDEX_EVENT, 6),
+            "digit8" => app.emit(PICKER_SELECT_INDEX_EVENT, 7),
+            "digit9" => app.emit(PICKER_SELECT_INDEX_EVENT, 8),
             _ => return,
         };
 
@@ -213,15 +237,16 @@ fn is_picker_session_shortcut(shortcut: &str) -> bool {
             | "enter"
             | "escape"
             | "esc"
-            | "1"
-            | "2"
-            | "3"
-            | "4"
-            | "5"
-            | "6"
-            | "7"
-            | "8"
-            | "9"
+            | "digit1"
+            | "digit2"
+            | "digit3"
+            | "digit4"
+            | "digit5"
+            | "digit6"
+            | "digit7"
+            | "digit8"
+            | "digit9"
+            | "tab"
     )
 }
 
