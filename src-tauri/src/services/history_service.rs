@@ -2,7 +2,8 @@ use crate::{
     app_bootstrap::AppState,
     domain::{clip_item::ClipItemDetail, error::AppError},
     services::{
-        dedup_service::DedupService, normalize_service::NormalizeService,
+        dedup_service::{DedupDecision, DedupService},
+        normalize_service::NormalizeService,
         privacy_service::PrivacyService,
     },
 };
@@ -29,10 +30,12 @@ impl HistoryService {
             return Ok(None);
         }
 
-        if !DedupService::default().should_store(&state.repository, &normalized.normalized.hash)? {
-            return Ok(None);
+        match DedupService::default().decide(&state.repository, &normalized.normalized.hash)? {
+            DedupDecision::Skip => Ok(None),
+            DedupDecision::BumpExisting(existing_id) => {
+                state.repository.bump_item(&existing_id).map(Some)
+            }
+            DedupDecision::StoreNew => state.repository.save_text_item(&normalized).map(Some),
         }
-
-        state.repository.save_text_item(&normalized).map(Some)
     }
 }

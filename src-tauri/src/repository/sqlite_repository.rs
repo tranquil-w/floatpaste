@@ -250,6 +250,32 @@ impl SqliteRepository {
         Ok(value > 0)
     }
 
+    /// 查找（未删除的）具有相同 hash 的现有记录，返回其 id
+    pub fn find_existing_by_hash(&self, hash: &str) -> Result<Option<String>, AppError> {
+        let connection = self.connection.lock()?;
+        let id = connection
+            .query_row(
+                "SELECT id FROM clip_items WHERE hash = ?1 AND deleted_at IS NULL LIMIT 1",
+                params![hash],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        Ok(id)
+    }
+
+    /// 刷新指定记录的 created_at 和 updated_at 到当前时间，使其排到列表顶部
+    pub fn bump_item(&self, id: &str) -> Result<ClipItemDetail, AppError> {
+        let now = Utc::now().timestamp_millis();
+        {
+            let connection = self.connection.lock()?;
+            connection.execute(
+                "UPDATE clip_items SET created_at = ?2, updated_at = ?2 WHERE id = ?1 AND deleted_at IS NULL",
+                params![id, now],
+            )?;
+        }
+        self.get_item_detail(id)
+    }
+
     pub fn search(&self, query: SearchQuery) -> Result<SearchResult, AppError> {
         let normalized = query.normalized();
         let keyword = normalized.keyword.trim().to_string();
@@ -615,6 +641,78 @@ mod tests {
             .unwrap();
 
         assert_eq!(result.items[0].id, "newer-normal");
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn find_existing_by_hash_returns_id() {
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+        let now = Utc::now();
+
+        seed_item(
+            &repository,
+            "item-a",
+            "hello",
+            (now - Duration::minutes(5)).timestamp_millis(),
+            None,
+            false,
+        );
+        // seed_item 使用 format!("hash-{id}") 作为 hash
+        let found = repository.find_existing_by_hash("hash-item-a").unwrap();
+        assert_eq!(found, Some("item-a".to_string()));
+
+        let not_found = repository.find_existing_by_hash("nonexistent-hash").unwrap();
+        assert_eq!(not_found, None);
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn find_existing_by_hash_ignores_deleted() {
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+        let now = Utc::now();
+
+        seed_item(
+            &repository,
+            "deleted-item",
+            "deleted content",
+            (now - Duration::minutes(5)).timestamp_millis(),
+            None,
+            false,
+        );
+        // 软删除这条记录
+        repository.delete_item("deleted-item").unwrap();
+
+        let found = repository
+            .find_existing_by_hash("hash-deleted-item")
+            .unwrap();
+        assert_eq!(found, None);
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn bump_item_updates_timestamps() {
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+        let old_time = (Utc::now() - Duration::hours(1)).timestamp_millis();
+
+        seed_item(&repository, "old-item", "bump me", old_time, None, true);
+
+        let before = repository.get_item_detail("old-item").unwrap();
+        let bumped = repository.bump_item("old-item").unwrap();
+
+        // 时间戳应该被更新到更新的值
+        assert_ne!(bumped.created_at, before.created_at);
+        assert_ne!(bumped.updated_at, before.updated_at);
+        // 收藏状态应保持不变
+        assert!(bumped.is_favorited);
 
         drop(repository);
         fs::remove_file(path).unwrap();
