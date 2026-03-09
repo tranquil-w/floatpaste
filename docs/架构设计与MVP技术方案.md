@@ -1011,7 +1011,7 @@ floatpaste/
 
 ---
 
-## 20. 当前实现状态（截至 2026-03-08）
+## 20. 当前实现状态（截至 2026-03-09）
 
 下面内容用于同步“设计稿”与“仓库现状”，避免文档与代码脱节。
 
@@ -1025,16 +1025,21 @@ floatpaste/
 - `clip_items`、`clip_items_fts`、`settings`、`excluded_apps` 持久化
 - Manager 基础界面：列表、详情、全文搜索、编辑、删除、收藏、设置分区
 - Picker 基础界面：最近活跃列表、轻量预览
+- 前端依据当前 `WebviewWindow` 标签在 `ManagerShell` 与 `PickerShell` 间切换，并加载对应主题壳层
 - 全局快捷键唤起 Picker
-- Picker 本地按键控制：`Up / Down / Enter / Esc / 1..9`
+- Picker 无焦点显示：显示时记录前台窗口，并在必要时立即恢复目标焦点
+- Picker 会话快捷键控制：`Up / Down / Enter / Esc / Tab / Digit1..Digit9`
+- Picker 支持鼠标点击窗口外部自动关闭
+- Manager 内可打开 Picker，Picker 内可通过 `Tab` 或按钮切回 Manager
+- Manager 在桌面运行时支持 `Escape` 直接隐藏当前窗口
 - Windows 剪贴板文本监听轮询原型
 - 去重、排除应用、暂停监听、自写回抑制基础链路
 - 托盘菜单：打开资料库、打开速贴面板、打开设置、暂停/恢复监听、退出
 - 回贴主链路：写入剪贴板、恢复目标窗口、尝试发送 `Ctrl+V`
 - 回贴结果状态码基础收口
 - Manager 关闭后隐藏到托盘，而不是直接退出进程
-- Picker 当前按需懒创建，不在应用启动时预创建
-- Manager 与 Picker 当前采用单窗口切换策略，不同时显示
+- Picker 已在 `tauri.conf.json` 中预创建为隐藏窗口，运行时主要通过显示/隐藏切换
+- Manager 与 Picker 当前为两个独立 `WebviewWindow`，但交互上仍以单主视图切换为主
 
 ### 20.2 当前实现与设计稿的对应关系
 
@@ -1050,9 +1055,11 @@ floatpaste/
 - 前端入口：`src/app/App.tsx`
 - Manager：`src/features/manager/ManagerShell.tsx`
 - Picker：`src/features/picker/PickerShell.tsx`
-- 前端桥接：`src/bridge/commands.ts`、`src/bridge/events.ts`
+- 前端桥接：`src/bridge/commands.ts`、`src/bridge/events.ts`、`src/bridge/window.ts`
 - 应用启动：`src-tauri/src/lib.rs`、`src-tauri/src/app_bootstrap.rs`
+- 窗口命令：`src-tauri/src/commands/windows.rs`
 - 剪贴监听：`src-tauri/src/platform/windows/clipboard_monitor.rs`
+- Picker 鼠标会话监控：`src-tauri/src/platform/windows/picker_mouse_monitor.rs`
 - 快捷键：`src-tauri/src/services/shortcut_manager.rs`
 - 托盘：`src-tauri/src/services/tray_service.rs`
 - 窗口协调：`src-tauri/src/services/window_coordinator.rs`
@@ -1074,11 +1081,11 @@ floatpaste/
 当前代码为 MVP 原型实现，存在以下明确取舍：
 
 - 剪贴监听当前采用轮询方式，而非更底层的原生事件监听
-- Picker 当前采用“可聚焦窗口 + 本地键盘事件处理”的稳定实现，而非文档前文中的“无焦点窗口 + 会话期全局快捷键”目标方案
-- Manager 与 Picker 当前采用单窗口切换策略：打开 Picker 时隐藏 Manager，关闭 Picker 后再按会话来源回到 Manager 或原目标窗口
-- Manager 内“打开速贴”当前通过延迟切回主线程显示 Picker，优先规避在当前聚焦窗口点击事件中直接切换窗口导致的卡顿
+- Picker 当前已采用“无焦点窗口 + 会话期全局快捷键 + 鼠标移出关闭”的实现，但仍需继续验证在不同输入法与前台应用中的稳定性
+- Manager 与 Picker 虽然是独立窗口，但当前交互仍以“打开 Picker 时隐藏 Manager，关闭后恢复目标窗口或 Manager”为主，不追求双窗口同时可见
+- Manager 内“打开速贴”和 Picker 内“回资料库”都通过 Rust 侧窗口命令统一编排，并在隐藏后加入 `50ms` 延迟，优先规避窗口切换竞态
 - 回贴当前优先保证“写入剪贴板 + 尝试恢复目标窗口 + 注入 Ctrl+V”，不承诺所有应用都完全一致
-- 浏览器预览模式下前端自动切换到本地 mock 数据，不走真实 Rust 后端
+- 浏览器预览模式下前端自动切换到本地 mock 数据，只能验证 UI 与本地键盘 fallback，无法验证真实无焦点、全局快捷键、鼠标钩子与前台窗口恢复
 - 全局快捷键当前已按库的规范化结果进行注册和匹配；设置中仍允许用户输入 `Ctrl+\`` 这类简写，但运行时会转换为规范键名
 
 ---
@@ -1146,9 +1153,10 @@ npx tauri dev
 说明：
 
 - `npm run tauri -- dev` 会通过项目内的 `@tauri-apps/cli` 调用 Tauri 开发模式
-- Manager 窗口标签为 `manager`
-- Picker 窗口按需创建，首次由全局快捷键、托盘菜单或 Manager 内入口触发时再创建
-- 当前运行时只会显示一个主窗口：Manager 与 Picker 不会同时保持可见
+- Tauri 运行时会预创建 `manager` 与 `picker` 两个窗口标签
+- `src/app/App.tsx` 会根据当前窗口标签分别渲染 `ManagerShell` 或 `PickerShell`
+- Picker 默认隐藏，运行时主要通过显示/隐藏切换
+- 当前交互上通常只保留一个主界面可见：从 Manager 打开 Picker 时会隐藏 Manager；从外部应用唤起 Picker 时只显示 Picker
 
 ### 21.5 生产构建校验
 
@@ -1181,6 +1189,7 @@ cargo check --manifest-path src-tauri\Cargo.toml
 - `src/features/picker/PickerShell.tsx`
 - `src/bridge/commands.ts`
 - `src/bridge/events.ts`
+- `src/bridge/window.ts`
 
 #### 调试桌面链路
 
@@ -1193,6 +1202,7 @@ cargo check --manifest-path src-tauri\Cargo.toml
 重点文件：
 
 - `src-tauri/src/platform/windows/clipboard_monitor.rs`
+- `src-tauri/src/platform/windows/picker_mouse_monitor.rs`
 - `src-tauri/src/services/shortcut_manager.rs`
 - `src-tauri/src/services/window_coordinator.rs`
 - `src-tauri/src/services/paste_executor.rs`
@@ -1220,18 +1230,20 @@ cargo check --manifest-path src-tauri\Cargo.toml
 2. 在任意文本应用中复制一段文本
 3. 打开 Manager，确认记录已入库
 4. 通过全局快捷键唤起 Picker
-5. 用 `Up / Down / Enter / Esc / 1..9` 验证 Picker 本地键盘操作
-6. 在记事本、浏览器输入框、编辑器中验证回贴行为
-7. 在设置中加入排除应用，确认对应前台应用不再入库
-8. 通过托盘切换监听状态，确认暂停后不再继续入库
-9. 关闭 Manager，确认应用仍留在托盘；再通过托盘重新打开 Manager
+5. 用 `Up / Down / Enter / Esc / Tab / 1..9` 验证 Picker 会话快捷键操作
+6. 点击 Picker 窗口外部，确认窗口自动关闭并恢复原目标窗口
+7. 从 Manager 内打开 Picker，再在 Picker 中按 `Tab` 或点击“资料库”，确认可切回 Manager
+8. 在记事本、浏览器输入框、编辑器中验证回贴行为
+9. 在设置中加入排除应用，确认对应前台应用不再入库
+10. 通过托盘切换监听状态，确认暂停后不再继续入库
+11. 在 Manager 中按 `Escape`，确认窗口被隐藏且应用仍留在托盘；再通过托盘重新打开 Manager
 
 ### 21.8 当前调试限制
 
-截至 2026-03-08，调试时需要明确以下限制：
+截至 2026-03-09，调试时需要明确以下限制：
 
 - 浏览器预览模式无法验证真实系统能力
 - 不同应用对 `Ctrl+V` 注入的响应存在差异
-- 当前实现优先保证稳定可用，因此 Picker 暂未维持“无焦点、不打断”的目标体验
-- 当前 Manager 与 Picker 采用单窗口切换策略，这与文档前文的理想形态存在阶段性差异
+- Picker 的无焦点体验已经接入，但仍依赖 Win32 焦点恢复、低级鼠标钩子和快捷键注册时序，仍需在更多应用场景下做兼容性回归
+- 当前 Manager 与 Picker 虽为独立窗口，但交互上仍采用单主视图切换策略，这与“双窗口同时可见”的理想形态仍有差距
 - 当前尚未提供单独的日志查看器界面，主要依赖终端输出和数据库结果观察
