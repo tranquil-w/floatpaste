@@ -252,7 +252,7 @@ sequenceDiagram
     SM->>WC: 请求显示 Picker
     WC->>PK: 以非抢焦点策略显示
     WC->>KC: 开始接管轻量按键会话
-    PK->>HS: 请求最近记录/收藏
+    PK->>HS: 请求最近活跃记录
     HS-->>PK: 返回列表
     U->>KC: 上下 / 数字 / Enter / Esc
     KC->>PK: 转发选择事件
@@ -292,8 +292,7 @@ sequenceDiagram
 
 职责：
 
-- 展示最近记录
-- 展示收藏记录
+- 展示最近活跃记录
 - 提供轻量预览
 - 支持上下移动、数字直选、回车确认、Esc 关闭
 - 触发回贴
@@ -318,8 +317,7 @@ sequenceDiagram
 
 因此首版 Picker 的信息架构为：
 
-- 最近记录
-- 收藏记录
+- 最近活跃记录
 - 快捷键提示
 
 ### 6.2 Manager（资料库窗口）
@@ -411,7 +409,7 @@ Manager 是一个正常获取焦点的桌面窗口，不承担“无焦点”约
 
 | 模块 | 主要职责 | 输入 | 输出 | 依赖 |
 | --- | --- | --- | --- | --- |
-| Picker | 最近/收藏展示、轻量选择、触发回贴 | 快捷键事件、按键会话、列表数据 | 粘贴命令、关闭命令 | HistoryService、PasteExecutor |
+| Picker | 最近活跃记录展示、轻量选择、触发回贴 | 快捷键事件、按键会话、列表数据 | 粘贴命令、关闭命令 | HistoryService、PasteExecutor |
 | Manager | 搜索、编辑、删除、收藏 | 用户输入、编辑动作 | 更新命令、搜索结果 | HistoryService、SearchService |
 | Tray UI | 托盘入口、暂停监听、打开资料库 | 托盘点击 | 状态切换、窗口命令 | TrayService、ConfigService |
 | ClipboardMonitor | 监听剪贴板变化 | Windows 剪贴板事件 | 原始剪贴板候选 | PlatformAdapter |
@@ -452,16 +450,14 @@ Manager 是一个正常获取焦点的桌面窗口，不承担“无焦点”约
 
 Picker 首版不做全文搜索，只做：
 
-- 收藏优先分组
-- 最近使用优先
-- 最近创建次之
+- 最近活跃优先
+- 未使用过的记录以创建时间作为最近活跃时间
 
 #### Manager 的搜索策略
 
 Manager 支持全文搜索，排序优先级：
 
-- 收藏优先
-- 最近使用优先
+- 最近活跃优先
 - 文本内容匹配优先
 - 来源应用与时间过滤次之
 
@@ -517,8 +513,9 @@ interface SearchResult {
 
 排序落地规则：
 
-- `recent_desc`：先按 `is_favorited DESC`，再按 `last_used_at DESC NULLS LAST`，最后按 `created_at DESC`
-- `relevance_desc`：先按 `is_favorited DESC`，再按 `FTS5 bm25 ASC`，然后按 `last_used_at DESC NULLS LAST`，最后按 `created_at DESC`
+- `recent_desc`：按 `COALESCE(last_used_at, created_at) DESC`，若相同再按 `created_at DESC`
+- `relevance_desc`：先按 `FTS5 bm25 ASC`，再按 `COALESCE(last_used_at, created_at) DESC`，最后按 `created_at DESC`
+- 收藏状态保留为独立属性与筛选条件，不参与默认历史排序，也不在 Picker 中单独置顶
 
 ### 9.3 回贴执行
 
@@ -878,7 +875,7 @@ interface UserSetting {
 - 复制一段文本后能够自动入库
 - 资料库中能够搜索到该文本
 - 资料库中可编辑文本并保存
-- 收藏状态可切换，且收藏项可在 Picker 中优先展示
+- 收藏状态可切换，且收藏项可在资料库收藏区独立查看
 - 删除记录后，列表与搜索结果同步消失
 - 选中历史项后能够重新粘贴到当前应用
 
@@ -1027,7 +1024,7 @@ floatpaste/
 - SQLite 初始化迁移与 FTS5 搜索
 - `clip_items`、`clip_items_fts`、`settings`、`excluded_apps` 持久化
 - Manager 基础界面：列表、详情、全文搜索、编辑、删除、收藏、设置分区
-- Picker 基础界面：最近/收藏合并列表、轻量预览
+- Picker 基础界面：最近活跃列表、轻量预览
 - 全局快捷键唤起 Picker
 - Picker 本地按键控制：`Up / Down / Enter / Esc / 1..9`
 - Windows 剪贴板文本监听轮询原型

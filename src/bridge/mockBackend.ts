@@ -48,6 +48,10 @@ let items: ClipItemDetail[] = [
   },
 ];
 
+function getActivityTimestamp(item: ClipItemDetail): number {
+  return Date.parse(item.lastUsedAt ?? item.createdAt);
+}
+
 function rankItems(query: SearchQuery): ClipItemDetail[] {
   const keyword = query.keyword.trim().toLowerCase();
   let result = [...items];
@@ -66,28 +70,24 @@ function rankItems(query: SearchQuery): ClipItemDetail[] {
     );
 
     result.sort((left, right) => {
-      if (left.isFavorited !== right.isFavorited) {
-        return Number(right.isFavorited) - Number(left.isFavorited);
-      }
-
       const leftIndex = left.searchText.indexOf(keyword);
       const rightIndex = right.searchText.indexOf(keyword);
       if (leftIndex !== rightIndex) {
         return leftIndex - rightIndex;
       }
 
-      return Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
+      const activityDiff = getActivityTimestamp(right) - getActivityTimestamp(left);
+      if (activityDiff !== 0) {
+        return activityDiff;
+      }
+
+      return Date.parse(right.createdAt) - Date.parse(left.createdAt);
     });
   } else {
     result.sort((left, right) => {
-      if (left.isFavorited !== right.isFavorited) {
-        return Number(right.isFavorited) - Number(left.isFavorited);
-      }
-
-      const leftUsed = left.lastUsedAt ? Date.parse(left.lastUsedAt) : 0;
-      const rightUsed = right.lastUsedAt ? Date.parse(right.lastUsedAt) : 0;
-      if (leftUsed !== rightUsed) {
-        return rightUsed - leftUsed;
+      const activityDiff = getActivityTimestamp(right) - getActivityTimestamp(left);
+      if (activityDiff !== 0) {
+        return activityDiff;
       }
 
       return Date.parse(right.createdAt) - Date.parse(left.createdAt);
@@ -178,7 +178,16 @@ export async function mockSetItemFavorited(id: string, value: boolean): Promise<
   item.updatedAt = new Date().toISOString();
 }
 
-export async function mockPasteItem(_id: string, option: PasteOption): Promise<PasteResult> {
+export async function mockPasteItem(id: string, option: PasteOption): Promise<PasteResult> {
+  const item = items.find((entry) => entry.id === id);
+  if (!item) {
+    throw new Error("未找到对应剪贴记录");
+  }
+
+  const now = new Date().toISOString();
+  item.lastUsedAt = now;
+  item.updatedAt = now;
+
   return {
     success: true,
     code: option.restoreClipboardAfterPaste ? "clipboard_only_restore" : "clipboard_only",

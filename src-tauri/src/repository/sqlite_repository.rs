@@ -117,33 +117,30 @@ impl SqliteRepository {
 
     pub fn list_recent(&self, limit: u32) -> Result<Vec<ClipItemSummary>, AppError> {
         let connection = self.connection.lock()?;
-        let mut statement = connection.prepare(
+        let sql = format!(
             "SELECT id, preview_text, source_app, is_favorited, created_at, updated_at, last_used_at
              FROM clip_items
              WHERE deleted_at IS NULL
-             ORDER BY
-               is_favorited DESC,
-               CASE WHEN last_used_at IS NULL THEN 1 ELSE 0 END ASC,
-               last_used_at DESC,
-               created_at DESC
+             ORDER BY {}
              LIMIT ?1",
-        )?;
+            activity_order_clause(""),
+        );
+        let mut statement = connection.prepare(&sql)?;
         let rows = statement.query_map([limit], map_summary_row)?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
     pub fn list_favorites(&self, limit: u32) -> Result<Vec<ClipItemSummary>, AppError> {
         let connection = self.connection.lock()?;
-        let mut statement = connection.prepare(
+        let sql = format!(
             "SELECT id, preview_text, source_app, is_favorited, created_at, updated_at, last_used_at
              FROM clip_items
              WHERE deleted_at IS NULL AND is_favorited = 1
-             ORDER BY
-               CASE WHEN last_used_at IS NULL THEN 1 ELSE 0 END ASC,
-               last_used_at DESC,
-               created_at DESC
+             ORDER BY {}
              LIMIT ?1",
-        )?;
+            activity_order_clause(""),
+        );
+        let mut statement = connection.prepare(&sql)?;
         let rows = statement.query_map([limit], map_summary_row)?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
@@ -278,12 +275,9 @@ impl SqliteRepository {
             "SELECT id, preview_text, source_app, is_favorited, created_at, updated_at, last_used_at
              FROM clip_items
              WHERE {where_clause}
-             ORDER BY
-               is_favorited DESC,
-               CASE WHEN last_used_at IS NULL THEN 1 ELSE 0 END ASC,
-               last_used_at DESC,
-               created_at DESC
-             LIMIT ? OFFSET ?"
+             ORDER BY {}
+             LIMIT ? OFFSET ?",
+            activity_order_clause(""),
         );
 
         let mut statement = connection.prepare(&sql)?;
@@ -324,19 +318,11 @@ impl SqliteRepository {
         data_values.push(Value::Integer(i64::from(query.limit)));
         data_values.push(Value::Integer(i64::from(query.offset)));
         let order_clause = match query.sort {
-            SearchSort::RecentDesc => {
-                "ci.is_favorited DESC,
-                 CASE WHEN ci.last_used_at IS NULL THEN 1 ELSE 0 END ASC,
-                 ci.last_used_at DESC,
+            SearchSort::RecentDesc => activity_order_clause("ci"),
+            SearchSort::RelevanceDesc => "bm25(clip_items_fts) ASC,
+                 COALESCE(ci.last_used_at, ci.created_at) DESC,
                  ci.created_at DESC"
-            }
-            SearchSort::RelevanceDesc => {
-                "ci.is_favorited DESC,
-                 bm25(clip_items_fts) ASC,
-                 CASE WHEN ci.last_used_at IS NULL THEN 1 ELSE 0 END ASC,
-                 ci.last_used_at DESC,
-                 ci.created_at DESC"
-            }
+                .to_string(),
         };
 
         let sql = format!(
@@ -391,6 +377,14 @@ fn prefix(alias: &str) -> String {
     } else {
         format!("{alias}.")
     }
+}
+
+fn activity_order_clause(alias: &str) -> String {
+    format!(
+        "COALESCE({0}last_used_at, {0}created_at) DESC,
+         {0}created_at DESC",
+        prefix(alias)
+    )
 }
 
 fn build_fts_query(keyword: &str) -> String {
@@ -459,5 +453,170 @@ fn bool_to_i64(value: bool) -> i64 {
         1
     } else {
         0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, path::PathBuf};
+
+    use chrono::{Duration, Utc};
+
+    use super::{bool_to_i64, SqliteRepository};
+    use crate::domain::clip_item::{SearchFilters, SearchQuery, SearchSort};
+
+    fn temp_db_path() -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "floatpaste-repository-test-{}.db",
+            uuid::Uuid::new_v4()
+        ))
+    }
+
+    fn seed_item(
+        repository: &SqliteRepository,
+        id: &str,
+        preview: &str,
+        created_at: i64,
+        last_used_at: Option<i64>,
+        is_favorited: bool,
+    ) {
+        let connection = repository.connection.lock().unwrap();
+        connection
+            .execute(
+                "INSERT INTO clip_items(
+                    id, type, full_text, preview_text, search_text, source_app,
+                    is_favorited, hash, created_at, updated_at, last_used_at, deleted_at
+                ) VALUES(?1, 'text', ?2, ?2, ?2, NULL, ?3, ?4, ?5, ?5, ?6, NULL)",
+                rusqlite::params![
+                    id,
+                    preview,
+                    bool_to_i64(is_favorited),
+                    format!("hash-{id}"),
+                    created_at,
+                    last_used_at
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO clip_items_fts(item_id, full_text, search_text, source_app)
+                 VALUES(?1, ?2, ?2, NULL)",
+                rusqlite::params![id, preview],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn list_recent_prioritizes_newest_created_item_before_older_used_item() {
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+        let now = Utc::now();
+
+        seed_item(
+            &repository,
+            "older-used",
+            "older used",
+            (now - Duration::minutes(10)).timestamp_millis(),
+            Some((now - Duration::minutes(2)).timestamp_millis()),
+            false,
+        );
+        seed_item(
+            &repository,
+            "new-created",
+            "new created",
+            (now - Duration::minutes(1)).timestamp_millis(),
+            None,
+            false,
+        );
+
+        let items = repository.list_recent(10).unwrap();
+
+        assert_eq!(items[0].id, "new-created");
+        assert_eq!(items[1].id, "older-used");
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn mark_used_moves_item_to_top_until_newer_capture_arrives() {
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+        let now = Utc::now();
+
+        seed_item(
+            &repository,
+            "older-created",
+            "older created",
+            (now - Duration::minutes(5)).timestamp_millis(),
+            None,
+            false,
+        );
+        seed_item(
+            &repository,
+            "new-created",
+            "new created",
+            (now - Duration::minutes(1)).timestamp_millis(),
+            None,
+            false,
+        );
+
+        repository.mark_used("older-created").unwrap();
+        let after_mark_used = repository.list_recent(10).unwrap();
+        assert_eq!(after_mark_used[0].id, "older-created");
+
+        let latest_created_at = Utc::now().timestamp_millis() + 1_000;
+        seed_item(
+            &repository,
+            "latest-created",
+            "latest created",
+            latest_created_at,
+            None,
+            false,
+        );
+        let after_new_capture = repository.list_recent(10).unwrap();
+        assert_eq!(after_new_capture[0].id, "latest-created");
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn search_recent_desc_uses_activity_time_without_favorite_boost() {
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+        let now = Utc::now();
+
+        seed_item(
+            &repository,
+            "favorite-older",
+            "shared keyword",
+            (now - Duration::minutes(8)).timestamp_millis(),
+            Some((now - Duration::minutes(4)).timestamp_millis()),
+            true,
+        );
+        seed_item(
+            &repository,
+            "newer-normal",
+            "shared keyword",
+            (now - Duration::minutes(1)).timestamp_millis(),
+            None,
+            false,
+        );
+
+        let result = repository
+            .search(SearchQuery {
+                keyword: String::new(),
+                filters: SearchFilters::default(),
+                offset: 0,
+                limit: 10,
+                sort: SearchSort::RecentDesc,
+            })
+            .unwrap();
+
+        assert_eq!(result.items[0].id, "newer-normal");
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
     }
 }

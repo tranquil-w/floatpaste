@@ -12,23 +12,9 @@ import {
 import { isTauriRuntime } from "../../bridge/runtime";
 import type { ClipItemSummary } from "../../shared/types/clips";
 import { formatDateTime } from "../../shared/utils/time";
-import { usePickerFavoritesQuery, usePickerRecentQuery } from "./queries";
-
-function mergePickerItems(favorites: ClipItemSummary[], recent: ClipItemSummary[]): ClipItemSummary[] {
-  const merged = new Map<string, ClipItemSummary>();
-
-  favorites.forEach((item) => merged.set(item.id, item));
-  recent.forEach((item) => {
-    if (!merged.has(item.id)) {
-      merged.set(item.id, item);
-    }
-  });
-
-  return Array.from(merged.values()).slice(0, 9);
-}
+import { usePickerRecentQuery } from "./queries";
 
 export function PickerShell() {
-  const favorites = usePickerFavoritesQuery();
   const recent = usePickerRecentQuery();
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [lastMessage, setLastMessage] = useState("");
@@ -36,10 +22,7 @@ export function PickerShell() {
   const selectedIndexRef = useRef(0);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
-  const items = useMemo(
-    () => mergePickerItems(favorites.data ?? [], recent.data ?? []),
-    [favorites.data, recent.data],
-  );
+  const items = useMemo(() => (recent.data ?? []).slice(0, 9), [recent.data]);
 
   const handleOpenManager = async () => {
     await openManagerFromPicker();
@@ -93,10 +76,7 @@ export function PickerShell() {
     let unlistenSelectIndex: (() => void) | undefined;
 
     void listen(PICKER_SESSION_START_EVENT, async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["picker-favorites"] }),
-        queryClient.invalidateQueries({ queryKey: ["picker-recent"] }),
-      ]);
+      await queryClient.invalidateQueries({ queryKey: ["picker-recent"] });
 
       if (!disposed) {
         selectedIndexRef.current = 0;
@@ -108,10 +88,7 @@ export function PickerShell() {
     });
 
     void listen(CLIPS_CHANGED_EVENT, async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["picker-favorites"] }),
-        queryClient.invalidateQueries({ queryKey: ["picker-recent"] }),
-      ]);
+      await queryClient.invalidateQueries({ queryKey: ["picker-recent"] });
     }).then((cleanup) => {
       unlistenClips = cleanup;
     });

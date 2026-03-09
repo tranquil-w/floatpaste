@@ -251,7 +251,7 @@ export function ManagerShell() {
 
               <div className="flex shrink-0 items-center justify-between px-1 text-xs font-medium text-slate-400">
                 <span>共 {clips.data?.total ?? 0} 条记录</span>
-                <span>{keyword.trim() ? "按相关度排序" : "按最近使用排序"}</span>
+                <span>{keyword.trim() ? "按相关度排序" : "按最近活跃排序"}</span>
               </div>
 
               <div className="flex-1 space-y-3 overflow-y-auto pr-2 pl-1 py-1">
