@@ -15,10 +15,19 @@ let settings: UserSetting = {
   launchOnStartup: false,
   silentOnStartup: false,
   historyLimit: 1000,
+  pickerRecordLimit: 50,
   excludedApps: ["KeePass.exe", "WindowsTerminal.exe"],
   restoreClipboardAfterPaste: true,
   pauseMonitoring: false,
 };
+
+function sanitizeSettings(payload: UserSetting): UserSetting {
+  return {
+    ...structuredClone(payload),
+    silentOnStartup: payload.launchOnStartup ? payload.silentOnStartup : false,
+    pickerRecordLimit: Math.min(1000, Math.max(9, Math.trunc(payload.pickerRecordLimit || 50))),
+  };
+}
 
 let items: ClipItemDetail[] = [
   {
@@ -197,14 +206,11 @@ export async function mockPasteItem(id: string, option: PasteOption): Promise<Pa
 }
 
 export async function mockGetSettings(): Promise<UserSetting> {
-  return structuredClone(settings);
+  return sanitizeSettings(settings);
 }
 
 export async function mockUpdateSettings(payload: UserSetting): Promise<UserSetting> {
-  settings = structuredClone({
-    ...payload,
-    silentOnStartup: payload.launchOnStartup ? payload.silentOnStartup : false,
-  });
+  settings = sanitizeSettings(payload);
   return structuredClone(settings);
 }
 

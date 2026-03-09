@@ -8,6 +8,7 @@ pub struct UserSetting {
     pub launch_on_startup: bool,
     pub silent_on_startup: bool,
     pub history_limit: u32,
+    pub picker_record_limit: u32,
     pub excluded_apps: Vec<String>,
     pub restore_clipboard_after_paste: bool,
     pub pause_monitoring: bool,
@@ -20,6 +21,7 @@ impl Default for UserSetting {
             launch_on_startup: false,
             silent_on_startup: false,
             history_limit: 1_000,
+            picker_record_limit: 50,
             excluded_apps: vec![
                 "KeePass.exe".to_string(),
                 "Bitwarden.exe".to_string(),
@@ -43,6 +45,7 @@ impl UserSetting {
         }
 
         self.history_limit = self.history_limit.clamp(100, 10_000);
+        self.picker_record_limit = self.picker_record_limit.clamp(9, 1_000);
         self.excluded_apps = self
             .excluded_apps
             .into_iter()
@@ -85,5 +88,6 @@ mod tests {
 
         assert!(settings.launch_on_startup);
         assert!(!settings.silent_on_startup);
+        assert_eq!(settings.picker_record_limit, 50);
     }
 }

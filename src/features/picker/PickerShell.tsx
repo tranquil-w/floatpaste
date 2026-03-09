@@ -7,22 +7,32 @@ import {
   PICKER_CONFIRM_EVENT,
   PICKER_NAVIGATE_EVENT,
   PICKER_SELECT_INDEX_EVENT,
+  SETTINGS_CHANGED_EVENT,
   PICKER_SESSION_START_EVENT,
 } from "../../bridge/events";
 import { isTauriRuntime } from "../../bridge/runtime";
 import type { ClipItemSummary } from "../../shared/types/clips";
 import { formatDateTime } from "../../shared/utils/time";
-import { usePickerRecentQuery } from "./queries";
+import {
+  DEFAULT_PICKER_RECORD_LIMIT,
+  normalizePickerRecordLimit,
+  usePickerRecentQuery,
+  usePickerSettingsQuery,
+} from "./queries";
 
 export function PickerShell() {
-  const recent = usePickerRecentQuery();
+  const settings = usePickerSettingsQuery();
+  const pickerRecordLimit = settings.data
+    ? normalizePickerRecordLimit(settings.data.pickerRecordLimit)
+    : DEFAULT_PICKER_RECORD_LIMIT;
+  const recent = usePickerRecentQuery(pickerRecordLimit, Boolean(settings.data));
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [lastMessage, setLastMessage] = useState("");
   const itemsRef = useRef<ClipItemSummary[]>([]);
   const selectedIndexRef = useRef(0);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
-  const items = useMemo(() => (recent.data ?? []).slice(0, 9), [recent.data]);
+  const items = useMemo(() => recent.data ?? [], [recent.data]);
 
   const handleOpenManager = async () => {
     await openManagerFromPicker();
@@ -57,7 +67,7 @@ export function PickerShell() {
     const currentItem = itemRefs.current[selectedIndex];
     if (currentItem) {
       currentItem.scrollIntoView({
-        behavior: "smooth",
+        behavior: "auto",
         block: "nearest",
       });
     }
@@ -71,11 +81,13 @@ export function PickerShell() {
     let disposed = false;
     let unlistenStart: (() => void) | undefined;
     let unlistenClips: (() => void) | undefined;
+    let unlistenSettings: (() => void) | undefined;
     let unlistenNavigate: (() => void) | undefined;
     let unlistenConfirm: (() => void) | undefined;
     let unlistenSelectIndex: (() => void) | undefined;
 
     void listen(PICKER_SESSION_START_EVENT, async () => {
+      await queryClient.invalidateQueries({ queryKey: ["settings"] });
       await queryClient.invalidateQueries({ queryKey: ["picker-recent"] });
 
       if (!disposed) {
@@ -91,6 +103,18 @@ export function PickerShell() {
       await queryClient.invalidateQueries({ queryKey: ["picker-recent"] });
     }).then((cleanup) => {
       unlistenClips = cleanup;
+    });
+
+    void listen(SETTINGS_CHANGED_EVENT, async () => {
+      await queryClient.invalidateQueries({ queryKey: ["settings"] });
+      await queryClient.invalidateQueries({ queryKey: ["picker-recent"] });
+
+      if (!disposed) {
+        selectedIndexRef.current = 0;
+        setSelectedIndex(0);
+      }
+    }).then((cleanup) => {
+      unlistenSettings = cleanup;
     });
 
     void listen<string>(PICKER_NAVIGATE_EVENT, async (event) => {
@@ -139,6 +163,7 @@ export function PickerShell() {
       disposed = true;
       unlistenStart?.();
       unlistenClips?.();
+      unlistenSettings?.();
       unlistenNavigate?.();
       unlistenConfirm?.();
       unlistenSelectIndex?.();
@@ -230,7 +255,7 @@ export function PickerShell() {
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col px-2 py-2">
-          <div className="grid flex-1 gap-1 overflow-y-auto pr-1">
+          <div className="grid flex-1 gap-1 overflow-y-auto overflow-x-hidden pr-1">
             {items.length ? (
               items.map((item, index) => {
                 const isSelected = index === selectedIndex;
@@ -254,12 +279,16 @@ export function PickerShell() {
                     type="button"
                   >
                     <div className="mt-0.5 flex shrink-0 items-center justify-center">
-                      <kbd className={`flex h-5 w-5 items-center justify-center rounded-md border-b-2 font-mono text-[10px] font-bold ${isSelected
-                          ? "border-amber-600/40 bg-amber-500 text-white"
-                          : "border-slate-300 bg-slate-100 text-slate-500 group-hover:border-slate-400 group-hover:bg-slate-200 group-hover:text-slate-700"
-                        }`}>
-                        {index + 1}
-                      </kbd>
+                      {index < 9 ? (
+                        <kbd className={`flex h-5 w-5 items-center justify-center rounded-md border-b-2 font-mono text-[10px] font-bold ${isSelected
+                            ? "border-amber-600/40 bg-amber-500 text-white"
+                            : "border-slate-300 bg-slate-100 text-slate-500 group-hover:border-slate-400 group-hover:bg-slate-200 group-hover:text-slate-700"
+                          }`}>
+                          {index + 1}
+                        </kbd>
+                      ) : (
+                        <span aria-hidden="true" className="h-5 w-5" />
+                      )}
                     </div>
 
                     <div className="flex-1 min-w-0">

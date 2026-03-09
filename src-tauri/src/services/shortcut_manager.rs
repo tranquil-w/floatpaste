@@ -1,4 +1,12 @@
-use std::str::FromStr;
+use std::{
+    str::FromStr,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Mutex,
+    },
+    thread,
+    time::Duration,
+};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutEvent, ShortcutState};
 use tracing::{error, info, warn};
@@ -18,6 +26,11 @@ const PICKER_SESSION_SHORTCUTS: [&str; 14] = [
     "Up", "Down", "Enter", "Escape", "Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6",
     "Digit7", "Digit8", "Digit9", "Tab",
 ];
+const PICKER_NAV_REPEAT_INITIAL_DELAY: Duration = Duration::from_millis(280);
+const PICKER_NAV_REPEAT_INTERVAL: Duration = Duration::from_millis(85);
+
+static PICKER_NAV_REPEAT_DIRECTION: Mutex<Option<&str>> = Mutex::new(None);
+static PICKER_NAV_REPEAT_TOKEN: AtomicU64 = AtomicU64::new(0);
 
 impl ShortcutManager {
     pub fn sync_registered_shortcut(app: &AppHandle, shortcut: &str) -> Result<(), AppError> {
@@ -69,6 +82,7 @@ impl ShortcutManager {
     }
 
     pub fn unregister_picker_session_shortcuts(app: &AppHandle) {
+        Self::stop_picker_navigation_repeat(None);
         let manager = app.global_shortcut();
         for shortcut in PICKER_SESSION_SHORTCUTS {
             let _ = manager.unregister(shortcut);
@@ -76,7 +90,7 @@ impl ShortcutManager {
     }
 
     pub fn handle_shortcut_event(app: &AppHandle, shortcut: String, event: &ShortcutEvent) {
-        if event.state != ShortcutState::Pressed {
+        if event.state != ShortcutState::Pressed && event.state != ShortcutState::Released {
             return;
         }
 
@@ -87,6 +101,13 @@ impl ShortcutManager {
         let state = state.inner().clone();
 
         let normalized = shortcut.to_lowercase();
+        if let Some(direction) = picker_navigation_direction(normalized.as_str()) {
+            if event.state == ShortcutState::Released {
+                Self::stop_picker_navigation_repeat(Some(direction));
+                return;
+            }
+        }
+
         let settings_shortcut = match state.current_settings() {
             Ok(settings) => match normalize_shortcut(&settings.shortcut) {
                 Ok(value) => value,
@@ -102,13 +123,17 @@ impl ShortcutManager {
         };
 
         if normalized == settings_shortcut {
+            if event.state != ShortcutState::Pressed {
+                return;
+            }
+
             info!("命中主快捷键: {normalized}");
             let is_active = state.is_picker_active();
             let app_handle = app.clone();
             let state_clone = state.clone();
 
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(10));
+            thread::spawn(move || {
+                thread::sleep(Duration::from_millis(10));
                 let app_clone = app_handle.clone();
                 let _ = app_handle.run_on_main_thread(move || {
                     if is_active {
@@ -135,7 +160,9 @@ impl ShortcutManager {
         }
 
         if !state.is_picker_active() {
-            if is_picker_session_shortcut(normalized.as_str()) {
+            if event.state == ShortcutState::Pressed
+                && is_picker_session_shortcut(normalized.as_str())
+            {
                 warn!("检测到 Picker 已隐藏但会话快捷键仍在注册，正在自动释放这些快捷键");
                 let app_handle = app.clone();
                 let _ = app.run_on_main_thread(move || {
@@ -145,16 +172,33 @@ impl ShortcutManager {
             return;
         }
 
+        if let Some(direction) = picker_navigation_direction(normalized.as_str()) {
+            if event.state != ShortcutState::Pressed {
+                return;
+            }
+
+            if Self::start_picker_navigation_repeat(app, direction) {
+                if let Err(error) = app.emit(PICKER_NAVIGATE_EVENT, direction) {
+                    error!("向 Picker 发送快捷键事件失败: {error}");
+                }
+            }
+            return;
+        }
+
+        if event.state != ShortcutState::Pressed {
+            return;
+        }
+
+        Self::stop_picker_navigation_repeat(None);
+
         let emit_result = match normalized.as_str() {
-            "up" | "arrowup" => app.emit(PICKER_NAVIGATE_EVENT, "up"),
-            "down" | "arrowdown" => app.emit(PICKER_NAVIGATE_EVENT, "down"),
             "enter" => app.emit(PICKER_CONFIRM_EVENT, ()),
             "escape" | "esc" => {
                 info!("命中 Picker 关闭快捷键: {normalized}");
                 let app_handle = app.clone();
                 let state_clone = state.clone();
-                std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_millis(10));
+                thread::spawn(move || {
+                    thread::sleep(Duration::from_millis(10));
                     let app_clone = app_handle.clone();
                     let _ = app_handle.run_on_main_thread(move || {
                         Self::unregister_picker_session_shortcuts(&app_clone);
@@ -172,7 +216,7 @@ impl ShortcutManager {
                 info!("命中 Tab 键切换到 Manager");
                 let app_handle = app.clone();
                 let state_clone = state.clone();
-                std::thread::spawn(move || {
+                thread::spawn(move || {
                     let app_clone = app_handle.clone();
                     let _ = app_handle.run_on_main_thread(move || {
                         Self::unregister_picker_session_shortcuts(&app_clone);
@@ -201,6 +245,75 @@ impl ShortcutManager {
         if let Err(error) = emit_result {
             error!("向 Picker 发送快捷键事件失败: {error}");
         }
+    }
+
+    fn start_picker_navigation_repeat(app: &AppHandle, direction: &'static str) -> bool {
+        let mut active_direction = match PICKER_NAV_REPEAT_DIRECTION.lock() {
+            Ok(value) => value,
+            Err(error) => {
+                error!("读取 Picker 长按导航状态失败: {error}");
+                return true;
+            }
+        };
+
+        if *active_direction == Some(direction) {
+            return false;
+        }
+
+        *active_direction = Some(direction);
+        let token = PICKER_NAV_REPEAT_TOKEN.fetch_add(1, Ordering::SeqCst) + 1;
+        let app_handle = app.clone();
+
+        thread::spawn(move || {
+            thread::sleep(PICKER_NAV_REPEAT_INITIAL_DELAY);
+
+            loop {
+                if PICKER_NAV_REPEAT_TOKEN.load(Ordering::SeqCst) != token {
+                    break;
+                }
+
+                let is_active = app_handle
+                    .try_state::<AppState>()
+                    .map(|state| state.is_picker_active())
+                    .unwrap_or(false);
+                if !is_active || current_picker_navigation_direction() != Some(direction) {
+                    break;
+                }
+
+                let app_clone = app_handle.clone();
+                let _ = app_handle.run_on_main_thread(move || {
+                    if app_clone
+                        .try_state::<AppState>()
+                        .map(|state| state.is_picker_active())
+                        .unwrap_or(false)
+                    {
+                        let _ = app_clone.emit(PICKER_NAVIGATE_EVENT, direction);
+                    }
+                });
+
+                thread::sleep(PICKER_NAV_REPEAT_INTERVAL);
+            }
+        });
+
+        true
+    }
+
+    fn stop_picker_navigation_repeat(direction: Option<&'static str>) {
+        let mut active_direction = match PICKER_NAV_REPEAT_DIRECTION.lock() {
+            Ok(value) => value,
+            Err(error) => {
+                error!("停止 Picker 长按导航失败: {error}");
+                PICKER_NAV_REPEAT_TOKEN.fetch_add(1, Ordering::SeqCst);
+                return;
+            }
+        };
+
+        if direction.is_some() && *active_direction != direction {
+            return;
+        }
+
+        *active_direction = None;
+        PICKER_NAV_REPEAT_TOKEN.fetch_add(1, Ordering::SeqCst);
     }
 }
 
@@ -237,6 +350,21 @@ fn is_picker_session_shortcut(shortcut: &str) -> bool {
             | "digit9"
             | "tab"
     )
+}
+
+fn picker_navigation_direction(shortcut: &str) -> Option<&'static str> {
+    match shortcut {
+        "up" | "arrowup" => Some("up"),
+        "down" | "arrowdown" => Some("down"),
+        _ => None,
+    }
+}
+
+fn current_picker_navigation_direction() -> Option<&'static str> {
+    PICKER_NAV_REPEAT_DIRECTION
+        .lock()
+        .ok()
+        .and_then(|value| *value)
 }
 
 fn normalize_shortcut(shortcut: &str) -> Result<String, AppError> {

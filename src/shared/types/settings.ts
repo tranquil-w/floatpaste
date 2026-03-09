@@ -3,6 +3,7 @@ export interface UserSetting {
   launchOnStartup: boolean;
   silentOnStartup: boolean;
   historyLimit: number;
+  pickerRecordLimit: number;
   excludedApps: string[];
   restoreClipboardAfterPaste: boolean;
   pauseMonitoring: boolean;

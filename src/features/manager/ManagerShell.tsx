@@ -439,6 +439,7 @@ interface SettingsPanelProps {
     launchOnStartup: boolean;
     silentOnStartup: boolean;
     historyLimit: number;
+    pickerRecordLimit: number;
     excludedApps: string[];
     restoreClipboardAfterPaste: boolean;
     pauseMonitoring: boolean;
@@ -451,6 +452,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
   const [launchOnStartup, setLaunchOnStartup] = useState(false);
   const [silentOnStartup, setSilentOnStartup] = useState(false);
   const [historyLimit, setHistoryLimit] = useState(1000);
+  const [pickerRecordLimit, setPickerRecordLimit] = useState(50);
   const [restoreClipboardAfterPaste, setRestoreClipboardAfterPaste] = useState(true);
   const [pauseMonitoring, setPauseMonitoring] = useState(false);
   const [excludedAppsText, setExcludedAppsText] = useState("");
@@ -464,6 +466,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
     setLaunchOnStartup(data.launchOnStartup);
     setSilentOnStartup(data.silentOnStartup);
     setHistoryLimit(data.historyLimit);
+    setPickerRecordLimit(data.pickerRecordLimit);
     setRestoreClipboardAfterPaste(data.restoreClipboardAfterPaste);
     setPauseMonitoring(data.pauseMonitoring);
     setExcludedAppsText(data.excludedApps.join("\n"));
@@ -515,6 +518,21 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
           type="number"
           value={historyLimit}
         />
+      </label>
+
+      <label className="block">
+        <span className="mb-2.5 block text-sm font-medium text-slate-700">速贴窗口记录数</span>
+        <input
+          className="w-full rounded-2xl border border-slate-200 bg-slate-50/50 px-5 py-3.5 text-sm outline-none transition-all focus:border-accent focus:bg-white focus:ring-4 focus:ring-accent/10"
+          max={1000}
+          min={9}
+          onChange={(event) => setPickerRecordLimit(Number(event.target.value) || 50)}
+          type="number"
+          value={pickerRecordLimit}
+        />
+        <p className="mt-2 text-xs leading-relaxed text-slate-500">
+          控制速贴面板一次可滚动浏览的记录数，数字快捷键仍只覆盖前 9 条。
+        </p>
       </label>
 
       <label className="block">
@@ -592,6 +610,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
               launchOnStartup,
               silentOnStartup: launchOnStartup ? silentOnStartup : false,
               historyLimit,
+              pickerRecordLimit,
               excludedApps: excludedAppsText
                 .split(/\r?\n/)
                 .map((value) => value.trim())
