@@ -50,22 +50,41 @@ const pickerPositionOptions: Array<{
   },
 ];
 
+const MANAGER_PAGE_SIZE = 50;
+const SEARCH_DEBOUNCE_MS = 250;
+
 export function ManagerShell() {
   const { selectedItemId, draftText, viewMode, setDraftText, setSelectedItemId, setViewMode } =
     useManagerStore();
   const [keyword, setKeyword] = useState("");
+  const [debouncedKeyword, setDebouncedKeyword] = useState("");
   const [favoritedOnly, setFavoritedOnly] = useState(false);
+  const [pageIndex, setPageIndex] = useState(0);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedKeyword(keyword);
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [keyword]);
+
+  useEffect(() => {
+    setPageIndex(0);
+    setSelectedItemId(null);
+  }, [debouncedKeyword, favoritedOnly, setSelectedItemId]);
+
   const searchQuery = useMemo(
     () => ({
-      keyword,
+      keyword: debouncedKeyword,
       filters: {
         favoritedOnly,
       },
-      offset: 0,
-      limit: 50,
-      sort: (keyword.trim() ? "relevance_desc" : "recent_desc") as SearchSort,
+      offset: pageIndex * MANAGER_PAGE_SIZE,
+      limit: MANAGER_PAGE_SIZE,
+      sort: (debouncedKeyword.trim() ? "relevance_desc" : "recent_desc") as SearchSort,
     }),
-    [favoritedOnly, keyword],
+    [debouncedKeyword, favoritedOnly, pageIndex],
   );
 
   const favorites = useFavoritesQuery();
@@ -79,15 +98,15 @@ export function ManagerShell() {
   const updateSettingsMutation = useUpdateSettingsMutation();
 
   useEffect(() => {
-    if (!selectedItemId || !clips.data) {
+    if (!clips.data) {
       return;
     }
 
-    const existsInCurrentResult = clips.data.items.some((item) => item.id === selectedItemId);
-    if (!existsInCurrentResult) {
-      setSelectedItemId(null);
+    const maxPageIndex = Math.max(Math.ceil(clips.data.total / MANAGER_PAGE_SIZE) - 1, 0);
+    if (pageIndex > maxPageIndex) {
+      setPageIndex(maxPageIndex);
     }
-  }, [clips.data, selectedItemId, setSelectedItemId]);
+  }, [clips.data, pageIndex]);
 
   useEffect(() => {
     if (!isTauriRuntime()) {
@@ -153,6 +172,12 @@ export function ManagerShell() {
   const settingsSaveError = updateSettingsMutation.error
     ? getErrorMessage(updateSettingsMutation.error)
     : null;
+  const currentItems = clips.data?.items ?? [];
+  const totalCount = clips.data?.total ?? 0;
+  const pageStart = totalCount === 0 ? 0 : searchQuery.offset + 1;
+  const pageEnd = totalCount === 0 ? 0 : searchQuery.offset + currentItems.length;
+  const hasPreviousPage = pageIndex > 0;
+  const hasNextPage = pageEnd < totalCount;
 
   return (
     <div className="flex h-screen flex-col px-5 py-6 text-ink md:px-8">
@@ -276,13 +301,13 @@ export function ManagerShell() {
               </div>
 
               <div className="flex shrink-0 items-center justify-between px-1 text-xs font-medium text-slate-400">
-                <span>共 {clips.data?.total ?? 0} 条记录</span>
-                <span>{keyword.trim() ? "按相关度排序" : "按最近活跃排序"}</span>
+                <span>共 {totalCount} 条记录</span>
+                <span>{debouncedKeyword.trim() ? "按相关度排序" : "按最近活跃排序"}</span>
               </div>
 
               <div className="flex-1 space-y-3 overflow-y-auto pr-2 pl-1 py-1">
-                {clips.data?.items.length ? (
-                  clips.data.items.map((item, index) => {
+                {currentItems.length ? (
+                  currentItems.map((item, index) => {
                     const isSelected = item.id === selectedItemId;
                     return (
                       <button
@@ -298,7 +323,7 @@ export function ManagerShell() {
                         <div className="flex items-start justify-between gap-4">
                           <div className="flex-1">
                             <div className="flex h-5 w-5 items-center justify-center rounded-md bg-slate-100/80 text-[10px] font-bold text-slate-400 transition-colors group-hover:bg-slate-200 group-hover:text-slate-500">
-                              {String(index + 1).padStart(2, "0")}
+                              {String(searchQuery.offset + index + 1).padStart(2, "0")}
                             </div>
                             <p className="mt-2.5 line-clamp-3 text-sm leading-relaxed text-slate-800">
                               {item.contentPreview}
@@ -324,6 +349,28 @@ export function ManagerShell() {
                     description="复制任意文本后会自动入库；如果在浏览器预览模式中运行，这里会展示模拟数据。"
                   />
                 )}
+              </div>
+
+              <div className="flex shrink-0 items-center justify-between gap-3 border-t border-slate-200/80 px-1 pt-4 text-xs font-medium text-slate-400">
+                <span>{totalCount === 0 ? "当前没有可显示记录" : `当前显示第 ${pageStart}-${pageEnd} 条`}</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    className="rounded-xl bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm ring-1 ring-inset ring-slate-200 transition-all hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    disabled={!hasPreviousPage}
+                    onClick={() => setPageIndex((current) => Math.max(current - 1, 0))}
+                    type="button"
+                  >
+                    上一页
+                  </button>
+                  <button
+                    className="rounded-xl bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm ring-1 ring-inset ring-slate-200 transition-all hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    disabled={!hasNextPage}
+                    onClick={() => setPageIndex((current) => current + 1)}
+                    type="button"
+                  >
+                    下一页
+                  </button>
+                </div>
               </div>
             </>
           ) : (

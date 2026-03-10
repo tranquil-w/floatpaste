@@ -55,7 +55,7 @@ pub struct SearchQuery {
 
 impl SearchQuery {
     pub fn normalized(mut self) -> Self {
-        self.limit = self.limit.clamp(1, 100);
+        self.limit = self.limit.clamp(1, 10000);
         if self.keyword.trim().is_empty() {
             self.keyword.clear();
             self.sort = SearchSort::RecentDesc;
