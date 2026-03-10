@@ -237,14 +237,14 @@ export function PickerShell() {
   return (
     <div className="flex h-screen w-screen items-start justify-center bg-transparent p-0 text-ink overflow-hidden select-none" data-tauri-drag-region>
       <div className="flex h-full w-full flex-col overflow-hidden rounded-[20px] border border-white/40 bg-white/85 shadow-[0_16px_40px_rgba(15,23,42,0.2)] backdrop-blur-xl">
-        <div className="flex shrink-0 items-center justify-between border-b border-slate-200/50 bg-white/40 px-4 py-2.5" data-tauri-drag-region>
+        <div className="flex shrink-0 items-center justify-between border-b border-slate-200/50 bg-white/45 px-4 py-3" data-tauri-drag-region>
           <div className="flex items-center gap-2.5">
             <div className="h-2.5 w-2.5 rounded-full bg-accent/80"></div>
-            <span className="text-xs font-semibold tracking-wide text-slate-700">FloatPaste</span>
+            <span className="text-[13px] font-semibold tracking-wide text-slate-700">FloatPaste</span>
           </div>
           <div className="flex items-center gap-2">
             <button
-              className="flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-medium text-slate-500 transition-colors hover:bg-slate-200/50 hover:text-slate-800"
+              className="flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold text-slate-500 transition-colors hover:bg-slate-200/50 hover:text-slate-800"
               onClick={() => void handleOpenManager()}
               type="button"
             >
@@ -254,8 +254,8 @@ export function PickerShell() {
           </div>
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col px-2 py-2">
-          <div className="grid flex-1 gap-1 overflow-y-auto overflow-x-hidden pr-1">
+        <div className="flex min-h-0 flex-1 flex-col px-2 py-2.5">
+          <div className="grid flex-1 gap-1.5 overflow-y-auto overflow-x-hidden pr-1">
             {items.length ? (
               items.map((item, index) => {
                 const isSelected = index === selectedIndex;
@@ -265,8 +265,8 @@ export function PickerShell() {
                       itemRefs.current[index] = el;
                     }}
                     className={`group relative flex w-full items-start gap-2.5 rounded-xl px-2.5 py-2.5 text-left transition-all duration-150 ${isSelected
-                        ? "bg-amber-50 shadow-sm ring-1 ring-inset ring-amber-500/30"
-                        : "hover:bg-slate-100/50"
+                        ? "bg-amber-50/95 shadow-[0_8px_20px_rgba(217,119,6,0.12)] ring-1 ring-inset ring-amber-500/35"
+                        : "bg-white/15 hover:bg-slate-100/70"
                       }`}
                     key={item.id}
                     onClick={() => {
@@ -280,31 +280,35 @@ export function PickerShell() {
                   >
                     <div className="mt-0.5 flex shrink-0 items-center justify-center">
                       {index < 9 ? (
-                        <kbd className={`flex h-5 w-5 items-center justify-center rounded-md border-b-2 font-mono text-[10px] font-bold ${isSelected
-                            ? "border-amber-600/40 bg-amber-500 text-white"
+                        <kbd className={`flex h-[18px] w-[18px] items-center justify-center rounded-md border-b-2 font-mono text-[10px] font-bold ${isSelected
+                            ? "border-amber-600/50 bg-amber-500 text-white"
                             : "border-slate-300 bg-slate-100 text-slate-500 group-hover:border-slate-400 group-hover:bg-slate-200 group-hover:text-slate-700"
                           }`}>
                           {index + 1}
                         </kbd>
                       ) : (
-                        <span aria-hidden="true" className="h-5 w-5" />
+                        <span aria-hidden="true" className="h-[18px] w-[18px]" />
                       )}
                     </div>
 
-                    <div className="flex-1 min-w-0">
-                      <p className={`line-clamp-2 text-xs leading-relaxed ${isSelected ? "font-medium text-amber-950" : "text-slate-700"}`}>
+                    <div className="flex min-w-0 flex-1 flex-col gap-1">
+                      <p
+                        className={`${isSelected ? "line-clamp-3 text-[13px] font-semibold leading-5 text-amber-950" : "line-clamp-2 text-[13px] font-medium leading-5 text-slate-700"} break-words [overflow-wrap:anywhere]`}
+                      >
                         {item.contentPreview}
                       </p>
-                      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] font-medium text-slate-400">
-                        <span className="truncate max-w-[100px]">{item.sourceApp ?? "未知来源"}</span>
-                        <span className="w-0.5 h-0.5 rounded-full bg-slate-300"></span>
-                        <span>{formatDateTime(item.lastUsedAt ?? item.createdAt)}</span>
-                        {item.isFavorited ? (
-                          <>
-                            <span className="w-0.5 h-0.5 rounded-full bg-slate-300"></span>
-                            <span className="text-amber-600">★</span>
-                          </>
-                        ) : null}
+                      <div className={`flex min-w-0 items-center justify-between gap-2 text-[11px] leading-4 ${isSelected ? "text-slate-500" : "text-slate-400"}`}>
+                        <span className="min-w-0 flex-1 truncate font-semibold text-slate-500">
+                          {item.sourceApp ?? "未知来源"}
+                        </span>
+                        <span className="flex shrink-0 items-center gap-2">
+                          <span className="font-medium tabular-nums text-slate-400">
+                            {formatDateTime(item.lastUsedAt ?? item.createdAt)}
+                          </span>
+                          {item.isFavorited ? (
+                            <span className="text-[12px] leading-none text-amber-600">★</span>
+                          ) : null}
+                        </span>
                       </div>
                     </div>
                   </button>
@@ -315,20 +319,20 @@ export function PickerShell() {
                 <div className="mb-2.5 flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 ring-4 ring-white">
                   <div className="h-1.5 w-1.5 rounded-sm bg-slate-300" />
                 </div>
-                <p className="text-xs font-medium text-slate-600">暂无历史记录</p>
+                <p className="text-[13px] font-medium text-slate-600">暂无历史记录</p>
               </div>
             )}
           </div>
         </div>
 
-        <div className="flex shrink-0 items-center justify-between border-t border-slate-200/50 bg-white/60 px-4 py-2 text-[10px] font-medium tracking-wide text-slate-500 backdrop-blur-md">
+        <div className="flex shrink-0 items-center justify-between border-t border-slate-200/50 bg-white/65 px-4 py-2.5 text-[11px] font-medium tracking-wide text-slate-500 backdrop-blur-md">
           <div className="flex items-center gap-3">
-            <span className="flex items-center gap-1"><kbd className="font-sans font-bold">↑↓</kbd> 导航</span>
-            <span className="flex items-center gap-1"><kbd className="font-sans font-bold">↵</kbd> 粘贴</span>
-            <span className="flex items-center gap-1"><kbd className="font-sans font-bold">Esc</kbd> 取消</span>
+            <span className="flex items-center gap-1"><kbd className="font-sans text-[10px] font-bold text-slate-700">↑↓</kbd> 导航</span>
+            <span className="flex items-center gap-1"><kbd className="font-sans text-[10px] font-bold text-slate-700">↵</kbd> 粘贴</span>
+            <span className="flex items-center gap-1"><kbd className="font-sans text-[10px] font-bold text-slate-700">Esc</kbd> 取消</span>
           </div>
           <div className="flex items-center gap-3">
-            {lastMessage ? <span className="text-amber-600 font-semibold">{lastMessage}</span> : null}
+            {lastMessage ? <span className="font-semibold text-amber-600">{lastMessage}</span> : null}
           </div>
         </div>
       </div>
