@@ -65,3 +65,26 @@ cargo install tauri-cli
 ```
 
 浏览器预览模式下会自动切换到本地模拟数据，便于先开发界面；Tauri 环境下则走真实 Rust 命令。
+
+## 测试版发布
+
+仓库已提供首个 Windows 便携测试版的打包脚本：
+
+```bash
+pnpm release:portable
+```
+
+该命令会依次执行：
+
+- `pnpm build`
+- `cargo check --manifest-path src-tauri/Cargo.toml`
+- `pnpm tauri build --no-bundle --ci`
+- 生成便携包、发布说明与 `SHA256SUMS.txt`
+
+输出目录默认在 `tmp/release/`。
+
+详细发布步骤、GitHub Release 清单和文案模板见：
+
+- `docs/测试版发布流程.md`
+- `docs/测试版发布说明模板.md`
+- `docs/测试版使用说明模板.md`

@@ -1,13 +1,14 @@
 {
   "name": "floatpaste",
-  "version": "0.1.0",
+  "version": "0.1.0-beta.1",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "release:portable": "powershell -ExecutionPolicy Bypass -File scripts/build-portable.ps1"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.80.7",
