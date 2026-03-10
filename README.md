@@ -46,15 +46,15 @@
 前端浏览器预览：
 
 ```bash
-npm install
-npm run dev
+pnpm install
+pnpm dev
 ```
 
 Tauri 桌面运行：
 
 ```bash
-npm install
-npm run tauri -- dev
+pnpm install
+pnpm tauri dev
 ```
 
 仓库当前使用项目内的 `@tauri-apps/cli`，默认不要求全局安装 Cargo 版 CLI。
