@@ -379,7 +379,7 @@ Manager 是一个正常获取焦点的桌面窗口，不承担“无焦点”约
 - `HistoryService`：剪贴记录的创建、更新、删除、收藏与读取
 - `SearchService`：FTS5 检索、排序、过滤
 - `NormalizeService`：归一化文本内容、提取预览、生成哈希
-- `DedupService`：短时间重复内容去重
+- `DedupService`：基于哈希的短时间去重与历史记录刷新
 - `PrivacyService`：排除应用、暂停监听、自写回抑制
 - `ConfigService`：维护配置与运行期设置
 - `EventBus`：向前端广播状态变化
@@ -414,7 +414,7 @@ Manager 是一个正常获取焦点的桌面窗口，不承担“无焦点”约
 | Tray UI | 托盘入口、暂停监听、打开资料库 | 托盘点击 | 状态切换、窗口命令 | TrayService、ConfigService |
 | ClipboardMonitor | 监听剪贴板变化 | Windows 剪贴板事件 | 原始剪贴板候选 | PlatformAdapter |
 | NormalizeService | 文本归一化与预览生成 | 原始剪贴板内容 | 标准化文本项 | ClipboardMonitor |
-| DedupService | 去重 | 标准化文本项 | 允许写入 / 拒绝写入 | NormalizeService |
+| DedupService | 去重 | 标准化文本项 | 允许写入 / 刷新已有记录 / 拒绝写入 | NormalizeService |
 | PrivacyService | 排除应用、自写回过滤、暂停监听 | 标准化文本项、前台应用、配置 | 允许写入 / 拒绝写入 | ConfigService、ActiveAppResolver |
 | HistoryService | 记录增删改查与收藏 | 新剪贴项、编辑命令 | 列表、详情、事件 | SQLite |
 | SearchService | 全文检索、排序、过滤 | 查询词、筛选条件 | 搜索结果 | SQLite FTS5 |
@@ -439,7 +439,8 @@ Manager 是一个正常获取焦点的桌面窗口，不承担“无焦点”约
 
 监听策略：
 
-- 对短时间内重复文本去重
+- 对 8 秒窗口内的重复文本直接跳过
+- 对历史上已存在的同 hash 文本刷新既有记录时间，而不是重复插入
 - 支持排除应用名单
 - 支持暂停监听
 - 支持对“程序自己写回 clipboard”的情况做抑制，避免回贴后再次入库
@@ -460,6 +461,11 @@ Manager 支持全文搜索，排序优先级：
 - 最近活跃优先
 - 文本内容匹配优先
 - 来源应用与时间过滤次之
+
+当前实现补充：
+
+- 前端输入采用 `250ms` 防抖，减少高频 IPC 与 FTS 查询抖动
+- 默认按 `50` 条一页请求搜索结果，通过 `offset + limit` 翻页
 
 #### 搜索协议约定
 
@@ -655,6 +661,7 @@ struct PasteOption {
 - `delete_item(id)`
 - `set_item_favorited(id, value)`
 - `show_picker()`
+- `show_picker_from_manager()`
 - `hide_picker()`
 - `paste_item(id, option)`
 - `get_settings()`
@@ -662,6 +669,7 @@ struct PasteOption {
 - `pause_monitoring()`
 - `resume_monitoring()`
 - `open_manager()`
+- `open_manager_from_picker()`
 
 ---
 
@@ -689,7 +697,10 @@ interface ClipItem {
 interface UserSetting {
   shortcut: string;
   launchOnStartup: boolean;
+  silentOnStartup: boolean;
   historyLimit: number;
+  pickerRecordLimit: number;
+  pickerPositionMode: "mouse" | "lastPosition" | "caret";
   excludedApps: string[];
   restoreClipboardAfterPaste: boolean;
   pauseMonitoring: boolean;
@@ -1011,7 +1022,7 @@ floatpaste/
 
 ---
 
-## 20. 当前实现状态（截至 2026-03-09）
+## 20. 当前实现状态（截至 2026-03-11）
 
 下面内容用于同步“设计稿”与“仓库现状”，避免文档与代码脱节。
 
@@ -1024,19 +1035,26 @@ floatpaste/
 - SQLite 初始化迁移与 FTS5 搜索
 - `clip_items`、`clip_items_fts`、`settings`、`excluded_apps` 持久化
 - Manager 基础界面：列表、详情、全文搜索、编辑、删除、收藏、设置分区
+- Manager 搜索已接入 `250ms` 防抖、收藏筛选与 `50` 条分页
 - Picker 基础界面：最近活跃列表、轻量预览
 - 前端依据当前 `WebviewWindow` 标签在 `ManagerShell` 与 `PickerShell` 间切换，并加载对应主题壳层
 - 全局快捷键唤起 Picker
 - Picker 无焦点显示：显示时记录前台窗口，并在必要时立即恢复目标焦点
 - Picker 会话快捷键控制：`Up / Down / Enter / Esc / Tab / Digit1..Digit9`
+- Picker 支持方向键长按连续导航，记录数上限可配置
+- Picker 支持三种显示位置模式：鼠标位置、上次关闭位置、目标窗口光标位置（失败时回退鼠标位置）
 - Picker 支持鼠标点击窗口外部自动关闭
 - Manager 内可打开 Picker，Picker 内可通过 `Tab` 或按钮切回 Manager
 - Manager 在桌面运行时支持 `Escape` 直接隐藏当前窗口
 - Windows 剪贴板文本监听轮询原型
-- 去重、排除应用、暂停监听、自写回抑制基础链路
+- 基于哈希的重复内容处理：8 秒内重复跳过，历史重复刷新既有记录
+- 排除应用、暂停监听、自写回抑制基础链路
 - 托盘菜单：打开资料库、打开速贴面板、打开设置、暂停/恢复监听、退出
 - 回贴主链路：写入剪贴板、恢复目标窗口、尝试发送 `Ctrl+V`
 - 回贴结果状态码基础收口
+- 设置项已覆盖快捷键、历史上限、速贴记录数、速贴位置模式、开机自启、静默启动、恢复剪贴板、暂停监听与排除应用
+- 设置更新失败时会回滚持久化与运行时副作用，避免快捷键/启动项状态不一致
+- Windows 开机自启、`--silent` 静默启动与单实例唤醒已有资料库窗口机制
 - Manager 关闭后隐藏到托盘，而不是直接退出进程
 - Picker 已在 `tauri.conf.json` 中预创建为隐藏窗口，运行时主要通过显示/隐藏切换
 - Manager 与 Picker 当前为两个独立 `WebviewWindow`，但交互上仍以单主视图切换为主
@@ -1057,9 +1075,12 @@ floatpaste/
 - Picker：`src/features/picker/PickerShell.tsx`
 - 前端桥接：`src/bridge/commands.ts`、`src/bridge/events.ts`、`src/bridge/window.ts`
 - 应用启动：`src-tauri/src/lib.rs`、`src-tauri/src/app_bootstrap.rs`
+- 启动模式与单实例：`src-tauri/src/launch_mode.rs`、`src-tauri/src/platform/windows/single_instance.rs`
 - 窗口命令：`src-tauri/src/commands/windows.rs`
+- 设置命令与运行时同步：`src-tauri/src/commands/settings.rs`、`src-tauri/src/services/settings_service.rs`、`src-tauri/src/services/startup_service.rs`
 - 剪贴监听：`src-tauri/src/platform/windows/clipboard_monitor.rs`
 - Picker 鼠标会话监控：`src-tauri/src/platform/windows/picker_mouse_monitor.rs`
+- Picker 定位：`src-tauri/src/platform/windows/picker_position.rs`、`src-tauri/src/services/picker_position_service.rs`
 - 快捷键：`src-tauri/src/services/shortcut_manager.rs`
 - 托盘：`src-tauri/src/services/tray_service.rs`
 - 窗口协调：`src-tauri/src/services/window_coordinator.rs`
@@ -1085,6 +1106,9 @@ floatpaste/
 - Manager 与 Picker 虽然是独立窗口，但当前交互仍以“打开 Picker 时隐藏 Manager，关闭后恢复目标窗口或 Manager”为主，不追求双窗口同时可见
 - Manager 内“打开速贴”和 Picker 内“回资料库”都通过 Rust 侧窗口命令统一编排，并在隐藏后加入 `50ms` 延迟，优先规避窗口切换竞态
 - 回贴当前优先保证“写入剪贴板 + 尝试恢复目标窗口 + 注入 Ctrl+V”，不承诺所有应用都完全一致
+- 光标定位模式依赖 Win32 `GetGUIThreadInfo`；若目标线程没有可用插入符，会自动回退到鼠标定位
+- “上次关闭位置”存储在 `settings` 表的独立 key 中，跨会话可复用，但不单独引入窗口布局表
+- 单实例唤醒当前基于资料库窗口标题查找已有实例；静默启动模式不会唤醒已运行实例
 - 浏览器预览模式下前端自动切换到本地 mock 数据，只能验证 UI 与本地键盘 fallback，无法验证真实无焦点、全局快捷键、鼠标钩子与前台窗口恢复
 - 全局快捷键当前已按库的规范化结果进行注册和匹配；设置中仍允许用户输入 `Ctrl+\`` 这类简写，但运行时会转换为规范键名
 
@@ -1097,14 +1121,14 @@ floatpaste/
 当前仓库的本地开发环境要求：
 
 - Node.js
-- npm
+- pnpm
 - Rust 工具链
 - Windows 10 或 Windows 11
 
 若要运行 Tauri 桌面应用，还需要安装：
 
 ```bash
-npm install
+pnpm install
 ```
 
 说明：
@@ -1118,7 +1142,7 @@ npm install
 在仓库根目录执行：
 
 ```bash
-npm install
+pnpm install
 ```
 
 ### 21.3 仅运行前端预览
@@ -1126,7 +1150,7 @@ npm install
 用于开发界面、验证布局和交互，不依赖 Tauri：
 
 ```bash
-npm run dev
+pnpm dev
 ```
 
 说明：
@@ -1140,30 +1164,31 @@ npm run dev
 用于调试真实的 Windows 剪贴板、快捷键、托盘和回贴链路：
 
 ```bash
-npm run tauri -- dev
+pnpm tauri dev
 ```
 
 等价命令为：
 
 ```bash
-npm run dev
-npx tauri dev
+pnpm dev
+pnpm exec tauri dev
 ```
 
 说明：
 
-- `npm run tauri -- dev` 会通过项目内的 `@tauri-apps/cli` 调用 Tauri 开发模式
+- `pnpm tauri dev` 会通过项目内的 `@tauri-apps/cli` 调用 Tauri 开发模式
 - Tauri 运行时会预创建 `manager` 与 `picker` 两个窗口标签
 - `src/app/App.tsx` 会根据当前窗口标签分别渲染 `ManagerShell` 或 `PickerShell`
 - Picker 默认隐藏，运行时主要通过显示/隐藏切换
 - 当前交互上通常只保留一个主界面可见：从 Manager 打开 Picker 时会隐藏 Manager；从外部应用唤起 Picker 时只显示 Picker
+- 静默启动模式会跳过自动打开 Manager，但托盘、快捷键、剪贴板监听仍会继续初始化
 
 ### 21.5 生产构建校验
 
 前端构建：
 
 ```bash
-npm run build
+pnpm build
 ```
 
 后端编译检查：
@@ -1180,7 +1205,7 @@ cargo check --manifest-path src-tauri\Cargo.toml
 
 推荐方式：
 
-- 先用 `npm run dev` 调整界面和交互
+- 先用 `pnpm dev` 调整界面和交互
 - 浏览器预览模式下验证 Manager 搜索、详情编辑、Picker 布局
 
 重点文件：
@@ -1195,7 +1220,7 @@ cargo check --manifest-path src-tauri\Cargo.toml
 
 推荐方式：
 
-- 使用 `npm run tauri -- dev`
+- 使用 `pnpm tauri dev`
 - 在终端直接观察 Rust `tracing` 输出
 - 重点验证复制文本、唤起 Picker、选择条目、回贴到目标应用的闭环
 
@@ -1226,21 +1251,24 @@ cargo check --manifest-path src-tauri\Cargo.toml
 
 建议按下面顺序验证：
 
-1. 运行 `npm run tauri -- dev`
+1. 运行 `pnpm tauri dev`
 2. 在任意文本应用中复制一段文本
 3. 打开 Manager，确认记录已入库
 4. 通过全局快捷键唤起 Picker
-5. 用 `Up / Down / Enter / Esc / Tab / 1..9` 验证 Picker 会话快捷键操作
+5. 用 `Up / Down / Enter / Esc / Tab / 1..9` 验证 Picker 会话快捷键操作，并确认方向键长按可以连续导航
 6. 点击 Picker 窗口外部，确认窗口自动关闭并恢复原目标窗口
 7. 从 Manager 内打开 Picker，再在 Picker 中按 `Tab` 或点击“资料库”，确认可切回 Manager
-8. 在记事本、浏览器输入框、编辑器中验证回贴行为
-9. 在设置中加入排除应用，确认对应前台应用不再入库
-10. 通过托盘切换监听状态，确认暂停后不再继续入库
-11. 在 Manager 中按 `Escape`，确认窗口被隐藏且应用仍留在托盘；再通过托盘重新打开 Manager
+8. 在设置中切换“速贴窗口记录数”和“速贴窗口显示位置”，重新唤起 Picker 验证记录数量与定位模式是否生效
+9. 在 Manager 搜索框中输入关键字，确认搜索存在防抖且可以通过上一页/下一页翻页
+10. 在记事本、浏览器输入框、编辑器中验证回贴行为
+11. 在设置中加入排除应用，确认对应前台应用不再入库
+12. 通过托盘切换监听状态，确认暂停后不再继续入库
+13. 切换开机自启与静默启动设置，确认配置可以保存；若在真实 Windows 环境下，可进一步检查注册表启动项是否同步
+14. 在 Manager 中按 `Escape`，确认窗口被隐藏且应用仍留在托盘；再通过托盘重新打开 Manager
 
 ### 21.8 当前调试限制
 
-截至 2026-03-09，调试时需要明确以下限制：
+截至 2026-03-11，调试时需要明确以下限制：
 
 - 浏览器预览模式无法验证真实系统能力
 - 不同应用对 `Ctrl+V` 注入的响应存在差异

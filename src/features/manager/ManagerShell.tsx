@@ -187,9 +187,9 @@ export function ManagerShell() {
             <div className="inline-flex items-center rounded-full border border-accent/20 bg-accent/5 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.3em] text-accentDeep">
               FloatPaste / 浮贴
             </div>
-            <h1 className="mt-3 font-display text-3xl font-medium tracking-tight">MVP 资料库窗口</h1>
+            <h1 className="mt-3 font-display text-3xl font-medium tracking-tight">资料库窗口</h1>
             <p className="mt-3 text-sm leading-relaxed text-slate-600">
-              这一版优先打通文本记录、搜索、编辑、收藏和设置，速贴面板与系统回贴链路继续沿当前骨架推进。
+              当前版本已经打通文本记录、搜索、编辑、收藏、设置与速贴主链路，剩余工作主要集中在兼容性与稳定性收口。
             </p>
           </div>
 
@@ -206,7 +206,7 @@ export function ManagerShell() {
             <div className="relative z-10">
               <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-white/60">快捷键</p>
               <p className="mt-1.5 text-2xl font-semibold tracking-wide">{settings.data?.shortcut ?? "Ctrl+`"}</p>
-              <p className="mt-3 text-[13px] leading-relaxed text-white/70">当前仅完成 Manager 主窗口，Picker 与全局唤起链路在下一阶段接入。</p>
+              <p className="mt-3 text-[13px] leading-relaxed text-white/70">全局快捷键、速贴面板与回贴链路已经接入；可在设置中继续调整记录数、显示位置与启动行为。</p>
             </div>
             <div className="absolute -right-4 -top-4 h-24 w-24 rounded-full bg-white/5 blur-2xl"></div>
           </div>
@@ -543,7 +543,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
     <div className="space-y-6">
       <div>
         <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">设置</p>
-        <h2 className="mt-1 font-display text-2xl font-medium tracking-tight">MVP 运行参数</h2>
+          <h2 className="mt-1 font-display text-2xl font-medium tracking-tight">运行设置</h2>
         <p className="mt-3 text-sm leading-relaxed text-slate-600">
           当前设置直接映射到后端持久化配置。排除应用与真正的前台应用识别将在 Windows 平台适配阶段继续细化。
         </p>
