@@ -236,10 +236,10 @@ export function PickerShell() {
 
   return (
     <div className="flex h-screen w-screen items-start justify-center bg-transparent p-0 text-ink overflow-hidden select-none" data-tauri-drag-region>
-      <div className="flex h-full w-full flex-col overflow-hidden rounded-[20px] border border-white/40 bg-white/85 shadow-[0_16px_40px_rgba(15,23,42,0.2)] backdrop-blur-xl">
-        <div className="flex shrink-0 items-center justify-between border-b border-slate-200/50 bg-white/45 px-4 py-3" data-tauri-drag-region>
+      <div className="flex h-full w-full flex-col overflow-hidden rounded-[20px] border border-white/40 bg-white/95 shadow-[0_16px_40px_rgba(15,23,42,0.2)] backdrop-blur-xl">
+        <div className="flex shrink-0 items-center justify-between border-b border-slate-200/50 bg-white/70 px-4 py-3" data-tauri-drag-region>
           <div className="flex items-center gap-2.5">
-            <div className="h-2.5 w-2.5 rounded-full bg-accent/80"></div>
+            <div className="h-2.5 w-2.5 rounded-full bg-amber-400"></div>
             <span className="text-[13px] font-semibold tracking-wide text-slate-700">FloatPaste</span>
           </div>
           <div className="flex items-center gap-2">
@@ -254,8 +254,8 @@ export function PickerShell() {
           </div>
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col px-2 py-2.5">
-          <div className="grid flex-1 gap-1.5 overflow-y-auto overflow-x-hidden pr-1">
+        <div className="flex min-h-0 flex-1 flex-col px-3 py-3">
+          <div className="grid flex-1 gap-1.5 overflow-y-auto overflow-x-hidden pr-2 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300/80 hover:[&::-webkit-scrollbar-thumb]:bg-slate-400/80 [&::-webkit-scrollbar-track]:bg-transparent transition-colors">
             {items.length ? (
               items.map((item, index) => {
                 const isSelected = index === selectedIndex;
@@ -264,9 +264,9 @@ export function PickerShell() {
                     ref={(el) => {
                       itemRefs.current[index] = el;
                     }}
-                    className={`group relative flex w-full items-start gap-2.5 rounded-xl px-2.5 py-2.5 text-left transition-all duration-150 ${isSelected
-                        ? "bg-amber-50/95 shadow-[0_8px_20px_rgba(217,119,6,0.12)] ring-1 ring-inset ring-amber-500/35"
-                        : "bg-white/15 hover:bg-slate-100/70"
+                    className={`group relative flex w-full items-start gap-3 rounded-xl px-3 py-3 text-left transition-all duration-200 ${isSelected
+                      ? "bg-amber-500/10 shadow-[0_2px_10px_rgba(245,158,11,0.05)]"
+                      : "bg-transparent hover:bg-slate-500/5"
                       }`}
                     key={item.id}
                     onClick={() => {
@@ -280,33 +280,33 @@ export function PickerShell() {
                   >
                     <div className="mt-0.5 flex shrink-0 items-center justify-center">
                       {index < 9 ? (
-                        <kbd className={`flex h-[18px] w-[18px] items-center justify-center rounded-md border-b-2 font-mono text-[10px] font-bold ${isSelected
-                            ? "border-amber-600/50 bg-amber-500 text-white"
-                            : "border-slate-300 bg-slate-100 text-slate-500 group-hover:border-slate-400 group-hover:bg-slate-200 group-hover:text-slate-700"
+                        <kbd className={`flex h-[20px] w-[20px] items-center justify-center rounded-[6px] font-mono text-[11px] font-bold transition-colors ${isSelected
+                          ? "bg-amber-500 text-white shadow-sm"
+                          : "bg-slate-400/15 text-slate-400 group-hover:bg-slate-400/25 group-hover:text-slate-700"
                           }`}>
                           {index + 1}
                         </kbd>
                       ) : (
-                        <span aria-hidden="true" className="h-[18px] w-[18px]" />
+                        <span aria-hidden="true" className="h-[20px] w-[20px]" />
                       )}
                     </div>
 
-                    <div className="flex min-w-0 flex-1 flex-col gap-1">
+                    <div className="flex min-w-0 flex-1 flex-col gap-1.5">
                       <p
-                        className={`${isSelected ? "line-clamp-3 text-[13px] font-semibold leading-5 text-amber-950" : "line-clamp-2 text-[13px] font-medium leading-5 text-slate-700"} break-words [overflow-wrap:anywhere]`}
+                        className={`${isSelected ? "text-slate-800 font-medium" : "text-slate-600"} line-clamp-2 text-[13px] leading-[1.6] break-words [overflow-wrap:anywhere] transition-colors`}
                       >
                         {item.contentPreview}
                       </p>
-                      <div className={`flex min-w-0 items-center justify-between gap-2 text-[11px] leading-4 ${isSelected ? "text-slate-500" : "text-slate-400"}`}>
-                        <span className="min-w-0 flex-1 truncate font-semibold text-slate-500">
+                      <div className={`flex min-w-0 items-center justify-between gap-2 text-[11px] leading-none transition-colors ${isSelected ? "text-amber-700/60" : "text-slate-400/70"}`}>
+                        <span className="min-w-0 flex-1 truncate font-medium">
                           {item.sourceApp ?? "未知来源"}
                         </span>
-                        <span className="flex shrink-0 items-center gap-2">
-                          <span className="font-medium tabular-nums text-slate-400">
+                        <span className="flex shrink-0 items-center gap-1.5 font-medium">
+                          <span className="tabular-nums">
                             {formatDateTime(item.lastUsedAt ?? item.createdAt)}
                           </span>
                           {item.isFavorited ? (
-                            <span className="text-[12px] leading-none text-amber-600">★</span>
+                            <span className="text-[10px] leading-none text-amber-500">★</span>
                           ) : null}
                         </span>
                       </div>
@@ -317,19 +317,19 @@ export function PickerShell() {
             ) : (
               <div className="flex flex-col items-center justify-center py-8 text-center">
                 <div className="mb-2.5 flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 ring-4 ring-white">
-                  <div className="h-1.5 w-1.5 rounded-sm bg-slate-300" />
+                  <div className="h-1.5 w-1.5 rounded-sm bg-slate-400" />
                 </div>
-                <p className="text-[13px] font-medium text-slate-600">暂无历史记录</p>
+                <p className="text-[13px] font-medium text-slate-500">暂无历史记录</p>
               </div>
             )}
           </div>
         </div>
 
-        <div className="flex shrink-0 items-center justify-between border-t border-slate-200/50 bg-white/65 px-4 py-2.5 text-[11px] font-medium tracking-wide text-slate-500 backdrop-blur-md">
-          <div className="flex items-center gap-3">
-            <span className="flex items-center gap-1"><kbd className="font-sans text-[10px] font-bold text-slate-700">↑↓</kbd> 导航</span>
-            <span className="flex items-center gap-1"><kbd className="font-sans text-[10px] font-bold text-slate-700">↵</kbd> 粘贴</span>
-            <span className="flex items-center gap-1"><kbd className="font-sans text-[10px] font-bold text-slate-700">Esc</kbd> 取消</span>
+        <div className="flex shrink-0 items-center justify-between border-t border-slate-200/50 bg-slate-50/80 px-4 py-2.5 text-[11px] font-medium tracking-wide text-slate-400 backdrop-blur-md">
+          <div className="flex items-center gap-3.5">
+            <span className="flex items-center gap-1.5"><kbd className="flex h-[18px] items-center justify-center rounded bg-slate-400/15 px-1.5 font-sans text-[10px] font-bold text-slate-500">↑↓</kbd> 导航</span>
+            <span className="flex items-center gap-1.5"><kbd className="flex h-[18px] items-center justify-center rounded bg-slate-400/15 px-1.5 font-sans text-[10px] font-bold text-slate-500">↵</kbd> 粘贴</span>
+            <span className="flex items-center gap-1.5"><kbd className="flex h-[18px] items-center justify-center rounded bg-slate-400/15 px-1.5 font-sans text-[10px] font-bold text-slate-500">Esc</kbd> 取消</span>
           </div>
           <div className="flex items-center gap-3">
             {lastMessage ? <span className="font-semibold text-amber-600">{lastMessage}</span> : null}
