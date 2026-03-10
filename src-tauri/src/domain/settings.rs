@@ -1,4 +1,39 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PickerPositionMode {
+    Mouse,
+    LastPosition,
+    Caret,
+}
+
+impl Default for PickerPositionMode {
+    fn default() -> Self {
+        Self::Mouse
+    }
+}
+
+impl<'de> Deserialize<'de> for PickerPositionMode {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = Option::<String>::deserialize(deserializer)?.unwrap_or_default();
+        Ok(match value.as_str() {
+            "lastPosition" => Self::LastPosition,
+            "caret" => Self::Caret,
+            _ => Self::Mouse,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StoredWindowPosition {
+    pub x: i32,
+    pub y: i32,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -9,6 +44,7 @@ pub struct UserSetting {
     pub silent_on_startup: bool,
     pub history_limit: u32,
     pub picker_record_limit: u32,
+    pub picker_position_mode: PickerPositionMode,
     pub excluded_apps: Vec<String>,
     pub restore_clipboard_after_paste: bool,
     pub pause_monitoring: bool,
@@ -22,6 +58,7 @@ impl Default for UserSetting {
             silent_on_startup: false,
             history_limit: 1_000,
             picker_record_limit: 50,
+            picker_position_mode: PickerPositionMode::Mouse,
             excluded_apps: vec![
                 "KeePass.exe".to_string(),
                 "Bitwarden.exe".to_string(),
@@ -58,7 +95,7 @@ impl UserSetting {
 
 #[cfg(test)]
 mod tests {
-    use super::UserSetting;
+    use super::{PickerPositionMode, UserSetting};
 
     #[test]
     fn sanitized_turns_off_silent_when_launch_on_startup_is_disabled() {
@@ -89,5 +126,49 @@ mod tests {
         assert!(settings.launch_on_startup);
         assert!(!settings.silent_on_startup);
         assert_eq!(settings.picker_record_limit, 50);
+        assert_eq!(settings.picker_position_mode, PickerPositionMode::Mouse);
+    }
+
+    #[test]
+    fn deserialize_picker_position_mode() {
+        let settings: UserSetting = serde_json::from_str(
+            r#"{
+                "shortcut":"Ctrl+`",
+                "launchOnStartup":false,
+                "silentOnStartup":false,
+                "historyLimit":1000,
+                "pickerRecordLimit":50,
+                "pickerPositionMode":"lastPosition",
+                "excludedApps":["KeePass.exe"],
+                "restoreClipboardAfterPaste":true,
+                "pauseMonitoring":false
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            settings.picker_position_mode,
+            PickerPositionMode::LastPosition
+        );
+    }
+
+    #[test]
+    fn deserialize_invalid_picker_position_mode_falls_back_to_mouse() {
+        let settings: UserSetting = serde_json::from_str(
+            r#"{
+                "shortcut":"Ctrl+`",
+                "launchOnStartup":false,
+                "silentOnStartup":false,
+                "historyLimit":1000,
+                "pickerRecordLimit":50,
+                "pickerPositionMode":"somewhereElse",
+                "excludedApps":["KeePass.exe"],
+                "restoreClipboardAfterPaste":true,
+                "pauseMonitoring":false
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(settings.picker_position_mode, PickerPositionMode::Mouse);
     }
 }

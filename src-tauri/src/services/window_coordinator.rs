@@ -1,7 +1,8 @@
 use chrono::Utc;
 use serde::Serialize;
 use tauri::{
-    AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
+    AppHandle, Emitter, Manager, Position, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    WindowEvent,
 };
 use tracing::info;
 
@@ -10,8 +11,10 @@ use crate::{
     domain::{
         error::AppError,
         events::{PICKER_SESSION_END_EVENT, PICKER_SESSION_START_EVENT},
+        settings::UserSetting,
     },
     platform::windows::active_app::ActiveAppResolver,
+    services::picker_position_service::PickerPositionService,
 };
 
 pub struct WindowCoordinator;
@@ -52,8 +55,10 @@ impl WindowCoordinator {
 
     pub fn show_picker(app: &AppHandle, state: &AppState) -> Result<(), AppError> {
         let window = ensure_picker_window(app)?;
+        let settings = state.current_settings()?;
         if state.is_picker_active() {
-            let _ = window.center();
+            let session = state.picker_session()?;
+            apply_picker_window_position(&window, state, &settings, session.target_window_hwnd);
             return Ok(());
         }
 
@@ -68,7 +73,7 @@ impl WindowCoordinator {
         };
         state.set_picker_session(target_window, manager_visible)?;
         let _ = window.unminimize();
-        let _ = window.center();
+        apply_picker_window_position(&window, state, &settings, target_window);
         info!("显示 Picker，manager_visible={manager_visible}, target_window={target_window:?}");
 
         #[cfg(target_os = "windows")]
@@ -142,6 +147,7 @@ impl WindowCoordinator {
             .is_visible()
             .map_err(|error| AppError::Message(error.to_string()))?
         {
+            persist_picker_window_position(app, &window);
             window
                 .hide()
                 .map_err(|error| AppError::Message(error.to_string()))?;
@@ -231,7 +237,6 @@ fn ensure_picker_window(app: &AppHandle) -> Result<WebviewWindow, AppError> {
         .map_err(|error| AppError::Message(format!("创建 picker 窗口失败: {error}")))?;
 
     configure_picker_window(&window);
-    let _ = window.center();
     Ok(window)
 }
 
@@ -251,6 +256,41 @@ fn configure_manager_window(window: &WebviewWindow) {
             let _ = handle.hide();
         }
     });
+}
+
+fn apply_picker_window_position(
+    window: &WebviewWindow,
+    state: &AppState,
+    settings: &UserSetting,
+    target_window_hwnd: Option<isize>,
+) {
+    let position = PickerPositionService::resolve_window_position(
+        window,
+        &state.repository,
+        &settings.picker_position_mode,
+        target_window_hwnd,
+    )
+    .ok()
+    .flatten();
+
+    if let Some(position) = position {
+        let _ = window.set_position(Position::Physical(position));
+    } else {
+        let _ = window.center();
+    }
+}
+
+fn persist_picker_window_position(app: &AppHandle, window: &WebviewWindow) {
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+
+    let position = PickerPositionService::capture_window_position(window)
+        .ok()
+        .flatten();
+    if let Some(position) = position {
+        let _ = state.repository.save_picker_last_position(&position);
+    }
 }
 
 fn configure_picker_window(window: &WebviewWindow) {

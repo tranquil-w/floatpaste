@@ -17,8 +17,11 @@ use crate::domain::{
         ClipItemDetail, ClipItemSummary, NewClipTextItem, SearchQuery, SearchResult, SearchSort,
     },
     error::AppError,
-    settings::UserSetting,
+    settings::{StoredWindowPosition, UserSetting},
 };
+
+const USER_SETTINGS_KEY: &str = "user_settings";
+const PICKER_LAST_POSITION_KEY: &str = "picker_last_position";
 
 #[derive(Clone)]
 pub struct SqliteRepository {
@@ -38,8 +41,8 @@ impl SqliteRepository {
         let connection = self.connection.lock()?;
         let settings_json = connection
             .query_row(
-                "SELECT value FROM settings WHERE key = 'user_settings'",
-                [],
+                "SELECT value FROM settings WHERE key = ?1",
+                [USER_SETTINGS_KEY],
                 |row| row.get::<_, String>(0),
             )
             .optional()?;
@@ -60,13 +63,29 @@ impl SqliteRepository {
         Ok(setting.sanitized())
     }
 
+    pub fn load_picker_last_position(&self) -> Result<Option<StoredWindowPosition>, AppError> {
+        let connection = self.connection.lock()?;
+        let raw_value = connection
+            .query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                [PICKER_LAST_POSITION_KEY],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+
+        raw_value
+            .map(|raw| serde_json::from_str::<StoredWindowPosition>(&raw))
+            .transpose()
+            .map_err(Into::into)
+    }
+
     pub fn save_settings(&self, setting: &UserSetting) -> Result<(), AppError> {
         let connection = self.connection.lock()?;
         let transaction = connection.unchecked_transaction()?;
         transaction.execute(
-            "INSERT INTO settings(key, value) VALUES('user_settings', ?1)
+            "INSERT INTO settings(key, value) VALUES(?1, ?2)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            [serde_json::to_string(setting)?],
+            params![USER_SETTINGS_KEY, serde_json::to_string(setting)?],
         )?;
         transaction.execute("DELETE FROM excluded_apps", [])?;
         for app in &setting.excluded_apps {
@@ -76,6 +95,19 @@ impl SqliteRepository {
             )?;
         }
         transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn save_picker_last_position(
+        &self,
+        position: &StoredWindowPosition,
+    ) -> Result<(), AppError> {
+        let connection = self.connection.lock()?;
+        connection.execute(
+            "INSERT INTO settings(key, value) VALUES(?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![PICKER_LAST_POSITION_KEY, serde_json::to_string(position)?],
+        )?;
         Ok(())
     }
 
@@ -489,7 +521,10 @@ mod tests {
     use chrono::{Duration, Utc};
 
     use super::{bool_to_i64, SqliteRepository};
-    use crate::domain::clip_item::{SearchFilters, SearchQuery, SearchSort};
+    use crate::domain::{
+        clip_item::{SearchFilters, SearchQuery, SearchSort},
+        settings::StoredWindowPosition,
+    };
 
     fn temp_db_path() -> PathBuf {
         std::env::temp_dir().join(format!(
@@ -715,6 +750,21 @@ mod tests {
         assert_ne!(bumped.updated_at, before.updated_at);
         // 收藏状态应保持不变
         assert!(bumped.is_favorited);
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn save_and_load_picker_last_position() {
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+        let position = StoredWindowPosition { x: 320, y: 180 };
+
+        repository.save_picker_last_position(&position).unwrap();
+        let loaded = repository.load_picker_last_position().unwrap();
+
+        assert_eq!(loaded, Some(position));
 
         drop(repository);
         fs::remove_file(path).unwrap();

@@ -2,6 +2,7 @@ pub mod dedup_service;
 pub mod history_service;
 pub mod normalize_service;
 pub mod paste_executor;
+pub mod picker_position_service;
 pub mod privacy_service;
 pub mod search_service;
 pub mod settings_service;

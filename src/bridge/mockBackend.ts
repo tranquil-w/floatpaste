@@ -9,6 +9,7 @@ import type {
 import type { UserSetting } from "../shared/types/settings";
 
 const now = Date.now();
+const pickerPositionModes = new Set(["mouse", "lastPosition", "caret"]);
 
 let settings: UserSetting = {
   shortcut: "Ctrl+`",
@@ -16,16 +17,22 @@ let settings: UserSetting = {
   silentOnStartup: false,
   historyLimit: 1000,
   pickerRecordLimit: 50,
+  pickerPositionMode: "mouse",
   excludedApps: ["KeePass.exe", "WindowsTerminal.exe"],
   restoreClipboardAfterPaste: true,
   pauseMonitoring: false,
 };
 
 function sanitizeSettings(payload: UserSetting): UserSetting {
+  const pickerPositionMode = pickerPositionModes.has(payload.pickerPositionMode)
+    ? payload.pickerPositionMode
+    : "mouse";
+
   return {
     ...structuredClone(payload),
     silentOnStartup: payload.launchOnStartup ? payload.silentOnStartup : false,
     pickerRecordLimit: Math.min(1000, Math.max(9, Math.trunc(payload.pickerRecordLimit || 50))),
+    pickerPositionMode,
   };
 }
 

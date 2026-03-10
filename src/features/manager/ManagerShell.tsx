@@ -13,6 +13,7 @@ import { isTauriRuntime } from "../../bridge/runtime";
 import { hideCurrentWindow } from "../../bridge/window";
 import { queryClient } from "../../app/queryClient";
 import type { SearchSort } from "../../shared/types/clips";
+import type { PickerPositionMode, UserSetting } from "../../shared/types/settings";
 import { formatDateTime } from "../../shared/utils/time";
 import { useManagerStore } from "./store";
 import {
@@ -26,6 +27,28 @@ import {
   useUpdateSettingsMutation,
   useUpdateTextMutation,
 } from "./queries";
+
+const pickerPositionOptions: Array<{
+  value: PickerPositionMode;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "mouse",
+    label: "鼠标位置",
+    description: "默认推荐，速贴窗口会贴近当前鼠标所在位置弹出。",
+  },
+  {
+    value: "lastPosition",
+    label: "上次关闭时的位置",
+    description: "保留上次拖动或关闭时的位置；首次使用会落在屏幕中心。",
+  },
+  {
+    value: "caret",
+    label: "光标所在位置",
+    description: "优先跟随当前输入光标；如果系统拿不到光标位置，会退回鼠标位置。",
+  },
+];
 
 export function ManagerShell() {
   const { selectedItemId, draftText, viewMode, setDraftText, setSelectedItemId, setViewMode } =
@@ -434,16 +457,7 @@ interface SettingsPanelProps {
   errorMessage: string | null;
   isPending: boolean;
   onDismissError: () => void;
-  onSave: (payload: {
-    shortcut: string;
-    launchOnStartup: boolean;
-    silentOnStartup: boolean;
-    historyLimit: number;
-    pickerRecordLimit: number;
-    excludedApps: string[];
-    restoreClipboardAfterPaste: boolean;
-    pauseMonitoring: boolean;
-  }) => void;
+  onSave: (payload: UserSetting) => void;
 }
 
 function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: SettingsPanelProps) {
@@ -453,6 +467,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
   const [silentOnStartup, setSilentOnStartup] = useState(false);
   const [historyLimit, setHistoryLimit] = useState(1000);
   const [pickerRecordLimit, setPickerRecordLimit] = useState(50);
+  const [pickerPositionMode, setPickerPositionMode] = useState<PickerPositionMode>("mouse");
   const [restoreClipboardAfterPaste, setRestoreClipboardAfterPaste] = useState(true);
   const [pauseMonitoring, setPauseMonitoring] = useState(false);
   const [excludedAppsText, setExcludedAppsText] = useState("");
@@ -467,6 +482,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
     setSilentOnStartup(data.silentOnStartup);
     setHistoryLimit(data.historyLimit);
     setPickerRecordLimit(data.pickerRecordLimit);
+    setPickerPositionMode(data.pickerPositionMode);
     setRestoreClipboardAfterPaste(data.restoreClipboardAfterPaste);
     setPauseMonitoring(data.pauseMonitoring);
     setExcludedAppsText(data.excludedApps.join("\n"));
@@ -534,6 +550,32 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
           控制速贴面板一次可滚动浏览的记录数，数字快捷键仍只覆盖前 9 条。
         </p>
       </label>
+
+      <div>
+        <span className="mb-2.5 block text-sm font-medium text-slate-700">速贴窗口显示位置</span>
+        <div className="space-y-3">
+          {pickerPositionOptions.map((option) => (
+            <label
+              className="flex cursor-pointer items-start gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-4 transition-colors hover:bg-slate-50"
+              key={option.value}
+            >
+              <input
+                checked={pickerPositionMode === option.value}
+                className="mt-0.5 h-4 w-4 border-slate-300 text-accent focus:ring-accent"
+                name="picker-position-mode"
+                onChange={() => setPickerPositionMode(option.value)}
+                type="radio"
+              />
+              <span className="min-w-0">
+                <span className="block text-sm font-medium text-slate-700">{option.label}</span>
+                <span className="mt-1 block text-xs leading-relaxed text-slate-500">
+                  {option.description}
+                </span>
+              </span>
+            </label>
+          ))}
+        </div>
+      </div>
 
       <label className="block">
         <span className="mb-2.5 block text-sm font-medium text-slate-700">排除应用</span>
@@ -611,6 +653,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
               silentOnStartup: launchOnStartup ? silentOnStartup : false,
               historyLimit,
               pickerRecordLimit,
+              pickerPositionMode,
               excludedApps: excludedAppsText
                 .split(/\r?\n/)
                 .map((value) => value.trim())
