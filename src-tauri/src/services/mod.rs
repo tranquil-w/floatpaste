@@ -1,5 +1,6 @@
 pub mod dedup_service;
 pub mod history_service;
+pub mod image_storage;
 pub mod normalize_service;
 pub mod paste_executor;
 pub mod picker_position_service;

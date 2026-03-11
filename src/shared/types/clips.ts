@@ -1,4 +1,5 @@
 export type SearchSort = "relevance_desc" | "recent_desc";
+export type ClipType = "text" | "image" | "file";
 
 export interface SearchFilters {
   favoritedOnly?: boolean;
@@ -16,6 +17,7 @@ export interface SearchQuery {
 
 export interface ClipItemSummary {
   id: string;
+  type: ClipType;
   contentPreview: string;
   sourceApp: string | null;
   isFavorited: boolean;
@@ -24,11 +26,30 @@ export interface ClipItemSummary {
   lastUsedAt: string | null;
 }
 
-export interface ClipItemDetail extends ClipItemSummary {
-  fullText: string;
+// 所有字段都放在一个基础接口上，通过 type 区分行为
+export interface ClipItemDetail {
+  id: string;
+  type: ClipType;
+  contentPreview: string;
+  sourceApp: string | null;
+  isFavorited: boolean;
+  createdAt: string;
+  updatedAt: string;
+  lastUsedAt: string | null;
   searchText: string;
   hash: string;
-  type: "text";
+
+  fullText: string;
+
+  imagePath: string | null;
+  imageWidth: number | null;
+  imageHeight: number | null;
+  imageFormat: string | null;
+  fileSize: number | null;
+
+  filePaths: string[];
+  fileCount: number;
+  totalSize: number | null;
 }
 
 export interface SearchResult {

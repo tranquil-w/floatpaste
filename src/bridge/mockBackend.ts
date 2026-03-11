@@ -11,18 +11,6 @@ import type { UserSetting } from "../shared/types/settings";
 const now = Date.now();
 const pickerPositionModes = new Set(["mouse", "lastPosition", "caret"]);
 
-let settings: UserSetting = {
-  shortcut: "Ctrl+`",
-  launchOnStartup: false,
-  silentOnStartup: false,
-  historyLimit: 1000,
-  pickerRecordLimit: 50,
-  pickerPositionMode: "mouse",
-  excludedApps: ["KeePass.exe", "WindowsTerminal.exe"],
-  restoreClipboardAfterPaste: true,
-  pauseMonitoring: false,
-};
-
 function sanitizeSettings(payload: UserSetting): UserSetting {
   const pickerPositionMode = pickerPositionModes.has(payload.pickerPositionMode)
     ? payload.pickerPositionMode
@@ -49,6 +37,14 @@ let items: ClipItemDetail[] = [
     updatedAt: new Date(now - 1000 * 60 * 35).toISOString(),
     lastUsedAt: new Date(now - 1000 * 60 * 10).toISOString(),
     hash: "demo-hash-1",
+    imagePath: null,
+    imageWidth: null,
+    imageHeight: null,
+    imageFormat: null,
+    fileSize: null,
+    filePaths: [],
+    fileCount: 0,
+    totalSize: null,
   },
   {
     id: "demo-2",
@@ -62,6 +58,81 @@ let items: ClipItemDetail[] = [
     updatedAt: new Date(now - 1000 * 60 * 20).toISOString(),
     lastUsedAt: null,
     hash: "demo-hash-2",
+    imagePath: null,
+    imageWidth: null,
+    imageHeight: null,
+    imageFormat: null,
+    fileSize: null,
+    filePaths: [],
+    fileCount: 0,
+    totalSize: null,
+  },
+  {
+    id: "demo-3",
+    type: "image",
+    contentPreview: "图片 (1920 × 1080, 2.4 MB)",
+    fullText: "",
+    searchText: "图片 1920 1080",
+    sourceApp: "微信",
+    isFavorited: false,
+    createdAt: new Date(now - 1000 * 60 * 60).toISOString(),
+    updatedAt: new Date(now - 1000 * 60 * 60).toISOString(),
+    lastUsedAt: null,
+    hash: "demo-hash-3",
+    imagePath: "images/demo-3.png",
+    imageWidth: 1920,
+    imageHeight: 1080,
+    imageFormat: "png",
+    fileSize: 2400000,
+    filePaths: [],
+    fileCount: 0,
+    totalSize: null,
+  },
+  {
+    id: "demo-4",
+    type: "file",
+    contentPreview: "文件: 产品需求文档.pdf",
+    fullText: "",
+    searchText: "产品需求文档.pdf",
+    sourceApp: "文件资源管理器",
+    isFavorited: true,
+    createdAt: new Date(now - 1000 * 60 * 60 * 24).toISOString(),
+    updatedAt: new Date(now - 1000 * 60 * 60 * 24).toISOString(),
+    lastUsedAt: new Date(now - 1000 * 60 * 120).toISOString(),
+    hash: "demo-hash-4",
+    filePaths: ["C:\\Users\\User\\Documents\\产品需求文档.pdf"],
+    fileCount: 1,
+    totalSize: 3500000,
+    imagePath: null,
+    imageWidth: null,
+    imageHeight: null,
+    imageFormat: null,
+    fileSize: null,
+  },
+  {
+    id: "demo-5",
+    type: "file",
+    contentPreview: "3 个文件",
+    fullText: "",
+    searchText: "会议纪要.docx 预算表.xlsx 架构图.png",
+    sourceApp: "Microsoft Teams",
+    isFavorited: false,
+    createdAt: new Date(now - 1000 * 60 * 60 * 48).toISOString(),
+    updatedAt: new Date(now - 1000 * 60 * 60 * 48).toISOString(),
+    lastUsedAt: null,
+    hash: "demo-hash-5",
+    filePaths: [
+      "C:\\Users\\User\\Downloads\\会议纪要.docx",
+      "C:\\Users\\User\\Downloads\\预算表.xlsx",
+      "C:\\Users\\User\\Downloads\\架构图.png",
+    ],
+    fileCount: 3,
+    totalSize: 8700000,
+    imagePath: null,
+    imageWidth: null,
+    imageHeight: null,
+    imageFormat: null,
+    fileSize: null,
   },
 ];
 
@@ -83,7 +154,7 @@ function rankItems(query: SearchQuery): ClipItemDetail[] {
 
   if (keyword) {
     result = result.filter((item) =>
-      `${item.fullText} ${item.searchText} ${item.sourceApp ?? ""}`.toLowerCase().includes(keyword),
+      `${item.contentPreview} ${item.searchText} ${item.sourceApp ?? ""}`.toLowerCase().includes(keyword),
     );
 
     result.sort((left, right) => {
@@ -117,6 +188,7 @@ function rankItems(query: SearchQuery): ClipItemDetail[] {
 function toSummary(item: ClipItemDetail): ClipItemSummary {
   return {
     id: item.id,
+    type: item.type,
     contentPreview: item.contentPreview,
     sourceApp: item.sourceApp,
     isFavorited: item.isFavorited,
@@ -175,6 +247,10 @@ export async function mockUpdateTextItem(id: string, text: string): Promise<Clip
     throw new Error("未找到对应剪贴记录");
   }
 
+  if (item.type !== "text") {
+    throw new Error("只能编辑文本类型的记录");
+  }
+
   item.fullText = text;
   item.searchText = text.toLowerCase();
   item.contentPreview = text.slice(0, 80);
@@ -207,8 +283,12 @@ export async function mockPasteItem(id: string, option: PasteOption): Promise<Pa
 
   return {
     success: true,
-    code: option.restoreClipboardAfterPaste ? "clipboard_only_restore" : "clipboard_only",
-    message: "浏览器预览模式下仅模拟写入剪贴板，系统注入将在 Tauri 环境执行。",
+    code:
+      option.restoreClipboardAfterPaste ? `${item.type}_clipboard_only_restore` : `${item.type}_clipboard_only`,
+    message:
+      item.type === "text"
+        ? "浏览器预览模式下仅模拟写入文本剪贴板，系统注入将在 Tauri 环境执行。"
+        : `浏览器预览模式下仅模拟写入${item.type === "image" ? "图片" : "文件"}剪贴板，系统注入将在 Tauri 环境执行。`,
   };
 }
 
@@ -230,3 +310,15 @@ export async function mockResumeMonitoring(): Promise<UserSetting> {
   settings.pauseMonitoring = false;
   return structuredClone(settings);
 }
+
+let settings: UserSetting = {
+  shortcut: "Ctrl+`",
+  launchOnStartup: false,
+  silentOnStartup: false,
+  historyLimit: 1000,
+  pickerRecordLimit: 50,
+  pickerPositionMode: "mouse",
+  excludedApps: ["KeePass.exe", "WindowsTerminal.exe"],
+  restoreClipboardAfterPaste: true,
+  pauseMonitoring: false,
+};

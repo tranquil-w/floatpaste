@@ -292,6 +292,11 @@ export function PickerShell() {
                     </div>
 
                     <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 font-medium">
+                          {item.type === "text" ? "文本" : item.type === "image" ? "图片" : "文件"}
+                        </span>
+                      </div>
                       <p
                         className={`${isSelected ? "text-slate-800 font-medium" : "text-slate-600"} line-clamp-2 text-[13px] leading-[1.6] break-words [overflow-wrap:anywhere] transition-colors`}
                       >

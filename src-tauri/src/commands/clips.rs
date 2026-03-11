@@ -1,3 +1,4 @@
+use tracing::warn;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::{
@@ -54,6 +55,18 @@ pub fn update_text_item(
     id: String,
     text: String,
 ) -> Result<ClipItemDetail, String> {
+    // 检查是否是文本类型，只允许编辑文本类型
+    let existing = state
+        .repository
+        .get_item_detail(&id)
+        .map_err(map_error)?;
+    if existing.r#type != "text" {
+        return Err(format!(
+            "不能编辑 {} 类型的记录",
+            existing.r#type
+        ));
+    }
+
     let normalized = NormalizeService::normalize_text(&text, None)
         .ok_or_else(|| "更新内容不能为空".to_string())?;
     let detail = state
@@ -66,7 +79,15 @@ pub fn update_text_item(
 
 #[tauri::command]
 pub fn delete_item(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<(), String> {
+    let detail = state.repository.get_item_detail(&id).map_err(map_error)?;
     state.repository.delete_item(&id).map_err(map_error)?;
+    if detail.r#type == "image" {
+        if let Some(image_path) = detail.image_path.as_deref() {
+            if let Err(error) = state.image_storage.delete_image(image_path) {
+                warn!("删除图片文件失败: {image_path}, error={error}");
+            }
+        }
+    }
     let _ = app.emit(CLIPS_CHANGED_EVENT, &id);
     Ok(())
 }

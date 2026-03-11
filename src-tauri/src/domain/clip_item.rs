@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct ClipItemSummary {
     pub id: String,
+    pub r#type: String,
     pub content_preview: String,
     pub source_app: Option<String>,
     pub is_favorited: bool,
@@ -26,6 +27,50 @@ pub struct ClipItemDetail {
     pub updated_at: String,
     pub last_used_at: Option<String>,
     pub hash: String,
+    // Image-specific fields
+    pub image_path: Option<String>,
+    pub image_width: Option<i32>,
+    pub image_height: Option<i32>,
+    pub image_format: Option<String>,
+    pub file_size: Option<i64>,
+    // File-specific fields
+    pub file_paths: Vec<String>,
+    pub file_count: i32,
+    pub total_size: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewClipImageItem {
+    pub normalized: NormalizedClipImage,
+    pub source_app: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NormalizedClipImage {
+    pub preview_text: String,
+    pub search_text: String,
+    pub hash: String,
+    pub image_path: Option<String>,
+    pub image_width: Option<i32>,
+    pub image_height: Option<i32>,
+    pub image_format: Option<String>,
+    pub file_size: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewClipFileItem {
+    pub normalized: NormalizedClipFile,
+    pub source_app: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NormalizedClipFile {
+    pub preview_text: String,
+    pub search_text: String,
+    pub hash: String,
+    pub file_paths: Vec<String>,
+    pub file_count: i32,
+    pub total_size: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

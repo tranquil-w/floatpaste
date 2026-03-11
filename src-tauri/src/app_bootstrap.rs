@@ -13,6 +13,7 @@ use crate::{
     platform::windows::clipboard_monitor::ClipboardMonitor,
     repository::sqlite_repository::SqliteRepository,
     services::{
+        image_storage::ImageStorage,
         privacy_service::SelfWriteGuard, settings_service::SettingsService,
         tray_service::TrayService, window_coordinator::WindowCoordinator,
     },
@@ -21,6 +22,7 @@ use crate::{
 #[derive(Clone)]
 pub struct AppState {
     pub repository: SqliteRepository,
+    pub image_storage: ImageStorage,
     settings: Arc<RwLock<UserSetting>>,
     self_write_guard: SelfWriteGuard,
     picker_session: Arc<Mutex<PickerSession>>,
@@ -35,9 +37,10 @@ pub struct PickerSession {
 }
 
 impl AppState {
-    pub fn new(repository: SqliteRepository, settings: UserSetting) -> Self {
+    pub fn new(repository: SqliteRepository, image_storage: ImageStorage, settings: UserSetting) -> Self {
         Self {
             repository,
+            image_storage,
             settings: Arc::new(RwLock::new(settings)),
             self_write_guard: SelfWriteGuard::default(),
             picker_session: Arc::new(Mutex::new(PickerSession::default())),
@@ -101,8 +104,9 @@ pub fn bootstrap(app: &mut App, launch_mode: LaunchMode) -> Result<(), AppError>
     std::fs::create_dir_all(&data_dir)?;
     let db_path = data_dir.join("floatpaste.db");
     let repository = SqliteRepository::new(&db_path)?;
+    let image_storage = ImageStorage::new(data_dir.clone())?;
     let settings = repository.load_settings()?;
-    let state = AppState::new(repository, settings);
+    let state = AppState::new(repository, image_storage, settings);
 
     app.manage(state.clone());
     WindowCoordinator::configure_existing_windows(&app.handle());

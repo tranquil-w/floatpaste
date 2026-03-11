@@ -12,7 +12,7 @@ import {
 import { isTauriRuntime } from "../../bridge/runtime";
 import { hideCurrentWindow } from "../../bridge/window";
 import { queryClient } from "../../app/queryClient";
-import type { SearchSort } from "../../shared/types/clips";
+import type { ClipItemDetail, SearchSort } from "../../shared/types/clips";
 import type { PickerPositionMode, UserSetting } from "../../shared/types/settings";
 import { formatDateTime } from "../../shared/utils/time";
 import { useManagerStore } from "./store";
@@ -163,8 +163,8 @@ export function ManagerShell() {
   }, []);
 
   useEffect(() => {
-    if (detail.data) {
-      setDraftText(detail.data.fullText);
+    if (detail.data && detail.data.type === "text") {
+      setDraftText(detail.data.fullText ?? "");
     }
   }, [detail.data, setDraftText]);
 
@@ -179,6 +179,43 @@ export function ManagerShell() {
   const hasPreviousPage = pageIndex > 0;
   const hasNextPage = pageEnd < totalCount;
 
+  // 格式化字节大小
+  const formatBytes = (bytes?: number | null): string => {
+    if (!bytes) return "未知";
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+    return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
+  };
+
+  // 获取类型图标
+  const getTypeIcon = (type: string) => {
+    switch (type) {
+      case "text":
+        return "📝";
+      case "image":
+        return "🖼️";
+      case "file":
+        return "📎";
+      default:
+        return "📄";
+    }
+  };
+
+  // 获取类型标签
+  const getTypeLabel = (type: string) => {
+    switch (type) {
+      case "text":
+        return "文本";
+      case "image":
+        return "图片";
+      case "file":
+        return "文件";
+      default:
+        return "未知";
+    }
+  };
+
   return (
     <div className="flex h-screen flex-col px-5 py-6 text-ink md:px-8">
       <div className="mx-auto grid w-full max-w-7xl flex-1 min-h-0 gap-5 lg:grid-cols-[280px_minmax(360px,1fr)_420px]">
@@ -189,7 +226,7 @@ export function ManagerShell() {
             </div>
             <h1 className="mt-3 font-display text-3xl font-medium tracking-tight">资料库窗口</h1>
             <p className="mt-3 text-sm leading-relaxed text-slate-600">
-              当前版本已经打通文本记录、搜索、编辑、收藏、设置与速贴主链路，剩余工作主要集中在兼容性与稳定性收口。
+              当前版本已经打通文本、图片、文件记录的入库与基础浏览，搜索、收藏、设置与速贴主链路也已接入。
             </p>
           </div>
 
@@ -206,7 +243,7 @@ export function ManagerShell() {
             <div className="relative z-10">
               <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-white/60">快捷键</p>
               <p className="mt-1.5 text-2xl font-semibold tracking-wide">{settings.data?.shortcut ?? "Ctrl+`"}</p>
-              <p className="mt-3 text-[13px] leading-relaxed text-white/70">全局快捷键、速贴面板与回贴链路已经接入；可在设置中继续调整记录数、显示位置与启动行为。</p>
+              <p className="mt-3 text-[13px] leading-relaxed text-white/70">全局快捷键、速贴面板与文本/图片/文件的基础回贴链路已经接入；可在设置中继续调整记录数、显示位置与启动行为。</p>
             </div>
             <div className="absolute -right-4 -top-4 h-24 w-24 rounded-full bg-white/5 blur-2xl"></div>
           </div>
@@ -329,11 +366,16 @@ export function ManagerShell() {
                               {item.contentPreview}
                             </p>
                           </div>
-                          {item.isFavorited ? (
-                            <span className="shrink-0 rounded-full bg-amber-100/80 px-2 py-1 text-[10px] font-semibold text-amber-700">
-                              收藏
+                          <div className="flex flex-col items-end gap-2">
+                            <span className="text-[10px] px-2 py-1 rounded-full bg-slate-100 text-slate-500">
+                              {getTypeLabel(item.type)}
                             </span>
-                          ) : null}
+                            {item.isFavorited ? (
+                              <span className="shrink-0 rounded-full bg-amber-100/80 px-2 py-1 text-[10px] font-semibold text-amber-700">
+                                收藏
+                              </span>
+                            ) : null}
+                          </div>
                         </div>
                         <div className="mt-3.5 flex flex-wrap gap-x-4 gap-y-2 text-[11px] font-medium text-slate-400">
                           <span className="flex items-center gap-1.5"><span className="h-1 w-1 rounded-full bg-slate-300"></span>{item.sourceApp ?? "未知来源"}</span>
@@ -346,7 +388,7 @@ export function ManagerShell() {
                 ) : (
                   <EmptyState
                     title="当前没有匹配结果"
-                    description="复制任意文本后会自动入库；如果在浏览器预览模式中运行，这里会展示模拟数据。"
+                    description="复制文本、图片或文件后会自动入库；如果在浏览器预览模式中运行，这里会展示模拟数据。"
                   />
                 )}
               </div>
@@ -396,7 +438,9 @@ export function ManagerShell() {
                   <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">
                     详情编辑
                   </p>
-                  <h2 className="mt-1 font-display text-2xl font-medium tracking-tight">文本剪贴项</h2>
+                  <h2 className="mt-1 font-display text-2xl font-medium tracking-tight">
+                    {getTypeLabel(detail.data.type)}剪贴项
+                  </h2>
                 </div>
                 <div className="flex gap-2">
                   <button
@@ -424,7 +468,7 @@ export function ManagerShell() {
                     }
                     type="button"
                   >
-                    写入剪贴板
+                    {detail.data.type === "text" ? "写入剪贴板" : "复制到剪贴板"}
                   </button>
                 </div>
               </div>
@@ -446,41 +490,126 @@ export function ManagerShell() {
                   <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">更新时间</p>
                   <p className="mt-1.5 font-medium text-slate-800">{formatDateTime(selectedSummary.updatedAt)}</p>
                 </div>
+                {/* 图片或文件类型的额外信息 */}
+                {detail.data.type === "image" && (
+                  <>
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">尺寸</p>
+                      <p className="mt-1.5 font-medium text-slate-800">
+                        {detail.data.imageWidth} × {detail.data.imageHeight}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">大小</p>
+                      <p className="mt-1.5 font-medium text-slate-800">
+                        {formatBytes(detail.data.fileSize)}
+                      </p>
+                    </div>
+                    {detail.data.imageFormat && (
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">格式</p>
+                        <p className="mt-1.5 font-medium text-slate-800">{detail.data.imageFormat}</p>
+                      </div>
+                    )}
+                  </>
+                )}
+                {detail.data.type === "file" && (
+                  <>
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">文件数量</p>
+                      <p className="mt-1.5 font-medium text-slate-800">
+                        {detail.data.fileCount} 个
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">总大小</p>
+                      <p className="mt-1.5 font-medium text-slate-800">
+                        {formatBytes(detail.data.totalSize)}
+                      </p>
+                    </div>
+                  </>
+                )}
               </div>
 
-              <textarea
-                className="min-h-[200px] flex-1 w-full resize-none rounded-2xl border border-slate-200 bg-slate-50/50 px-5 py-5 text-[15px] leading-relaxed outline-none transition-all duration-300 focus:border-accent focus:bg-white focus:ring-4 focus:ring-accent/10"
-                onChange={(event) => setDraftText(event.target.value)}
-                value={draftText}
-              />
+              {/* 根据类型显示内容 */}
+              {detail.data.type === "text" ? (
+                <>
+                  <textarea
+                    className="min-h-[200px] flex-1 w-full resize-none rounded-2xl border border-slate-200 bg-slate-50/50 px-5 py-5 text-[15px] leading-relaxed outline-none transition-all duration-300 focus:border-accent focus:bg-white focus:ring-4 focus:ring-accent/10"
+                    onChange={(event) => setDraftText(event.target.value)}
+                    value={draftText}
+                  />
 
-              <div className="flex shrink-0 flex-wrap gap-2 pt-2">
-                <button
-                  className="rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white shadow-md transition-all hover:bg-slate-800 hover:shadow-lg disabled:opacity-50"
-                  disabled={updateTextMutation.isPending}
-                  onClick={() =>
-                    updateTextMutation.mutate({
-                      id: detail.data.id,
-                      text: draftText,
-                    })
-                  }
-                  type="button"
-                >
-                  保存文本
-                </button>
-                <button
-                  className="rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-red-600 shadow-sm ring-1 ring-inset ring-red-200 transition-all hover:bg-red-50 hover:text-red-700 disabled:opacity-50"
-                  disabled={deleteMutation.isPending}
-                  onClick={() => {
-                    deleteMutation.mutate(detail.data.id, {
-                      onSuccess: () => setSelectedItemId(null),
-                    });
-                  }}
-                  type="button"
-                >
-                  删除记录
-                </button>
-              </div>
+                  <div className="flex shrink-0 flex-wrap gap-2 pt-2">
+                    <button
+                      className="rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white shadow-md transition-all hover:bg-slate-800 hover:shadow-lg disabled:opacity-50"
+                      disabled={updateTextMutation.isPending}
+                      onClick={() =>
+                        updateTextMutation.mutate({
+                          id: detail.data.id,
+                          text: draftText,
+                        })
+                      }
+                      type="button"
+                    >
+                      保存文本
+                    </button>
+                    <button
+                      className="rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-red-600 shadow-sm ring-1 ring-inset ring-red-200 transition-all hover:bg-red-50 hover:text-red-700 disabled:opacity-50"
+                      disabled={deleteMutation.isPending}
+                      onClick={() => {
+                        deleteMutation.mutate(detail.data.id, {
+                          onSuccess: () => setSelectedItemId(null),
+                        });
+                      }}
+                      type="button"
+                    >
+                      删除记录
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex flex-col items-center justify-center py-10 text-center">
+                    <div className="text-6xl mb-3">{getTypeIcon(detail.data.type)}</div>
+                    <p className="text-slate-500 text-sm mb-1">
+                      {detail.data.type === "image"
+                        ? "图片类型记录不支持文本编辑，你可以复制到剪贴板后手动粘贴"
+                        : detail.data.type === "file"
+                          ? "文件类型记录不支持文本编辑，你可以复制到剪贴板后手动粘贴"
+                          : "该类型记录不支持文本编辑"}
+                    </p>
+                    {detail.data.type === "file" && (
+                      <div className="mt-4 w-full text-left bg-slate-50/50 p-4 rounded-xl border border-slate-200">
+                        <p className="text-xs font-bold uppercase tracking-wide text-slate-400 mb-2">
+                          文件路径
+                        </p>
+                        <div className="space-y-1 text-xs text-slate-600">
+                          {detail.data.filePaths.map((path, index) => (
+                            <p key={index} className="truncate hover:whitespace-normal">
+                              {path}
+                            </p>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex shrink-0 flex-wrap gap-2 pt-2">
+                    <button
+                      className="rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-red-600 shadow-sm ring-1 ring-inset ring-red-200 transition-all hover:bg-red-50 hover:text-red-700 disabled:opacity-50"
+                      disabled={deleteMutation.isPending}
+                      onClick={() => {
+                        deleteMutation.mutate(detail.data.id, {
+                          onSuccess: () => setSelectedItemId(null),
+                        });
+                      }}
+                      type="button"
+                    >
+                      删除记录
+                    </button>
+                  </div>
+                </>
+              )}
 
               {pasteMutation.data ? (
                 <p className="shrink-0 rounded-2xl bg-amber-50/80 px-4 py-3 text-sm text-amber-800 ring-1 ring-inset ring-amber-500/20">

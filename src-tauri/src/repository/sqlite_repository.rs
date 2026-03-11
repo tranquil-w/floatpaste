@@ -14,7 +14,8 @@ use uuid::Uuid;
 
 use crate::domain::{
     clip_item::{
-        ClipItemDetail, ClipItemSummary, NewClipTextItem, SearchQuery, SearchResult, SearchSort,
+        ClipItemDetail, ClipItemSummary, NewClipFileItem, NewClipImageItem, NewClipTextItem,
+        SearchQuery, SearchResult, SearchSort,
     },
     error::AppError,
     settings::{StoredWindowPosition, UserSetting},
@@ -120,8 +121,9 @@ impl SqliteRepository {
             transaction.execute(
                 "INSERT INTO clip_items(
                     id, type, full_text, preview_text, search_text, source_app,
-                    is_favorited, hash, created_at, updated_at, last_used_at, deleted_at
-                ) VALUES(?1, 'text', ?2, ?3, ?4, ?5, 0, ?6, ?7, ?7, NULL, NULL)",
+                    is_favorited, hash, created_at, updated_at, last_used_at, deleted_at,
+                    image_path, image_width, image_height, image_format, file_size, file_paths, file_count, total_size
+                ) VALUES(?1, 'text', ?2, ?3, ?4, ?5, 0, ?6, ?7, ?7, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '[]', 0, NULL)",
                 params![
                     id,
                     item.normalized.full_text,
@@ -147,10 +149,89 @@ impl SqliteRepository {
         self.get_item_detail(&id)
     }
 
+    pub fn save_image_item(&self, item: &NewClipImageItem) -> Result<ClipItemDetail, AppError> {
+        let now = Utc::now().timestamp_millis();
+        let id = Uuid::new_v4().to_string();
+        {
+            let connection = self.connection.lock()?;
+            let transaction = connection.unchecked_transaction()?;
+            transaction.execute(
+                "INSERT INTO clip_items(
+                    id, type, full_text, preview_text, search_text, source_app,
+                    is_favorited, hash, created_at, updated_at, last_used_at, deleted_at,
+                    image_path, image_width, image_height, image_format, file_size, file_paths, file_count, total_size
+                ) VALUES(?1, 'image', '', ?2, ?3, ?4, 0, ?5, ?6, ?6, NULL, NULL, ?7, ?8, ?9, ?10, ?11, '[]', 0, NULL)",
+                params![
+                    id,
+                    item.normalized.preview_text,
+                    item.normalized.search_text,
+                    item.source_app,
+                    item.normalized.hash,
+                    now,
+                    item.normalized.image_path,
+                    item.normalized.image_width,
+                    item.normalized.image_height,
+                    item.normalized.image_format,
+                    item.normalized.file_size
+                ],
+            )?;
+            transaction.execute(
+                "INSERT INTO clip_items_fts(item_id, full_text, search_text, source_app)
+                 VALUES(?1, '', ?2, ?3)",
+                params![
+                    id,
+                    item.normalized.search_text,
+                    item.source_app
+                ],
+            )?;
+            transaction.commit()?;
+        }
+        self.get_item_detail(&id)
+    }
+
+    pub fn save_file_item(&self, item: &NewClipFileItem) -> Result<ClipItemDetail, AppError> {
+        let now = Utc::now().timestamp_millis();
+        let id = Uuid::new_v4().to_string();
+        let file_paths_json = serde_json::to_string(&item.normalized.file_paths)?;
+        {
+            let connection = self.connection.lock()?;
+            let transaction = connection.unchecked_transaction()?;
+            transaction.execute(
+                "INSERT INTO clip_items(
+                    id, type, full_text, preview_text, search_text, source_app,
+                    is_favorited, hash, created_at, updated_at, last_used_at, deleted_at,
+                    image_path, image_width, image_height, image_format, file_size, file_paths, file_count, total_size
+                ) VALUES(?1, 'file', '', ?2, ?3, ?4, 0, ?5, ?6, ?6, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?7, ?8, ?9)",
+                params![
+                    id,
+                    item.normalized.preview_text,
+                    item.normalized.search_text,
+                    item.source_app,
+                    item.normalized.hash,
+                    now,
+                    file_paths_json,
+                    item.normalized.file_count,
+                    item.normalized.total_size
+                ],
+            )?;
+            transaction.execute(
+                "INSERT INTO clip_items_fts(item_id, full_text, search_text, source_app)
+                 VALUES(?1, '', ?2, ?3)",
+                params![
+                    id,
+                    item.normalized.search_text,
+                    item.source_app
+                ],
+            )?;
+            transaction.commit()?;
+        }
+        self.get_item_detail(&id)
+    }
+
     pub fn list_recent(&self, limit: u32) -> Result<Vec<ClipItemSummary>, AppError> {
         let connection = self.connection.lock()?;
         let sql = format!(
-            "SELECT id, preview_text, source_app, is_favorited, created_at, updated_at, last_used_at
+            "SELECT id, type, preview_text, source_app, is_favorited, created_at, updated_at, last_used_at
              FROM clip_items
              WHERE deleted_at IS NULL
              ORDER BY {}
@@ -165,7 +246,7 @@ impl SqliteRepository {
     pub fn list_favorites(&self, limit: u32) -> Result<Vec<ClipItemSummary>, AppError> {
         let connection = self.connection.lock()?;
         let sql = format!(
-            "SELECT id, preview_text, source_app, is_favorited, created_at, updated_at, last_used_at
+            "SELECT id, type, preview_text, source_app, is_favorited, created_at, updated_at, last_used_at
              FROM clip_items
              WHERE deleted_at IS NULL AND is_favorited = 1
              ORDER BY {}
@@ -181,7 +262,9 @@ impl SqliteRepository {
         let connection = self.connection.lock()?;
         let mut statement = connection.prepare(
             "SELECT id, type, preview_text, full_text, search_text, source_app,
-                    is_favorited, created_at, updated_at, last_used_at, hash
+                    is_favorited, created_at, updated_at, last_used_at, hash,
+                    image_path, image_width, image_height, image_format, file_size,
+                    file_paths, file_count, total_size
              FROM clip_items
              WHERE id = ?1 AND deleted_at IS NULL",
         )?;
@@ -330,7 +413,7 @@ impl SqliteRepository {
         values.push(Value::Integer(i64::from(query.limit)));
         values.push(Value::Integer(i64::from(query.offset)));
         let sql = format!(
-            "SELECT id, preview_text, source_app, is_favorited, created_at, updated_at, last_used_at
+            "SELECT id, type, preview_text, source_app, is_favorited, created_at, updated_at, last_used_at
              FROM clip_items
              WHERE {where_clause}
              ORDER BY {}
@@ -384,7 +467,7 @@ impl SqliteRepository {
         };
 
         let sql = format!(
-            "SELECT ci.id, ci.preview_text, ci.source_app, ci.is_favorited,
+            "SELECT ci.id, ci.type, ci.preview_text, ci.source_app, ci.is_favorited,
                     ci.created_at, ci.updated_at, ci.last_used_at
              FROM clip_items_fts
              JOIN clip_items ci ON ci.id = clip_items_fts.item_id
@@ -458,16 +541,20 @@ fn build_fts_query(keyword: &str) -> String {
 fn map_summary_row(row: &Row<'_>) -> rusqlite::Result<ClipItemSummary> {
     Ok(ClipItemSummary {
         id: row.get(0)?,
-        content_preview: row.get(1)?,
-        source_app: row.get(2)?,
-        is_favorited: row.get::<_, i64>(3)? == 1,
-        created_at: timestamp_to_iso(row.get_ref(4)?),
-        updated_at: timestamp_to_iso(row.get_ref(5)?),
-        last_used_at: optional_timestamp_to_iso(row.get_ref(6)?),
+        r#type: row.get(1)?,
+        content_preview: row.get(2)?,
+        source_app: row.get(3)?,
+        is_favorited: row.get::<_, i64>(4)? == 1,
+        created_at: timestamp_to_iso(row.get_ref(5)?),
+        updated_at: timestamp_to_iso(row.get_ref(6)?),
+        last_used_at: optional_timestamp_to_iso(row.get_ref(7)?),
     })
 }
 
 fn map_detail_row(row: &Row<'_>) -> rusqlite::Result<ClipItemDetail> {
+    let file_paths_str: String = row.get(16)?;
+    let file_paths = serde_json::from_str(&file_paths_str).unwrap_or_default();
+
     Ok(ClipItemDetail {
         id: row.get(0)?,
         r#type: row.get(1)?,
@@ -480,6 +567,14 @@ fn map_detail_row(row: &Row<'_>) -> rusqlite::Result<ClipItemDetail> {
         updated_at: timestamp_to_iso(row.get_ref(8)?),
         last_used_at: optional_timestamp_to_iso(row.get_ref(9)?),
         hash: row.get(10)?,
+        image_path: row.get(11)?,
+        image_width: row.get(12)?,
+        image_height: row.get(13)?,
+        image_format: row.get(14)?,
+        file_size: row.get(15)?,
+        file_paths,
+        file_count: row.get(17)?,
+        total_size: row.get(18)?,
     })
 }
 
@@ -637,6 +732,37 @@ mod tests {
         );
         let after_new_capture = repository.list_recent(10).unwrap();
         assert_eq!(after_new_capture[0].id, "latest-created");
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn save_image_item_round_trips_image_path_and_metadata() {
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+        let item = crate::domain::clip_item::NewClipImageItem {
+            normalized: crate::domain::clip_item::NormalizedClipImage {
+                preview_text: "图片 (16 x 16, 92.0 B)".to_string(),
+                search_text: "图片 16 x 16 png 92.0 b".to_string(),
+                hash: "image-hash".to_string(),
+                image_path: Some("images/test.png".to_string()),
+                image_width: Some(16),
+                image_height: Some(16),
+                image_format: Some("png".to_string()),
+                file_size: Some(92),
+            },
+            source_app: Some("画图".to_string()),
+        };
+
+        let detail = repository.save_image_item(&item).unwrap();
+
+        assert_eq!(detail.r#type, "image");
+        assert_eq!(detail.image_path.as_deref(), Some("images/test.png"));
+        assert_eq!(detail.image_width, Some(16));
+        assert_eq!(detail.image_height, Some(16));
+        assert_eq!(detail.image_format.as_deref(), Some("png"));
+        assert_eq!(detail.file_size, Some(92));
 
         drop(repository);
         fs::remove_file(path).unwrap();

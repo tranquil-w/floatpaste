@@ -13,7 +13,15 @@ CREATE TABLE IF NOT EXISTS clip_items (
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   last_used_at INTEGER NULL,
-  deleted_at INTEGER NULL
+  deleted_at INTEGER NULL,
+  image_path TEXT NULL,
+  image_width INTEGER NULL,
+  image_height INTEGER NULL,
+  image_format TEXT NULL,
+  file_size INTEGER NULL,
+  file_paths TEXT NOT NULL DEFAULT '[]',
+  file_count INTEGER NOT NULL DEFAULT 0,
+  total_size INTEGER NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_clip_items_created_at ON clip_items(created_at DESC);

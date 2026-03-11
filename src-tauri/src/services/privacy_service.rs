@@ -3,7 +3,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::domain::{clip_item::NormalizedClipText, error::AppError, settings::UserSetting};
+use crate::domain::{
+    clip_item::{NormalizedClipFile, NormalizedClipImage, NormalizedClipText},
+    error::AppError,
+    settings::UserSetting,
+};
 
 #[derive(Debug, Clone)]
 struct SuppressedHash {
@@ -45,11 +49,53 @@ impl PrivacyService {
         source_app: Option<&str>,
         self_write_guard: &SelfWriteGuard,
     ) -> Result<bool, AppError> {
+        Self::should_capture_by_hash(
+            settings,
+            &normalized.hash,
+            source_app,
+            self_write_guard,
+        )
+    }
+
+    pub fn should_capture_image(
+        settings: &UserSetting,
+        normalized: &NormalizedClipImage,
+        source_app: Option<&str>,
+        self_write_guard: &SelfWriteGuard,
+    ) -> Result<bool, AppError> {
+        Self::should_capture_by_hash(
+            settings,
+            &normalized.hash,
+            source_app,
+            self_write_guard,
+        )
+    }
+
+    pub fn should_capture_file(
+        settings: &UserSetting,
+        normalized: &NormalizedClipFile,
+        source_app: Option<&str>,
+        self_write_guard: &SelfWriteGuard,
+    ) -> Result<bool, AppError> {
+        Self::should_capture_by_hash(
+            settings,
+            &normalized.hash,
+            source_app,
+            self_write_guard,
+        )
+    }
+
+    fn should_capture_by_hash(
+        settings: &UserSetting,
+        hash: &str,
+        source_app: Option<&str>,
+        self_write_guard: &SelfWriteGuard,
+    ) -> Result<bool, AppError> {
         if settings.pause_monitoring {
             return Ok(false);
         }
 
-        if self_write_guard.is_suppressed(&normalized.hash)? {
+        if self_write_guard.is_suppressed(hash)? {
             return Ok(false);
         }
 
