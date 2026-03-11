@@ -64,6 +64,7 @@ export interface SearchResult {
 
 export interface PasteOption {
   restoreClipboardAfterPaste: boolean;
+  pasteToTarget?: boolean;
 }
 
 export interface PasteResult {

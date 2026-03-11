@@ -45,7 +45,7 @@ export function PickerShell() {
       return;
     }
 
-    const result = await pasteItem(item.id, { restoreClipboardAfterPaste: true });
+    const result = await pasteItem(item.id, { restoreClipboardAfterPaste: true, pasteToTarget: true });
     setLastMessage(result.message);
   };
 

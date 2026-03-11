@@ -1,4 +1,4 @@
-use std::{borrow::Cow, thread, time::Duration};
+use std::{borrow::Cow, fs, thread, time::Duration};
 
 use arboard::{Clipboard, Error as ClipboardError, ImageData};
 use tauri::AppHandle;
@@ -35,7 +35,7 @@ impl PasteExecutor {
         option: PasteOption,
     ) -> Result<PasteResult, AppError> {
         let detail = state.repository.get_item_detail(id)?;
-        let previous_clipboard = if option.restore_clipboard_after_paste {
+        let previous_clipboard = if option.restore_clipboard_after_paste && option.paste_to_target {
             Some(capture_clipboard_snapshot()?)
         } else {
             None
@@ -45,10 +45,21 @@ impl PasteExecutor {
 
         write_item_to_clipboard(state, &mut clipboard, &detail)?;
 
+        let clip_type_label = clip_type_label(&detail.r#type);
+
+        // 资料库窗口调用时仅写入剪贴板，不恢复目标窗口、不发送 Ctrl+V
+        if !option.paste_to_target {
+            state.repository.mark_used(id)?;
+            return Ok(PasteResult {
+                success: true,
+                code: format!("{}_clipboard_only", detail.r#type),
+                message: format!("已将{clip_type_label}写入系统剪贴板，可手动粘贴到目标位置。"),
+            });
+        }
+
         ShortcutManager::unregister_picker_session_shortcuts(app);
         WindowCoordinator::hide_picker(app)?;
 
-        let clip_type_label = clip_type_label(&detail.r#type);
         let picker_session = state.picker_session()?;
         let paste_result = if let Some(target_hwnd) = picker_session.target_window_hwnd {
             thread::sleep(Duration::from_millis(90));
@@ -236,7 +247,7 @@ fn analyze_file_paths(file_paths: &[String]) -> FileSelectionStats {
     let mut size_available = true;
 
     for path in file_paths {
-        let metadata = match std::fs::metadata(path) {
+        let metadata = match fs::metadata(path) {
             Ok(metadata) => metadata,
             Err(_) => {
                 size_available = false;

@@ -440,6 +440,7 @@ export function ManagerShell() {
                         option: {
                           restoreClipboardAfterPaste:
                             settings.data?.restoreClipboardAfterPaste ?? true,
+                          pasteToTarget: false,
                         },
                       })
                     }

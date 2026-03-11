@@ -126,6 +126,12 @@ pub struct SearchResult {
 #[serde(rename_all = "camelCase")]
 pub struct PasteOption {
     pub restore_clipboard_after_paste: bool,
+    #[serde(default = "default_true")]
+    pub paste_to_target: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
