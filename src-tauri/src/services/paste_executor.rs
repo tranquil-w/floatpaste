@@ -1,22 +1,10 @@
-use std::{borrow::Cow, mem::size_of, ptr::copy_nonoverlapping, thread, time::Duration};
+use std::{borrow::Cow, thread, time::Duration};
 
-use arboard::{Clipboard, ImageData};
+use arboard::{Clipboard, Error as ClipboardError, ImageData};
 use tauri::AppHandle;
 use tracing::warn;
-use windows::Win32::{
-    Foundation::{BOOL, POINT},
-    System::{
-        DataExchange::{
-            CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData,
-        },
-        Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE, GMEM_ZEROINIT},
-    },
-    UI::{
-        Input::KeyboardAndMouse::{
-            SendInput, INPUT, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, VK_CONTROL, VK_V,
-        },
-        Shell::DROPFILES,
-    },
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    SendInput, INPUT, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, VK_CONTROL, VK_V,
 };
 
 use crate::{
@@ -25,15 +13,17 @@ use crate::{
         clip_item::{ClipItemDetail, PasteOption, PasteResult},
         error::AppError,
     },
-    platform::windows::active_app::ActiveAppResolver,
+    platform::windows::{
+        active_app::ActiveAppResolver,
+        file_clipboard::read_file_paths_from_clipboard,
+        file_clipboard::write_file_paths_to_clipboard as write_file_paths_to_clipboard_impl,
+        image_clipboard::{read_image_from_clipboard, ClipboardImageData},
+    },
     services::{
-        normalize_service::NormalizeService,
-        shortcut_manager::ShortcutManager,
+        normalize_service::NormalizeService, shortcut_manager::ShortcutManager,
         window_coordinator::WindowCoordinator,
     },
 };
-
-const CF_HDROP_FORMAT: u32 = 15;
 
 pub struct PasteExecutor;
 
@@ -45,9 +35,13 @@ impl PasteExecutor {
         option: PasteOption,
     ) -> Result<PasteResult, AppError> {
         let detail = state.repository.get_item_detail(id)?;
+        let previous_clipboard = if option.restore_clipboard_after_paste {
+            Some(capture_clipboard_snapshot()?)
+        } else {
+            None
+        };
         let mut clipboard =
             Clipboard::new().map_err(|error| AppError::Clipboard(error.to_string()))?;
-        let previous_text = clipboard.get_text().ok();
 
         write_item_to_clipboard(state, &mut clipboard, &detail)?;
 
@@ -94,27 +88,193 @@ impl PasteExecutor {
             }
         };
 
-        if option.restore_clipboard_after_paste {
-            if let Some(snapshot) = previous_text {
-                if let Some(normalized) = NormalizeService::normalize_text(&snapshot, None) {
-                    state
-                        .self_write_guard()
-                        .suppress_hash(normalized.normalized.hash, Duration::from_secs(3))?;
-                }
-
-                thread::spawn(move || {
-                    thread::sleep(Duration::from_millis(550));
-                    if let Ok(mut restore_clipboard) = Clipboard::new() {
-                        let _ = restore_clipboard.set_text(snapshot);
-                    }
-                });
-            }
+        if let Some(snapshot) = previous_clipboard {
+            schedule_clipboard_restore(state.clone(), snapshot)?;
         }
 
         state.repository.mark_used(id)?;
 
         Ok(paste_result)
     }
+}
+
+#[derive(Debug, Clone)]
+enum ClipboardSnapshot {
+    Empty,
+    Text(String),
+    Image(ClipboardImageData),
+    Files(Vec<String>),
+}
+
+fn capture_clipboard_snapshot() -> Result<ClipboardSnapshot, AppError> {
+    if let Some(file_paths) = read_file_paths_from_clipboard()? {
+        return Ok(ClipboardSnapshot::Files(file_paths));
+    }
+
+    if let Some(image) = read_image_from_clipboard()? {
+        return Ok(ClipboardSnapshot::Image(image));
+    }
+
+    let mut clipboard = Clipboard::new().map_err(|error| AppError::Clipboard(error.to_string()))?;
+    match clipboard.get_text() {
+        Ok(text) => Ok(ClipboardSnapshot::Text(text)),
+        Err(ClipboardError::ContentNotAvailable) => Ok(ClipboardSnapshot::Empty),
+        Err(error) if should_retry_clipboard_read(&error) => {
+            Err(AppError::Clipboard(error.to_string()))
+        }
+        Err(_) => Ok(ClipboardSnapshot::Empty),
+    }
+}
+
+fn schedule_clipboard_restore(
+    state: AppState,
+    snapshot: ClipboardSnapshot,
+) -> Result<(), AppError> {
+    suppress_clipboard_snapshot(&state, &snapshot)?;
+
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(550));
+        if let Err(error) = restore_clipboard_snapshot(snapshot) {
+            warn!("恢复剪贴板失败: {error}");
+        }
+    });
+
+    Ok(())
+}
+
+fn suppress_clipboard_snapshot(
+    state: &AppState,
+    snapshot: &ClipboardSnapshot,
+) -> Result<(), AppError> {
+    match snapshot {
+        ClipboardSnapshot::Empty => Ok(()),
+        ClipboardSnapshot::Text(text) => {
+            if let Some(normalized) = NormalizeService::normalize_text(text, None) {
+                state
+                    .self_write_guard()
+                    .suppress_hash(normalized.normalized.hash, Duration::from_secs(3))?;
+            }
+            Ok(())
+        }
+        ClipboardSnapshot::Image(image) => {
+            let prepared =
+                state
+                    .image_storage
+                    .prepare_image(&image.rgba, image.width, image.height)?;
+            if let Some(normalized) = NormalizeService::normalize_image(
+                None,
+                Some(prepared.width),
+                Some(prepared.height),
+                Some(prepared.image_format),
+                Some(prepared.file_size),
+                Some(prepared.content_hash),
+                None,
+            ) {
+                state
+                    .self_write_guard()
+                    .suppress_hash(normalized.normalized.hash, Duration::from_secs(3))?;
+            }
+            Ok(())
+        }
+        ClipboardSnapshot::Files(file_paths) => {
+            let stats = analyze_file_paths(file_paths);
+            if let Some(normalized) = NormalizeService::normalize_files(
+                file_paths.clone(),
+                stats.directory_count,
+                stats.total_size,
+                None,
+            ) {
+                state
+                    .self_write_guard()
+                    .suppress_hash(normalized.normalized.hash, Duration::from_secs(3))?;
+            }
+            Ok(())
+        }
+    }
+}
+
+fn restore_clipboard_snapshot(snapshot: ClipboardSnapshot) -> Result<(), AppError> {
+    match snapshot {
+        ClipboardSnapshot::Empty => {
+            let mut clipboard =
+                Clipboard::new().map_err(|error| AppError::Clipboard(error.to_string()))?;
+            clipboard
+                .clear()
+                .map_err(|error| AppError::Clipboard(error.to_string()))
+        }
+        ClipboardSnapshot::Text(text) => {
+            let mut clipboard =
+                Clipboard::new().map_err(|error| AppError::Clipboard(error.to_string()))?;
+            clipboard
+                .set_text(text)
+                .map_err(|error| AppError::Clipboard(error.to_string()))
+        }
+        ClipboardSnapshot::Image(image) => {
+            let mut clipboard =
+                Clipboard::new().map_err(|error| AppError::Clipboard(error.to_string()))?;
+            clipboard
+                .set_image(ImageData {
+                    width: image.width,
+                    height: image.height,
+                    bytes: Cow::Owned(image.rgba),
+                })
+                .map_err(|error| AppError::Clipboard(error.to_string()))
+        }
+        ClipboardSnapshot::Files(file_paths) => write_file_paths_to_clipboard(&file_paths),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FileSelectionStats {
+    directory_count: i32,
+    total_size: Option<i64>,
+}
+
+fn analyze_file_paths(file_paths: &[String]) -> FileSelectionStats {
+    let mut total_size = 0i64;
+    let mut directory_count = 0i32;
+    let mut size_available = true;
+
+    for path in file_paths {
+        let metadata = match std::fs::metadata(path) {
+            Ok(metadata) => metadata,
+            Err(_) => {
+                size_available = false;
+                continue;
+            }
+        };
+
+        if metadata.is_dir() {
+            directory_count += 1;
+            size_available = false;
+            continue;
+        }
+
+        let Ok(file_size) = i64::try_from(metadata.len()) else {
+            size_available = false;
+            continue;
+        };
+        total_size = match total_size.checked_add(file_size) {
+            Some(total_size) => total_size,
+            None => {
+                size_available = false;
+                continue;
+            }
+        };
+    }
+
+    FileSelectionStats {
+        directory_count,
+        total_size: if size_available {
+            Some(total_size)
+        } else {
+            None
+        },
+    }
+}
+
+fn should_retry_clipboard_read(error: &ClipboardError) -> bool {
+    matches!(error, ClipboardError::ClipboardOccupied)
 }
 
 fn write_item_to_clipboard(
@@ -136,7 +296,9 @@ fn write_item_to_clipboard(
         }
         "image" => {
             let Some(image_path) = detail.image_path.as_deref() else {
-                return Err(AppError::Message("图片记录缺少可恢复的文件引用".to_string()));
+                return Err(AppError::Message(
+                    "图片记录缺少可恢复的文件引用".to_string(),
+                ));
             };
             let decoded = state.image_storage.load_image(image_path)?;
 
@@ -157,9 +319,12 @@ fn write_item_to_clipboard(
                 return Err(AppError::Message("文件记录缺少文件路径".to_string()));
             }
 
-            if let Some(normalized) =
-                NormalizeService::normalize_files(detail.file_paths.clone(), detail.total_size, None)
-            {
+            if let Some(normalized) = NormalizeService::normalize_files(
+                detail.file_paths.clone(),
+                detail.directory_count,
+                detail.total_size,
+                None,
+            ) {
                 state
                     .self_write_guard()
                     .suppress_hash(normalized.normalized.hash, Duration::from_secs(3))?;
@@ -172,49 +337,7 @@ fn write_item_to_clipboard(
 }
 
 fn write_file_paths_to_clipboard(file_paths: &[String]) -> Result<(), AppError> {
-    let mut encoded_paths = Vec::new();
-    for path in file_paths {
-        encoded_paths.extend(path.encode_utf16());
-        encoded_paths.push(0);
-    }
-    encoded_paths.push(0);
-
-    let header_size = size_of::<DROPFILES>();
-    let path_bytes_len = encoded_paths.len() * size_of::<u16>();
-    let total_size = header_size + path_bytes_len;
-
-    unsafe {
-        let handle = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, total_size);
-        if handle.is_invalid() {
-            return Err(AppError::Clipboard("分配文件剪贴板内存失败".to_string()));
-        }
-
-        let memory = GlobalLock(handle);
-        if memory.is_null() {
-            let _ = GlobalUnlock(handle);
-            return Err(AppError::Clipboard("锁定文件剪贴板内存失败".to_string()));
-        }
-
-        let header = memory.cast::<DROPFILES>();
-        (*header).pFiles = header_size as u32;
-        (*header).pt = POINT { x: 0, y: 0 };
-        (*header).fNC = BOOL(0);
-        (*header).fWide = BOOL(1);
-
-        let path_memory = memory.cast::<u8>().add(header_size).cast::<u16>();
-        copy_nonoverlapping(encoded_paths.as_ptr(), path_memory, encoded_paths.len());
-        let _ = GlobalUnlock(handle);
-
-        OpenClipboard(None).map_err(|error| AppError::Clipboard(error.to_string()))?;
-        let result = (|| {
-            EmptyClipboard().map_err(|error| AppError::Clipboard(error.to_string()))?;
-            SetClipboardData(CF_HDROP_FORMAT, handle.into())
-                .map_err(|error| AppError::Clipboard(error.to_string()))?;
-            Ok(())
-        })();
-        let _ = CloseClipboard();
-        result
-    }
+    write_file_paths_to_clipboard_impl(file_paths)
 }
 
 fn clip_type_label(value: &str) -> &'static str {
