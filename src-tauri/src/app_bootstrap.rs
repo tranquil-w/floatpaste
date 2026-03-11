@@ -13,9 +13,9 @@ use crate::{
     platform::windows::clipboard_monitor::ClipboardMonitor,
     repository::sqlite_repository::SqliteRepository,
     services::{
-        image_storage::ImageStorage,
-        privacy_service::SelfWriteGuard, settings_service::SettingsService,
-        tray_service::TrayService, window_coordinator::WindowCoordinator,
+        image_storage::ImageStorage, privacy_service::SelfWriteGuard,
+        settings_service::SettingsService, tray_service::TrayService,
+        window_coordinator::WindowCoordinator,
     },
 };
 
@@ -37,7 +37,11 @@ pub struct PickerSession {
 }
 
 impl AppState {
-    pub fn new(repository: SqliteRepository, image_storage: ImageStorage, settings: UserSetting) -> Self {
+    pub fn new(
+        repository: SqliteRepository,
+        image_storage: ImageStorage,
+        settings: UserSetting,
+    ) -> Self {
         Self {
             repository,
             image_storage,

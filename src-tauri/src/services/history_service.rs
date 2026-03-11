@@ -73,9 +73,7 @@ impl HistoryService {
                 state.repository.bump_item(&existing_id).map(Some)
             }
             DedupDecision::StoreNew => {
-                let stored = state
-                    .image_storage
-                    .store_prepared_image(&prepared_image)?;
+                let stored = state.image_storage.store_prepared_image(&prepared_image)?;
                 normalized.normalized.image_path = Some(stored.image_path.clone());
 
                 match state.repository.save_image_item(&normalized) {
@@ -92,13 +90,17 @@ impl HistoryService {
     pub fn ingest_files(
         state: &AppState,
         file_paths: Vec<String>,
+        directory_count: i32,
         total_size: Option<i64>,
         source_app: Option<String>,
     ) -> Result<Option<ClipItemDetail>, AppError> {
         let settings = state.current_settings()?;
-        let Some(normalized) =
-            NormalizeService::normalize_files(file_paths, total_size, source_app.clone())
-        else {
+        let Some(normalized) = NormalizeService::normalize_files(
+            file_paths,
+            directory_count,
+            total_size,
+            source_app.clone(),
+        ) else {
             return Ok(None);
         };
 

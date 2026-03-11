@@ -13,6 +13,7 @@ tauri-build = { version = "2.2.0", features = [] }
 [dependencies]
 arboard = "3.4.1"
 chrono = { version = "0.4.42", features = ["clock", "serde"] }
+image = { version = "0.25.9", default-features = false, features = ["bmp", "png"] }
 png = "0.17.16"
 rusqlite = { version = "0.32.1", features = ["bundled"] }
 serde = { version = "1.0.228", features = ["derive"] }

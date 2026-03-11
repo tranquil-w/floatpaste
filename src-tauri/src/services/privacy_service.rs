@@ -49,12 +49,7 @@ impl PrivacyService {
         source_app: Option<&str>,
         self_write_guard: &SelfWriteGuard,
     ) -> Result<bool, AppError> {
-        Self::should_capture_by_hash(
-            settings,
-            &normalized.hash,
-            source_app,
-            self_write_guard,
-        )
+        Self::should_capture_by_hash(settings, &normalized.hash, source_app, self_write_guard)
     }
 
     pub fn should_capture_image(
@@ -63,12 +58,7 @@ impl PrivacyService {
         source_app: Option<&str>,
         self_write_guard: &SelfWriteGuard,
     ) -> Result<bool, AppError> {
-        Self::should_capture_by_hash(
-            settings,
-            &normalized.hash,
-            source_app,
-            self_write_guard,
-        )
+        Self::should_capture_by_hash(settings, &normalized.hash, source_app, self_write_guard)
     }
 
     pub fn should_capture_file(
@@ -77,12 +67,7 @@ impl PrivacyService {
         source_app: Option<&str>,
         self_write_guard: &SelfWriteGuard,
     ) -> Result<bool, AppError> {
-        Self::should_capture_by_hash(
-            settings,
-            &normalized.hash,
-            source_app,
-            self_write_guard,
-        )
+        Self::should_capture_by_hash(settings, &normalized.hash, source_app, self_write_guard)
     }
 
     fn should_capture_by_hash(

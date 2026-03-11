@@ -1,5 +1,7 @@
 pub mod active_app;
 pub mod clipboard_monitor;
+pub mod file_clipboard;
+pub mod image_clipboard;
 pub mod picker_mouse_monitor;
 pub mod picker_position;
 pub mod shortcuts;

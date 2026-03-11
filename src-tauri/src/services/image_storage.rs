@@ -56,8 +56,8 @@ impl ImageStorage {
         let png_bytes = encode_png(rgba, width, height)?;
         let file_size = i64::try_from(png_bytes.len())
             .map_err(|_| AppError::Message("图片数据过大，无法保存".to_string()))?;
-        let width =
-            i32::try_from(width).map_err(|_| AppError::Message("图片宽度超出支持范围".to_string()))?;
+        let width = i32::try_from(width)
+            .map_err(|_| AppError::Message("图片宽度超出支持范围".to_string()))?;
         let height = i32::try_from(height)
             .map_err(|_| AppError::Message("图片高度超出支持范围".to_string()))?;
 
@@ -147,24 +147,28 @@ fn encode_png(rgba: &[u8], width: usize, height: usize) -> Result<Vec<u8>, AppEr
         .and_then(|pixels| pixels.checked_mul(4))
         .ok_or_else(|| AppError::Message("图片尺寸超出支持范围".to_string()))?;
     if rgba.len() != expected_len {
-        return Err(AppError::Message("图片像素数据长度与尺寸不匹配".to_string()));
+        return Err(AppError::Message(
+            "图片像素数据长度与尺寸不匹配".to_string(),
+        ));
     }
 
     let mut output = Vec::new();
     let width =
         u32::try_from(width).map_err(|_| AppError::Message("图片宽度超出支持范围".to_string()))?;
-    let height = u32::try_from(height)
-        .map_err(|_| AppError::Message("图片高度超出支持范围".to_string()))?;
+    let height =
+        u32::try_from(height).map_err(|_| AppError::Message("图片高度超出支持范围".to_string()))?;
 
-    let mut encoder = Encoder::new(&mut output, width, height);
-    encoder.set_color(ColorType::Rgba);
-    encoder.set_depth(BitDepth::Eight);
-    let mut writer = encoder
-        .write_header()
-        .map_err(|error| AppError::Message(format!("编码 PNG 图片失败: {error}")))?;
-    writer
-        .write_image_data(rgba)
-        .map_err(|error| AppError::Message(format!("写入 PNG 图片失败: {error}")))?;
+    {
+        let mut encoder = Encoder::new(&mut output, width, height);
+        encoder.set_color(ColorType::Rgba);
+        encoder.set_depth(BitDepth::Eight);
+        let mut writer = encoder
+            .write_header()
+            .map_err(|error| AppError::Message(format!("编码 PNG 图片失败: {error}")))?;
+        writer
+            .write_image_data(rgba)
+            .map_err(|error| AppError::Message(format!("写入 PNG 图片失败: {error}")))?;
+    }
 
     Ok(output)
 }

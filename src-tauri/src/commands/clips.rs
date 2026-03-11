@@ -1,5 +1,5 @@
-use tracing::warn;
 use tauri::{AppHandle, Emitter, State};
+use tracing::warn;
 
 use crate::{
     app_bootstrap::AppState,
@@ -56,15 +56,9 @@ pub fn update_text_item(
     text: String,
 ) -> Result<ClipItemDetail, String> {
     // 检查是否是文本类型，只允许编辑文本类型
-    let existing = state
-        .repository
-        .get_item_detail(&id)
-        .map_err(map_error)?;
+    let existing = state.repository.get_item_detail(&id).map_err(map_error)?;
     if existing.r#type != "text" {
-        return Err(format!(
-            "不能编辑 {} 类型的记录",
-            existing.r#type
-        ));
+        return Err(format!("不能编辑 {} 类型的记录", existing.r#type));
     }
 
     let normalized = NormalizeService::normalize_text(&text, None)

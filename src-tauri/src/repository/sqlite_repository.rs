@@ -1,4 +1,5 @@
 use std::{
+    fs,
     path::Path,
     sync::{Arc, Mutex},
 };
@@ -23,6 +24,19 @@ use crate::domain::{
 
 const USER_SETTINGS_KEY: &str = "user_settings";
 const PICKER_LAST_POSITION_KEY: &str = "picker_last_position";
+const CURRENT_SCHEMA_VERSION: i32 = 3;
+const CLIP_ITEMS_MEDIA_COLUMNS: [(&str, &str); 7] = [
+    ("image_path", "TEXT NULL"),
+    ("image_width", "INTEGER NULL"),
+    ("image_height", "INTEGER NULL"),
+    ("image_format", "TEXT NULL"),
+    ("file_size", "INTEGER NULL"),
+    ("file_paths", "TEXT NOT NULL DEFAULT '[]'"),
+    ("file_count", "INTEGER NOT NULL DEFAULT 0"),
+];
+const CLIP_ITEMS_TOTAL_SIZE_COLUMN: (&str, &str) = ("total_size", "INTEGER NULL");
+const CLIP_ITEMS_DIRECTORY_COUNT_COLUMN: (&str, &str) =
+    ("directory_count", "INTEGER NOT NULL DEFAULT 0");
 
 #[derive(Clone)]
 pub struct SqliteRepository {
@@ -32,7 +46,7 @@ pub struct SqliteRepository {
 impl SqliteRepository {
     pub fn new(path: &Path) -> Result<Self, AppError> {
         let connection = Connection::open(path)?;
-        connection.execute_batch(include_str!("../../migrations/0001_init.sql"))?;
+        initialize_database(&connection)?;
         Ok(Self {
             connection: Arc::new(Mutex::new(connection)),
         })
@@ -122,8 +136,8 @@ impl SqliteRepository {
                 "INSERT INTO clip_items(
                     id, type, full_text, preview_text, search_text, source_app,
                     is_favorited, hash, created_at, updated_at, last_used_at, deleted_at,
-                    image_path, image_width, image_height, image_format, file_size, file_paths, file_count, total_size
-                ) VALUES(?1, 'text', ?2, ?3, ?4, ?5, 0, ?6, ?7, ?7, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '[]', 0, NULL)",
+                    image_path, image_width, image_height, image_format, file_size, file_paths, file_count, total_size, directory_count
+                ) VALUES(?1, 'text', ?2, ?3, ?4, ?5, 0, ?6, ?7, ?7, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '[]', 0, NULL, 0)",
                 params![
                     id,
                     item.normalized.full_text,
@@ -159,8 +173,8 @@ impl SqliteRepository {
                 "INSERT INTO clip_items(
                     id, type, full_text, preview_text, search_text, source_app,
                     is_favorited, hash, created_at, updated_at, last_used_at, deleted_at,
-                    image_path, image_width, image_height, image_format, file_size, file_paths, file_count, total_size
-                ) VALUES(?1, 'image', '', ?2, ?3, ?4, 0, ?5, ?6, ?6, NULL, NULL, ?7, ?8, ?9, ?10, ?11, '[]', 0, NULL)",
+                    image_path, image_width, image_height, image_format, file_size, file_paths, file_count, total_size, directory_count
+                ) VALUES(?1, 'image', '', ?2, ?3, ?4, 0, ?5, ?6, ?6, NULL, NULL, ?7, ?8, ?9, ?10, ?11, '[]', 0, NULL, 0)",
                 params![
                     id,
                     item.normalized.preview_text,
@@ -178,11 +192,7 @@ impl SqliteRepository {
             transaction.execute(
                 "INSERT INTO clip_items_fts(item_id, full_text, search_text, source_app)
                  VALUES(?1, '', ?2, ?3)",
-                params![
-                    id,
-                    item.normalized.search_text,
-                    item.source_app
-                ],
+                params![id, item.normalized.search_text, item.source_app],
             )?;
             transaction.commit()?;
         }
@@ -200,8 +210,8 @@ impl SqliteRepository {
                 "INSERT INTO clip_items(
                     id, type, full_text, preview_text, search_text, source_app,
                     is_favorited, hash, created_at, updated_at, last_used_at, deleted_at,
-                    image_path, image_width, image_height, image_format, file_size, file_paths, file_count, total_size
-                ) VALUES(?1, 'file', '', ?2, ?3, ?4, 0, ?5, ?6, ?6, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?7, ?8, ?9)",
+                    image_path, image_width, image_height, image_format, file_size, file_paths, file_count, total_size, directory_count
+                ) VALUES(?1, 'file', '', ?2, ?3, ?4, 0, ?5, ?6, ?6, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?7, ?8, ?9, ?10)",
                 params![
                     id,
                     item.normalized.preview_text,
@@ -211,17 +221,14 @@ impl SqliteRepository {
                     now,
                     file_paths_json,
                     item.normalized.file_count,
-                    item.normalized.total_size
+                    item.normalized.total_size,
+                    item.normalized.directory_count
                 ],
             )?;
             transaction.execute(
                 "INSERT INTO clip_items_fts(item_id, full_text, search_text, source_app)
                  VALUES(?1, '', ?2, ?3)",
-                params![
-                    id,
-                    item.normalized.search_text,
-                    item.source_app
-                ],
+                params![id, item.normalized.search_text, item.source_app],
             )?;
             transaction.commit()?;
         }
@@ -231,7 +238,7 @@ impl SqliteRepository {
     pub fn list_recent(&self, limit: u32) -> Result<Vec<ClipItemSummary>, AppError> {
         let connection = self.connection.lock()?;
         let sql = format!(
-            "SELECT id, type, preview_text, source_app, is_favorited, created_at, updated_at, last_used_at
+            "SELECT id, type, preview_text, source_app, is_favorited, file_paths, file_count, total_size, directory_count, created_at, updated_at, last_used_at
              FROM clip_items
              WHERE deleted_at IS NULL
              ORDER BY {}
@@ -246,7 +253,7 @@ impl SqliteRepository {
     pub fn list_favorites(&self, limit: u32) -> Result<Vec<ClipItemSummary>, AppError> {
         let connection = self.connection.lock()?;
         let sql = format!(
-            "SELECT id, type, preview_text, source_app, is_favorited, created_at, updated_at, last_used_at
+            "SELECT id, type, preview_text, source_app, is_favorited, file_paths, file_count, total_size, directory_count, created_at, updated_at, last_used_at
              FROM clip_items
              WHERE deleted_at IS NULL AND is_favorited = 1
              ORDER BY {}
@@ -264,7 +271,7 @@ impl SqliteRepository {
             "SELECT id, type, preview_text, full_text, search_text, source_app,
                     is_favorited, created_at, updated_at, last_used_at, hash,
                     image_path, image_width, image_height, image_format, file_size,
-                    file_paths, file_count, total_size
+                    file_paths, file_count, total_size, directory_count
              FROM clip_items
              WHERE id = ?1 AND deleted_at IS NULL",
         )?;
@@ -413,7 +420,7 @@ impl SqliteRepository {
         values.push(Value::Integer(i64::from(query.limit)));
         values.push(Value::Integer(i64::from(query.offset)));
         let sql = format!(
-            "SELECT id, type, preview_text, source_app, is_favorited, created_at, updated_at, last_used_at
+            "SELECT id, type, preview_text, source_app, is_favorited, file_paths, file_count, total_size, directory_count, created_at, updated_at, last_used_at
              FROM clip_items
              WHERE {where_clause}
              ORDER BY {}
@@ -468,6 +475,7 @@ impl SqliteRepository {
 
         let sql = format!(
             "SELECT ci.id, ci.type, ci.preview_text, ci.source_app, ci.is_favorited,
+                    ci.file_paths, ci.file_count, ci.total_size, ci.directory_count,
                     ci.created_at, ci.updated_at, ci.last_used_at
              FROM clip_items_fts
              JOIN clip_items ci ON ci.id = clip_items_fts.item_id
@@ -512,6 +520,106 @@ fn build_filters_clause_with_alias(query: &SearchQuery, alias: &str) -> (String,
     (clauses.join(" AND "), values)
 }
 
+fn initialize_database(connection: &Connection) -> Result<(), AppError> {
+    connection.execute_batch(include_str!("../../migrations/0001_init.sql"))?;
+
+    let schema_version = current_schema_version(connection)?;
+    if schema_version < CURRENT_SCHEMA_VERSION {
+        apply_schema_upgrades(connection, schema_version)?;
+    } else if !clip_items_has_media_columns(connection)? {
+        // 兼容历史上未记录 user_version 的已有数据库。
+        apply_media_columns_migration(connection)?;
+        set_schema_version(connection, CURRENT_SCHEMA_VERSION)?;
+    }
+
+    Ok(())
+}
+
+fn apply_schema_upgrades(connection: &Connection, current_version: i32) -> Result<(), AppError> {
+    if current_version < 2 {
+        apply_media_columns_migration(connection)?;
+    }
+
+    if current_version < 3 {
+        apply_directory_count_migration(connection)?;
+    }
+
+    set_schema_version(connection, CURRENT_SCHEMA_VERSION)
+}
+
+fn apply_media_columns_migration(connection: &Connection) -> Result<(), AppError> {
+    for (column_name, definition) in clip_items_media_columns() {
+        if column_exists(connection, "clip_items", column_name)? {
+            continue;
+        }
+
+        connection.execute(
+            &format!("ALTER TABLE clip_items ADD COLUMN {column_name} {definition}"),
+            [],
+        )?;
+    }
+
+    Ok(())
+}
+
+fn apply_directory_count_migration(connection: &Connection) -> Result<(), AppError> {
+    let (column_name, definition) = CLIP_ITEMS_DIRECTORY_COUNT_COLUMN;
+    if !column_exists(connection, "clip_items", column_name)? {
+        connection.execute(
+            &format!("ALTER TABLE clip_items ADD COLUMN {column_name} {definition}"),
+            [],
+        )?;
+    }
+
+    Ok(())
+}
+
+fn current_schema_version(connection: &Connection) -> Result<i32, AppError> {
+    connection
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .map_err(Into::into)
+}
+
+fn set_schema_version(connection: &Connection, version: i32) -> Result<(), AppError> {
+    connection.pragma_update(None, "user_version", version)?;
+    Ok(())
+}
+
+fn clip_items_has_media_columns(connection: &Connection) -> Result<bool, AppError> {
+    for (column_name, _) in clip_items_media_columns() {
+        if !column_exists(connection, "clip_items", column_name)? {
+            return Ok(false);
+        }
+    }
+
+    Ok(true)
+}
+
+fn clip_items_media_columns() -> impl Iterator<Item = (&'static str, &'static str)> {
+    CLIP_ITEMS_MEDIA_COLUMNS
+        .iter()
+        .copied()
+        .chain(std::iter::once(CLIP_ITEMS_TOTAL_SIZE_COLUMN))
+        .chain(std::iter::once(CLIP_ITEMS_DIRECTORY_COUNT_COLUMN))
+}
+
+fn column_exists(
+    connection: &Connection,
+    table_name: &str,
+    column_name: &str,
+) -> Result<bool, AppError> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table_name})"))?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
+
+    for existing_column in rows {
+        if existing_column? == column_name {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
 fn prefix(alias: &str) -> String {
     if alias.is_empty() {
         String::new()
@@ -539,26 +647,53 @@ fn build_fts_query(keyword: &str) -> String {
 }
 
 fn map_summary_row(row: &Row<'_>) -> rusqlite::Result<ClipItemSummary> {
+    let r#type: String = row.get(1)?;
+    let preview_text: String = row.get(2)?;
+    let file_paths = parse_file_paths(row.get::<_, String>(5)?);
+    let file_count: i32 = row.get(6)?;
+    let stored_total_size: Option<i64> = row.get(7)?;
+    let stored_directory_count: i32 = row.get(8)?;
+    let resolved_file_fields = resolve_file_clip_fields(
+        &r#type,
+        &file_paths,
+        file_count,
+        stored_directory_count,
+        stored_total_size,
+    );
+
     Ok(ClipItemSummary {
         id: row.get(0)?,
-        r#type: row.get(1)?,
-        content_preview: row.get(2)?,
+        r#type,
+        content_preview: resolved_file_fields.content_preview.unwrap_or(preview_text),
         source_app: row.get(3)?,
         is_favorited: row.get::<_, i64>(4)? == 1,
-        created_at: timestamp_to_iso(row.get_ref(5)?),
-        updated_at: timestamp_to_iso(row.get_ref(6)?),
-        last_used_at: optional_timestamp_to_iso(row.get_ref(7)?),
+        file_count: resolved_file_fields.file_count,
+        directory_count: resolved_file_fields.directory_count,
+        created_at: timestamp_to_iso(row.get_ref(9)?),
+        updated_at: timestamp_to_iso(row.get_ref(10)?),
+        last_used_at: optional_timestamp_to_iso(row.get_ref(11)?),
     })
 }
 
 fn map_detail_row(row: &Row<'_>) -> rusqlite::Result<ClipItemDetail> {
-    let file_paths_str: String = row.get(16)?;
-    let file_paths = serde_json::from_str(&file_paths_str).unwrap_or_default();
+    let r#type: String = row.get(1)?;
+    let preview_text: String = row.get(2)?;
+    let file_paths = parse_file_paths(row.get::<_, String>(16)?);
+    let file_count: i32 = row.get(17)?;
+    let stored_total_size: Option<i64> = row.get(18)?;
+    let stored_directory_count: i32 = row.get(19)?;
+    let resolved_file_fields = resolve_file_clip_fields(
+        &r#type,
+        &file_paths,
+        file_count,
+        stored_directory_count,
+        stored_total_size,
+    );
 
     Ok(ClipItemDetail {
         id: row.get(0)?,
-        r#type: row.get(1)?,
-        content_preview: row.get(2)?,
+        r#type,
+        content_preview: resolved_file_fields.content_preview.unwrap_or(preview_text),
         full_text: row.get(3)?,
         search_text: row.get(4)?,
         source_app: row.get(5)?,
@@ -573,9 +708,121 @@ fn map_detail_row(row: &Row<'_>) -> rusqlite::Result<ClipItemDetail> {
         image_format: row.get(14)?,
         file_size: row.get(15)?,
         file_paths,
-        file_count: row.get(17)?,
-        total_size: row.get(18)?,
+        file_count: resolved_file_fields.file_count,
+        directory_count: resolved_file_fields.directory_count,
+        total_size: resolved_file_fields.total_size,
     })
+}
+
+fn parse_file_paths(file_paths_str: String) -> Vec<String> {
+    serde_json::from_str(&file_paths_str).unwrap_or_else(|error| {
+        warn!("解析 file_paths JSON 失败: {error}");
+        Vec::new()
+    })
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedFileClipFields {
+    content_preview: Option<String>,
+    file_count: i32,
+    directory_count: i32,
+    total_size: Option<i64>,
+}
+
+fn resolve_file_clip_fields(
+    clip_type: &str,
+    file_paths: &[String],
+    stored_file_count: i32,
+    stored_directory_count: i32,
+    stored_total_size: Option<i64>,
+) -> ResolvedFileClipFields {
+    if clip_type != "file" {
+        return ResolvedFileClipFields {
+            content_preview: None,
+            file_count: stored_file_count,
+            directory_count: stored_directory_count,
+            total_size: stored_total_size,
+        };
+    }
+
+    let analyzed = analyze_file_paths(file_paths);
+    let file_count = if stored_file_count > 0 {
+        stored_file_count
+    } else {
+        file_paths.len() as i32
+    };
+    let directory_count = stored_directory_count
+        .max(analyzed.directory_count)
+        .clamp(0, file_count);
+    let total_size = if directory_count > 0 {
+        None
+    } else {
+        stored_total_size.or(analyzed.total_size)
+    };
+
+    ResolvedFileClipFields {
+        content_preview: Some(crate::services::normalize_service::build_file_preview(
+            file_paths,
+            file_count,
+            directory_count,
+            total_size,
+        )),
+        file_count,
+        directory_count,
+        total_size,
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct FilePathAnalysis {
+    directory_count: i32,
+    total_size: Option<i64>,
+}
+
+fn analyze_file_paths(file_paths: &[String]) -> FilePathAnalysis {
+    let mut total_size = 0i64;
+    let mut directory_count = 0i32;
+    let mut size_available = true;
+
+    for path in file_paths {
+        let metadata = match fs::metadata(path) {
+            Ok(metadata) => metadata,
+            Err(_) => {
+                size_available = false;
+                continue;
+            }
+        };
+
+        if metadata.is_dir() {
+            directory_count += 1;
+            size_available = false;
+            continue;
+        }
+
+        let file_size = match i64::try_from(metadata.len()) {
+            Ok(file_size) => file_size,
+            Err(_) => {
+                size_available = false;
+                continue;
+            }
+        };
+        total_size = match total_size.checked_add(file_size) {
+            Some(total_size) => total_size,
+            None => {
+                size_available = false;
+                continue;
+            }
+        };
+    }
+
+    FilePathAnalysis {
+        directory_count,
+        total_size: if size_available {
+            Some(total_size)
+        } else {
+            None
+        },
+    }
 }
 
 fn timestamp_to_iso(value: ValueRef<'_>) -> String {
@@ -614,6 +861,7 @@ mod tests {
     use std::{fs, path::PathBuf};
 
     use chrono::{Duration, Utc};
+    use rusqlite::Connection;
 
     use super::{bool_to_i64, SqliteRepository};
     use crate::domain::{
@@ -621,11 +869,91 @@ mod tests {
         settings::StoredWindowPosition,
     };
 
+    const LEGACY_SCHEMA_SQL: &str = r#"
+PRAGMA journal_mode = WAL;
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS clip_items (
+  id TEXT PRIMARY KEY,
+  type TEXT NOT NULL,
+  full_text TEXT NOT NULL,
+  preview_text TEXT NOT NULL,
+  search_text TEXT NOT NULL,
+  source_app TEXT NULL,
+  is_favorited INTEGER NOT NULL DEFAULT 0,
+  hash TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  last_used_at INTEGER NULL,
+  deleted_at INTEGER NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_clip_items_created_at ON clip_items(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_clip_items_last_used_at ON clip_items(last_used_at DESC);
+CREATE INDEX IF NOT EXISTS idx_clip_items_hash ON clip_items(hash);
+CREATE INDEX IF NOT EXISTS idx_clip_items_source_app ON clip_items(source_app);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS clip_items_fts USING fts5(
+  item_id UNINDEXED,
+  full_text,
+  search_text,
+  source_app
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS excluded_apps (
+  executable_name TEXT PRIMARY KEY
+);
+"#;
+
     fn temp_db_path() -> PathBuf {
         std::env::temp_dir().join(format!(
             "floatpaste-repository-test-{}.db",
             uuid::Uuid::new_v4()
         ))
+    }
+
+    #[test]
+    fn new_upgrades_legacy_database_with_media_columns() {
+        let path = temp_db_path();
+        let connection = Connection::open(&path).unwrap();
+        connection.execute_batch(LEGACY_SCHEMA_SQL).unwrap();
+        drop(connection);
+
+        let repository = SqliteRepository::new(&path).unwrap();
+        let detail = repository
+            .save_file_item(&crate::domain::clip_item::NewClipFileItem {
+                normalized: crate::domain::clip_item::NormalizedClipFile {
+                    preview_text: "文件: demo.txt".to_string(),
+                    search_text: "demo.txt".to_string(),
+                    hash: "file-hash".to_string(),
+                    file_paths: vec!["C:\\Temp\\demo.txt".to_string()],
+                    file_count: 1,
+                    directory_count: 0,
+                    total_size: Some(42),
+                },
+                source_app: Some("资源管理器".to_string()),
+            })
+            .unwrap();
+
+        assert_eq!(detail.r#type, "file");
+        assert_eq!(detail.file_paths, vec!["C:\\Temp\\demo.txt".to_string()]);
+        assert_eq!(detail.total_size, Some(42));
+
+        let version = repository
+            .connection
+            .lock()
+            .unwrap()
+            .query_row("PRAGMA user_version", [], |row| row.get::<_, i32>(0))
+            .unwrap();
+        assert_eq!(version, 3);
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
     }
 
     fn seed_item(

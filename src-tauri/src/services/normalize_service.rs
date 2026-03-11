@@ -63,19 +63,13 @@ impl NormalizeService {
             "图片 {} {} {}",
             dimension_text,
             format.as_deref().unwrap_or(""),
-            file_size
-                .map(format_bytes)
-                .unwrap_or_default(),
+            file_size.map(format_bytes).unwrap_or_default(),
         )
         .trim()
         .to_lowercase();
         let hash_input = format!(
             "{:?}{:?}{:?}{:?}{:?}",
-            content_hash,
-            width,
-            height,
-            format,
-            file_size
+            content_hash, width, height, format, file_size
         );
         let hash = format!("{:x}", Sha256::digest(hash_input.as_bytes()));
 
@@ -96,6 +90,7 @@ impl NormalizeService {
 
     pub fn normalize_files(
         file_paths: Vec<String>,
+        directory_count: i32,
         total_size: Option<i64>,
         source_app: Option<String>,
     ) -> Option<NewClipFileItem> {
@@ -109,26 +104,16 @@ impl NormalizeService {
         }
 
         let file_count = file_paths.len() as i32;
-        let preview = if file_count == 1 {
-            file_paths
-                .first()
-                .map(|path| format!("文件: {}", extract_filename(path)))
-                .unwrap_or("文件".to_string())
-        } else {
-            let summary = total_size
-                .map(format_bytes)
-                .map(|size| format!("{file_count} 个文件 ({size})"))
-                .unwrap_or_else(|| format!("{file_count} 个文件"));
-            summary
-        };
+        let directory_count = directory_count.clamp(0, file_count);
+        let preview = build_file_preview(&file_paths, file_count, directory_count, total_size);
 
         let search_text = file_paths
             .iter()
-            .map(extract_filename)
+            .map(|path| extract_filename(path))
             .collect::<Vec<_>>()
             .join(" ");
 
-        let hash_input = format!("{:?}{:?}", file_paths, total_size);
+        let hash_input = format!("{:?}{:?}{:?}", file_paths, directory_count, total_size);
         let hash = format!("{:x}", Sha256::digest(hash_input.as_bytes()));
 
         Some(NewClipFileItem {
@@ -138,11 +123,45 @@ impl NormalizeService {
                 hash,
                 file_paths,
                 file_count,
+                directory_count,
                 total_size,
             },
             source_app,
         })
     }
+}
+
+pub fn build_file_preview(
+    file_paths: &[String],
+    file_count: i32,
+    directory_count: i32,
+    total_size: Option<i64>,
+) -> String {
+    if file_count <= 1 {
+        let label = if directory_count > 0 {
+            "文件夹"
+        } else {
+            "文件"
+        };
+        return file_paths
+            .first()
+            .map(|path| format!("{label}: {}", extract_filename(path)))
+            .unwrap_or_else(|| label.to_string());
+    }
+
+    if directory_count == file_count {
+        return format!("{file_count} 个文件夹");
+    }
+
+    if directory_count > 0 {
+        let file_only_count = file_count - directory_count;
+        return format!("{file_only_count} 个文件，{directory_count} 个文件夹");
+    }
+
+    total_size
+        .map(format_bytes)
+        .map(|size| format!("{file_count} 个文件 ({size})"))
+        .unwrap_or_else(|| format!("{file_count} 个文件"))
 }
 
 fn format_bytes(bytes: i64) -> String {
@@ -172,25 +191,54 @@ mod tests {
 
     #[test]
     fn normalize_files_skips_empty_path_list() {
-        let item = NormalizeService::normalize_files(vec![" ".to_string()], None, None);
+        let item = NormalizeService::normalize_files(vec![" ".to_string()], 0, None, None);
         assert!(item.is_none());
     }
 
     #[test]
     fn normalize_files_builds_preview_and_count() {
         let item = NormalizeService::normalize_files(
-            vec![
-                "C:\\Temp\\a.txt".to_string(),
-                "C:\\Temp\\b.txt".to_string(),
-            ],
+            vec!["C:\\Temp\\a.txt".to_string(), "C:\\Temp\\b.txt".to_string()],
+            0,
             Some(2_048),
             None,
         )
         .unwrap();
 
         assert_eq!(item.normalized.file_count, 2);
+        assert_eq!(item.normalized.directory_count, 0);
         assert_eq!(item.normalized.preview_text, "2 个文件 (2.0 KB)");
         assert_eq!(item.normalized.search_text, "a.txt b.txt");
+    }
+
+    #[test]
+    fn normalize_files_marks_single_directory_preview() {
+        let item = NormalizeService::normalize_files(
+            vec!["C:\\Temp\\项目资料".to_string()],
+            1,
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(item.normalized.preview_text, "文件夹: 项目资料");
+        assert_eq!(item.normalized.directory_count, 1);
+    }
+
+    #[test]
+    fn normalize_files_marks_mixed_entries_preview() {
+        let item = NormalizeService::normalize_files(
+            vec![
+                "C:\\Temp\\a.txt".to_string(),
+                "C:\\Temp\\设计稿".to_string(),
+            ],
+            1,
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(item.normalized.preview_text, "1 个文件，1 个文件夹");
     }
 
     #[test]

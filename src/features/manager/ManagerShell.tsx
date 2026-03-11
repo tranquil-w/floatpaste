@@ -14,6 +14,11 @@ import { hideCurrentWindow } from "../../bridge/window";
 import { queryClient } from "../../app/queryClient";
 import type { ClipItemDetail, SearchSort } from "../../shared/types/clips";
 import type { PickerPositionMode, UserSetting } from "../../shared/types/settings";
+import {
+  getClipTypeIcon,
+  getClipTypeLabel,
+  getFileCountLabel,
+} from "../../shared/utils/clipDisplay";
 import { formatDateTime } from "../../shared/utils/time";
 import { useManagerStore } from "./store";
 import {
@@ -188,34 +193,6 @@ export function ManagerShell() {
     return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
   };
 
-  // 获取类型图标
-  const getTypeIcon = (type: string) => {
-    switch (type) {
-      case "text":
-        return "📝";
-      case "image":
-        return "🖼️";
-      case "file":
-        return "📎";
-      default:
-        return "📄";
-    }
-  };
-
-  // 获取类型标签
-  const getTypeLabel = (type: string) => {
-    switch (type) {
-      case "text":
-        return "文本";
-      case "image":
-        return "图片";
-      case "file":
-        return "文件";
-      default:
-        return "未知";
-    }
-  };
-
   return (
     <div className="flex h-screen flex-col px-5 py-6 text-ink md:px-8">
       <div className="mx-auto grid w-full max-w-7xl flex-1 min-h-0 gap-5 lg:grid-cols-[280px_minmax(360px,1fr)_420px]">
@@ -368,7 +345,7 @@ export function ManagerShell() {
                           </div>
                           <div className="flex flex-col items-end gap-2">
                             <span className="text-[10px] px-2 py-1 rounded-full bg-slate-100 text-slate-500">
-                              {getTypeLabel(item.type)}
+                              {getClipTypeLabel(item)}
                             </span>
                             {item.isFavorited ? (
                               <span className="shrink-0 rounded-full bg-amber-100/80 px-2 py-1 text-[10px] font-semibold text-amber-700">
@@ -439,7 +416,7 @@ export function ManagerShell() {
                     详情编辑
                   </p>
                   <h2 className="mt-1 font-display text-2xl font-medium tracking-tight">
-                    {getTypeLabel(detail.data.type)}剪贴项
+                    {getClipTypeLabel(detail.data)}剪贴项
                   </h2>
                 </div>
                 <div className="flex gap-2">
@@ -516,7 +493,9 @@ export function ManagerShell() {
                 {detail.data.type === "file" && (
                   <>
                     <div>
-                      <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">文件数量</p>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
+                        {getFileCountLabel(detail.data.fileCount, detail.data.directoryCount)}
+                      </p>
                       <p className="mt-1.5 font-medium text-slate-800">
                         {detail.data.fileCount} 个
                       </p>
@@ -524,8 +503,11 @@ export function ManagerShell() {
                     <div>
                       <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">总大小</p>
                       <p className="mt-1.5 font-medium text-slate-800">
-                        {formatBytes(detail.data.totalSize)}
+                        {detail.data.directoryCount > 0 ? "未统计" : formatBytes(detail.data.totalSize)}
                       </p>
+                      {detail.data.directoryCount > 0 ? (
+                        <p className="mt-1 text-xs text-slate-500">包含文件夹时默认不递归统计大小。</p>
+                      ) : null}
                     </div>
                   </>
                 )}
@@ -571,12 +553,12 @@ export function ManagerShell() {
               ) : (
                 <>
                   <div className="flex flex-col items-center justify-center py-10 text-center">
-                    <div className="text-6xl mb-3">{getTypeIcon(detail.data.type)}</div>
+                    <div className="text-6xl mb-3">{getClipTypeIcon(detail.data)}</div>
                     <p className="text-slate-500 text-sm mb-1">
                       {detail.data.type === "image"
                         ? "图片类型记录不支持文本编辑，你可以复制到剪贴板后手动粘贴"
                         : detail.data.type === "file"
-                          ? "文件类型记录不支持文本编辑，你可以复制到剪贴板后手动粘贴"
+                          ? `${getClipTypeLabel(detail.data)}类型记录不支持文本编辑，你可以复制到剪贴板后手动粘贴`
                           : "该类型记录不支持文本编辑"}
                     </p>
                     {detail.data.type === "file" && (

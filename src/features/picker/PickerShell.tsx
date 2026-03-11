@@ -12,6 +12,7 @@ import {
 } from "../../bridge/events";
 import { isTauriRuntime } from "../../bridge/runtime";
 import type { ClipItemSummary } from "../../shared/types/clips";
+import { getClipTypeLabel } from "../../shared/utils/clipDisplay";
 import { formatDateTime } from "../../shared/utils/time";
 import {
   DEFAULT_PICKER_RECORD_LIMIT,
@@ -236,7 +237,7 @@ export function PickerShell() {
 
   return (
     <div className="flex h-screen w-screen items-start justify-center bg-transparent p-0 text-ink overflow-hidden select-none" data-tauri-drag-region>
-      <div className="flex h-full w-full flex-col overflow-hidden rounded-[20px] border border-white/40 bg-white/95 shadow-[0_16px_40px_rgba(15,23,42,0.2)] backdrop-blur-xl">
+      <div className="flex h-full w-full flex-col overflow-hidden rounded-[20px] border border-slate-300/50 bg-white/95 backdrop-blur-xl">
         <div className="flex shrink-0 items-center justify-between border-b border-slate-200/50 bg-white/70 px-4 py-3" data-tauri-drag-region>
           <div className="flex items-center gap-2.5">
             <div className="h-2.5 w-2.5 rounded-full bg-amber-400"></div>
@@ -294,7 +295,7 @@ export function PickerShell() {
                     <div className="flex min-w-0 flex-1 flex-col gap-1.5">
                       <div className="flex items-center gap-2 mb-0.5">
                         <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 font-medium">
-                          {item.type === "text" ? "文本" : item.type === "image" ? "图片" : "文件"}
+                          {getClipTypeLabel(item)}
                         </span>
                       </div>
                       <p

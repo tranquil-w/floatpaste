@@ -21,6 +21,8 @@ export interface ClipItemSummary {
   contentPreview: string;
   sourceApp: string | null;
   isFavorited: boolean;
+  fileCount: number;
+  directoryCount: number;
   createdAt: string;
   updatedAt: string;
   lastUsedAt: string | null;
@@ -49,6 +51,7 @@ export interface ClipItemDetail {
 
   filePaths: string[];
   fileCount: number;
+  directoryCount: number;
   totalSize: number | null;
 }
 

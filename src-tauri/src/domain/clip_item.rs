@@ -8,6 +8,8 @@ pub struct ClipItemSummary {
     pub content_preview: String,
     pub source_app: Option<String>,
     pub is_favorited: bool,
+    pub file_count: i32,
+    pub directory_count: i32,
     pub created_at: String,
     pub updated_at: String,
     pub last_used_at: Option<String>,
@@ -36,6 +38,7 @@ pub struct ClipItemDetail {
     // File-specific fields
     pub file_paths: Vec<String>,
     pub file_count: i32,
+    pub directory_count: i32,
     pub total_size: Option<i64>,
 }
 
@@ -70,6 +73,7 @@ pub struct NormalizedClipFile {
     pub hash: String,
     pub file_paths: Vec<String>,
     pub file_count: i32,
+    pub directory_count: i32,
     pub total_size: Option<i64>,
 }
 
