@@ -287,7 +287,7 @@ export function PickerShell() {
 
   return (
     <div className="flex h-screen w-screen items-start justify-center bg-transparent p-0 text-ink overflow-hidden select-none" data-tauri-drag-region>
-      <div className="relative flex h-full w-full flex-col overflow-hidden rounded-[16px] border border-slate-300/40 bg-white/95 backdrop-blur-2xl shadow-2xl">
+      <div className="relative flex h-full w-full flex-col overflow-hidden rounded-[16px] border border-slate-400/60 bg-white/95 backdrop-blur-2xl ring-1 ring-black/5 ring-inset">
         {tauriRuntime
           ? PICKER_RESIZE_HANDLES.map((handle) => (
             <div
