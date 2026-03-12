@@ -26,39 +26,39 @@ const PICKER_RESIZE_HANDLES: Array<{
   direction: WindowResizeDirection;
   className: string;
 }> = [
-  {
-    direction: "North",
-    className: "absolute inset-x-3 top-0 z-20 h-2 cursor-ns-resize",
-  },
-  {
-    direction: "South",
-    className: "absolute inset-x-3 bottom-0 z-20 h-2 cursor-ns-resize",
-  },
-  {
-    direction: "West",
-    className: "absolute inset-y-3 left-0 z-20 w-2 cursor-ew-resize",
-  },
-  {
-    direction: "East",
-    className: "absolute inset-y-3 right-0 z-20 w-2 cursor-ew-resize",
-  },
-  {
-    direction: "NorthWest",
-    className: "absolute left-0 top-0 z-30 h-4 w-4 cursor-nwse-resize",
-  },
-  {
-    direction: "NorthEast",
-    className: "absolute right-0 top-0 z-30 h-4 w-4 cursor-nesw-resize",
-  },
-  {
-    direction: "SouthWest",
-    className: "absolute bottom-0 left-0 z-30 h-4 w-4 cursor-nesw-resize",
-  },
-  {
-    direction: "SouthEast",
-    className: "absolute bottom-0 right-0 z-30 h-4 w-4 cursor-nwse-resize",
-  },
-];
+    {
+      direction: "North",
+      className: "absolute inset-x-3 top-0 z-20 h-2 cursor-ns-resize",
+    },
+    {
+      direction: "South",
+      className: "absolute inset-x-3 bottom-0 z-20 h-2 cursor-ns-resize",
+    },
+    {
+      direction: "West",
+      className: "absolute inset-y-3 left-0 z-20 w-2 cursor-ew-resize",
+    },
+    {
+      direction: "East",
+      className: "absolute inset-y-3 right-0 z-20 w-2 cursor-ew-resize",
+    },
+    {
+      direction: "NorthWest",
+      className: "absolute left-0 top-0 z-30 h-4 w-4 cursor-nwse-resize",
+    },
+    {
+      direction: "NorthEast",
+      className: "absolute right-0 top-0 z-30 h-4 w-4 cursor-nesw-resize",
+    },
+    {
+      direction: "SouthWest",
+      className: "absolute bottom-0 left-0 z-30 h-4 w-4 cursor-nesw-resize",
+    },
+    {
+      direction: "SouthEast",
+      className: "absolute bottom-0 right-0 z-30 h-4 w-4 cursor-nwse-resize",
+    },
+  ];
 
 export function PickerShell() {
   const tauriRuntime = isTauriRuntime();
@@ -287,7 +287,7 @@ export function PickerShell() {
 
   return (
     <div className="flex h-screen w-screen items-start justify-center bg-transparent p-0 text-ink overflow-hidden select-none" data-tauri-drag-region>
-      <div className="relative flex h-full w-full flex-col overflow-hidden rounded-[16px] border border-slate-400/60 bg-white/95 backdrop-blur-2xl ring-1 ring-black/5 ring-inset">
+      <div className="relative flex h-full w-full flex-col overflow-hidden rounded-[16px] border border-slate-400/60 bg-white/95 ring-1 ring-black/5 ring-inset">
         {tauriRuntime
           ? PICKER_RESIZE_HANDLES.map((handle) => (
             <div
@@ -345,7 +345,7 @@ export function PickerShell() {
                   >
                     {item.contentPreview}
                   </p>
-                  
+
                   <div className={`flex w-full items-center gap-2 text-[10px] leading-none transition-colors ${isSelected ? "text-amber-700/60" : "text-slate-400/60"}`}>
                     {index < 9 ? (
                       <kbd className={`flex h-[16px] min-w-[16px] px-1 items-center justify-center rounded-[4px] font-mono text-[9px] font-bold transition-colors ${isSelected
