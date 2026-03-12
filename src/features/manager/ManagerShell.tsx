@@ -250,7 +250,12 @@ export function ManagerShell() {
                     }}
                     type="button"
                   >
-                    <p className="line-clamp-2 text-sm font-medium leading-relaxed text-slate-800">{item.contentPreview}</p>
+                    <p
+                      className="line-clamp-3 text-[12px] leading-relaxed text-slate-700/80 whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
+                      title={item.tooltipText || item.contentPreview}
+                    >
+                      {item.contentPreview}
+                    </p>
                     <p className="mt-2 text-[11px] font-medium text-amber-700/60">{formatDateTime(item.lastUsedAt ?? item.createdAt)}</p>
                   </button>
                 ))
@@ -339,7 +344,10 @@ export function ManagerShell() {
                             <div className="flex h-5 w-5 items-center justify-center rounded-md bg-slate-100/80 text-[10px] font-bold text-slate-400 transition-colors group-hover:bg-slate-200 group-hover:text-slate-500">
                               {String(searchQuery.offset + index + 1).padStart(2, "0")}
                             </div>
-                            <p className="mt-2.5 line-clamp-3 text-sm leading-relaxed text-slate-800">
+                            <p
+                              className="mt-3 line-clamp-5 text-[13px] leading-[1.6] text-slate-700/90 whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
+                              title={item.tooltipText || item.contentPreview}
+                            >
                               {item.contentPreview}
                             </p>
                           </div>

@@ -6,6 +6,7 @@ pub struct ClipItemSummary {
     pub id: String,
     pub r#type: String,
     pub content_preview: String,
+    pub tooltip_text: Option<String>,
     pub source_app: Option<String>,
     pub is_favorited: bool,
     pub file_count: i32,

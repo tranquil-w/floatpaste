@@ -238,7 +238,7 @@ impl SqliteRepository {
     pub fn list_recent(&self, limit: u32) -> Result<Vec<ClipItemSummary>, AppError> {
         let connection = self.connection.lock()?;
         let sql = format!(
-            "SELECT id, type, preview_text, source_app, is_favorited, file_paths, file_count, total_size, directory_count, created_at, updated_at, last_used_at
+            "SELECT id, type, preview_text, source_app, is_favorited, file_paths, file_count, total_size, directory_count, created_at, updated_at, last_used_at, substr(full_text, 1, 3000)
              FROM clip_items
              WHERE deleted_at IS NULL
              ORDER BY {}
@@ -253,7 +253,7 @@ impl SqliteRepository {
     pub fn list_favorites(&self, limit: u32) -> Result<Vec<ClipItemSummary>, AppError> {
         let connection = self.connection.lock()?;
         let sql = format!(
-            "SELECT id, type, preview_text, source_app, is_favorited, file_paths, file_count, total_size, directory_count, created_at, updated_at, last_used_at
+            "SELECT id, type, preview_text, source_app, is_favorited, file_paths, file_count, total_size, directory_count, created_at, updated_at, last_used_at, substr(full_text, 1, 3000)
              FROM clip_items
              WHERE deleted_at IS NULL AND is_favorited = 1
              ORDER BY {}
@@ -420,7 +420,7 @@ impl SqliteRepository {
         values.push(Value::Integer(i64::from(query.limit)));
         values.push(Value::Integer(i64::from(query.offset)));
         let sql = format!(
-            "SELECT id, type, preview_text, source_app, is_favorited, file_paths, file_count, total_size, directory_count, created_at, updated_at, last_used_at
+            "SELECT id, type, preview_text, source_app, is_favorited, file_paths, file_count, total_size, directory_count, created_at, updated_at, last_used_at, substr(full_text, 1, 3000)
              FROM clip_items
              WHERE {where_clause}
              ORDER BY {}
@@ -476,7 +476,7 @@ impl SqliteRepository {
         let sql = format!(
             "SELECT ci.id, ci.type, ci.preview_text, ci.source_app, ci.is_favorited,
                     ci.file_paths, ci.file_count, ci.total_size, ci.directory_count,
-                    ci.created_at, ci.updated_at, ci.last_used_at
+                    ci.created_at, ci.updated_at, ci.last_used_at, substr(ci.full_text, 1, 3000)
              FROM clip_items_fts
              JOIN clip_items ci ON ci.id = clip_items_fts.item_id
              WHERE clip_items_fts MATCH ? AND {filter_clause}
@@ -661,10 +661,16 @@ fn map_summary_row(row: &Row<'_>) -> rusqlite::Result<ClipItemSummary> {
         stored_total_size,
     );
 
+    let tooltip_text: Option<String> = row
+        .get::<_, Option<String>>(12)
+        .unwrap_or_default()
+        .filter(|s| !s.is_empty());
+
     Ok(ClipItemSummary {
         id: row.get(0)?,
         r#type,
         content_preview: resolved_file_fields.content_preview.unwrap_or(preview_text),
+        tooltip_text,
         source_app: row.get(3)?,
         is_favorited: row.get::<_, i64>(4)? == 1,
         file_count: resolved_file_fields.file_count,

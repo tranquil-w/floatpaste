@@ -237,15 +237,16 @@ export function PickerShell() {
 
   return (
     <div className="flex h-screen w-screen items-start justify-center bg-transparent p-0 text-ink overflow-hidden select-none" data-tauri-drag-region>
-      <div className="flex h-full w-full flex-col overflow-hidden rounded-[20px] border border-slate-300/50 bg-white/95 backdrop-blur-xl">
-        <div className="flex shrink-0 items-center justify-between border-b border-slate-200/50 bg-white/70 px-4 py-3" data-tauri-drag-region>
-          <div className="flex items-center gap-2.5">
-            <div className="h-2.5 w-2.5 rounded-full bg-amber-400"></div>
-            <span className="text-[13px] font-semibold tracking-wide text-slate-700">FloatPaste</span>
-          </div>
+      <div className="flex h-full w-full flex-col overflow-hidden rounded-[16px] border border-slate-300/40 bg-white/95 backdrop-blur-2xl shadow-2xl">
+        <div className="flex shrink-0 items-center justify-between border-b border-slate-200/50 bg-white/50 px-3 py-2" data-tauri-drag-region>
           <div className="flex items-center gap-2">
+            <div className="h-2.5 w-2.5 rounded-full bg-amber-400"></div>
+            <span className="text-[12px] font-semibold tracking-wide text-slate-700">FloatPaste</span>
+            {lastMessage && <span className="text-[10px] font-medium text-amber-600 ml-2 animate-pulse">{lastMessage}</span>}
+          </div>
+          <div className="flex items-center gap-1.5">
             <button
-              className="flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold text-slate-500 transition-colors hover:bg-slate-200/50 hover:text-slate-800"
+              className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold text-slate-500 transition-colors hover:bg-slate-200/50 hover:text-slate-800"
               onClick={() => void handleOpenManager()}
               type="button"
             >
@@ -255,90 +256,63 @@ export function PickerShell() {
           </div>
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col px-3 py-3">
-          <div className="grid flex-1 gap-1.5 overflow-y-auto overflow-x-hidden pr-2 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300/80 hover:[&::-webkit-scrollbar-thumb]:bg-slate-400/80 [&::-webkit-scrollbar-track]:bg-transparent transition-colors">
-            {items.length ? (
-              items.map((item, index) => {
-                const isSelected = index === selectedIndex;
-                return (
-                  <button
-                    ref={(el) => {
-                      itemRefs.current[index] = el;
-                    }}
-                    className={`group relative flex w-full items-start gap-3 rounded-xl px-3 py-3 text-left transition-all duration-200 ${isSelected
-                      ? "bg-amber-500/10 shadow-[0_2px_10px_rgba(245,158,11,0.05)]"
-                      : "bg-transparent hover:bg-slate-500/5"
-                      }`}
-                    key={item.id}
-                    onClick={() => {
-                      selectedIndexRef.current = index;
-                      setSelectedIndex(index);
-                    }}
-                    onDoubleClick={() => {
-                      void confirmSelection(index);
-                    }}
-                    type="button"
+        <div className="flex min-h-0 flex-1 flex-col p-2">
+          <div className="grid flex-1 gap-1 overflow-y-auto overflow-x-hidden pr-1.5 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300/80 hover:[&::-webkit-scrollbar-thumb]:bg-slate-400/80 [&::-webkit-scrollbar-track]:bg-transparent transition-colors">
+            {items.map((item, index) => {
+              const isSelected = index === selectedIndex;
+              return (
+                <button
+                  ref={(el) => {
+                    itemRefs.current[index] = el;
+                  }}
+                  className={`group relative flex w-full flex-col gap-1.5 rounded-xl px-2.5 py-2.5 text-left transition-all duration-200 ${isSelected
+                    ? "bg-amber-500/10 shadow-[0_2px_10px_rgba(245,158,11,0.06)] ring-1 ring-amber-500/20"
+                    : "bg-transparent hover:bg-slate-500/5"
+                    }`}
+                  key={item.id}
+                  onClick={() => {
+                    selectedIndexRef.current = index;
+                    setSelectedIndex(index);
+                  }}
+                  onDoubleClick={() => {
+                    void confirmSelection(index);
+                  }}
+                  type="button"
+                >
+                  <p
+                    className={`${isSelected ? "text-slate-800" : "text-slate-600/90"} line-clamp-5 text-[13px] leading-[1.6] tracking-tight break-words [overflow-wrap:anywhere] whitespace-pre-wrap transition-colors`}
+                    title={item.tooltipText || item.contentPreview}
                   >
-                    <div className="mt-0.5 flex shrink-0 items-center justify-center">
-                      {index < 9 ? (
-                        <kbd className={`flex h-[20px] w-[20px] items-center justify-center rounded-[6px] font-mono text-[11px] font-bold transition-colors ${isSelected
-                          ? "bg-amber-500 text-white shadow-sm"
-                          : "bg-slate-400/15 text-slate-400 group-hover:bg-slate-400/25 group-hover:text-slate-700"
-                          }`}>
-                          {index + 1}
-                        </kbd>
-                      ) : (
-                        <span aria-hidden="true" className="h-[20px] w-[20px]" />
-                      )}
-                    </div>
-
-                    <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-                      <div className="flex items-center gap-2 mb-0.5">
-                        <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 font-medium">
-                          {getClipTypeLabel(item)}
-                        </span>
-                      </div>
-                      <p
-                        className={`${isSelected ? "text-slate-800 font-medium" : "text-slate-600"} line-clamp-2 text-[13px] leading-[1.6] break-words [overflow-wrap:anywhere] transition-colors`}
-                      >
-                        {item.contentPreview}
-                      </p>
-                      <div className={`flex min-w-0 items-center justify-between gap-2 text-[11px] leading-none transition-colors ${isSelected ? "text-amber-700/60" : "text-slate-400/70"}`}>
-                        <span className="min-w-0 flex-1 truncate font-medium">
-                          {item.sourceApp ?? "未知来源"}
-                        </span>
-                        <span className="flex shrink-0 items-center gap-1.5 font-medium">
-                          <span className="tabular-nums">
-                            {formatDateTime(item.lastUsedAt ?? item.createdAt)}
-                          </span>
-                          {item.isFavorited ? (
-                            <span className="text-[10px] leading-none text-amber-500">★</span>
-                          ) : null}
-                        </span>
-                      </div>
-                    </div>
-                  </button>
-                );
-              })
-            ) : (
-              <div className="flex flex-col items-center justify-center py-8 text-center">
-                <div className="mb-2.5 flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 ring-4 ring-white">
-                  <div className="h-1.5 w-1.5 rounded-sm bg-slate-400" />
-                </div>
-                <p className="text-[13px] font-medium text-slate-500">暂无历史记录</p>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="flex shrink-0 items-center justify-between border-t border-slate-200/50 bg-slate-50/80 px-4 py-2.5 text-[11px] font-medium tracking-wide text-slate-400 backdrop-blur-md">
-          <div className="flex items-center gap-3.5">
-            <span className="flex items-center gap-1.5"><kbd className="flex h-[18px] items-center justify-center rounded bg-slate-400/15 px-1.5 font-sans text-[10px] font-bold text-slate-500">↑↓</kbd> 导航</span>
-            <span className="flex items-center gap-1.5"><kbd className="flex h-[18px] items-center justify-center rounded bg-slate-400/15 px-1.5 font-sans text-[10px] font-bold text-slate-500">↵</kbd> 粘贴</span>
-            <span className="flex items-center gap-1.5"><kbd className="flex h-[18px] items-center justify-center rounded bg-slate-400/15 px-1.5 font-sans text-[10px] font-bold text-slate-500">Esc</kbd> 取消</span>
-          </div>
-          <div className="flex items-center gap-3">
-            {lastMessage ? <span className="font-semibold text-amber-600">{lastMessage}</span> : null}
+                    {item.contentPreview}
+                  </p>
+                  
+                  <div className={`flex w-full items-center gap-2 text-[10px] leading-none transition-colors ${isSelected ? "text-amber-700/60" : "text-slate-400/60"}`}>
+                    {index < 9 ? (
+                      <kbd className={`flex h-[16px] min-w-[16px] px-1 items-center justify-center rounded-[4px] font-mono text-[9px] font-bold transition-colors ${isSelected
+                        ? "bg-amber-500 text-white"
+                        : "bg-slate-400/15 text-slate-400 group-hover:bg-slate-400/25 group-hover:text-slate-700"
+                        }`}>
+                        {index + 1}
+                      </kbd>
+                    ) : null}
+                    <span className="shrink-0 px-1 py-0.5 rounded-sm bg-slate-100/90 font-medium">
+                      {getClipTypeLabel(item)}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate font-medium">
+                      {item.sourceApp ?? "未知来源"}
+                    </span>
+                    <span className="flex shrink-0 items-center gap-1 font-medium">
+                      <span className="tabular-nums">
+                        {formatDateTime(item.lastUsedAt ?? item.createdAt)}
+                      </span>
+                      {item.isFavorited ? (
+                        <span className="text-[10px] text-amber-500">★</span>
+                      ) : null}
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>

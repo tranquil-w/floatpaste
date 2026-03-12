@@ -19,6 +19,7 @@ export interface ClipItemSummary {
   id: string;
   type: ClipType;
   contentPreview: string;
+  tooltipText?: string | null;
   sourceApp: string | null;
   isFavorited: boolean;
   fileCount: number;

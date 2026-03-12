@@ -9,26 +9,19 @@ pub struct NormalizeService;
 
 impl NormalizeService {
     pub fn normalize_text(text: &str, source_app: Option<String>) -> Option<NewClipTextItem> {
-        let trimmed = text.trim();
-        if trimmed.is_empty() {
+        if text.trim().is_empty() {
             return None;
         }
 
-        let compact = trimmed
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ")
-            .trim()
-            .to_string();
-
-        let preview = compact.chars().take(120).collect::<String>();
-        let hash = format!("{:x}", Sha256::digest(compact.as_bytes()));
+        let normalized_text = normalize_text_for_indexing(text);
+        let preview = text.chars().take(120).collect::<String>();
+        let hash = format!("{:x}", Sha256::digest(normalized_text.as_bytes()));
 
         Some(NewClipTextItem {
             normalized: NormalizedClipText {
-                full_text: trimmed.to_string(),
+                full_text: text.to_string(),
                 preview_text: preview,
-                search_text: compact.to_lowercase(),
+                search_text: normalized_text.to_lowercase(),
                 hash,
             },
             source_app,
@@ -185,9 +178,36 @@ fn extract_filename(path: &str) -> String {
         .to_string()
 }
 
+fn normalize_text_for_indexing(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 #[cfg(test)]
 mod tests {
+    use sha2::{Digest, Sha256};
+
     use super::NormalizeService;
+
+    #[test]
+    fn normalize_text_keeps_raw_text_but_normalizes_search_and_hash() {
+        let item = NormalizeService::normalize_text("  Hello\n  WORLD \t ", None).unwrap();
+
+        assert_eq!(item.normalized.full_text, "  Hello\n  WORLD \t ");
+        assert_eq!(item.normalized.search_text, "hello world");
+        assert_eq!(
+            item.normalized.hash,
+            format!("{:x}", Sha256::digest("Hello WORLD".as_bytes()))
+        );
+    }
+
+    #[test]
+    fn normalize_text_treats_whitespace_only_variants_as_same_hash() {
+        let first = NormalizeService::normalize_text("Alpha\nBeta", None).unwrap();
+        let second = NormalizeService::normalize_text(" Alpha   Beta ", None).unwrap();
+
+        assert_eq!(first.normalized.hash, second.normalized.hash);
+        assert_eq!(first.normalized.search_text, second.normalized.search_text);
+    }
 
     #[test]
     fn normalize_files_skips_empty_path_list() {

@@ -4,11 +4,11 @@ use std::{
     sync::{Arc, Mutex, RwLock},
 };
 
-use tauri::{App, Manager};
+use tauri::{App, AppHandle, Emitter, Manager};
 use tracing::{info, warn};
 
 use crate::{
-    domain::{error::AppError, settings::UserSetting},
+    domain::{error::AppError, events::CLIPS_CHANGED_EVENT, settings::UserSetting},
     launch_mode::LaunchMode,
     platform::windows::clipboard_monitor::ClipboardMonitor,
     repository::sqlite_repository::SqliteRepository,
@@ -110,7 +110,7 @@ pub fn bootstrap(app: &mut App, launch_mode: LaunchMode) -> Result<(), AppError>
     let repository = SqliteRepository::new(&db_path)?;
     let image_storage = ImageStorage::new(data_dir.clone())?;
     let settings = repository.load_settings()?;
-    let state = AppState::new(repository, image_storage, settings);
+    let state = AppState::new(repository.clone(), image_storage, settings);
 
     app.manage(state.clone());
     WindowCoordinator::configure_existing_windows(&app.handle());
@@ -120,11 +120,33 @@ pub fn bootstrap(app: &mut App, launch_mode: LaunchMode) -> Result<(), AppError>
     TrayService::setup(&app.handle())?;
     ClipboardMonitor::start(app.handle().clone(), state)?;
 
+    if let Err(error) = seed_welcome_entry(&app.handle(), &repository) {
+        warn!("初始化欢迎记录失败: {error}");
+    }
+
     if !launch_mode.is_silent() {
         WindowCoordinator::open_manager(&app.handle())?;
     }
 
     info!("FloatPaste MVP 已初始化，数据库路径: {}", db_path.display());
+    Ok(())
+}
+
+fn seed_welcome_entry(app: &AppHandle, repository: &SqliteRepository) -> Result<(), AppError> {
+    if !repository.list_recent(1)?.is_empty() {
+        return Ok(());
+    }
+
+    let Some(text_item) = crate::services::normalize_service::NormalizeService::normalize_text(
+        "欢迎使用 FloatPaste 👋  [↑↓] 导航记录 · [Enter] 快速粘贴 · [1~9] 数字键直达 · [Tab] 打开完整资料库 · [Esc] 随时退出",
+        Some("使用指引".to_string()),
+    ) else {
+        return Ok(());
+    };
+
+    let detail = repository.save_text_item(&text_item)?;
+    repository.set_favorited(&detail.id, true)?;
+    let _ = app.emit(CLIPS_CHANGED_EVENT, &detail.id);
     Ok(())
 }
 
