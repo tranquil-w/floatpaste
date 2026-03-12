@@ -33,6 +33,10 @@ impl<'de> Deserialize<'de> for PickerPositionMode {
 pub struct StoredWindowPosition {
     pub x: i32,
     pub y: i32,
+    #[serde(default)]
+    pub width: Option<u32>,
+    #[serde(default)]
+    pub height: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

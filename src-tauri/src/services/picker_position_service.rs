@@ -1,4 +1,4 @@
-use tauri::{PhysicalPosition, WebviewWindow};
+use tauri::{PhysicalPosition, PhysicalSize, WebviewWindow};
 
 use crate::{
     domain::{
@@ -13,6 +13,10 @@ use crate::{
 
 const PICKER_ANCHOR_GAP_PX: i32 = 12;
 const PICKER_TOP_ANCHOR_X_DIVISOR: i32 = 5;
+pub const PICKER_DEFAULT_WIDTH: u32 = 360;
+pub const PICKER_DEFAULT_HEIGHT: u32 = 420;
+pub const PICKER_MIN_WIDTH: u32 = 256;
+pub const PICKER_MIN_HEIGHT: u32 = 280;
 
 pub struct PickerPositionService;
 
@@ -48,11 +52,25 @@ impl PickerPositionService {
         let position = window
             .outer_position()
             .map_err(|error| AppError::Message(error.to_string()))?;
+        let size = window
+            .inner_size()
+            .map_err(|error| AppError::Message(error.to_string()))?;
+        let (width, height) = clamp_window_size(size.width, size.height);
 
         Ok(Some(StoredWindowPosition {
             x: position.x,
             y: position.y,
+            width: Some(width),
+            height: Some(height),
         }))
+    }
+
+    pub fn resolve_window_size(
+        repository: &SqliteRepository,
+    ) -> Result<Option<PhysicalSize<u32>>, AppError> {
+        Ok(repository
+            .load_picker_window_state()?
+            .and_then(stored_window_size))
     }
 }
 
@@ -89,7 +107,7 @@ fn resolve_from_last_position(
     window_width: i32,
     window_height: i32,
 ) -> Result<Option<ScreenPoint>, AppError> {
-    if let Some(position) = repository.load_picker_last_position()? {
+    if let Some(position) = repository.load_picker_window_state()? {
         let anchor = ScreenPoint {
             x: position.x,
             y: position.y,
@@ -159,10 +177,31 @@ fn clamp_top_left(
     }
 }
 
+fn stored_window_size(position: StoredWindowPosition) -> Option<PhysicalSize<u32>> {
+    if position.width.is_none() && position.height.is_none() {
+        return None;
+    }
+
+    let (width, height) = clamp_window_size(
+        position.width.unwrap_or(PICKER_DEFAULT_WIDTH),
+        position.height.unwrap_or(PICKER_DEFAULT_HEIGHT),
+    );
+    Some(PhysicalSize::new(width, height))
+}
+
+fn clamp_window_size(width: u32, height: u32) -> (u32, u32) {
+    (
+        width.max(PICKER_MIN_WIDTH),
+        height.max(PICKER_MIN_HEIGHT),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        center_in_work_area, clamp_top_left, place_window_near_point, ScreenPoint, ScreenRect,
+        center_in_work_area, clamp_top_left, clamp_window_size, place_window_near_point,
+        stored_window_size, ScreenPoint, ScreenRect, StoredWindowPosition, PICKER_DEFAULT_HEIGHT,
+        PICKER_DEFAULT_WIDTH,
     };
 
     #[test]
@@ -234,5 +273,53 @@ mod tests {
 
         assert_eq!(point.x, 720);
         assert_eq!(point.y, 320);
+    }
+
+    #[test]
+    fn clamp_window_size_respects_minimum_bounds() {
+        let size = clamp_window_size(240, 180);
+
+        assert_eq!(size, (256, 280));
+    }
+
+    #[test]
+    fn stored_window_size_uses_defaults_for_missing_dimension() {
+        let size = stored_window_size(StoredWindowPosition {
+            x: 0,
+            y: 0,
+            width: Some(540),
+            height: None,
+        })
+        .unwrap();
+
+        assert_eq!(size.width, 540);
+        assert_eq!(size.height, PICKER_DEFAULT_HEIGHT);
+    }
+
+    #[test]
+    fn stored_window_size_returns_none_when_legacy_payload_has_no_size() {
+        let size = stored_window_size(StoredWindowPosition {
+            x: 0,
+            y: 0,
+            width: None,
+            height: None,
+        });
+
+        assert!(size.is_none());
+    }
+
+    #[test]
+    fn stored_window_size_clamps_saved_dimensions() {
+        let size = stored_window_size(StoredWindowPosition {
+            x: 0,
+            y: 0,
+            width: Some(200),
+            height: Some(120),
+        })
+        .unwrap();
+
+        assert_eq!(size.width, 256);
+        assert_eq!(size.height, 280);
+        assert_ne!(size.width, PICKER_DEFAULT_WIDTH);
     }
 }

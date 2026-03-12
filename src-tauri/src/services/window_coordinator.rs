@@ -1,10 +1,10 @@
 use chrono::Utc;
 use serde::Serialize;
 use tauri::{
-    AppHandle, Emitter, Manager, Position, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
-    WindowEvent,
+    AppHandle, Emitter, Manager, PhysicalSize, Position, Size, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder, WindowEvent,
 };
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::{
     app_bootstrap::AppState,
@@ -14,7 +14,10 @@ use crate::{
         settings::UserSetting,
     },
     platform::windows::active_app::ActiveAppResolver,
-    services::picker_position_service::PickerPositionService,
+    services::picker_position_service::{
+        PickerPositionService, PICKER_DEFAULT_HEIGHT, PICKER_DEFAULT_WIDTH, PICKER_MIN_HEIGHT,
+        PICKER_MIN_WIDTH,
+    },
 };
 
 pub struct WindowCoordinator;
@@ -61,6 +64,8 @@ impl WindowCoordinator {
             apply_picker_window_position(&window, state, &settings, session.target_window_hwnd);
             return Ok(());
         }
+
+        restore_picker_window_size(app, &window);
 
         let manager_visible = app
             .get_webview_window(MANAGER_WINDOW_LABEL)
@@ -225,8 +230,9 @@ fn ensure_picker_window(app: &AppHandle) -> Result<WebviewWindow, AppError> {
 
     let window = WebviewWindowBuilder::new(app, PICKER_WINDOW_LABEL, WebviewUrl::default())
         .title(PICKER_WINDOW_TITLE)
-        .inner_size(360.0, 420.0)
-        .resizable(false)
+        .inner_size(PICKER_DEFAULT_WIDTH as f64, PICKER_DEFAULT_HEIGHT as f64)
+        .min_inner_size(PICKER_MIN_WIDTH as f64, PICKER_MIN_HEIGHT as f64)
+        .resizable(true)
         .visible(false)
         .decorations(false)
         .always_on_top(true)
@@ -289,7 +295,29 @@ fn persist_picker_window_position(app: &AppHandle, window: &WebviewWindow) {
         .ok()
         .flatten();
     if let Some(position) = position {
-        let _ = state.repository.save_picker_last_position(&position);
+        let _ = state.repository.save_picker_window_state(&position);
+    }
+}
+
+fn restore_picker_window_size(app: &AppHandle, window: &WebviewWindow) {
+    let _ = window.set_min_size(Some(Size::Physical(PhysicalSize::new(
+        PICKER_MIN_WIDTH,
+        PICKER_MIN_HEIGHT,
+    ))));
+
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+
+    let size = match PickerPositionService::resolve_window_size(&state.repository) {
+        Ok(size) => size,
+        Err(error) => {
+            warn!("恢复 picker 窗口尺寸失败: {error}");
+            None
+        }
+    };
+    if let Some(size) = size {
+        let _ = window.set_size(Size::Physical(size));
     }
 }
 

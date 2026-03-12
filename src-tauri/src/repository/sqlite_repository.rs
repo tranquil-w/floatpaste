@@ -23,7 +23,8 @@ use crate::domain::{
 };
 
 const USER_SETTINGS_KEY: &str = "user_settings";
-const PICKER_LAST_POSITION_KEY: &str = "picker_last_position";
+// 继续复用旧 key，兼容已落盘的“仅位置”状态。
+const PICKER_WINDOW_STATE_KEY: &str = "picker_last_position";
 const CURRENT_SCHEMA_VERSION: i32 = 3;
 const CLIP_ITEMS_MEDIA_COLUMNS: [(&str, &str); 7] = [
     ("image_path", "TEXT NULL"),
@@ -78,12 +79,12 @@ impl SqliteRepository {
         Ok(setting.sanitized())
     }
 
-    pub fn load_picker_last_position(&self) -> Result<Option<StoredWindowPosition>, AppError> {
+    pub fn load_picker_window_state(&self) -> Result<Option<StoredWindowPosition>, AppError> {
         let connection = self.connection.lock()?;
         let raw_value = connection
             .query_row(
                 "SELECT value FROM settings WHERE key = ?1",
-                [PICKER_LAST_POSITION_KEY],
+                [PICKER_WINDOW_STATE_KEY],
                 |row| row.get::<_, String>(0),
             )
             .optional()?;
@@ -113,15 +114,12 @@ impl SqliteRepository {
         Ok(())
     }
 
-    pub fn save_picker_last_position(
-        &self,
-        position: &StoredWindowPosition,
-    ) -> Result<(), AppError> {
+    pub fn save_picker_window_state(&self, position: &StoredWindowPosition) -> Result<(), AppError> {
         let connection = self.connection.lock()?;
         connection.execute(
             "INSERT INTO settings(key, value) VALUES(?1, ?2)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            params![PICKER_LAST_POSITION_KEY, serde_json::to_string(position)?],
+            params![PICKER_WINDOW_STATE_KEY, serde_json::to_string(position)?],
         )?;
         Ok(())
     }
@@ -867,9 +865,9 @@ mod tests {
     use std::{fs, path::PathBuf};
 
     use chrono::{Duration, Utc};
-    use rusqlite::Connection;
+    use rusqlite::{params, Connection};
 
-    use super::{bool_to_i64, SqliteRepository};
+    use super::{bool_to_i64, SqliteRepository, PICKER_WINDOW_STATE_KEY};
     use crate::domain::{
         clip_item::{SearchFilters, SearchQuery, SearchSort},
         settings::StoredWindowPosition,
@@ -1216,15 +1214,49 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
     }
 
     #[test]
-    fn save_and_load_picker_last_position() {
+    fn save_and_load_picker_window_state() {
         let path = temp_db_path();
         let repository = SqliteRepository::new(&path).unwrap();
-        let position = StoredWindowPosition { x: 320, y: 180 };
+        let position = StoredWindowPosition {
+            x: 320,
+            y: 180,
+            width: Some(520),
+            height: Some(640),
+        };
 
-        repository.save_picker_last_position(&position).unwrap();
-        let loaded = repository.load_picker_last_position().unwrap();
+        repository.save_picker_window_state(&position).unwrap();
+        let loaded = repository.load_picker_window_state().unwrap();
 
         assert_eq!(loaded, Some(position));
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn load_picker_window_state_is_backward_compatible_with_position_only_payload() {
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+        let connection = repository.connection.lock().unwrap();
+        connection
+            .execute(
+                "INSERT INTO settings(key, value) VALUES(?1, ?2)",
+                params![PICKER_WINDOW_STATE_KEY, r#"{"x":320,"y":180}"#],
+            )
+            .unwrap();
+        drop(connection);
+
+        let loaded = repository.load_picker_window_state().unwrap();
+
+        assert_eq!(
+            loaded,
+            Some(StoredWindowPosition {
+                x: 320,
+                y: 180,
+                width: None,
+                height: None,
+            })
+        );
 
         drop(repository);
         fs::remove_file(path).unwrap();

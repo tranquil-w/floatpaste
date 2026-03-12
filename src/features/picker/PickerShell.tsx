@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { queryClient } from "../../app/queryClient";
 import { hidePicker, openManagerFromPicker, pasteItem } from "../../bridge/commands";
@@ -10,6 +10,7 @@ import {
   SETTINGS_CHANGED_EVENT,
   PICKER_SESSION_START_EVENT,
 } from "../../bridge/events";
+import { startCurrentWindowResize, type WindowResizeDirection } from "../../bridge/window";
 import { isTauriRuntime } from "../../bridge/runtime";
 import type { ClipItemSummary } from "../../shared/types/clips";
 import { getClipTypeLabel } from "../../shared/utils/clipDisplay";
@@ -21,7 +22,46 @@ import {
   usePickerSettingsQuery,
 } from "./queries";
 
+const PICKER_RESIZE_HANDLES: Array<{
+  direction: WindowResizeDirection;
+  className: string;
+}> = [
+  {
+    direction: "North",
+    className: "absolute inset-x-3 top-0 z-20 h-2 cursor-ns-resize",
+  },
+  {
+    direction: "South",
+    className: "absolute inset-x-3 bottom-0 z-20 h-2 cursor-ns-resize",
+  },
+  {
+    direction: "West",
+    className: "absolute inset-y-3 left-0 z-20 w-2 cursor-ew-resize",
+  },
+  {
+    direction: "East",
+    className: "absolute inset-y-3 right-0 z-20 w-2 cursor-ew-resize",
+  },
+  {
+    direction: "NorthWest",
+    className: "absolute left-0 top-0 z-30 h-4 w-4 cursor-nwse-resize",
+  },
+  {
+    direction: "NorthEast",
+    className: "absolute right-0 top-0 z-30 h-4 w-4 cursor-nesw-resize",
+  },
+  {
+    direction: "SouthWest",
+    className: "absolute bottom-0 left-0 z-30 h-4 w-4 cursor-nesw-resize",
+  },
+  {
+    direction: "SouthEast",
+    className: "absolute bottom-0 right-0 z-30 h-4 w-4 cursor-nwse-resize",
+  },
+];
+
 export function PickerShell() {
+  const tauriRuntime = isTauriRuntime();
   const settings = usePickerSettingsQuery();
   const pickerRecordLimit = settings.data
     ? normalizePickerRecordLimit(settings.data.pickerRecordLimit)
@@ -38,6 +78,16 @@ export function PickerShell() {
   const handleOpenManager = async () => {
     await openManagerFromPicker();
   };
+
+  const handleResizeMouseDown =
+    (direction: WindowResizeDirection) =>
+      (event: ReactMouseEvent<HTMLDivElement>) => {
+        event.preventDefault();
+        event.stopPropagation();
+        void startCurrentWindowResize(direction).catch((error) => {
+          console.warn("启动 picker 窗口拉伸失败", error);
+        });
+      };
 
   const confirmSelection = async (index: number) => {
     const item = itemsRef.current[index];
@@ -75,7 +125,7 @@ export function PickerShell() {
   }, [selectedIndex]);
 
   useEffect(() => {
-    if (!isTauriRuntime()) {
+    if (!tauriRuntime) {
       return;
     }
 
@@ -169,10 +219,10 @@ export function PickerShell() {
       unlistenConfirm?.();
       unlistenSelectIndex?.();
     };
-  }, []);
+  }, [tauriRuntime]);
 
   useEffect(() => {
-    if (isTauriRuntime()) {
+    if (tauriRuntime) {
       return;
     }
 
@@ -233,11 +283,21 @@ export function PickerShell() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [tauriRuntime]);
 
   return (
     <div className="flex h-screen w-screen items-start justify-center bg-transparent p-0 text-ink overflow-hidden select-none" data-tauri-drag-region>
-      <div className="flex h-full w-full flex-col overflow-hidden rounded-[16px] border border-slate-300/40 bg-white/95 backdrop-blur-2xl shadow-2xl">
+      <div className="relative flex h-full w-full flex-col overflow-hidden rounded-[16px] border border-slate-300/40 bg-white/95 backdrop-blur-2xl shadow-2xl">
+        {tauriRuntime
+          ? PICKER_RESIZE_HANDLES.map((handle) => (
+            <div
+              aria-hidden="true"
+              className={handle.className}
+              key={handle.direction}
+              onMouseDown={handleResizeMouseDown(handle.direction)}
+            />
+          ))
+          : null}
         <div className="flex shrink-0 items-center justify-between border-b border-slate-200/50 bg-white/50 px-3 py-2" data-tauri-drag-region>
           <div className="flex items-center gap-2">
             <div className="h-2.5 w-2.5 rounded-full bg-amber-400"></div>
