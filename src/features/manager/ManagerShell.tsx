@@ -194,15 +194,36 @@ export function ManagerShell() {
   };
 
   return (
-    <div className="flex h-screen flex-col px-5 py-6 text-ink md:px-8">
-      <div className="mx-auto grid w-full max-w-7xl flex-1 min-h-0 gap-5 lg:grid-cols-[280px_minmax(360px,1fr)_420px]">
-        <Panel className="flex flex-col gap-5 overflow-hidden">
+    <div className="flex min-h-screen lg:h-screen lg:overflow-hidden flex-col px-4 py-6 text-ink md:px-6 overflow-y-auto">
+      <style>{`
+        *::-webkit-scrollbar {
+          width: 5px;
+          height: 5px;
+        }
+        *::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        *::-webkit-scrollbar-thumb {
+          background: rgba(148, 163, 184, 0.2);
+          border-radius: 10px;
+        }
+        *::-webkit-scrollbar-thumb:hover {
+          background: rgba(148, 163, 184, 0.4);
+        }
+      `}</style>
+      <div className="mx-auto grid w-full max-w-[1600px] flex-1 min-h-0 gap-4 xl:grid-cols-[280px_minmax(360px,1fr)_420px] lg:grid-cols-[260px_minmax(320px,1fr)_380px]">
+        <Panel className="flex flex-col gap-5 lg:overflow-hidden min-h-[600px] lg:min-h-0">
           <div className="shrink-0">
-            <div className="inline-flex items-center rounded-full border border-accent/20 bg-accent/5 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.3em] text-accentDeep">
-              FloatPaste / 浮贴
+            <div className="inline-flex items-center gap-2 rounded-full border border-accent/20 bg-gradient-to-r from-accent/10 to-transparent pl-1.5 pr-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-accentDeep shadow-sm">
+              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent text-white shadow-inner">
+                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+              </span>
+              FloatPaste
             </div>
-            <h1 className="mt-3 font-display text-3xl font-medium tracking-tight">资料库窗口</h1>
-            <p className="mt-3 text-sm leading-relaxed text-slate-600">
+            <h1 className="mt-4 font-display text-[2rem] font-medium tracking-tight text-slate-800">资料库窗口</h1>
+            <p className="mt-3 text-[13px] leading-relaxed text-slate-500/90">
               当前版本已经打通文本、图片、文件记录的入库与基础浏览，搜索、收藏、设置与速贴主链路也已接入。
             </p>
           </div>
@@ -216,16 +237,20 @@ export function ManagerShell() {
             </StatusBadge>
           </div>
 
-          <div className="relative shrink-0 overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 to-slate-800 px-5 py-5 text-white shadow-lg">
+          <div className="relative shrink-0 overflow-hidden rounded-3xl bg-slate-800 px-6 py-6 text-white shadow-xl shadow-slate-900/10 ring-1 ring-white/10 transition-transform duration-500 hover:scale-[1.02]">
             <div className="relative z-10">
-              <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-white/60">快捷键</p>
-              <p className="mt-1.5 text-2xl font-semibold tracking-wide">{settings.data?.shortcut ?? "Ctrl+`"}</p>
-              <p className="mt-3 text-[13px] leading-relaxed text-white/70">全局快捷键、速贴面板与文本/图片/文件的基础回贴链路已经接入；可在设置中继续调整记录数、显示位置与启动行为。</p>
+              <div className="flex items-center gap-2">
+                <div className="h-1.5 w-1.5 rounded-full bg-accent shadow-[0_0_8px_rgba(251,191,36,0.8)]"></div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-white/50">全局快捷键</p>
+              </div>
+              <p className="mt-2.5 font-display text-3xl font-medium tracking-wide text-white drop-shadow-sm">{settings.data?.shortcut ?? "Ctrl+`"}</p>
+              <p className="mt-3 text-xs leading-relaxed text-white/60 font-medium">唤起速贴面板进行剪贴板管理</p>
             </div>
-            <div className="absolute -right-4 -top-4 h-24 w-24 rounded-full bg-white/5 blur-2xl"></div>
+            <div className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-accent/20 blur-[40px] transition-all duration-700 group-hover:bg-accent/30"></div>
+            <div className="absolute -left-10 -bottom-10 h-32 w-32 rounded-full bg-blue-500/10 blur-[30px]"></div>
           </div>
-
-          <div className="flex min-h-0 flex-1 flex-col">
+          
+          <div className="flex min-h-[200px] lg:min-h-0 flex-1 flex-col">
             <div className="mb-3 flex shrink-0 items-center justify-between">
               <h2 className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">
                 收藏预览
@@ -265,50 +290,75 @@ export function ManagerShell() {
             </div>
           </div>
 
-          <div className="mt-auto flex shrink-0 gap-2 pt-4">
-            <button
-              className="whitespace-nowrap rounded-2xl bg-gradient-to-b from-amber-400 to-amber-500 px-4 py-3 text-sm font-semibold text-white shadow-[0_2px_10px_rgba(217,119,6,0.2)] transition-all duration-300 hover:to-amber-600 hover:shadow-[0_4px_14px_rgba(217,119,6,0.3)]"
-              onClick={() => void showPicker()}
-              type="button"
-            >
-              打开速贴
-            </button>
-            <button
-              className={`whitespace-nowrap flex-1 rounded-2xl px-4 py-3 text-sm font-semibold transition-all duration-300 ${
-                viewMode === "history"
-                  ? "bg-slate-900 text-white shadow-md"
-                  : "bg-white text-slate-700 ring-1 ring-inset ring-slate-200 hover:bg-slate-50 hover:text-slate-900"
-              }`}
-              onClick={() => setViewMode("history")}
-              type="button"
-            >
-              历史库
-            </button>
-            <button
-              className={`whitespace-nowrap flex-1 rounded-2xl px-4 py-3 text-sm font-semibold transition-all duration-300 ${
-                viewMode === "settings"
-                  ? "bg-slate-900 text-white shadow-md"
-                  : "bg-white text-slate-700 ring-1 ring-inset ring-slate-200 hover:bg-slate-50 hover:text-slate-900"
-              }`}
-              onClick={() => setViewMode("settings")}
-              type="button"
-            >
-              设置
-            </button>
+          <div className="mt-auto shrink-0 pt-6">
+            <div className="flex flex-col gap-3">
+              <button
+                className="group relative flex w-full items-center justify-center gap-2 overflow-hidden rounded-2xl bg-slate-900 px-4 py-3.5 text-sm font-semibold text-white shadow-lg shadow-slate-900/20 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-slate-900/30 active:translate-y-0"
+                onClick={() => void showPicker()}
+                type="button"
+              >
+                <div
+                  className="absolute inset-0 bg-gradient-to-r from-accent/0 via-accent/20 to-accent/0 opacity-0 transition-opacity duration-500 group-hover:opacity-100"
+                  style={{ transform: "translateX(-100%)" }}
+                />
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                </svg>
+                打开速贴
+              </button>
+              <div className="grid grid-cols-2 gap-2 rounded-2xl bg-slate-100/80 p-1.5 backdrop-blur-sm ring-1 ring-slate-200/50">
+                <button
+                  className={`flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all duration-300 ${
+                    viewMode === "history"
+                      ? "bg-white text-slate-800 shadow-sm ring-1 ring-slate-200/50"
+                      : "text-slate-500 hover:text-slate-700 hover:bg-slate-200/50"
+                  }`}
+                  onClick={() => setViewMode("history")}
+                  type="button"
+                >
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  历史库
+                </button>
+                <button
+                  className={`flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all duration-300 ${
+                    viewMode === "settings"
+                      ? "bg-white text-slate-800 shadow-sm ring-1 ring-slate-200/50"
+                      : "text-slate-500 hover:text-slate-700 hover:bg-slate-200/50"
+                  }`}
+                  onClick={() => setViewMode("settings")}
+                  type="button"
+                >
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                  设置
+                </button>
+              </div>
+            </div>
           </div>
         </Panel>
 
-        <Panel className="flex flex-col gap-4 overflow-hidden">
+        <Panel className="flex flex-col gap-4 lg:overflow-hidden min-h-[500px] lg:min-h-0">
           {viewMode === "history" ? (
             <>
-              <div className="flex shrink-0 flex-col gap-3 sm:flex-row">
-                <input
-                  className="flex-1 rounded-2xl border border-slate-200 bg-slate-50/50 px-5 py-3.5 text-sm outline-none transition-all focus:border-accent focus:bg-white focus:ring-4 focus:ring-accent/10"
-                  onChange={(event) => setKeyword(event.target.value)}
-                  placeholder="搜索全文、来源应用或关键短语"
-                  value={keyword}
-                />
-                <label className="inline-flex cursor-pointer items-center gap-2 rounded-2xl border border-slate-200 bg-white px-5 py-3.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50">
+              <div className="flex shrink-0 flex-col gap-2.5 sm:flex-row">
+                <div className="relative flex-1 group">
+                  <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none text-slate-400 group-focus-within:text-accent transition-colors">
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                  </div>
+                  <input
+                    className="w-full rounded-2xl border border-slate-200/80 bg-slate-50/50 pl-11 pr-5 py-3 text-sm outline-none backdrop-blur-sm transition-all duration-300 placeholder:text-slate-400 focus:border-accent/40 focus:bg-white focus:ring-4 focus:ring-accent/10 focus:shadow-[0_4px_20px_-4px_rgba(251,191,36,0.15)]"
+                    onChange={(event) => setKeyword(event.target.value)}
+                    placeholder="搜索全文、来源应用或关键短语"
+                    value={keyword}
+                  />
+                </div>
+                <label className="inline-flex cursor-pointer items-center gap-2 rounded-2xl border border-slate-200/80 bg-white px-5 py-3 text-sm font-medium text-slate-600 shadow-sm transition-all duration-300 hover:bg-slate-50 hover:border-slate-300 hover:text-slate-900 active:scale-95">
                   <input
                     className="h-4 w-4 rounded border-slate-300 text-accent focus:ring-accent"
                     checked={favoritedOnly}
@@ -330,42 +380,60 @@ export function ManagerShell() {
                     const isSelected = item.id === selectedItemId;
                     return (
                       <button
-                        className={`group w-full rounded-3xl border px-5 py-4 text-left transition-all duration-300 ${
+                        className={`group w-full rounded-3xl border px-6 py-5 text-left transition-all duration-300 ${
                           isSelected
-                            ? "scale-[1.01] border-accent/40 bg-white shadow-[0_4px_20px_-4px_rgba(217,119,6,0.15)] ring-1 ring-accent/30"
-                            : "border-slate-200/60 bg-white/60 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white hover:shadow-sm"
+                            ? "scale-[1.01] border-accent/30 bg-white shadow-[0_8px_30px_-4px_rgba(217,119,6,0.12)] ring-1 ring-accent/30 z-10 relative"
+                            : "border-slate-200/60 bg-white/60 hover:-translate-y-0.5 hover:border-slate-300/80 hover:bg-white/90 hover:shadow-md"
                         }`}
                         key={item.id}
                         onClick={() => setSelectedItemId(item.id)}
                         type="button"
                       >
                         <div className="flex items-start justify-between gap-4">
-                          <div className="flex-1">
-                            <div className="flex h-5 w-5 items-center justify-center rounded-md bg-slate-100/80 text-[10px] font-bold text-slate-400 transition-colors group-hover:bg-slate-200 group-hover:text-slate-500">
+                          <div className="flex-1 min-w-0">
+                            <div className={`inline-flex h-6 min-w-6 items-center justify-center rounded-lg px-1.5 text-[10px] font-bold transition-colors ${
+                              isSelected 
+                                ? "bg-accent/10 text-accentDeep ring-1 ring-accent/20" 
+                                : "bg-slate-100/80 text-slate-400 group-hover:bg-slate-200 group-hover:text-slate-500"
+                            }`}>
                               {String(searchQuery.offset + index + 1).padStart(2, "0")}
                             </div>
                             <p
-                              className="mt-3 line-clamp-5 text-[13px] leading-[1.6] text-slate-700/90 whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
+                              className={`mt-3.5 line-clamp-4 text-[13px] leading-[1.6] whitespace-pre-wrap break-words [overflow-wrap:anywhere] transition-colors ${
+                                isSelected ? "text-slate-800" : "text-slate-600 group-hover:text-slate-700"
+                              }`}
                               title={item.tooltipText || item.contentPreview}
                             >
                               {item.contentPreview}
                             </p>
                           </div>
-                          <div className="flex flex-col items-end gap-2">
-                            <span className="text-[10px] px-2 py-1 rounded-full bg-slate-100 text-slate-500">
+                          <div className="flex shrink-0 flex-col items-end gap-2">
+                            <span className="inline-flex items-center rounded-full border border-slate-200/60 bg-white px-2.5 py-1 text-[10px] font-medium text-slate-500 shadow-sm">
                               {getClipTypeLabel(item)}
                             </span>
                             {item.isFavorited ? (
-                              <span className="shrink-0 rounded-full bg-amber-100/80 px-2 py-1 text-[10px] font-semibold text-amber-700">
+                              <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-600 ring-1 ring-inset ring-amber-500/20">
+                                <svg className="h-2.5 w-2.5" fill="currentColor" viewBox="0 0 20 20">
+                                  <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                                </svg>
                                 收藏
                               </span>
                             ) : null}
                           </div>
                         </div>
-                        <div className="mt-3.5 flex flex-wrap gap-x-4 gap-y-2 text-[11px] font-medium text-slate-400">
-                          <span className="flex items-center gap-1.5"><span className="h-1 w-1 rounded-full bg-slate-300"></span>{item.sourceApp ?? "未知来源"}</span>
-                          <span className="flex items-center gap-1.5"><span className="h-1 w-1 rounded-full bg-slate-300"></span>创建于 {formatDateTime(item.createdAt)}</span>
-                          <span className="flex items-center gap-1.5"><span className="h-1 w-1 rounded-full bg-slate-300"></span>最近使用 {formatDateTime(item.lastUsedAt)}</span>
+                        <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-[11px] font-medium text-slate-400">
+                          <span className="flex items-center gap-1.5">
+                            <span className={`h-1.5 w-1.5 rounded-full ${isSelected ? "bg-accent/40" : "bg-slate-200"}`}></span>
+                            {item.sourceApp ?? "未知来源"}
+                          </span>
+                          <span className="flex items-center gap-1.5">
+                            <span className="h-1.5 w-1.5 rounded-full bg-slate-200"></span>
+                            创建于 {formatDateTime(item.createdAt)}
+                          </span>
+                          <span className="flex items-center gap-1.5">
+                            <span className="h-1.5 w-1.5 rounded-full bg-slate-200"></span>
+                            最近使用 {formatDateTime(item.lastUsedAt)}
+                          </span>
                         </div>
                       </button>
                     );
@@ -378,24 +446,30 @@ export function ManagerShell() {
                 )}
               </div>
 
-              <div className="flex shrink-0 items-center justify-between gap-3 border-t border-slate-200/80 px-1 pt-4 text-xs font-medium text-slate-400">
+              <div className="flex shrink-0 items-center justify-between gap-3 border-t border-slate-100 px-1 pt-4 pb-1 text-xs font-medium text-slate-400">
                 <span>{totalCount === 0 ? "当前没有可显示记录" : `当前显示第 ${pageStart}-${pageEnd} 条`}</span>
                 <div className="flex items-center gap-2">
                   <button
-                    className="rounded-xl bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm ring-1 ring-inset ring-slate-200 transition-all hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    className="flex items-center gap-1 rounded-xl bg-white px-3.5 py-2 text-xs font-semibold text-slate-600 shadow-sm ring-1 ring-inset ring-slate-200 transition-all hover:bg-slate-50 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-slate-600"
                     disabled={!hasPreviousPage}
                     onClick={() => setPageIndex((current) => Math.max(current - 1, 0))}
                     type="button"
                   >
+                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                    </svg>
                     上一页
                   </button>
                   <button
-                    className="rounded-xl bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm ring-1 ring-inset ring-slate-200 transition-all hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    className="flex items-center gap-1 rounded-xl bg-white px-3.5 py-2 text-xs font-semibold text-slate-600 shadow-sm ring-1 ring-inset ring-slate-200 transition-all hover:bg-slate-50 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-slate-600"
                     disabled={!hasNextPage}
                     onClick={() => setPageIndex((current) => current + 1)}
                     type="button"
                   >
                     下一页
+                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
                   </button>
                 </div>
               </div>
@@ -415,21 +489,28 @@ export function ManagerShell() {
           )}
         </Panel>
 
-        <Panel className="flex flex-col gap-4 overflow-hidden">
+        <Panel className="flex flex-col gap-4 lg:overflow-hidden min-h-[500px] lg:min-h-0">
           {detail.data && selectedSummary ? (
             <>
-              <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
+              <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4">
                 <div>
-                  <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">
-                    详情编辑
-                  </p>
-                  <h2 className="mt-1 font-display text-2xl font-medium tracking-tight">
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-1.5 w-1.5 rounded-full bg-accent shadow-[0_0_8px_rgba(251,191,36,0.8)]"></span>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">
+                      详情编辑
+                    </p>
+                  </div>
+                  <h2 className="mt-2 font-display text-2xl font-medium tracking-tight text-slate-800">
                     {getClipTypeLabel(detail.data)}剪贴项
                   </h2>
                 </div>
                 <div className="flex gap-2">
                   <button
-                    className="rounded-xl bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm ring-1 ring-inset ring-slate-200 transition-all hover:bg-slate-50 hover:text-slate-900"
+                    className={`flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-medium transition-all duration-300 ${
+                      detail.data.isFavorited
+                        ? "bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-500/30 hover:bg-amber-100 hover:text-amber-800"
+                        : "bg-white text-slate-600 shadow-sm ring-1 ring-inset ring-slate-200 hover:bg-slate-50 hover:text-slate-900"
+                    }`}
                     onClick={() =>
                       favoritedMutation.mutate({
                         id: detail.data.id,
@@ -438,10 +519,13 @@ export function ManagerShell() {
                     }
                     type="button"
                   >
-                    {detail.data.isFavorited ? "取消收藏" : "加入收藏"}
+                    <svg className={`h-4 w-4 ${detail.data.isFavorited ? "text-amber-500" : "text-slate-400"}`} fill="currentColor" viewBox="0 0 20 20">
+                      <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                    </svg>
+                    {detail.data.isFavorited ? "已收藏" : "加入收藏"}
                   </button>
                   <button
-                    className="rounded-xl bg-gradient-to-b from-amber-400 to-amber-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all hover:to-amber-600 hover:shadow"
+                    className="group relative overflow-hidden rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-slate-900/10 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-slate-900/20 active:translate-y-0"
                     onClick={() =>
                       pasteMutation.mutate({
                         id: detail.data.id,
@@ -454,64 +538,116 @@ export function ManagerShell() {
                     }
                     type="button"
                   >
-                    {detail.data.type === "text" ? "写入剪贴板" : "复制到剪贴板"}
+                    <div
+                      className="absolute inset-0 bg-gradient-to-r from-accent/0 via-accent/20 to-accent/0 opacity-0 transition-opacity duration-500 group-hover:opacity-100"
+                      style={{ transform: "translateX(-100%)" }}
+                    />
+                    <span className="relative flex items-center gap-1.5">
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                      </svg>
+                      {detail.data.type === "text" ? "写入剪贴板" : "复制到剪贴板"}
+                    </span>
                   </button>
                 </div>
               </div>
 
-              <div className="grid shrink-0 gap-3 rounded-2xl border border-slate-100 bg-slate-50/50 p-5 text-sm text-slate-600 sm:grid-cols-2">
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">来源应用</p>
-                  <p className="mt-1.5 font-medium text-slate-800">{selectedSummary.sourceApp ?? "未知来源"}</p>
+              <div className="grid shrink-0 gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-slate-100 bg-slate-50/50 p-4 transition-colors hover:bg-slate-50">
+                  <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
+                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                    </svg>
+                    来源应用
+                  </p>
+                  <p className="mt-2 font-medium text-slate-800">{selectedSummary.sourceApp ?? "未知来源"}</p>
                 </div>
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">最近使用</p>
-                  <p className="mt-1.5 font-medium text-slate-800">{formatDateTime(selectedSummary.lastUsedAt)}</p>
+                <div className="rounded-2xl border border-slate-100 bg-slate-50/50 p-4 transition-colors hover:bg-slate-50">
+                  <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
+                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    最近使用
+                  </p>
+                  <p className="mt-2 font-medium text-slate-800">{formatDateTime(selectedSummary.lastUsedAt)}</p>
                 </div>
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">创建时间</p>
-                  <p className="mt-1.5 font-medium text-slate-800">{formatDateTime(selectedSummary.createdAt)}</p>
+                <div className="rounded-2xl border border-slate-100 bg-slate-50/50 p-4 transition-colors hover:bg-slate-50">
+                  <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
+                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                    创建时间
+                  </p>
+                  <p className="mt-2 font-medium text-slate-800">{formatDateTime(selectedSummary.createdAt)}</p>
                 </div>
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">更新时间</p>
-                  <p className="mt-1.5 font-medium text-slate-800">{formatDateTime(selectedSummary.updatedAt)}</p>
+                <div className="rounded-2xl border border-slate-100 bg-slate-50/50 p-4 transition-colors hover:bg-slate-50">
+                  <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
+                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    更新时间
+                  </p>
+                  <p className="mt-2 font-medium text-slate-800">{formatDateTime(selectedSummary.updatedAt)}</p>
                 </div>
                 {/* 图片或文件类型的额外信息 */}
                 {detail.data.type === "image" && (
                   <>
-                    <div>
-                      <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">尺寸</p>
-                      <p className="mt-1.5 font-medium text-slate-800">
+                    <div className="rounded-2xl border border-slate-100 bg-slate-50/50 p-4 transition-colors hover:bg-slate-50">
+                      <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
+                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                        </svg>
+                        尺寸
+                      </p>
+                      <p className="mt-2 font-medium text-slate-800">
                         {detail.data.imageWidth} × {detail.data.imageHeight}
                       </p>
                     </div>
-                    <div>
-                      <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">大小</p>
-                      <p className="mt-1.5 font-medium text-slate-800">
+                    <div className="rounded-2xl border border-slate-100 bg-slate-50/50 p-4 transition-colors hover:bg-slate-50">
+                      <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
+                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                        </svg>
+                        大小
+                      </p>
+                      <p className="mt-2 font-medium text-slate-800">
                         {formatBytes(detail.data.fileSize)}
                       </p>
                     </div>
                     {detail.data.imageFormat && (
-                      <div>
-                        <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">格式</p>
-                        <p className="mt-1.5 font-medium text-slate-800">{detail.data.imageFormat}</p>
+                      <div className="rounded-2xl border border-slate-100 bg-slate-50/50 p-4 transition-colors hover:bg-slate-50">
+                        <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
+                          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+                          </svg>
+                          格式
+                        </p>
+                        <p className="mt-2 font-medium text-slate-800">{detail.data.imageFormat}</p>
                       </div>
                     )}
                   </>
                 )}
                 {detail.data.type === "file" && (
                   <>
-                    <div>
-                      <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
+                    <div className="rounded-2xl border border-slate-100 bg-slate-50/50 p-4 transition-colors hover:bg-slate-50">
+                      <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
+                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
                         {getFileCountLabel(detail.data.fileCount, detail.data.directoryCount)}
                       </p>
-                      <p className="mt-1.5 font-medium text-slate-800">
+                      <p className="mt-2 font-medium text-slate-800">
                         {detail.data.fileCount} 个
                       </p>
                     </div>
-                    <div>
-                      <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">总大小</p>
-                      <p className="mt-1.5 font-medium text-slate-800">
+                    <div className="rounded-2xl border border-slate-100 bg-slate-50/50 p-4 transition-colors hover:bg-slate-50">
+                      <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
+                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                        </svg>
+                        总大小
+                      </p>
+                      <p className="mt-2 font-medium text-slate-800">
                         {detail.data.directoryCount > 0 ? "未统计" : formatBytes(detail.data.totalSize)}
                       </p>
                       {detail.data.directoryCount > 0 ? (
@@ -526,14 +662,14 @@ export function ManagerShell() {
               {detail.data.type === "text" ? (
                 <>
                   <textarea
-                    className="min-h-[200px] flex-1 w-full resize-none rounded-2xl border border-slate-200 bg-slate-50/50 px-5 py-5 text-[15px] leading-relaxed outline-none transition-all duration-300 focus:border-accent focus:bg-white focus:ring-4 focus:ring-accent/10"
+                    className="min-h-[200px] flex-1 w-full resize-none rounded-2xl border border-slate-200/80 bg-white/80 px-5 py-5 text-[15px] leading-relaxed shadow-inner shadow-slate-100/50 outline-none transition-all duration-300 focus:border-accent focus:bg-white focus:ring-4 focus:ring-accent/10"
                     onChange={(event) => setDraftText(event.target.value)}
                     value={draftText}
                   />
 
                   <div className="flex shrink-0 flex-wrap gap-2 pt-2">
                     <button
-                      className="rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white shadow-md transition-all hover:bg-slate-800 hover:shadow-lg disabled:opacity-50"
+                      className="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-accent/40 hover:bg-slate-50 hover:text-slate-900 hover:shadow-md disabled:opacity-50"
                       disabled={updateTextMutation.isPending}
                       onClick={() =>
                         updateTextMutation.mutate({
@@ -543,10 +679,15 @@ export function ManagerShell() {
                       }
                       type="button"
                     >
-                      保存文本
+                      <span className="flex items-center gap-2">
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                        </svg>
+                        保存文本修改
+                      </span>
                     </button>
                     <button
-                      className="rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-red-600 shadow-sm ring-1 ring-inset ring-red-200 transition-all hover:bg-red-50 hover:text-red-700 disabled:opacity-50"
+                      className="rounded-xl border border-red-100 bg-white px-5 py-2.5 text-sm font-semibold text-red-600 shadow-sm transition-all duration-300 hover:bg-red-50 hover:text-red-700 disabled:opacity-50"
                       disabled={deleteMutation.isPending}
                       onClick={() => {
                         deleteMutation.mutate(detail.data.id, {
