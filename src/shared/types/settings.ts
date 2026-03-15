@@ -1,4 +1,5 @@
 export type PickerPositionMode = "mouse" | "lastPosition" | "caret";
+export type ThemeMode = "system" | "light" | "dark";
 
 export interface UserSetting {
   shortcut: string;
@@ -10,4 +11,5 @@ export interface UserSetting {
   excludedApps: string[];
   restoreClipboardAfterPaste: boolean;
   pauseMonitoring: boolean;
+  themeMode: ThemeMode;
 }

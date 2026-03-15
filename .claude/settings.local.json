@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(claude:*)",
+      "Bash(pnpm build:*)",
+      "Bash(cargo check:*)"
+    ]
+  }
+}

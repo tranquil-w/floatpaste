@@ -2,9 +2,102 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Catppuccin Latte (Light Theme) */
 :root {
-  color: #111827;
+  /* Rosewater */ --cp-rosewater: #dc8a78;
+  /* Flamingo */ --cp-flamingo: #dd7878;
+  /* Pink */ --cp-pink: #ea76cb;
+  /* Mauve */ --cp-mauve: #8839ef;
+  /* Red */ --cp-red: #d20f39;
+  /* Maroon */ --cp-maroon: #e64553;
+  /* Peach */ --cp-peach: #fe640b;
+  /* Yellow */ --cp-yellow: #df8e1d;
+  /* Green */ --cp-green: #40a02b;
+  /* Teal */ --cp-teal: #179299;
+  /* Sky */ --cp-sky: #04a5e5;
+  /* Sapphire */ --cp-sapphire: #209fb5;
+  /* Blue */ --cp-blue: #1e66f5;
+  /* Lavender */ --cp-lavender: #7287fd;
+  /* Text */ --cp-text: #4c4f69;
+  /* Subtext1 */ --cp-subtext1: #5c5f77;
+  /* Subtext0 */ --cp-subtext0: #6c6f85;
+  /* Overlay2 */ --cp-overlay2: #7c7f93;
+  /* Overlay1 */ --cp-overlay1: #8c8fa1;
+  /* Overlay0 */ --cp-overlay0: #9ca0b0;
+  /* Surface2 */ --cp-surface2: #acb0be;
+  /* Surface1 */ --cp-surface1: #bcc0cc;
+  /* Surface0 */ --cp-surface0: #ccd0da;
+  /* Base */ --cp-base: #eff1f5;
+  /* Mantle */ --cp-mantle: #e6e9ef;
+  /* Crust */ --cp-crust: #dce0e8;
+
+  /* RGB components for rgba() usage */
+  --cp-text-rgb: 76, 79, 105;
+  --cp-surface1-rgb: 188, 192, 204;
+  --cp-surface2-rgb: 172, 176, 190;
+
+  color: var(--cp-text);
   font-family: "Segoe UI", sans-serif;
+  color-scheme: light;
+  background-color: var(--cp-base);
+}
+
+/* Catppuccin Macchiato (Dark Theme) */
+html.dark {
+  /* Rosewater */ --cp-rosewater: #f4dbd6;
+  /* Flamingo */ --cp-flamingo: #f0c6c6;
+  /* Pink */ --cp-pink: #f5bde6;
+  /* Mauve */ --cp-mauve: #c6a0f6;
+  /* Red */ --cp-red: #ed8796;
+  /* Maroon */ --cp-maroon: #ee99a0;
+  /* Peach */ --cp-peach: #f5a97f;
+  /* Yellow */ --cp-yellow: #eccd92;
+  /* Green */ --cp-green: #a6da95;
+  /* Teal */ --cp-teal: #8bd5ca;
+  /* Sky */ --cp-sky: #91d7e3;
+  /* Sapphire */ --cp-sapphire: #7dc4e4;
+  /* Blue */ --cp-blue: #8aadf4;
+  /* Lavender */ --cp-lavender: #b7bdf8;
+  /* Text */ --cp-text: #cad3f5;
+  /* Subtext1 */ --cp-subtext1: #b8c0e0;
+  /* Subtext0 */ --cp-subtext0: #a5adcb;
+  /* Overlay2 */ --cp-overlay2: #939ab7;
+  /* Overlay1 */ --cp-overlay1: #8087a2;
+  /* Overlay0 */ --cp-overlay0: #6e738d;
+  /* Surface2 */ --cp-surface2: #5b6078;
+  /* Surface1 */ --cp-surface1: #494d64;
+  /* Surface0 */ --cp-surface0: #363a4f;
+  /* Base */ --cp-base: #24273a;
+  /* Mantle */ --cp-mantle: #1e2030;
+  /* Crust */ --cp-crust: #181926;
+
+  /* RGB components for rgba() usage */
+  --cp-text-rgb: 202, 211, 245;
+  --cp-surface1-rgb: 73, 77, 100;
+  --cp-surface2-rgb: 91, 96, 120;
+
+  color: var(--cp-text);
+  color-scheme: dark;
+  background-color: var(--cp-base);
+}
+
+/* 滚动条样式 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--cp-base);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--cp-surface0);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--cp-surface1);
 }
 
 html,
@@ -13,19 +106,35 @@ body,
   min-height: 100%;
 }
 
+html.window-picker,
+html.window-picker #root {
+  background: transparent;
+  background-color: transparent;
+}
+
+/* Picker 窗口的 body 需要有背景色，否则内容会完全透明 */
+html.window-picker body {
+  background: var(--cp-base);
+}
+
 body {
   margin: 0;
+  color: inherit;
+  transition:
+    background 220ms ease,
+    color 220ms ease;
 }
 
 body.theme-manager {
-  background:
-    radial-gradient(circle at top left, rgba(217, 119, 6, 0.18), transparent 32%),
-    radial-gradient(circle at right, rgba(63, 98, 18, 0.14), transparent 26%),
-    linear-gradient(180deg, #f8f4ee 0%, #f2eadc 100%);
+  background: var(--cp-base);
 }
 
 body.theme-picker {
-  background: transparent;
+  background: var(--cp-base);
+}
+
+.text-ink {
+  color: var(--cp-text);
 }
 
 * {
@@ -40,6 +149,6 @@ select {
 }
 
 ::selection {
-  color: #fff;
-  background: rgba(146, 64, 14, 0.85);
+  color: var(--cp-base);
+  background: var(--cp-lavender);
 }

@@ -286,8 +286,8 @@ export function PickerShell() {
   }, [tauriRuntime]);
 
   return (
-    <div className="flex h-screen w-screen items-start justify-center bg-transparent p-0 text-ink overflow-hidden select-none" data-tauri-drag-region>
-      <div className="relative flex h-full w-full flex-col overflow-hidden rounded-[16px] border border-slate-400/60 bg-white/95 ring-1 ring-black/5 ring-inset">
+    <div className="flex h-screen w-screen items-start justify-center overflow-hidden bg-transparent p-0 text-ink select-none">
+      <div className="relative flex h-full w-full flex-col overflow-hidden rounded-[16px] border border-cp-surface0/80 bg-cp-base/98 shadow-[0_20px_70px_-15px_rgba(15,23,42,0.4)] ring-1 ring-black/5 ring-inset backdrop-blur-xl dark:border-cp-surface0/90 dark:bg-cp-base/98 dark:shadow-[0_20px_70px_-15px_rgba(0,0,0,0.7)] dark:ring-cp-surface0/60">
         {tauriRuntime
           ? PICKER_RESIZE_HANDLES.map((handle) => (
             <div
@@ -298,15 +298,15 @@ export function PickerShell() {
             />
           ))
           : null}
-        <div className="flex shrink-0 items-center justify-between border-b border-slate-200/50 bg-white/50 px-3 py-2" data-tauri-drag-region>
+        <div className="flex shrink-0 items-center justify-between border-b border-cp-surface0/60 bg-cp-base/40 px-3 py-2 dark:border-cp-surface0/70 dark:bg-cp-base/70" data-tauri-drag-region>
           <div className="flex items-center gap-2">
-            <div className="h-2.5 w-2.5 rounded-full bg-amber-400"></div>
-            <span className="text-[12px] font-semibold tracking-wide text-slate-700">FloatPaste</span>
-            {lastMessage && <span className="text-[10px] font-medium text-amber-600 ml-2 animate-pulse">{lastMessage}</span>}
+            <div className="h-2.5 w-2.5 rounded-full bg-cp-accent dark:bg-cp-accent"></div>
+            <span className="text-[12px] font-semibold tracking-wide text-cp-text dark:text-cp-text">FloatPaste</span>
+            {lastMessage && <span className="ml-2 animate-pulse text-[10px] font-medium text-cp-yellow dark:text-cp-yellow">{lastMessage}</span>}
           </div>
           <div className="flex items-center gap-1.5">
             <button
-              className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold text-slate-500 transition-colors hover:bg-slate-200/50 hover:text-slate-800"
+              className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold text-cp-subtext0 transition-colors hover:bg-cp-surface0/50 hover:text-cp-text dark:text-cp-subtext0 dark:hover:bg-cp-surface0/40 dark:hover:text-cp-text"
               onClick={() => void handleOpenManager()}
               type="button"
             >
@@ -317,7 +317,7 @@ export function PickerShell() {
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col p-2">
-          <div className="grid flex-1 gap-1 overflow-y-auto overflow-x-hidden pr-1.5 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300/80 hover:[&::-webkit-scrollbar-thumb]:bg-slate-400/80 [&::-webkit-scrollbar-track]:bg-transparent transition-colors">
+          <div className="grid flex-1 gap-1 overflow-y-auto overflow-x-hidden px-1.5 pt-1 pb-1 transition-colors [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-cp-surface1/80 [&::-webkit-scrollbar-track]:bg-transparent hover:[&::-webkit-scrollbar-thumb]:bg-cp-surface2/80 dark:[&::-webkit-scrollbar-thumb]:bg-cp-surface1/80 dark:hover:[&::-webkit-scrollbar-thumb]:bg-cp-surface2/80">
             {items.map((item, index) => {
               const isSelected = index === selectedIndex;
               return (
@@ -326,8 +326,8 @@ export function PickerShell() {
                     itemRefs.current[index] = el;
                   }}
                   className={`group relative flex w-full flex-col gap-1.5 rounded-xl px-2.5 py-2.5 text-left transition-all duration-200 ${isSelected
-                    ? "bg-amber-500/10 shadow-[0_2px_10px_rgba(245,158,11,0.06)] ring-1 ring-amber-500/20"
-                    : "bg-transparent hover:bg-slate-500/5"
+                    ? "bg-cp-yellow/10 shadow-[0_4px_15px_-2px_rgba(245,158,11,0.1)] ring-1 ring-cp-yellow/20 dark:bg-cp-yellow/18 dark:shadow-[0_4px_20px_-2px_rgba(0,0,0,0.5)] dark:ring-cp-yellow/40"
+                    : "bg-transparent hover:bg-cp-surface0/5 dark:hover:bg-cp-surface0/60"
                     }`}
                   key={item.id}
                   onClick={() => {
@@ -340,22 +340,22 @@ export function PickerShell() {
                   type="button"
                 >
                   <p
-                    className={`${isSelected ? "text-slate-800" : "text-slate-600/90"} line-clamp-5 text-[13px] leading-[1.6] tracking-tight break-words [overflow-wrap:anywhere] whitespace-pre-wrap transition-colors`}
+                    className={`${isSelected ? "text-cp-text dark:text-cp-text" : "text-cp-text/90 dark:text-cp-text/80"} line-clamp-5 text-[13px] leading-[1.6] tracking-tight break-words [overflow-wrap:anywhere] whitespace-pre-wrap transition-colors`}
                     title={item.tooltipText || item.contentPreview}
                   >
                     {item.contentPreview}
                   </p>
 
-                  <div className={`flex w-full items-center gap-2 text-[10px] leading-none transition-colors ${isSelected ? "text-amber-700/60" : "text-slate-400/60"}`}>
+                  <div className={`flex w-full items-center gap-2 text-[10px] leading-none transition-colors ${isSelected ? "text-cp-yellow/70 dark:text-cp-yellow/80" : "text-cp-subtext0/70 dark:text-cp-subtext0/80"}`}>
                     {index < 9 ? (
                       <kbd className={`flex h-[16px] min-w-[16px] px-1 items-center justify-center rounded-[4px] font-mono text-[9px] font-bold transition-colors ${isSelected
-                        ? "bg-amber-500 text-white"
-                        : "bg-slate-400/15 text-slate-400 group-hover:bg-slate-400/25 group-hover:text-slate-700"
+                        ? "bg-cp-yellow text-cp-base dark:text-cp-text"
+                        : "bg-cp-surface0/15 text-cp-subtext0 group-hover:bg-cp-surface0/25 group-hover:text-cp-text dark:bg-cp-surface0 dark:text-cp-subtext0 dark:group-hover:bg-cp-surface1 dark:group-hover:text-cp-text"
                         }`}>
                         {index + 1}
                       </kbd>
                     ) : null}
-                    <span className="shrink-0 px-1 py-0.5 rounded-sm bg-slate-100/90 font-medium">
+                    <span className="shrink-0 rounded-sm bg-cp-surface0/90 px-1 py-0.5 font-medium dark:bg-cp-surface0 dark:text-cp-text">
                       {getClipTypeLabel(item)}
                     </span>
                     <span className="min-w-0 flex-1 truncate font-medium">
@@ -366,7 +366,7 @@ export function PickerShell() {
                         {formatDateTime(item.lastUsedAt ?? item.createdAt)}
                       </span>
                       {item.isFavorited ? (
-                        <span className="text-[10px] text-amber-500">★</span>
+                        <span className="text-[10px] text-cp-yellow dark:text-cp-yellow">★</span>
                       ) : null}
                     </span>
                   </div>

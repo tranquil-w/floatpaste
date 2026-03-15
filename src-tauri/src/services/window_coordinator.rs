@@ -322,22 +322,39 @@ fn restore_picker_window_size(app: &AppHandle, window: &WebviewWindow) {
 }
 
 fn configure_picker_window(window: &WebviewWindow) {
+    #[cfg(target_os = "windows")]
+    if let Err(error) = crate::platform::windows::window_utils::apply_picker_window_shape(window) {
+        warn!("初始化 picker 圆角窗口失败: {error}");
+    }
+
     let app = window.app_handle().clone();
+    let handle = window.clone();
     window.on_window_event(move |event| {
-        if let WindowEvent::CloseRequested { api, .. } = event {
-            if app
-                .try_state::<AppState>()
-                .map(|state| state.is_quitting())
-                .unwrap_or(false)
-            {
-                return;
+        match event {
+            WindowEvent::CloseRequested { api, .. } => {
+                if app
+                    .try_state::<AppState>()
+                    .map(|state| state.is_quitting())
+                    .unwrap_or(false)
+                {
+                    return;
+                }
+                api.prevent_close();
+                if let Some(state) = app.try_state::<AppState>() {
+                    let _ = WindowCoordinator::hide_picker_and_restore_target(&app, &state);
+                } else {
+                    let _ = WindowCoordinator::hide_picker(&app);
+                }
             }
-            api.prevent_close();
-            if let Some(state) = app.try_state::<AppState>() {
-                let _ = WindowCoordinator::hide_picker_and_restore_target(&app, &state);
-            } else {
-                let _ = WindowCoordinator::hide_picker(&app);
+            #[cfg(target_os = "windows")]
+            WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
+                if let Err(error) =
+                    crate::platform::windows::window_utils::apply_picker_window_shape(&handle)
+                {
+                    warn!("刷新 picker 圆角窗口失败: {error}");
+                }
             }
+            _ => {}
         }
     });
 }

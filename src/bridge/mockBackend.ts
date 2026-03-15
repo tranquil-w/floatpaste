@@ -10,17 +10,20 @@ import type { UserSetting } from "../shared/types/settings";
 
 const now = Date.now();
 const pickerPositionModes = new Set(["mouse", "lastPosition", "caret"]);
+const themeModes = new Set(["system", "light", "dark"]);
 
 function sanitizeSettings(payload: UserSetting): UserSetting {
   const pickerPositionMode = pickerPositionModes.has(payload.pickerPositionMode)
     ? payload.pickerPositionMode
     : "mouse";
+  const themeMode = themeModes.has(payload.themeMode) ? payload.themeMode : "system";
 
   return {
     ...structuredClone(payload),
     silentOnStartup: payload.launchOnStartup ? payload.silentOnStartup : false,
     pickerRecordLimit: Math.min(1000, Math.max(9, Math.trunc(payload.pickerRecordLimit || 50))),
     pickerPositionMode,
+    themeMode,
   };
 }
 
@@ -328,4 +331,5 @@ let settings: UserSetting = {
   excludedApps: ["KeePass.exe", "WindowsTerminal.exe"],
   restoreClipboardAfterPaste: true,
   pauseMonitoring: false,
+  themeMode: "system",
 };

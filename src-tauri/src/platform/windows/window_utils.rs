@@ -1,9 +1,12 @@
 use tauri::WebviewWindow;
 use windows::Win32::Foundation::HWND;
+use windows::Win32::Graphics::Gdi::{CreateRoundRectRgn, DeleteObject, HGDIOBJ, SetWindowRgn};
 use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, ShowWindow, GWL_EXSTYLE, SWP_NOACTIVATE,
     SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SW_SHOWNOACTIVATE, WS_EX_NOACTIVATE,
 };
+
+const PICKER_WINDOW_CORNER_RADIUS: i32 = 16;
 
 pub fn show_window_no_activate(window: &WebviewWindow) -> Result<(), String> {
     let tauri_hwnd = window.hwnd().map_err(|e| e.to_string())?;
@@ -34,5 +37,13 @@ pub fn show_window_no_activate(window: &WebviewWindow) -> Result<(), String> {
         );
     }
 
+    Ok(())
+}
+
+pub fn apply_picker_window_shape(_window: &WebviewWindow) -> Result<(), String> {
+    // 废弃旧的 SetWindowRgn 裁剪方案。
+    // 在现代 Windows 11 上，使用 SetWindowRgn 处理窗口圆角会触发 DWM 装饰冲突，
+    // 导致拖动窗口时出现 Picker 标题渗出以及背景割裂感。
+    // 现在改由前端 CSS `rounded` 属性配合 `transparent: true` 窗口配置来实现平滑圆角。
     Ok(())
 }

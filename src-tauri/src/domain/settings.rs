@@ -28,6 +28,34 @@ impl<'de> Deserialize<'de> for PickerPositionMode {
     }
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ThemeMode {
+    System,
+    Light,
+    Dark,
+}
+
+impl Default for ThemeMode {
+    fn default() -> Self {
+        Self::System
+    }
+}
+
+impl<'de> Deserialize<'de> for ThemeMode {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = Option::<String>::deserialize(deserializer)?.unwrap_or_default();
+        Ok(match value.as_str() {
+            "light" => Self::Light,
+            "dark" => Self::Dark,
+            _ => Self::System,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct StoredWindowPosition {
@@ -52,6 +80,7 @@ pub struct UserSetting {
     pub excluded_apps: Vec<String>,
     pub restore_clipboard_after_paste: bool,
     pub pause_monitoring: bool,
+    pub theme_mode: ThemeMode,
 }
 
 impl Default for UserSetting {
@@ -70,6 +99,7 @@ impl Default for UserSetting {
             ],
             restore_clipboard_after_paste: true,
             pause_monitoring: false,
+            theme_mode: ThemeMode::System,
         }
     }
 }
@@ -99,7 +129,7 @@ impl UserSetting {
 
 #[cfg(test)]
 mod tests {
-    use super::{PickerPositionMode, UserSetting};
+    use super::{PickerPositionMode, ThemeMode, UserSetting};
 
     #[test]
     fn sanitized_turns_off_silent_when_launch_on_startup_is_disabled() {
@@ -131,6 +161,7 @@ mod tests {
         assert!(!settings.silent_on_startup);
         assert_eq!(settings.picker_record_limit, 50);
         assert_eq!(settings.picker_position_mode, PickerPositionMode::Mouse);
+        assert_eq!(settings.theme_mode, ThemeMode::System);
     }
 
     #[test]
@@ -174,5 +205,47 @@ mod tests {
         .unwrap();
 
         assert_eq!(settings.picker_position_mode, PickerPositionMode::Mouse);
+    }
+
+    #[test]
+    fn deserialize_theme_mode() {
+        let settings: UserSetting = serde_json::from_str(
+            r#"{
+                "shortcut":"Ctrl+`",
+                "launchOnStartup":false,
+                "silentOnStartup":false,
+                "historyLimit":1000,
+                "pickerRecordLimit":50,
+                "pickerPositionMode":"mouse",
+                "excludedApps":["KeePass.exe"],
+                "restoreClipboardAfterPaste":true,
+                "pauseMonitoring":false,
+                "themeMode":"dark"
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(settings.theme_mode, ThemeMode::Dark);
+    }
+
+    #[test]
+    fn deserialize_invalid_theme_mode_falls_back_to_system() {
+        let settings: UserSetting = serde_json::from_str(
+            r#"{
+                "shortcut":"Ctrl+`",
+                "launchOnStartup":false,
+                "silentOnStartup":false,
+                "historyLimit":1000,
+                "pickerRecordLimit":50,
+                "pickerPositionMode":"mouse",
+                "excludedApps":["KeePass.exe"],
+                "restoreClipboardAfterPaste":true,
+                "pauseMonitoring":false,
+                "themeMode":"sepia"
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(settings.theme_mode, ThemeMode::System);
     }
 }
