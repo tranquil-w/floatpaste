@@ -33,6 +33,26 @@ import {
   useUpdateTextMutation,
 } from "./queries";
 
+// --- 样式常量抽象 ---
+const STYLES = {
+  logoBadge: "inline-flex items-center gap-2 rounded-full border border-[color:var(--cp-accent-primary)]/20 bg-[color:var(--cp-accent-primary)]/10 pl-1.5 pr-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-[color:var(--cp-accent-primary)] shadow-sm",
+  logoIcon: "flex h-5 w-5 items-center justify-center rounded-full bg-[color:var(--cp-accent-primary)] text-cp-base shadow-sm",
+  shortcutCard: "relative shrink-0 overflow-hidden rounded-3xl bg-[color:var(--cp-card-surface)]/40 px-6 py-6 text-[color:var(--cp-text-primary)] shadow-xl shadow-black/5 ring-1 ring-[color:var(--cp-border-strong)] transition-transform duration-500 hover:scale-[1.01] dark:bg-[color:var(--cp-card-surface)]/30 dark:shadow-none dark:ring-[color:var(--cp-border-soft)]",
+  shortcutDot: "h-1.5 w-1.5 rounded-full bg-[color:var(--cp-accent-primary)] shadow-[0_0_8px_rgba(114,135,253,0.5)]",
+  favoriteItem: "group w-full rounded-2xl border border-[color:var(--cp-border-soft)] bg-cp-mantle/50 px-4 py-3 text-left transition-all duration-300 hover:-translate-y-0.5 hover:border-[color:var(--cp-border-strong)] hover:bg-cp-mantle dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[rgba(var(--cp-surface0-rgb),0.4)]",
+  primaryButton: "group relative flex w-full items-center justify-center gap-2 rounded-2xl bg-[color:var(--cp-accent-primary)] px-4 py-3.5 text-sm font-bold text-cp-base shadow-lg shadow-[color:var(--cp-accent-primary)]/20 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-[color:var(--cp-accent-primary)]/30 hover:brightness-110 active:translate-y-0",
+  viewModeToggle: (active: boolean) => `flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold transition-all duration-300 ${active
+    ? "bg-[color:var(--cp-window-shell)] text-[color:var(--cp-text-primary)] shadow-sm ring-1 ring-[color:var(--cp-border-strong)]"
+    : "text-[color:var(--cp-text-secondary)] hover:text-[color:var(--cp-text-primary)] hover:bg-[color:var(--cp-control-surface-hover)]/40"
+    }`,
+  searchInput: "w-full rounded-2xl border border-[color:var(--cp-border-strong)] bg-cp-mantle py-3 pl-11 pr-5 text-sm outline-none backdrop-blur-sm transition-all duration-300 placeholder:text-[color:var(--cp-text-muted)] focus:border-[rgba(var(--cp-lavender-rgb),0.4)] focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[rgba(var(--cp-lavender-rgb),0.1)] dark:bg-[rgba(var(--cp-surface0-rgb),0.3)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]",
+  historyItem: (selected: boolean) => `group w-full rounded-3xl border px-6 py-5 text-left transition-all duration-300 ${selected
+    ? "relative z-10 scale-[1.01] border-[rgba(var(--cp-lavender-rgb),0.6)] bg-cp-mantle shadow-xl shadow-black/5 ring-1 ring-[rgba(var(--cp-lavender-rgb),0.3)] dark:border-[rgba(var(--cp-lavender-rgb),0.5)] dark:bg-[rgba(var(--cp-surface0-rgb),0.6)] dark:shadow-none"
+    : "border-[color:var(--cp-border-soft)] bg-cp-mantle/30 hover:-translate-y-0.5 hover:border-[color:var(--cp-border-strong)] hover:bg-cp-mantle/60 hover:shadow-md dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
+    }`,
+  detailEditor: "min-h-[200px] flex-1 w-full resize-none rounded-2xl border border-[color:var(--cp-border-strong)] bg-cp-mantle px-5 py-5 text-[14px] leading-relaxed outline-none transition-all duration-300 focus:border-[rgba(var(--cp-lavender-rgb),0.4)] focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[rgba(var(--cp-lavender-rgb),0.1)] dark:bg-[rgba(var(--cp-surface0-rgb),0.3)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]",
+};
+
 const pickerPositionOptions: Array<{
   value: PickerPositionMode;
   label: string;
@@ -217,35 +237,19 @@ export function ManagerShell() {
 
   return (
     <div className="flex min-h-screen flex-col overflow-y-auto px-4 py-6 text-ink lg:h-screen lg:overflow-hidden md:px-6">
-      <style>{`
-        *::-webkit-scrollbar {
-          width: 5px;
-          height: 5px;
-        }
-        *::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        *::-webkit-scrollbar-thumb {
-          background: rgba(var(--cp-surface1-rgb), 0.5);
-          border-radius: 10px;
-        }
-        *::-webkit-scrollbar-thumb:hover {
-          background: rgba(var(--cp-surface2-rgb), 0.6);
-        }
-      `}</style>
       <div className="mx-auto grid w-full max-w-[1600px] flex-1 min-h-0 gap-4 xl:grid-cols-[280px_minmax(360px,1fr)_420px] lg:grid-cols-[260px_minmax(320px,1fr)_380px]">
         <Panel className="flex flex-col gap-5 lg:overflow-hidden min-h-[600px] lg:min-h-0">
           <div className="shrink-0">
-            <div className="inline-flex items-center gap-2 rounded-full border border-cp-accent/20 bg-cp-accent/10 pl-1.5 pr-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-cp-accentDeep shadow-sm">
-              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-cp-accent text-cp-base shadow-inner">
+            <div className={STYLES.logoBadge}>
+              <span className={STYLES.logoIcon}>
                 <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
                 </svg>
               </span>
               FloatPaste
             </div>
-            <h1 className="mt-4 font-display text-[2rem] font-medium tracking-tight text-cp-text dark:text-cp-text">资料库窗口</h1>
-            <p className="mt-3 text-[13px] leading-relaxed text-cp-subtext0/90 dark:text-cp-subtext0/80">
+            <h1 className="mt-4 font-display text-[2rem] font-medium tracking-tight text-[color:var(--cp-text-primary)]">资料库窗口</h1>
+            <p className="mt-3 text-[13px] leading-relaxed text-[color:var(--cp-text-secondary)]">
               当前版本已经打通文本、图片、文件记录的入库与基础浏览，搜索、收藏、设置与速贴主链路也已接入。
             </p>
           </div>
@@ -259,26 +263,25 @@ export function ManagerShell() {
             </StatusBadge>
           </div>
 
-          <div className="relative shrink-0 overflow-hidden rounded-3xl bg-cp-surface0 px-6 py-6 text-cp-text shadow-2xl shadow-cp-surface0/20 ring-1 ring-cp-text/10 transition-transform duration-500 hover:scale-[1.02] dark:bg-cp-surface0/80 dark:shadow-[0_24px_80px_rgba(0,0,0,0.55)] dark:ring-cp-surface0/50">
+          <div className={STYLES.shortcutCard}>
             <div className="relative z-10">
               <div className="flex items-center gap-2">
-                <div className="h-1.5 w-1.5 rounded-full bg-cp-accent shadow-[0_0_8px_rgba(251,191,36,0.8)]"></div>
-                <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-cp-text/50">全局快捷键</p>
+                <div className={STYLES.shortcutDot}></div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-[color:var(--cp-text-muted)]">全局快捷键</p>
               </div>
-              <p className="mt-2.5 font-display text-3xl font-medium tracking-wide text-cp-text drop-shadow-sm">{settings.data?.shortcut ?? "Ctrl+`"}</p>
-              <p className="mt-3 text-xs leading-relaxed text-cp-text/60 font-medium">唤起速贴面板进行剪贴板管理</p>
+              <p className="mt-2.5 font-display text-3xl font-medium tracking-wide text-[color:var(--cp-text-primary)]">{settings.data?.shortcut ?? "Ctrl+`"}</p>
+              <p className="mt-3 text-xs leading-relaxed text-[color:var(--cp-text-muted)] font-medium">唤起速贴面板进行剪贴板管理</p>
             </div>
-            <div className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-cp-accent/20 blur-[40px] transition-all duration-700 group-hover:bg-cp-accent/30"></div>
-            <div className="absolute -left-10 -bottom-10 h-32 w-32 rounded-full bg-cp-blue/10 blur-[30px]"></div>
+            <div className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-[color:var(--cp-accent-primary)]/10 blur-[40px] transition-all duration-700 group-hover:bg-[color:var(--cp-accent-primary)]/20"></div>
           </div>
 
           <div className="flex min-h-[200px] lg:min-h-0 flex-1 flex-col">
             <div className="mb-3 flex shrink-0 items-center justify-between">
-              <h2 className="text-[11px] font-bold uppercase tracking-[0.18em] text-cp-subtext0 dark:text-cp-subtext0">
+              <h2 className="text-[11px] font-bold uppercase tracking-[0.18em] text-[color:var(--cp-text-muted)]">
                 收藏预览
               </h2>
               <button
-                className="text-[13px] font-medium text-cp-accentDeep transition-colors hover:text-cp-accent dark:text-cp-accent dark:hover:text-cp-accent"
+                className="rounded-lg px-2 py-1 text-[13px] font-semibold text-[color:var(--cp-accent-primary)] transition-all hover:bg-[color:var(--cp-accent-primary)]/10 active:scale-95"
                 onClick={() => setViewMode("history")}
                 type="button"
               >
@@ -289,7 +292,7 @@ export function ManagerShell() {
               {favorites.data?.length ? (
                 favorites.data.map((item) => (
                   <button
-                    className="group w-full rounded-2xl border border-cp-yellow/50 bg-cp-yellow/80 px-4 py-3 text-left transition-all duration-300 hover:-translate-y-0.5 hover:border-cp-yellow/80 hover:shadow-[0_4px_12px_-4px_rgba(217,119,6,0.15)] dark:border-cp-yellow/30 dark:bg-cp-surface0/90 dark:hover:border-cp-yellow/40 dark:hover:shadow-[0_8px_24px_-12px_rgba(251,191,36,0.35)]"
+                    className={STYLES.favoriteItem}
                     key={item.id}
                     onClick={() => {
                       setViewMode("history");
@@ -298,12 +301,12 @@ export function ManagerShell() {
                     type="button"
                   >
                     <p
-                      className="line-clamp-3 text-[12px] leading-relaxed text-cp-text/80 whitespace-pre-wrap break-words [overflow-wrap:anywhere] dark:text-cp-text/90"
+                      className="line-clamp-3 text-[12px] leading-relaxed text-[color:var(--cp-text-secondary)] whitespace-pre-wrap break-words [overflow-wrap:anywhere] transition-colors group-hover:text-[color:var(--cp-text-primary)]"
                       title={item.tooltipText || item.contentPreview}
                     >
                       {item.contentPreview}
                     </p>
-                    <p className="mt-2 text-[11px] font-medium text-cp-yellow/60 dark:text-cp-yellow/70">{formatDateTime(item.lastUsedAt ?? item.createdAt)}</p>
+                    <p className="mt-2 text-[10px] font-medium text-[color:var(--cp-text-muted)] opacity-80">{formatDateTime(item.lastUsedAt ?? item.createdAt)}</p>
                   </button>
                 ))
               ) : (
@@ -315,40 +318,33 @@ export function ManagerShell() {
           <div className="mt-auto shrink-0 pt-6">
             <div className="flex flex-col gap-3">
               <button
-                className="group relative flex w-full items-center justify-center gap-2 rounded-2xl bg-cp-surface0 px-4 py-3.5 text-sm font-semibold text-cp-text shadow-lg shadow-cp-surface0/20 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-cp-surface0/30 hover:bg-cp-surface1 active:translate-y-0 dark:bg-cp-surface0 dark:text-cp-text dark:shadow-black/30 dark:hover:shadow-black/40 dark:hover:bg-cp-surface1"
+                className={STYLES.primaryButton}
                 onClick={() => void showPicker()}
                 type="button"
               >
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                </svg>
-                打开速贴
+                </svg> 打开速贴面板
               </button>
-              <div className="grid grid-cols-2 gap-2 rounded-2xl bg-cp-surface0/80 p-1.5 backdrop-blur-sm ring-1 ring-cp-surface0/50 dark:bg-cp-surface0/80 dark:ring-cp-surface0/60">
+              <div className="grid grid-cols-2 gap-2 rounded-2xl bg-[color:var(--cp-control-surface)]/40 p-1.5 backdrop-blur-sm ring-1 ring-[rgba(var(--cp-surface1-rgb),0.2)]">
                 <button
-                  className={`flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all duration-300 ${viewMode === "history"
-                      ? "bg-cp-base text-cp-text shadow-sm ring-1 ring-cp-surface0/50 dark:bg-cp-surface0/70 dark:text-cp-text dark:ring-cp-surface0"
-                      : "text-cp-subtext0 hover:text-cp-text hover:bg-cp-surface0/50 dark:text-cp-subtext0 dark:hover:bg-cp-surface0/50 dark:hover:text-cp-text"
-                    }`}
+                  className={STYLES.viewModeToggle(viewMode === "history")}
                   onClick={() => setViewMode("history")}
                   type="button"
                 >
                   <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                   历史库
                 </button>
                 <button
-                  className={`flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all duration-300 ${viewMode === "settings"
-                      ? "bg-cp-base text-cp-text shadow-sm ring-1 ring-cp-surface0/50 dark:bg-cp-surface0/70 dark:text-cp-text dark:ring-cp-surface0"
-                      : "text-cp-subtext0 hover:text-cp-text hover:bg-cp-surface0/50 dark:text-cp-subtext0 dark:hover:bg-cp-surface0/50 dark:hover:text-cp-text"
-                    }`}
+                  className={STYLES.viewModeToggle(viewMode === "settings")}
                   onClick={() => setViewMode("settings")}
                   type="button"
                 >
                   <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                   </svg>
                   设置
                 </button>
@@ -362,21 +358,21 @@ export function ManagerShell() {
             <>
               <div className="flex shrink-0 flex-col gap-2.5 sm:flex-row">
                 <div className="relative flex-1 group">
-                  <div className="absolute inset-y-0 left-0 flex items-center pl-4 text-cp-subtext0 transition-colors pointer-events-none group-focus-within:text-cp-accent dark:text-cp-subtext0">
-                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  <div className="absolute inset-y-0 left-0 flex items-center pl-4 text-[color:var(--cp-text-muted)] transition-colors pointer-events-none group-focus-within:text-[color:var(--cp-accent-primary)]">
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                     </svg>
                   </div>
                   <input
-                    className="w-full rounded-2xl border border-cp-surface0/80 bg-cp-surface0/50 py-3 pl-11 pr-5 text-sm outline-none backdrop-blur-sm transition-all duration-300 placeholder:text-cp-subtext0 focus:border-cp-accent/40 focus:bg-cp-base focus:ring-4 focus:ring-cp-accent/10 focus:shadow-[0_4px_20px_-4px_rgba(251,191,36,0.15)] dark:border-cp-surface0/80 dark:bg-cp-surface0 dark:text-cp-text dark:placeholder:text-cp-subtext0 dark:focus:bg-cp-surface0 dark:focus:border-cp-accent/50 dark:focus:ring-cp-accent/20 dark:focus:shadow-[0_4px_20px_-4px_rgba(251,191,36,0.3)]"
+                    className={STYLES.searchInput}
                     onChange={(event) => setKeyword(event.target.value)}
                     placeholder="搜索全文、来源应用或关键短语"
                     value={keyword}
                   />
                 </div>
-                <label className="inline-flex cursor-pointer items-center gap-2 rounded-2xl border border-cp-surface0/80 bg-cp-base px-5 py-3 text-sm font-medium text-cp-subtext0 shadow-sm transition-all duration-300 hover:border-cp-surface0/90 hover:bg-cp-surface0/90 hover:text-cp-text active:scale-95 dark:border-cp-surface0/80 dark:bg-cp-surface0 dark:text-cp-text dark:hover:border-cp-surface0/90 dark:hover:bg-cp-surface1 dark:hover:text-cp-text">
+                <label className="inline-flex cursor-pointer items-center gap-2 rounded-2xl border border-[color:var(--cp-border-soft)] bg-cp-mantle px-5 py-3 text-sm font-semibold text-[color:var(--cp-text-secondary)] shadow-sm transition-all duration-300 hover:border-[color:var(--cp-border-strong)] hover:bg-cp-mantle/80 hover:text-[color:var(--cp-text-primary)] active:scale-95">
                   <input
-                    className="h-4 w-4 rounded border-cp-surface0 bg-cp-base text-cp-accent focus:ring-cp-accent dark:border-cp-surface0 dark:bg-cp-surface0 dark:ring-offset-cp-surface0"
+                    className="h-4 w-4 rounded border-[color:var(--cp-border-strong)] bg-cp-base text-[color:var(--cp-accent-primary)] focus:ring-[color:var(--cp-accent-primary)]"
                     checked={favoritedOnly}
                     onChange={(event) => setFavoritedOnly(event.target.checked)}
                     type="checkbox"
@@ -385,7 +381,7 @@ export function ManagerShell() {
                 </label>
               </div>
 
-              <div className="flex shrink-0 items-center justify-between px-1 text-xs font-medium text-cp-subtext0 dark:text-cp-subtext0">
+              <div className="flex shrink-0 items-center justify-between px-1 text-[11px] font-bold uppercase tracking-wider text-[color:var(--cp-text-muted)]">
                 <span>共 {totalCount} 条记录</span>
                 <span>{debouncedKeyword.trim() ? "按相关度排序" : "按最近活跃排序"}</span>
               </div>
@@ -396,10 +392,7 @@ export function ManagerShell() {
                     const isSelected = item.id === selectedItemId;
                     return (
                       <button
-                        className={`group w-full rounded-3xl border px-6 py-5 text-left transition-all duration-300 ${isSelected
-                            ? "relative z-10 scale-[1.01] border-cp-accent/40 bg-cp-base shadow-[0_12px_40px_-8px_rgba(15,23,42,0.1)] ring-1 ring-cp-accent/30 dark:bg-cp-surface0/70 dark:shadow-[0_20px_50px_-12px_rgba(0,0,0,0.7)] dark:ring-cp-yellow/30 dark:border-cp-yellow/40"
-                            : "border-cp-surface0/60 bg-cp-base/60 hover:-translate-y-0.5 hover:border-cp-surface0/80 hover:bg-cp-base/90 hover:shadow-md dark:border-cp-surface0/60 dark:bg-cp-surface0/50 dark:hover:border-cp-surface0/80 dark:hover:bg-cp-surface0/70"
-                          }`}
+                        className={STYLES.historyItem(isSelected)}
                         key={item.id}
                         onClick={() => setSelectedItemId(item.id)}
                         type="button"
@@ -407,13 +400,13 @@ export function ManagerShell() {
                         <div className="flex items-start justify-between gap-4">
                           <div className="flex-1 min-w-0">
                             <div className={`inline-flex h-6 min-w-6 items-center justify-center rounded-lg px-1.5 text-[10px] font-bold transition-colors ${isSelected
-                                ? "bg-cp-accent/10 text-cp-accentDeep ring-1 ring-cp-accent/20 dark:text-cp-yellow"
-                                : "bg-cp-surface0/80 text-cp-subtext0 group-hover:bg-cp-surface1 group-hover:text-cp-subtext0 dark:bg-cp-surface0 dark:text-cp-subtext0 dark:group-hover:bg-cp-surface1 dark:group-hover:text-cp-text"
+                                ? "bg-[color:var(--cp-accent-primary)]/20 text-[color:var(--cp-accent-primary)] ring-1 ring-[color:var(--cp-accent-primary)]/30"
+                                : "bg-[color:var(--cp-control-surface)] text-[color:var(--cp-text-muted)] group-hover:bg-[color:var(--cp-control-surface-hover)] group-hover:text-[color:var(--cp-text-secondary)]"
                               }`}>
                               {String(searchQuery.offset + index + 1).padStart(2, "0")}
                             </div>
                             <p
-                              className={`mt-3.5 line-clamp-4 text-[13px] leading-[1.6] whitespace-pre-wrap break-words [overflow-wrap:anywhere] transition-colors ${isSelected ? "text-cp-text dark:text-cp-text" : "text-cp-text/90 group-hover:text-cp-text dark:text-cp-text dark:group-hover:text-cp-text"
+                              className={`mt-3.5 line-clamp-4 text-[13px] font-medium leading-[1.6] whitespace-pre-wrap break-words [overflow-wrap:anywhere] transition-colors ${isSelected ? "text-[color:var(--cp-text-primary)]" : "text-[color:var(--cp-text-secondary)] group-hover:text-[color:var(--cp-text-primary)]"
                                 }`}
                               title={item.tooltipText || item.contentPreview}
                             >
@@ -421,11 +414,11 @@ export function ManagerShell() {
                             </p>
                           </div>
                           <div className="flex shrink-0 flex-col items-end gap-2">
-                            <span className="inline-flex items-center rounded-full border border-cp-surface0/60 bg-cp-base px-2.5 py-1 text-[10px] font-medium text-cp-subtext0 shadow-sm dark:border-cp-surface0/60 dark:bg-cp-surface0/80 dark:text-cp-text">
+                            <span className="inline-flex items-center rounded-full border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[color:var(--cp-control-surface)]/50 px-2.5 py-1 text-[10px] font-bold text-[color:var(--cp-text-muted)] shadow-sm">
                               {getClipTypeLabel(item)}
                             </span>
                             {item.isFavorited ? (
-                              <span className="inline-flex items-center gap-1 rounded-full bg-cp-yellow/15 px-2 py-1 text-[10px] font-semibold text-cp-yellow ring-1 ring-inset ring-cp-yellow/20 dark:bg-cp-yellow/15 dark:text-cp-yellow dark:ring-cp-yellow/20">
+                              <span className="inline-flex items-center gap-1 rounded-full bg-[color:var(--cp-favorite)]/15 px-2 py-1 text-[10px] font-bold text-[color:var(--cp-favorite)] ring-1 ring-inset ring-[color:var(--cp-favorite)]/20">
                                 <svg className="h-2.5 w-2.5" fill="currentColor" viewBox="0 0 20 20">
                                   <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
                                 </svg>
@@ -434,17 +427,17 @@ export function ManagerShell() {
                             ) : null}
                           </div>
                         </div>
-                        <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-[11px] font-medium text-cp-subtext0 dark:text-cp-subtext0">
+                        <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-[10px] font-bold uppercase tracking-wider text-[color:var(--cp-text-muted)] opacity-80">
                           <span className="flex items-center gap-1.5">
-                            <span className={`h-1.5 w-1.5 rounded-full ${isSelected ? "bg-cp-accent/40" : "bg-cp-surface0 dark:bg-cp-surface0"}`}></span>
+                            <span className={`h-1 w-1 rounded-full ${isSelected ? "bg-[color:var(--cp-accent-primary)]" : "bg-[color:var(--cp-border-strong)]"}`}></span>
                             {item.sourceApp ?? "未知来源"}
                           </span>
                           <span className="flex items-center gap-1.5">
-                            <span className="h-1.5 w-1.5 rounded-full bg-cp-surface0 dark:bg-cp-surface0"></span>
+                            <span className="h-1 w-1 rounded-full bg-[color:var(--cp-border-strong)]"></span>
                             创建于 {formatDateTime(item.createdAt)}
                           </span>
                           <span className="flex items-center gap-1.5">
-                            <span className="h-1.5 w-1.5 rounded-full bg-cp-surface0 dark:bg-cp-surface0"></span>
+                            <span className="h-1 w-1 rounded-full bg-[color:var(--cp-border-strong)]"></span>
                             最近使用 {formatDateTime(item.lastUsedAt)}
                           </span>
                         </div>
@@ -459,28 +452,28 @@ export function ManagerShell() {
                 )}
               </div>
 
-              <div className="flex shrink-0 items-center justify-between gap-3 border-t border-cp-surface0 px-1 pb-1 pt-4 text-xs font-medium text-cp-subtext0 dark:border-cp-surface0/50 dark:text-cp-subtext0">
+              <div className="flex shrink-0 items-center justify-between gap-3 border-t border-[rgba(var(--cp-surface1-rgb),0.2)] px-1 pb-1 pt-4 text-[11px] font-bold uppercase tracking-wider text-[color:var(--cp-text-muted)]">
                 <span>{totalCount === 0 ? "当前没有可显示记录" : `当前显示第 ${pageStart}-${pageEnd} 条`}</span>
                 <div className="flex items-center gap-2">
                   <button
-                    className="flex items-center gap-1 rounded-xl bg-cp-base px-3.5 py-2 text-xs font-semibold text-cp-subtext0 shadow-sm ring-1 ring-inset ring-cp-surface0 transition-all hover:bg-cp-surface0 hover:text-cp-text disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-cp-base disabled:hover:text-cp-subtext0 dark:bg-cp-surface0 dark:text-cp-text dark:ring-cp-surface0 dark:hover:bg-cp-surface1 dark:hover:text-cp-text dark:disabled:hover:bg-cp-surface0 dark:disabled:hover:text-cp-text"
+                    className="flex items-center gap-1.5 rounded-xl bg-[color:var(--cp-control-surface)]/40 px-3.5 py-2 text-xs font-bold text-[color:var(--cp-text-secondary)] shadow-sm ring-1 ring-inset ring-[rgba(var(--cp-surface1-rgb),0.2)] transition-all hover:bg-[color:var(--cp-control-surface-hover)]/60 hover:text-[color:var(--cp-text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
                     disabled={!hasPreviousPage}
                     onClick={() => setPageIndex((current) => Math.max(current - 1, 0))}
                     type="button"
                   >
-                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
                     </svg>
                     上一页
                   </button>
                   <button
-                    className="flex items-center gap-1 rounded-xl bg-cp-base px-3.5 py-2 text-xs font-semibold text-cp-subtext0 shadow-sm ring-1 ring-inset ring-cp-surface0 transition-all hover:bg-cp-surface0 hover:text-cp-text disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-cp-base disabled:hover:text-cp-subtext0 dark:bg-cp-surface0 dark:text-cp-text dark:ring-cp-surface0 dark:hover:bg-cp-surface1 dark:hover:text-cp-text dark:disabled:hover:bg-cp-surface0 dark:disabled:hover:text-cp-text"
+                    className="flex items-center gap-1.5 rounded-xl bg-[color:var(--cp-control-surface)]/40 px-3.5 py-2 text-xs font-bold text-[color:var(--cp-text-secondary)] shadow-sm ring-1 ring-inset ring-[rgba(var(--cp-surface1-rgb),0.2)] transition-all hover:bg-[color:var(--cp-control-surface-hover)]/60 hover:text-[color:var(--cp-text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
                     disabled={!hasNextPage}
                     onClick={() => setPageIndex((current) => current + 1)}
                     type="button"
                   >
                     下一页
-                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                     </svg>
                   </button>
@@ -505,23 +498,23 @@ export function ManagerShell() {
         <Panel className="flex flex-col gap-4 lg:overflow-hidden min-h-[500px] lg:min-h-0">
           {detail.data && selectedSummary ? (
             <>
-              <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-cp-surface0 pb-4 dark:border-cp-surface0/50">
+              <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[rgba(var(--cp-surface1-rgb),0.2)] pb-4">
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="flex h-1.5 w-1.5 rounded-full bg-cp-accent shadow-[0_0_8px_rgba(251,191,36,0.8)]"></span>
-                    <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-cp-subtext0 dark:text-cp-subtext0">
+                    <span className="flex h-1.5 w-1.5 rounded-full bg-[color:var(--cp-accent-primary)]"></span>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-[color:var(--cp-text-muted)]">
                       详情编辑
                     </p>
                   </div>
-                  <h2 className="mt-2 font-display text-2xl font-medium tracking-tight text-cp-text dark:text-cp-text">
+                  <h2 className="mt-2 font-display text-2xl font-medium tracking-tight text-[color:var(--cp-text-primary)]">
                     {getClipTypeLabel(detail.data)}剪贴项
                   </h2>
                 </div>
                 <div className="flex gap-2">
                   <button
-                    className={`flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-medium transition-all duration-300 ${detail.data.isFavorited
-                        ? "bg-cp-yellow/15 text-cp-yellow ring-1 ring-inset ring-cp-yellow/30 hover:bg-cp-yellow/25 hover:text-cp-yellow dark:bg-cp-yellow/15 dark:text-cp-yellow dark:ring-cp-yellow/30 dark:hover:bg-cp-yellow/25"
-                        : "bg-cp-base text-cp-subtext0 shadow-sm ring-1 ring-inset ring-cp-surface0 hover:bg-cp-surface0 hover:text-cp-text dark:bg-cp-surface0 dark:text-cp-text dark:ring-cp-surface0 dark:hover:bg-cp-surface1 dark:hover:text-cp-text"
+                    className={`flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-bold transition-all duration-300 ${detail.data.isFavorited
+                        ? "bg-[color:var(--cp-favorite)]/15 text-[color:var(--cp-favorite)] ring-1 ring-inset ring-[color:var(--cp-favorite)]/30 hover:bg-[color:var(--cp-favorite)]/25"
+                        : "bg-[color:var(--cp-control-surface)]/40 text-[color:var(--cp-text-secondary)] shadow-sm ring-1 ring-inset ring-[rgba(var(--cp-surface1-rgb),0.2)] hover:bg-[color:var(--cp-control-surface-hover)]/60 hover:text-[color:var(--cp-text-primary)]"
                       }`}
                     onClick={() =>
                       favoritedMutation.mutate({
@@ -531,19 +524,19 @@ export function ManagerShell() {
                     }
                     type="button"
                   >
-                    <svg className={`h-4 w-4 ${detail.data.isFavorited ? "text-cp-yellow dark:text-cp-yellow" : "text-cp-subtext0 dark:text-cp-subtext0"}`} fill="currentColor" viewBox="0 0 20 20">
+                    <svg className={`h-4 w-4 ${detail.data.isFavorited ? "text-[color:var(--cp-favorite)]" : "text-[color:var(--cp-text-muted)]"}`} fill="currentColor" viewBox="0 0 20 20">
                       <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
                     </svg>
                     {detail.data.isFavorited ? "已收藏" : "加入收藏"}
                   </button>
                   <button
-                    className="group relative rounded-xl bg-cp-surface0 px-4 py-2 text-sm font-semibold text-cp-text shadow-md shadow-cp-surface0/10 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-cp-surface0/20 hover:bg-cp-surface1 active:translate-y-0 dark:bg-cp-surface0 dark:text-cp-text dark:shadow-[0_8px_24px_-12px_rgba(0,0,0,0.35)] dark:hover:shadow-[0_12px_32px_-16px_rgba(0,0,0,0.45)] dark:hover:bg-cp-surface1"
+                    className="group relative rounded-xl bg-[color:var(--cp-accent-primary)] px-4 py-2 text-sm font-bold text-cp-base shadow-md shadow-[color:var(--cp-accent-primary)]/10 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg hover:brightness-110 active:translate-y-0"
                     onClick={() =>
                       pasteMutation.mutate({
                         id: detail.data.id,
                         option: {
                           restoreClipboardAfterPaste:
-                            settings.data?.restoreClipboardAfterPaste ?? true,
+                          settings.data?.restoreClipboardAfterPaste ?? true,
                           pasteToTarget: false,
                         },
                       })
@@ -551,8 +544,8 @@ export function ManagerShell() {
                     type="button"
                   >
                     <span className="flex items-center gap-1.5">
-                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
                       </svg>
                       {detail.data.type === "text" ? "写入剪贴板" : "复制到剪贴板"}
                     </span>
@@ -561,105 +554,105 @@ export function ManagerShell() {
               </div>
 
               <div className="grid shrink-0 gap-3 sm:grid-cols-2">
-                <div className="rounded-2xl border border-cp-surface0 bg-cp-surface0/50 p-4 transition-colors hover:bg-cp-surface0 dark:border-cp-surface0/50 dark:bg-cp-surface0/55 dark:hover:bg-cp-surface0/70">
-                  <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-cp-subtext0 dark:text-cp-subtext0">
-                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                <div className="rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[color:var(--cp-control-surface)]/30">
+                  <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--cp-text-muted)]">
+                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
                     </svg>
                     来源应用
                   </p>
-                  <p className="mt-2 font-medium text-cp-text dark:text-cp-text">{selectedSummary.sourceApp ?? "未知来源"}</p>
+                  <p className="mt-2 text-[13px] font-bold text-[color:var(--cp-text-primary)]">{selectedSummary.sourceApp ?? "未知来源"}</p>
                 </div>
-                <div className="rounded-2xl border border-cp-surface0 bg-cp-surface0/50 p-4 transition-colors hover:bg-cp-surface0 dark:border-cp-surface0/50 dark:bg-cp-surface0/55 dark:hover:bg-cp-surface0/70">
-                  <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-cp-subtext0 dark:text-cp-subtext0">
-                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                <div className="rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[color:var(--cp-control-surface)]/30">
+                  <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--cp-text-muted)]">
+                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
                     最近使用
                   </p>
-                  <p className="mt-2 font-medium text-cp-text dark:text-cp-text">{formatDateTime(selectedSummary.lastUsedAt)}</p>
+                  <p className="mt-2 text-[13px] font-bold text-[color:var(--cp-text-primary)]">{formatDateTime(selectedSummary.lastUsedAt)}</p>
                 </div>
-                <div className="rounded-2xl border border-cp-surface0 bg-cp-surface0/50 p-4 transition-colors hover:bg-cp-surface0 dark:border-cp-surface0/50 dark:bg-cp-surface0/55 dark:hover:bg-cp-surface0/70">
-                  <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-cp-subtext0 dark:text-cp-subtext0">
-                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                <div className="rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[color:var(--cp-control-surface)]/30">
+                  <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--cp-text-muted)]">
+                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                     </svg>
                     创建时间
                   </p>
-                  <p className="mt-2 font-medium text-cp-text dark:text-cp-text">{formatDateTime(selectedSummary.createdAt)}</p>
+                  <p className="mt-2 text-[13px] font-bold text-[color:var(--cp-text-primary)]">{formatDateTime(selectedSummary.createdAt)}</p>
                 </div>
-                <div className="rounded-2xl border border-cp-surface0 bg-cp-surface0/50 p-4 transition-colors hover:bg-cp-surface0 dark:border-cp-surface0/50 dark:bg-cp-surface0/55 dark:hover:bg-cp-surface0/70">
-                  <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-cp-subtext0 dark:text-cp-subtext0">
-                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                <div className="rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[color:var(--cp-control-surface)]/30">
+                  <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--cp-text-muted)]">
+                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                     </svg>
                     更新时间
                   </p>
-                  <p className="mt-2 font-medium text-cp-text dark:text-cp-text">{formatDateTime(selectedSummary.updatedAt)}</p>
+                  <p className="mt-2 text-[13px] font-bold text-[color:var(--cp-text-primary)]">{formatDateTime(selectedSummary.updatedAt)}</p>
                 </div>
                 {/* 图片或文件类型的额外信息 */}
                 {detail.data.type === "image" && (
                   <>
-                    <div className="rounded-2xl border border-cp-surface0 bg-cp-surface0/50 p-4 transition-colors hover:bg-cp-surface0 dark:border-cp-surface0/50 dark:bg-cp-surface0/55 dark:hover:bg-cp-surface0/70">
-                      <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-cp-subtext0 dark:text-cp-subtext0">
-                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                    <div className="rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[color:var(--cp-control-surface)]/30">
+                      <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--cp-text-muted)]">
+                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
                         </svg>
                         尺寸
                       </p>
-                      <p className="mt-2 font-medium text-cp-text dark:text-cp-text">
+                      <p className="mt-2 text-[13px] font-bold text-[color:var(--cp-text-primary)]">
                         {detail.data.imageWidth} × {detail.data.imageHeight}
                       </p>
                     </div>
-                    <div className="rounded-2xl border border-cp-surface0 bg-cp-surface0/50 p-4 transition-colors hover:bg-cp-surface0 dark:border-cp-surface0/50 dark:bg-cp-surface0/55 dark:hover:bg-cp-surface0/70">
-                      <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-cp-subtext0 dark:text-cp-subtext0">
-                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                    <div className="rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[color:var(--cp-control-surface)]/30">
+                      <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--cp-text-muted)]">
+                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
                         </svg>
                         大小
                       </p>
-                      <p className="mt-2 font-medium text-cp-text dark:text-cp-text">
+                      <p className="mt-2 text-[13px] font-bold text-[color:var(--cp-text-primary)]">
                         {formatBytes(detail.data.fileSize)}
                       </p>
                     </div>
                     {detail.data.imageFormat && (
-                      <div className="rounded-2xl border border-cp-surface0 bg-cp-surface0/50 p-4 transition-colors hover:bg-cp-surface0 dark:border-cp-surface0/50 dark:bg-cp-surface0/55 dark:hover:bg-cp-surface0/70">
-                        <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-cp-subtext0 dark:text-cp-subtext0">
-                          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+                      <div className="rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[color:var(--cp-control-surface)]/30">
+                        <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--cp-text-muted)]">
+                          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
                           </svg>
                           格式
                         </p>
-                        <p className="mt-2 font-medium text-cp-text dark:text-cp-text">{detail.data.imageFormat}</p>
+                        <p className="mt-2 text-[13px] font-bold text-[color:var(--cp-text-primary)]">{detail.data.imageFormat}</p>
                       </div>
                     )}
                   </>
                 )}
                 {detail.data.type === "file" && (
                   <>
-                    <div className="rounded-2xl border border-cp-surface0 bg-cp-surface0/50 p-4 transition-colors hover:bg-cp-surface0 dark:border-cp-surface0/50 dark:bg-cp-surface0/55 dark:hover:bg-cp-surface0/70">
-                      <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-cp-subtext0 dark:text-cp-subtext0">
-                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    <div className="rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[color:var(--cp-control-surface)]/30">
+                      <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--cp-text-muted)]">
+                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                         </svg>
                         {getFileCountLabel(detail.data.fileCount, detail.data.directoryCount)}
                       </p>
-                      <p className="mt-2 font-medium text-cp-text dark:text-cp-text">
+                      <p className="mt-2 text-[13px] font-bold text-[color:var(--cp-text-primary)]">
                         {detail.data.fileCount} 个
                       </p>
                     </div>
-                    <div className="rounded-2xl border border-cp-surface0 bg-cp-surface0/50 p-4 transition-colors hover:bg-cp-surface0 dark:border-cp-surface0/50 dark:bg-cp-surface0/55 dark:hover:bg-cp-surface0/70">
-                      <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-cp-subtext0 dark:text-cp-subtext0">
-                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                    <div className="rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[color:var(--cp-control-surface)]/30">
+                      <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--cp-text-muted)]">
+                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
                         </svg>
                         总大小
                       </p>
-                      <p className="mt-2 font-medium text-cp-text dark:text-cp-text">
+                      <p className="mt-2 text-[13px] font-bold text-[color:var(--cp-text-primary)]">
                         {detail.data.directoryCount > 0 ? "未统计" : formatBytes(detail.data.totalSize)}
                       </p>
                       {detail.data.directoryCount > 0 ? (
-                        <p className="mt-1 text-xs text-cp-subtext0 dark:text-cp-subtext0">包含文件夹时默认不递归统计大小。</p>
+                        <p className="mt-1 text-[10px] font-medium text-[color:var(--cp-text-muted)]">包含文件夹时默认不递归统计大小。</p>
                       ) : null}
                     </div>
                   </>
@@ -670,14 +663,14 @@ export function ManagerShell() {
               {detail.data.type === "text" ? (
                 <>
                   <textarea
-                    className="min-h-[200px] flex-1 w-full resize-none rounded-2xl border border-cp-surface0/80 bg-cp-base/80 px-5 py-5 text-[15px] leading-relaxed shadow-inner shadow-cp-surface0/50 outline-none transition-all duration-300 focus:border-cp-accent focus:bg-cp-base focus:ring-4 focus:ring-cp-accent/10 dark:border-cp-surface0 dark:bg-cp-surface0/90 dark:text-cp-text dark:shadow-none dark:focus:bg-cp-surface0 dark:focus:border-cp-accent dark:focus:ring-cp-accent/10"
+                    className={STYLES.detailEditor}
                     onChange={(event) => setDraftText(event.target.value)}
                     value={draftText}
                   />
 
                   <div className="flex shrink-0 flex-wrap gap-2 pt-2">
                     <button
-                      className="rounded-xl border border-cp-surface0 bg-cp-base px-5 py-2.5 text-sm font-semibold text-cp-text shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-cp-accent/40 hover:bg-cp-surface0 hover:text-cp-text hover:shadow-md disabled:opacity-50 dark:border-cp-surface0 dark:bg-cp-surface0 dark:text-cp-text dark:hover:bg-cp-surface1 dark:hover:text-cp-text"
+                      className="rounded-xl border border-[color:var(--cp-border-strong)] bg-[rgba(var(--cp-surface0-rgb),0.3)] px-5 py-2.5 text-sm font-bold text-[color:var(--cp-text-primary)] shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-[color:var(--cp-border-strong)] hover:bg-[rgba(var(--cp-surface1-rgb),0.2)] active:scale-95 disabled:opacity-50"
                       disabled={updateTextMutation.isPending}
                       onClick={() =>
                         updateTextMutation.mutate({
@@ -688,14 +681,14 @@ export function ManagerShell() {
                       type="button"
                     >
                       <span className="flex items-center gap-2">
-                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
                         </svg>
                         保存文本修改
                       </span>
                     </button>
                     <button
-                      className="rounded-xl border border-cp-red/10 bg-cp-base px-5 py-2.5 text-sm font-semibold text-cp-red shadow-sm transition-all duration-300 hover:bg-cp-red/5 hover:text-cp-red disabled:opacity-50 dark:border-cp-red/20 dark:bg-cp-surface0 dark:text-cp-red dark:hover:bg-cp-red/10 dark:hover:text-cp-red"
+                      className="rounded-xl border border-[rgba(var(--cp-red-rgb),0.3)] bg-[rgba(var(--cp-red-rgb),0.05)] px-5 py-2.5 text-sm font-bold text-[color:var(--cp-danger)] transition-all duration-300 hover:bg-[rgba(var(--cp-red-rgb),0.15)] hover:border-[rgba(var(--cp-red-rgb),0.5)] active:scale-95 disabled:opacity-50"
                       disabled={deleteMutation.isPending}
                       onClick={() => {
                         deleteMutation.mutate(detail.data.id, {
@@ -712,7 +705,7 @@ export function ManagerShell() {
                 <>
                   <div className="flex flex-col items-center justify-center py-10 text-center">
                     <div className="text-6xl mb-3">{getClipTypeIcon(detail.data)}</div>
-                    <p className="mb-1 text-sm text-cp-subtext0 dark:text-cp-subtext0">
+                    <p className="mb-1 text-sm font-medium text-[color:var(--cp-text-secondary)]">
                       {detail.data.type === "image"
                         ? "图片类型记录不支持文本编辑，你可以复制到剪贴板后手动粘贴"
                         : detail.data.type === "file"
@@ -720,11 +713,11 @@ export function ManagerShell() {
                           : "该类型记录不支持文本编辑"}
                     </p>
                     {detail.data.type === "file" && (
-                      <div className="mt-4 w-full rounded-xl border border-cp-surface0 bg-cp-surface0/50 p-4 text-left dark:border-cp-surface0/50 dark:bg-cp-surface0/60">
-                        <p className="mb-2 text-xs font-bold uppercase tracking-wide text-cp-subtext0 dark:text-cp-subtext0">
+                      <div className="mt-4 w-full rounded-xl border border-[rgba(var(--cp-surface2-rgb),0.5)] bg-cp-mantle p-4 text-left dark:border-[rgba(var(--cp-surface1-rgb),0.3)] dark:bg-[rgba(var(--cp-surface0-rgb),0.2)]">
+                        <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-[color:var(--cp-text-muted)]">
                           文件路径
                         </p>
-                        <div className="space-y-1 text-xs text-cp-text dark:text-cp-text">
+                        <div className="space-y-1 text-xs font-medium text-[color:var(--cp-text-primary)]">
                           {detail.data.filePaths.map((path, index) => (
                             <p key={index} className="truncate hover:whitespace-normal">
                               {path}
@@ -736,7 +729,7 @@ export function ManagerShell() {
                   </div>
                   <div className="flex shrink-0 flex-wrap gap-2 pt-2">
                     <button
-                      className="rounded-2xl bg-cp-base px-5 py-3 text-sm font-semibold text-cp-red shadow-sm ring-1 ring-inset ring-cp-red/20 transition-all hover:bg-cp-red/5 hover:text-cp-red disabled:opacity-50 dark:bg-cp-surface0 dark:text-cp-red dark:ring-cp-red/20 dark:hover:bg-cp-red/10 dark:hover:text-cp-red"
+                      className="rounded-xl border border-[rgba(var(--cp-red-rgb),0.3)] bg-[rgba(var(--cp-red-rgb),0.05)] px-5 py-2.5 text-sm font-bold text-[color:var(--cp-danger)] transition-all duration-300 hover:bg-[rgba(var(--cp-red-rgb),0.15)] hover:border-[rgba(var(--cp-red-rgb),0.5)] active:scale-95 disabled:opacity-50"
                       disabled={deleteMutation.isPending}
                       onClick={() => {
                         deleteMutation.mutate(detail.data.id, {
@@ -752,7 +745,7 @@ export function ManagerShell() {
               )}
 
               {pasteMutation.data ? (
-                <p className="shrink-0 rounded-2xl bg-cp-yellow/80 px-4 py-3 text-sm text-cp-yellow ring-1 ring-inset ring-cp-yellow/20 dark:bg-cp-yellow/15 dark:text-cp-yellow dark:ring-cp-yellow/20">
+                <p className="shrink-0 rounded-2xl bg-[color:var(--cp-favorite)]/15 px-4 py-3 text-sm font-bold text-[color:var(--cp-favorite)] ring-1 ring-inset ring-[color:var(--cp-favorite)]/20 animate-in fade-in slide-in-from-bottom-2">
                   {pasteMutation.data.message}
                 </p>
               ) : null}
@@ -813,18 +806,18 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
   return (
     <div className="space-y-6">
       <div>
-        <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-cp-subtext0 dark:text-cp-subtext0">设置</p>
-        <h2 className="mt-1 font-display text-2xl font-medium tracking-tight dark:text-cp-text">运行设置</h2>
-        <p className="mt-3 text-sm leading-relaxed text-cp-text/90 dark:text-cp-text/80">
+        <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-[color:var(--cp-text-muted)]">设置</p>
+        <h2 className="mt-1 font-display text-2xl font-medium tracking-tight text-[color:var(--cp-text-primary)]">运行设置</h2>
+        <p className="mt-3 text-[13px] leading-relaxed text-[color:var(--cp-text-secondary)]">
           当前设置直接映射到后端持久化配置。排除应用与真正的前台应用识别将在 Windows 平台适配阶段继续细化。
         </p>
       </div>
 
       {errorMessage ? (
-        <div className="flex items-start justify-between gap-3 rounded-2xl bg-cp-red/15 px-4 py-3 text-sm text-cp-red ring-1 ring-inset ring-cp-red/20 dark:bg-cp-red/10 dark:text-cp-red dark:ring-cp-red/20">
+        <div className="flex items-start justify-between gap-3 rounded-2xl bg-[color:var(--cp-danger)]/15 px-4 py-3 text-sm font-bold text-[color:var(--cp-danger)] ring-1 ring-inset ring-[color:var(--cp-danger)]/20">
           <p className="leading-relaxed">{errorMessage}</p>
           <button
-            className="shrink-0 text-xs font-semibold text-cp-red transition-colors hover:text-cp-red dark:text-cp-red dark:hover:text-cp-red"
+            className="shrink-0 text-xs font-bold uppercase tracking-wider transition-opacity hover:opacity-80"
             onClick={onDismissError}
             type="button"
           >
@@ -834,18 +827,18 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
       ) : null}
 
       <label className="block">
-        <span className="mb-2.5 block text-sm font-medium text-cp-text dark:text-cp-text">全局快捷键</span>
+        <span className="mb-2.5 block text-[13px] font-bold text-[color:var(--cp-text-primary)]">全局快捷键</span>
         <input
-          className="w-full rounded-2xl border border-cp-surface0 bg-cp-surface0/50 px-5 py-3.5 text-sm outline-none transition-all focus:border-cp-accent focus:bg-cp-base focus:ring-4 focus:ring-cp-accent/10 dark:border-cp-surface0 dark:bg-cp-surface0 dark:text-cp-text dark:focus:bg-cp-surface0"
+          className="w-full rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.5)] bg-cp-mantle px-5 py-3.5 text-sm font-medium outline-none transition-all focus:border-[rgba(var(--cp-lavender-rgb),0.4)] focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[rgba(var(--cp-lavender-rgb),0.1)] dark:border-[rgba(var(--cp-surface1-rgb),0.4)] dark:bg-[rgba(var(--cp-surface0-rgb),0.3)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
           onChange={(event) => setShortcut(event.target.value)}
           value={shortcut}
         />
       </label>
 
       <label className="block">
-        <span className="mb-2.5 block text-sm font-medium text-cp-text dark:text-cp-text">历史记录上限</span>
+        <span className="mb-2.5 block text-[13px] font-bold text-[color:var(--cp-text-primary)]">历史记录上限</span>
         <input
-          className="w-full rounded-2xl border border-cp-surface0 bg-cp-surface0/50 px-5 py-3.5 text-sm outline-none transition-all focus:border-cp-accent focus:bg-cp-base focus:ring-4 focus:ring-cp-accent/10 dark:border-cp-surface0 dark:bg-cp-surface0 dark:text-cp-text dark:focus:bg-cp-surface0"
+          className="w-full rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.5)] bg-cp-mantle px-5 py-3.5 text-sm font-medium outline-none transition-all focus:border-[rgba(var(--cp-lavender-rgb),0.4)] focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[rgba(var(--cp-lavender-rgb),0.1)] dark:border-[rgba(var(--cp-surface1-rgb),0.4)] dark:bg-[rgba(var(--cp-surface0-rgb),0.3)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
           min={100}
           onChange={(event) => setHistoryLimit(Number(event.target.value) || 1000)}
           step={100}
@@ -855,64 +848,70 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
       </label>
 
       <label className="block">
-        <span className="mb-2.5 block text-sm font-medium text-cp-text dark:text-cp-text">速贴窗口记录数</span>
+        <span className="mb-2.5 block text-[13px] font-bold text-[color:var(--cp-text-primary)]">速贴窗口记录数</span>
         <input
-          className="w-full rounded-2xl border border-cp-surface0 bg-cp-surface0/50 px-5 py-3.5 text-sm outline-none transition-all focus:border-cp-accent focus:bg-cp-base focus:ring-4 focus:ring-cp-accent/10 dark:border-cp-surface0 dark:bg-cp-surface0 dark:text-cp-text dark:focus:bg-cp-surface0"
+          className="w-full rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.5)] bg-cp-mantle px-5 py-3.5 text-sm font-medium outline-none transition-all focus:border-[rgba(var(--cp-lavender-rgb),0.4)] focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[rgba(var(--cp-lavender-rgb),0.1)] dark:border-[rgba(var(--cp-surface1-rgb),0.4)] dark:bg-[rgba(var(--cp-surface0-rgb),0.3)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
           max={1000}
           min={9}
           onChange={(event) => setPickerRecordLimit(Number(event.target.value) || 50)}
           type="number"
           value={pickerRecordLimit}
         />
-        <p className="mt-2 text-xs leading-relaxed text-cp-subtext0 dark:text-cp-subtext0">
+        <p className="mt-2 text-[11px] font-medium leading-relaxed text-[color:var(--cp-text-muted)]">
           控制速贴面板一次可滚动浏览的记录数，数字快捷键仍只覆盖前 9 条。
         </p>
       </label>
 
-      <div>
-        <span className="mb-2.5 block text-sm font-medium text-cp-text dark:text-cp-text">界面主题</span>
+      <label className="block">
+        <span className="mb-2.5 block text-[13px] font-bold text-[color:var(--cp-text-primary)]">界面主题</span>
         <div className="space-y-3">
           {themeModeOptions.map((option) => (
             <label
-              className="flex cursor-pointer items-start gap-3 rounded-2xl border border-cp-surface0 bg-cp-base px-5 py-4 transition-colors hover:bg-cp-surface0/50 dark:border-cp-surface0 dark:bg-cp-surface0/70 dark:hover:bg-cp-surface0"
+              className={`flex cursor-pointer items-start gap-3 rounded-2xl border px-5 py-4 transition-all duration-300 ${themeMode === option.value
+                  ? "border-[rgba(var(--cp-lavender-rgb),0.4)] bg-[rgba(var(--cp-lavender-rgb),0.05)] ring-1 ring-[rgba(var(--cp-lavender-rgb),0.1)]"
+                  : "border-[rgba(var(--cp-surface1-rgb),0.3)] bg-cp-mantle hover:border-[rgba(var(--cp-surface1-rgb),0.4)] hover:bg-[rgba(var(--cp-surface1-rgb),0.15)]"
+                }`}
               key={option.value}
             >
               <input
                 checked={themeMode === option.value}
-                className="mt-0.5 h-4 w-4 border-cp-surface0 bg-cp-base text-cp-accent focus:ring-cp-accent dark:border-cp-surface0 dark:bg-cp-surface0 dark:ring-offset-cp-surface0"
+                className="mt-1 h-4 w-4 border-[rgba(var(--cp-surface1-rgb),0.4)] bg-cp-base text-[color:var(--cp-accent-primary)] focus:ring-[color:var(--cp-accent-primary)]"
                 name="theme-mode"
                 onChange={() => setThemeMode(option.value)}
                 type="radio"
               />
               <span className="min-w-0">
-                <span className="block text-sm font-medium text-cp-text dark:text-cp-text">{option.label}</span>
-                <span className="mt-1 block text-xs leading-relaxed text-cp-subtext0 dark:text-cp-subtext0">
+                <span className={`block text-sm font-bold transition-colors ${themeMode === option.value ? "text-[color:var(--cp-text-primary)]" : "text-[color:var(--cp-text-secondary)]"}`}>{option.label}</span>
+                <span className="mt-1 block text-[11px] font-medium leading-relaxed text-[color:var(--cp-text-muted)] opacity-80">
                   {option.description}
                 </span>
               </span>
             </label>
           ))}
         </div>
-      </div>
+      </label>
 
       <div>
-        <span className="mb-2.5 block text-sm font-medium text-cp-text dark:text-cp-text">速贴窗口显示位置</span>
+        <span className="mb-2.5 block text-[13px] font-bold text-[color:var(--cp-text-primary)]">速贴窗口显示位置</span>
         <div className="space-y-3">
           {pickerPositionOptions.map((option) => (
             <label
-              className="flex cursor-pointer items-start gap-3 rounded-2xl border border-cp-surface0 bg-cp-base px-5 py-4 transition-colors hover:bg-cp-surface0/50 dark:border-cp-surface0 dark:bg-cp-surface0/70 dark:hover:bg-cp-surface0"
+              className={`flex cursor-pointer items-start gap-3 rounded-2xl border px-5 py-4 transition-all duration-300 ${pickerPositionMode === option.value
+                  ? "border-[rgba(var(--cp-lavender-rgb),0.4)] bg-[rgba(var(--cp-lavender-rgb),0.05)] ring-1 ring-[rgba(var(--cp-lavender-rgb),0.1)]"
+                  : "border-[rgba(var(--cp-surface1-rgb),0.3)] bg-cp-mantle hover:border-[rgba(var(--cp-surface1-rgb),0.4)] hover:bg-[rgba(var(--cp-surface1-rgb),0.15)]"
+                }`}
               key={option.value}
             >
               <input
                 checked={pickerPositionMode === option.value}
-                className="mt-0.5 h-4 w-4 border-cp-surface0 bg-cp-base text-cp-accent focus:ring-cp-accent dark:border-cp-surface0 dark:bg-cp-surface0 dark:ring-offset-cp-surface0"
+                className="mt-1 h-4 w-4 border-[rgba(var(--cp-surface1-rgb),0.4)] bg-cp-base text-[color:var(--cp-accent-primary)] focus:ring-[color:var(--cp-accent-primary)]"
                 name="picker-position-mode"
                 onChange={() => setPickerPositionMode(option.value)}
                 type="radio"
               />
               <span className="min-w-0">
-                <span className="block text-sm font-medium text-cp-text dark:text-cp-text">{option.label}</span>
-                <span className="mt-1 block text-xs leading-relaxed text-cp-subtext0 dark:text-cp-subtext0">
+                <span className={`block text-sm font-bold transition-colors ${pickerPositionMode === option.value ? "text-[color:var(--cp-text-primary)]" : "text-[color:var(--cp-text-secondary)]"}`}>{option.label}</span>
+                <span className="mt-1 block text-[11px] font-medium leading-relaxed text-[color:var(--cp-text-muted)] opacity-80">
                   {option.description}
                 </span>
               </span>
@@ -922,9 +921,9 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
       </div>
 
       <label className="block">
-        <span className="mb-2.5 block text-sm font-medium text-cp-text dark:text-cp-text">排除应用</span>
+        <span className="mb-2.5 block text-[13px] font-bold text-[color:var(--cp-text-primary)]">排除应用</span>
         <textarea
-          className="min-h-[120px] w-full rounded-2xl border border-cp-surface0 bg-cp-surface0/50 px-5 py-3.5 text-sm leading-relaxed outline-none transition-all focus:border-cp-accent focus:bg-cp-base focus:ring-4 focus:ring-cp-accent/10 dark:border-cp-surface0 dark:bg-cp-surface0 dark:text-cp-text dark:placeholder:text-cp-subtext0 dark:focus:bg-cp-surface0"
+          className="w-full rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.5)] bg-cp-mantle px-5 py-3.5 text-sm font-medium leading-relaxed outline-none transition-all focus:border-[rgba(var(--cp-lavender-rgb),0.4)] focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[rgba(var(--cp-lavender-rgb),0.1)] dark:border-[rgba(var(--cp-surface1-rgb),0.4)] dark:bg-[rgba(var(--cp-surface0-rgb),0.3)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
           onChange={(event) => setExcludedAppsText(event.target.value)}
           placeholder={"每行一个可执行文件名，例如：\nKeePass.exe\nWindowsTerminal.exe"}
           value={excludedAppsText}
@@ -932,9 +931,9 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
       </label>
 
       <div className="space-y-3">
-        <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-cp-surface0 bg-cp-base px-5 py-4 transition-colors hover:bg-cp-surface0/50 dark:border-cp-surface0 dark:bg-cp-surface0/70 dark:hover:bg-cp-surface0">
+        <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-cp-mantle px-5 py-4 transition-all duration-300 hover:border-[rgba(var(--cp-surface1-rgb),0.4)]/30 hover:bg-[rgba(var(--cp-surface1-rgb),0.2)]">
           <input
-            className="h-4 w-4 rounded border-cp-surface0 bg-cp-base text-cp-accent focus:ring-cp-accent dark:border-cp-surface0 dark:bg-cp-surface0 dark:ring-offset-cp-surface0"
+            className="h-4 w-4 rounded border-[rgba(var(--cp-surface1-rgb),0.4)] bg-cp-base text-[color:var(--cp-accent-primary)] focus:ring-[color:var(--cp-accent-primary)] dark:bg-[color:var(--cp-control-surface)]"
             checked={launchOnStartup}
             onChange={(event) => {
               const checked = event.target.checked;
@@ -945,49 +944,49 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
             }}
             type="checkbox"
           />
-          <span className="text-sm font-medium text-cp-text dark:text-cp-text">开机自启</span>
+          <span className="text-sm font-bold text-[color:var(--cp-text-secondary)] transition-colors">开机自启</span>
         </label>
 
         <label
-          className={`flex items-center gap-3 rounded-2xl border px-5 py-4 transition-colors ${launchOnStartup
-              ? "cursor-pointer border-cp-surface0 bg-cp-base hover:bg-cp-surface0/50 dark:border-cp-surface0 dark:bg-cp-surface0/70 dark:hover:bg-cp-surface0"
-              : "cursor-not-allowed border-cp-surface0 bg-cp-surface0/50 text-cp-subtext0 dark:border-cp-surface0 dark:bg-cp-surface0/40 dark:text-cp-subtext0"
+          className={`flex items-center gap-3 rounded-2xl border px-5 py-4 transition-all duration-300 ${launchOnStartup
+              ? "cursor-pointer border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[rgba(var(--cp-surface0-rgb),0.2)] hover:border-[rgba(var(--cp-surface1-rgb),0.4)]/30 hover:bg-[rgba(var(--cp-surface1-rgb),0.3)]"
+              : "cursor-not-allowed border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[rgba(var(--cp-surface0-rgb),0.1)] text-[color:var(--cp-text-muted)]"
             }`}
         >
           <input
-            className="h-4 w-4 rounded border-cp-surface0 bg-cp-base text-cp-accent focus:ring-cp-accent dark:border-cp-surface0 dark:bg-cp-surface0 dark:ring-offset-cp-surface0"
+            className="h-4 w-4 rounded border-[rgba(var(--cp-surface1-rgb),0.4)] bg-cp-base text-[color:var(--cp-accent-primary)] focus:ring-[color:var(--cp-accent-primary)] dark:bg-[color:var(--cp-control-surface)]"
             checked={silentOnStartup}
             disabled={!launchOnStartup}
             onChange={(event) => setSilentOnStartup(event.target.checked)}
             type="checkbox"
           />
-          <span className="text-sm font-medium text-cp-text dark:text-cp-text">开机自启时静默启动</span>
+          <span className={`text-sm font-bold transition-colors ${launchOnStartup ? "text-[color:var(--cp-text-secondary)]" : "text-[color:var(--cp-text-muted)]"}`}>开机自启时静默启动</span>
         </label>
 
-        <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-cp-surface0 bg-cp-base px-5 py-4 transition-colors hover:bg-cp-surface0/50 dark:border-cp-surface0 dark:bg-cp-surface0/70 dark:hover:bg-cp-surface0">
+        <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-cp-mantle px-5 py-4 transition-all duration-300 hover:border-[rgba(var(--cp-surface1-rgb),0.4)]/30 hover:bg-[rgba(var(--cp-surface1-rgb),0.2)]">
           <input
-            className="h-4 w-4 rounded border-cp-surface0 bg-cp-base text-cp-accent focus:ring-cp-accent dark:border-cp-surface0 dark:bg-cp-surface0 dark:ring-offset-cp-surface0"
+            className="h-4 w-4 rounded border-[rgba(var(--cp-surface1-rgb),0.4)] bg-cp-base text-[color:var(--cp-accent-primary)] focus:ring-[color:var(--cp-accent-primary)] dark:bg-[color:var(--cp-control-surface)]"
             checked={restoreClipboardAfterPaste}
             onChange={(event) => setRestoreClipboardAfterPaste(event.target.checked)}
             type="checkbox"
           />
-          <span className="text-sm font-medium text-cp-text dark:text-cp-text">回贴后恢复原始剪贴板</span>
+          <span className="text-sm font-bold text-[color:var(--cp-text-secondary)]">回贴后恢复原始剪贴板</span>
         </label>
 
-        <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-cp-surface0 bg-cp-base px-5 py-4 transition-colors hover:bg-cp-surface0/50 dark:border-cp-surface0 dark:bg-cp-surface0/70 dark:hover:bg-cp-surface0">
+        <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-cp-mantle px-5 py-4 transition-all duration-300 hover:border-[rgba(var(--cp-surface1-rgb),0.4)]/30 hover:bg-[rgba(var(--cp-surface1-rgb),0.2)]">
           <input
-            className="h-4 w-4 rounded border-cp-surface0 bg-cp-base text-cp-accent focus:ring-cp-accent dark:border-cp-surface0 dark:bg-cp-surface0 dark:ring-offset-cp-surface0"
+            className="h-4 w-4 rounded border-[rgba(var(--cp-surface1-rgb),0.4)] bg-cp-base text-[color:var(--cp-accent-primary)] focus:ring-[color:var(--cp-accent-primary)] dark:bg-[color:var(--cp-control-surface)]"
             checked={pauseMonitoring}
             onChange={(event) => setPauseMonitoring(event.target.checked)}
             type="checkbox"
           />
-          <span className="text-sm font-medium text-cp-text dark:text-cp-text">暂停监听</span>
+          <span className="text-sm font-bold text-[color:var(--cp-text-secondary)]">暂停监听</span>
         </label>
       </div>
 
       <div className="pt-2">
         <button
-          className="rounded-2xl bg-cp-accent px-6 py-3.5 text-sm font-semibold text-cp-base shadow-md transition-all hover:bg-cp-accent/90 hover:shadow-lg disabled:opacity-50 dark:bg-cp-accent dark:text-cp-base dark:hover:bg-cp-accent/90"
+          className="rounded-2xl bg-[color:var(--cp-accent-primary)] px-8 py-4 text-sm font-bold text-cp-base shadow-lg shadow-[color:var(--cp-accent-primary)]/20 transition-all hover:brightness-110 hover:shadow-xl active:scale-95 disabled:opacity-50"
           disabled={isPending}
           onClick={() =>
             onSave({

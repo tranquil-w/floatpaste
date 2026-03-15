@@ -22,6 +22,24 @@ import {
   usePickerSettingsQuery,
 } from "./queries";
 
+// --- 样式常量抽象 ---
+const STYLES = {
+  container: "relative flex h-[calc(100%-2px)] w-[calc(100%-2px)] flex-col overflow-hidden rounded-[18px] border border-[color:var(--cp-border-strong)] bg-[color:var(--cp-window-shell)] shadow-none ring-1 ring-black/5 ring-inset backdrop-blur-xl dark:bg-[color:var(--cp-window-shell)]",
+  header: "flex shrink-0 items-center justify-between border-b border-[rgba(var(--cp-surface1-rgb),0.3)] bg-[rgba(var(--cp-mantle-rgb),0.4)] px-3 py-2 dark:border-[rgba(var(--cp-surface1-rgb),0.2)] dark:bg-[rgba(var(--cp-mantle-rgb),0.7)]",
+  headerDot: "h-2.5 w-2.5 rounded-full bg-[color:var(--cp-accent-primary)] shadow-sm",
+  headerButton: "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold text-[color:var(--cp-text-secondary)] transition-colors hover:bg-[rgba(var(--cp-surface1-rgb),0.3)] hover:text-[color:var(--cp-text-primary)]",
+  itemButton: (selected: boolean) => `group relative flex w-full flex-col gap-1.5 rounded-[12px] px-3 py-2.5 text-left transition-all duration-200 border ${selected
+    ? "bg-[rgba(var(--cp-lavender-rgb),0.12)] border-[rgba(var(--cp-lavender-rgb),0.3)] shadow-sm dark:bg-[rgba(var(--cp-lavender-rgb),0.15)] dark:border-[rgba(var(--cp-lavender-rgb),0.4)]"
+    : "bg-transparent border-transparent hover:bg-[rgba(var(--cp-surface1-rgb),0.2)] dark:hover:bg-[rgba(var(--cp-surface1-rgb),0.3)]"
+    }`,
+  itemContent: (selected: boolean) => `${selected ? "text-[color:var(--cp-text-primary)]" : "text-[color:var(--cp-text-primary)]/90 dark:text-[color:var(--cp-text-primary)]/80"} line-clamp-5 text-[13px] font-medium leading-[1.6] tracking-tight break-words [overflow-wrap:anywhere] whitespace-pre-wrap transition-colors`,
+  kbdBadge: (selected: boolean) => `flex h-[16px] min-w-[16px] px-1 items-center justify-center rounded-[5px] font-mono text-[9px] font-bold transition-colors ${selected
+    ? "bg-[color:var(--cp-accent-primary)] text-cp-base dark:text-cp-mantle"
+    : "bg-[rgba(var(--cp-surface0-rgb),0.5)] text-[color:var(--cp-text-secondary)] group-hover:bg-[rgba(var(--cp-surface1-rgb),0.5)] group-hover:text-[color:var(--cp-text-primary)]"
+    }`,
+  typeBadge: "shrink-0 rounded-[4px] bg-[rgba(var(--cp-surface0-rgb),0.3)] px-1.5 py-0.5 font-medium text-[color:var(--cp-text-secondary)]",
+};
+
 const PICKER_RESIZE_HANDLES: Array<{
   direction: WindowResizeDirection;
   className: string;
@@ -286,8 +304,8 @@ export function PickerShell() {
   }, [tauriRuntime]);
 
   return (
-    <div className="flex h-screen w-screen items-start justify-center overflow-hidden bg-transparent p-0 text-ink select-none">
-      <div className="relative flex h-full w-full flex-col overflow-hidden rounded-[16px] border border-cp-surface0/80 bg-cp-base/98 shadow-[0_20px_70px_-15px_rgba(15,23,42,0.4)] ring-1 ring-black/5 ring-inset backdrop-blur-xl dark:border-cp-surface0/90 dark:bg-cp-base/98 dark:shadow-[0_20px_70px_-15px_rgba(0,0,0,0.7)] dark:ring-cp-surface0/60">
+    <div className="flex h-screen w-screen items-center justify-center overflow-hidden bg-transparent p-0 text-ink select-none">
+      <div className={STYLES.container}>
         {tauriRuntime
           ? PICKER_RESIZE_HANDLES.map((handle) => (
             <div
@@ -298,26 +316,26 @@ export function PickerShell() {
             />
           ))
           : null}
-        <div className="flex shrink-0 items-center justify-between border-b border-cp-surface0/60 bg-cp-base/40 px-3 py-2 dark:border-cp-surface0/70 dark:bg-cp-base/70" data-tauri-drag-region>
+        <div className={STYLES.header} data-tauri-drag-region>
           <div className="flex items-center gap-2">
-            <div className="h-2.5 w-2.5 rounded-full bg-cp-accent dark:bg-cp-accent"></div>
-            <span className="text-[12px] font-semibold tracking-wide text-cp-text dark:text-cp-text">FloatPaste</span>
-            {lastMessage && <span className="ml-2 animate-pulse text-[10px] font-medium text-cp-yellow dark:text-cp-yellow">{lastMessage}</span>}
+            <div className={STYLES.headerDot}></div>
+            <span className="text-[12px] font-bold tracking-tight text-[color:var(--cp-text-primary)]">FloatPaste</span>
+            {lastMessage && <span className="ml-2 animate-pulse text-[10px] font-medium text-[color:var(--cp-favorite)]">{lastMessage}</span>}
           </div>
           <div className="flex items-center gap-1.5">
             <button
-              className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold text-cp-subtext0 transition-colors hover:bg-cp-surface0/50 hover:text-cp-text dark:text-cp-subtext0 dark:hover:bg-cp-surface0/40 dark:hover:text-cp-text"
+              className={STYLES.headerButton}
               onClick={() => void handleOpenManager()}
               type="button"
             >
               资料库
-              <svg className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" /></svg>
+              <svg className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2.2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" /></svg>
             </button>
           </div>
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col p-2">
-          <div className="grid flex-1 gap-1 overflow-y-auto overflow-x-hidden px-1.5 pt-1 pb-1 transition-colors [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-cp-surface1/80 [&::-webkit-scrollbar-track]:bg-transparent hover:[&::-webkit-scrollbar-thumb]:bg-cp-surface2/80 dark:[&::-webkit-scrollbar-thumb]:bg-cp-surface1/80 dark:hover:[&::-webkit-scrollbar-thumb]:bg-cp-surface2/80">
+          <div className="grid flex-1 gap-1 overflow-y-auto overflow-x-hidden px-1.5 pt-1 pb-1 transition-colors">
             {items.map((item, index) => {
               const isSelected = index === selectedIndex;
               return (
@@ -325,10 +343,7 @@ export function PickerShell() {
                   ref={(el) => {
                     itemRefs.current[index] = el;
                   }}
-                  className={`group relative flex w-full flex-col gap-1.5 rounded-xl px-2.5 py-2.5 text-left transition-all duration-200 ${isSelected
-                    ? "bg-cp-yellow/10 shadow-[0_4px_15px_-2px_rgba(245,158,11,0.1)] ring-1 ring-cp-yellow/20 dark:bg-cp-yellow/18 dark:shadow-[0_4px_20px_-2px_rgba(0,0,0,0.5)] dark:ring-cp-yellow/40"
-                    : "bg-transparent hover:bg-cp-surface0/5 dark:hover:bg-cp-surface0/60"
-                    }`}
+                  className={STYLES.itemButton(isSelected)}
                   key={item.id}
                   onClick={() => {
                     selectedIndexRef.current = index;
@@ -340,33 +355,30 @@ export function PickerShell() {
                   type="button"
                 >
                   <p
-                    className={`${isSelected ? "text-cp-text dark:text-cp-text" : "text-cp-text/90 dark:text-cp-text/80"} line-clamp-5 text-[13px] leading-[1.6] tracking-tight break-words [overflow-wrap:anywhere] whitespace-pre-wrap transition-colors`}
+                    className={STYLES.itemContent(isSelected)}
                     title={item.tooltipText || item.contentPreview}
                   >
                     {item.contentPreview}
                   </p>
 
-                  <div className={`flex w-full items-center gap-2 text-[10px] leading-none transition-colors ${isSelected ? "text-cp-yellow/70 dark:text-cp-yellow/80" : "text-cp-subtext0/70 dark:text-cp-subtext0/80"}`}>
+                  <div className={`flex w-full items-center gap-2 text-[10px] leading-none transition-colors ${isSelected ? "text-[rgba(var(--cp-lavender-rgb),0.8)]" : "text-[color:var(--cp-text-muted)]"}`}>
                     {index < 9 ? (
-                      <kbd className={`flex h-[16px] min-w-[16px] px-1 items-center justify-center rounded-[4px] font-mono text-[9px] font-bold transition-colors ${isSelected
-                        ? "bg-cp-yellow text-cp-base dark:text-cp-text"
-                        : "bg-cp-surface0/15 text-cp-subtext0 group-hover:bg-cp-surface0/25 group-hover:text-cp-text dark:bg-cp-surface0 dark:text-cp-subtext0 dark:group-hover:bg-cp-surface1 dark:group-hover:text-cp-text"
-                        }`}>
+                      <kbd className={STYLES.kbdBadge(isSelected)}>
                         {index + 1}
                       </kbd>
                     ) : null}
-                    <span className="shrink-0 rounded-sm bg-cp-surface0/90 px-1 py-0.5 font-medium dark:bg-cp-surface0 dark:text-cp-text">
+                    <span className={STYLES.typeBadge}>
                       {getClipTypeLabel(item)}
                     </span>
-                    <span className="min-w-0 flex-1 truncate font-medium">
+                    <span className="min-w-0 flex-1 truncate font-medium opacity-80">
                       {item.sourceApp ?? "未知来源"}
                     </span>
-                    <span className="flex shrink-0 items-center gap-1 font-medium">
+                    <span className="flex shrink-0 items-center gap-1 font-medium opacity-80">
                       <span className="tabular-nums">
                         {formatDateTime(item.lastUsedAt ?? item.createdAt)}
                       </span>
                       {item.isFavorited ? (
-                        <span className="text-[10px] text-cp-yellow dark:text-cp-yellow">★</span>
+                        <span className="text-[10px] text-[color:var(--cp-favorite)]">★</span>
                       ) : null}
                     </span>
                   </div>
