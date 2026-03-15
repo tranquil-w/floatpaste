@@ -31,6 +31,29 @@
   /* Mantle */ --cp-mantle: #e6e9ef;
   /* Crust */ --cp-crust: #dce0e8;
 
+  /* 语义化表面 */
+  --cp-window-shell: var(--cp-base);
+  --cp-panel-surface: var(--cp-mantle);
+  --cp-card-surface: var(--cp-base);
+  --cp-control-surface: var(--cp-surface0);
+  --cp-control-surface-hover: var(--cp-surface1);
+
+  /* 语义化边框 */
+  --cp-border-soft: rgba(204, 208, 218, 0.6);
+  --cp-border-strong: var(--cp-surface1);
+  --cp-focus-ring: rgba(114, 135, 253, 0.4);
+
+  /* 语义化强调 */
+  --cp-accent-primary: var(--cp-lavender);
+  --cp-accent-primary-strong: var(--cp-blue);
+  --cp-accent-warm: var(--cp-yellow);
+  --cp-danger: var(--cp-red);
+
+  /* 语义化文本 */
+  --cp-text-primary: var(--cp-text);
+  --cp-text-secondary: var(--cp-subtext0);
+  --cp-text-muted: var(--cp-overlay0);
+
   /* RGB components for rgba() usage */
   --cp-text-rgb: 76, 79, 105;
   --cp-surface1-rgb: 188, 192, 204;
@@ -71,6 +94,29 @@ html.dark {
   /* Mantle */ --cp-mantle: #1e2030;
   /* Crust */ --cp-crust: #181926;
 
+  /* 语义化表面 */
+  --cp-window-shell: var(--cp-base);
+  --cp-panel-surface: var(--cp-mantle);
+  --cp-card-surface: var(--cp-surface0);
+  --cp-control-surface: var(--cp-surface0);
+  --cp-control-surface-hover: var(--cp-surface1);
+
+  /* 语义化边框 */
+  --cp-border-soft: rgba(54, 58, 79, 0.6);
+  --cp-border-strong: var(--cp-surface1);
+  --cp-focus-ring: rgba(183, 189, 248, 0.4);
+
+  /* 语义化强调 */
+  --cp-accent-primary: var(--cp-lavender);
+  --cp-accent-primary-strong: var(--cp-blue);
+  --cp-accent-warm: var(--cp-yellow);
+  --cp-danger: var(--cp-red);
+
+  /* 语义化文本 */
+  --cp-text-primary: var(--cp-text);
+  --cp-text-secondary: var(--cp-subtext0);
+  --cp-text-muted: var(--cp-overlay0);
+
   /* RGB components for rgba() usage */
   --cp-text-rgb: 202, 211, 245;
   --cp-surface1-rgb: 73, 77, 100;
@@ -83,21 +129,25 @@ html.dark {
 
 /* 滚动条样式 */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--cp-base);
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--cp-surface0);
-  border-radius: 4px;
+  background: var(--cp-control-surface);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 10px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--cp-surface1);
+  background: var(--cp-control-surface-hover);
+  border: 3px solid transparent;
+  background-clip: content-box;
 }
 
 html,
@@ -114,27 +164,28 @@ html.window-picker #root {
 
 /* Picker 窗口的 body 需要有背景色，否则内容会完全透明 */
 html.window-picker body {
-  background: var(--cp-base);
+  background: var(--cp-window-shell);
 }
 
 body {
   margin: 0;
-  color: inherit;
+  color: var(--cp-text-primary);
+  background-color: var(--cp-window-shell);
   transition:
     background 220ms ease,
     color 220ms ease;
 }
 
 body.theme-manager {
-  background: var(--cp-base);
+  background: var(--cp-window-shell);
 }
 
 body.theme-picker {
-  background: var(--cp-base);
+  background: var(--cp-window-shell);
 }
 
 .text-ink {
-  color: var(--cp-text);
+  color: var(--cp-text-primary);
 }
 
 * {
@@ -146,9 +197,17 @@ input,
 textarea,
 select {
   font: inherit;
+  color: inherit;
+  background: transparent;
+  border: none;
+  outline: none;
+}
+
+button {
+  cursor: pointer;
 }
 
 ::selection {
   color: var(--cp-base);
-  background: var(--cp-lavender);
+  background: var(--cp-accent-primary);
 }
