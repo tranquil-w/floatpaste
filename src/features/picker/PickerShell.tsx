@@ -286,8 +286,8 @@ export function PickerShell() {
   }, [tauriRuntime]);
 
   return (
-    <div className="flex h-screen w-screen items-start justify-center overflow-hidden bg-transparent p-0 text-ink select-none">
-      <div className="relative flex h-full w-full flex-col overflow-hidden rounded-[18px] border border-[rgba(var(--cp-surface0-rgb),0.6)] bg-[color:var(--cp-window-shell)] shadow-[0_12px_40px_-8px_rgba(0,0,0,0.3)] ring-1 ring-black/5 ring-inset backdrop-blur-xl dark:border-[rgba(var(--cp-surface0-rgb),0.4)] dark:bg-[color:var(--cp-window-shell)] dark:shadow-[0_20px_50px_-12px_rgba(0,0,0,0.8)]">
+    <div className="flex h-screen w-screen items-center justify-center overflow-hidden bg-transparent p-0 text-ink select-none">
+      <div className="relative flex h-[calc(100%-2px)] w-[calc(100%-2px)] flex-col overflow-hidden rounded-[18px] border border-[rgba(var(--cp-surface0-rgb),0.6)] bg-[color:var(--cp-window-shell)] shadow-none ring-1 ring-black/5 ring-inset backdrop-blur-xl dark:border-[rgba(var(--cp-surface0-rgb),0.4)] dark:bg-[color:var(--cp-window-shell)] dark:shadow-none">
         {tauriRuntime
           ? PICKER_RESIZE_HANDLES.map((handle) => (
             <div

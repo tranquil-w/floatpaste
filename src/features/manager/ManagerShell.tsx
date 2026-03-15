@@ -304,7 +304,7 @@ export function ManagerShell() {
               >
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                </svg> open picker
+                </svg> 打开速贴面板
               </button>
               <div className="grid grid-cols-2 gap-2 rounded-2xl bg-[color:var(--cp-control-surface)]/40 p-1.5 backdrop-blur-sm ring-1 ring-[rgba(var(--cp-surface1-rgb),0.2)]">
                 <button

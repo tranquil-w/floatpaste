@@ -31,28 +31,27 @@
   /* Mantle */ --cp-mantle: #e6e9ef;
   /* Crust */ --cp-crust: #dce0e8;
 
+  /* RGB components for rgba() usage */
+  --cp-text-rgb: 76, 79, 105;
+  --cp-subtext0-rgb: 108, 111, 133;
+  --cp-surface0-rgb: 204, 208, 218;
+  --cp-surface1-rgb: 188, 192, 204;
+  --cp-surface2-rgb: 172, 176, 190;
+  --cp-base-rgb: 239, 241, 245;
+  --cp-mantle-rgb: 230, 233, 239;
+  --cp-crust-rgb: 220, 224, 232;
+  --cp-lavender-rgb: 114, 135, 253;
+  --cp-blue-rgb: 30, 102, 245;
+  --cp-red-rgb: 210, 15, 57;
+  --cp-yellow-rgb: 223, 142, 29;
+  --cp-green-rgb: 64, 160, 43;
+
   /* 语义化表面 */
   --cp-window-shell: var(--cp-base);
   --cp-panel-surface: var(--cp-mantle);
   --cp-card-surface: var(--cp-base);
   --cp-control-surface: var(--cp-surface0);
   --cp-control-surface-hover: var(--cp-surface1);
-
-  /* 语义化边框 */
-  --cp-border-soft: #ccd0da;
-  --cp-border-strong: var(--cp-surface1);
-  --cp-focus-ring: #7287fd;
-
-  /* 语义化强调 */
-  --cp-accent-primary: var(--cp-lavender);
-  --cp-accent-primary-strong: var(--cp-blue);
-  --cp-accent-warm: var(--cp-yellow);
-  --cp-danger: var(--cp-red);
-
-  /* 语义化文本 */
-  --cp-text-primary: var(--cp-text);
-  --cp-text-secondary: var(--cp-subtext0);
-  --cp-text-muted: var(--cp-overlay0);
 
   /* 语义化边框 */
   --cp-border-soft: rgba(var(--cp-surface0-rgb), 0.6);
@@ -69,21 +68,6 @@
   --cp-text-primary: var(--cp-text);
   --cp-text-secondary: var(--cp-subtext0);
   --cp-text-muted: var(--cp-overlay0);
-
-  /* RGB components for rgba() usage */
-  --cp-text-rgb: 76, 79, 105;
-  --cp-subtext0-rgb: 108, 111, 133;
-  --cp-surface0-rgb: 204, 208, 218;
-  --cp-surface1-rgb: 188, 192, 204;
-  --cp-surface2-rgb: 172, 176, 190;
-  --cp-base-rgb: 239, 241, 245;
-  --cp-mantle-rgb: 230, 233, 239;
-  --cp-crust-rgb: 220, 224, 232;
-  --cp-lavender-rgb: 114, 135, 253;
-  --cp-blue-rgb: 30, 102, 245;
-  --cp-red-rgb: 210, 15, 57;
-  --cp-yellow-rgb: 223, 142, 29;
-  --cp-green-rgb: 64, 160, 43;
 
   color: var(--cp-text);
   font-family: "Segoe UI", sans-serif;
@@ -134,205 +118,7 @@ html.dark {
   --cp-red-rgb: 237, 135, 150;
   --cp-yellow-rgb: 236, 205, 146;
   --cp-green-rgb: 166, 218, 149;
-
-  /* 语义化表面 */
-  --cp-window-shell: #24273a;
-  --cp-panel-surface: #1e2030;
-  --cp-card-surface: #363a4f;
-  --cp-control-surface: #363a4f;
-  --cp-control-surface-hover: #494d64;
-
-  /* 语义化边框 */
-  --cp-border-soft: rgba(var(--cp-surface0-rgb), 0.4);
-  --cp-border-strong: rgba(var(--cp-surface1-rgb), 0.5);
-  --cp-focus-ring: rgba(var(--cp-lavender-rgb), 0.4);
-
-  /* 语义化文本 */
-  --cp-text-primary: #cad3f5;
-  --cp-text-secondary: #a5adcb;
-  --cp-text-muted: #6e738d;
-
-  color: var(--cp-text);
-  color-scheme: dark;
-  background-color: var(--cp-base);
-}
-
-/* Catppuccin Macchiato (Dark Theme) */
-html.dark {
-  /* Rosewater */ --cp-rosewater: #f4dbd6;
-  /* Flamingo */ --cp-flamingo: #f0c6c6;
-  /* Pink */ --cp-pink: #f5bde6;
-  /* Mauve */ --cp-mauve: #c6a0f6;
-  /* Red */ --cp-red: #ed8796;
-  /* Maroon */ --cp-maroon: #ee99a0;
-  /* Peach */ --cp-peach: #f5a97f;
-  /* Yellow */ --cp-yellow: #eccd92;
-  /* Green */ --cp-green: #a6da95;
-  /* Teal */ --cp-teal: #8bd5ca;
-  /* Sky */ --cp-sky: #91d7e3;
-  /* Sapphire */ --cp-sapphire: #7dc4e4;
-  /* Blue */ --cp-blue: #8aadf4;
-  /* Lavender */ --cp-lavender: #b7bdf8;
-  /* Text */ --cp-text: #cad3f5;
-  /* Subtext1 */ --cp-subtext1: #b8c0e0;
-  /* Subtext0 */ --cp-subtext0: #a5adcb;
-  /* Overlay2 */ --cp-overlay2: #939ab7;
-  /* Overlay1 */ --cp-overlay1: #8087a2;
-  /* Overlay0 */ --cp-overlay0: #6e738d;
-  /* Surface2 */ --cp-surface2: #5b6078;
-  /* Surface1 */ --cp-surface1: #494d64;
-  /* Surface0 */ --cp-surface0: #363a4f;
-  /* Base */ --cp-base: #24273a;
-  /* Mantle */ --cp-mantle: #1e2030;
-  /* Crust */ --cp-crust: #181926;
-
-  /* RGB components for rgba() usage */
-  --cp-text-rgb: 202, 211, 245;
-  --cp-subtext0-rgb: 165, 173, 203;
-  --cp-surface0-rgb: 54, 58, 79;
-  --cp-surface1-rgb: 73, 77, 100;
-  --cp-base-rgb: 36, 39, 58;
-  --cp-mantle-rgb: 30, 32, 48;
-  --cp-lavender-rgb: 183, 189, 248;
-  --cp-red-rgb: 237, 135, 150;
-  --cp-yellow-rgb: 236, 205, 146;
-  --cp-green-rgb: 166, 218, 149;
-
-  /* 语义化表面 */
-  --cp-window-shell: #24273a;
-  --cp-panel-surface: #1e2030;
-  --cp-card-surface: #363a4f;
-  --cp-control-surface: #363a4f;
-  --cp-control-surface-hover: #494d64;
-
-  /* 语义化文本 */
-  --cp-text-primary: #cad3f5;
-  --cp-text-secondary: #a5adcb;
-  --cp-text-muted: #6e738d;
-
-  color: var(--cp-text);
-  color-scheme: dark;
-  background-color: var(--cp-base);
-}
-
-/* 滚动条样式 */
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: var(--cp-control-surface);
-  border: 3px solid transparent;
-  background-clip: content-box;
-  border-radius: 10px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: var(--cp-control-surface-hover);
-  border: 3px solid transparent;
-  background-clip: content-box;
-}
-
-html,
-body,
-#root {
-  min-height: 100%;
-}
-
-html.window-picker,
-html.window-picker #root {
-  background: transparent !important;
-}
-
-/* Picker 窗口的 body 必须完全透明，避免遮挡容器圆角 */
-html.window-picker body {
-  background: transparent !important;
-}
-
-body {
-  margin: 0;
-  color: var(--cp-text-primary);
-  background-color: var(--cp-window-shell);
-  transition:
-    background 220ms ease,
-    color 220ms ease;
-}
-
-body.theme-manager {
-  background-color: var(--cp-window-shell);
-}
-
-body.theme-picker {
-  background-color: transparent;
-}
-
-.text-ink {
-  color: var(--cp-text-primary);
-}
-
-* {
-  box-sizing: border-box;
-}
-
-button,
-input,
-textarea,
-select {
-  font: inherit;
-  color: inherit;
-  background: transparent;
-}
-
-button {
-  cursor: pointer;
-  border: none;
-  outline: none;
-}
-
-input,
-textarea {
-  border: 1px solid transparent;
-  outline: none;
-}
-
-::selection {
-  color: var(--cp-base);
-  background: rgba(var(--cp-lavender-rgb), 0.4);
-}
-
-/* Catppuccin Macchiato (Dark Theme) */
-html.dark {
-  /* Rosewater */ --cp-rosewater: #f4dbd6;
-  /* Flamingo */ --cp-flamingo: #f0c6c6;
-  /* Pink */ --cp-pink: #f5bde6;
-  /* Mauve */ --cp-mauve: #c6a0f6;
-  /* Red */ --cp-red: #ed8796;
-  /* Maroon */ --cp-maroon: #ee99a0;
-  /* Peach */ --cp-peach: #f5a97f;
-  /* Yellow */ --cp-yellow: #eccd92;
-  /* Green */ --cp-green: #a6da95;
-  /* Teal */ --cp-teal: #8bd5ca;
-  /* Sky */ --cp-sky: #91d7e3;
-  /* Sapphire */ --cp-sapphire: #7dc4e4;
-  /* Blue */ --cp-blue: #8aadf4;
-  /* Lavender */ --cp-lavender: #b7bdf8;
-  /* Text */ --cp-text: #cad3f5;
-  /* Subtext1 */ --cp-subtext1: #b8c0e0;
-  /* Subtext0 */ --cp-subtext0: #a5adcb;
-  /* Overlay2 */ --cp-overlay2: #939ab7;
-  /* Overlay1 */ --cp-overlay1: #8087a2;
-  /* Overlay0 */ --cp-overlay0: #6e738d;
-  /* Surface2 */ --cp-surface2: #5b6078;
-  /* Surface1 */ --cp-surface1: #494d64;
-  /* Surface0 */ --cp-surface0: #363a4f;
-  /* Base */ --cp-base: #24273a;
-  /* Mantle */ --cp-mantle: #1e2030;
-  /* Crust */ --cp-crust: #181926;
+  --cp-accent-primary-rgb: 183, 189, 248;
 
   /* 语义化表面 */
   --cp-window-shell: var(--cp-base);
@@ -342,26 +128,14 @@ html.dark {
   --cp-control-surface-hover: var(--cp-surface1);
 
   /* 语义化边框 */
-  --cp-border-soft: #363a4f;
-  --cp-border-strong: var(--cp-surface1);
-  --cp-focus-ring: #b7bdf8;
-
-  /* 语义化强调 */
-  --cp-accent-primary: var(--cp-lavender);
-  --cp-accent-primary-strong: var(--cp-blue);
-  --cp-accent-warm: var(--cp-yellow);
-  --cp-danger: var(--cp-red);
+  --cp-border-soft: rgba(var(--cp-surface0-rgb), 0.4);
+  --cp-border-strong: rgba(var(--cp-surface1-rgb), 0.5);
+  --cp-focus-ring: rgba(var(--cp-lavender-rgb), 0.4);
 
   /* 语义化文本 */
   --cp-text-primary: var(--cp-text);
   --cp-text-secondary: var(--cp-subtext0);
   --cp-text-muted: var(--cp-overlay0);
-
-  /* RGB components for rgba() usage */
-  --cp-text-rgb: 202, 211, 245;
-  --cp-surface1-rgb: 73, 77, 100;
-  --cp-surface2-rgb: 91, 96, 120;
-  --cp-accent-primary-rgb: 183, 189, 248;
 
   color: var(--cp-text);
   color-scheme: dark;
@@ -397,15 +171,8 @@ body,
   min-height: 100%;
 }
 
-html.window-picker,
-html.window-picker #root {
-  background: transparent;
-  background-color: transparent;
-}
-
-/* Picker 窗口的 body 不能有背景色，否则圆角会被遮挡 */
-html.window-picker body {
-  background: transparent;
+* {
+  box-sizing: border-box;
 }
 
 body {
@@ -417,20 +184,30 @@ body {
     color 220ms ease;
 }
 
-body.theme-manager {
-  background: var(--cp-window-shell);
+/* Picker 窗口强制透明补丁：必须放在最后以确保最高优先级 */
+html.window-picker,
+html.window-picker body,
+html.window-picker #root {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  /* 关键：禁用过渡动画，防止透明化延迟产生瞬时尖角 */
+  transition: none !important;
+  box-shadow: none !important;
 }
 
 body.theme-picker {
-  background: var(--cp-window-shell);
+  background: transparent !important;
+  background-color: transparent !important;
+  transition: none !important;
+}
+
+body.theme-manager {
+  background-color: var(--cp-window-shell);
 }
 
 .text-ink {
   color: var(--cp-text-primary);
-}
-
-* {
-  box-sizing: border-box;
 }
 
 button,
