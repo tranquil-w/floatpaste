@@ -298,7 +298,7 @@ export function PickerShell() {
             />
           ))
           : null}
-        <div className="flex shrink-0 items-center justify-between border-b border-[color:var(--cp-border-soft)]/60 bg-[color:var(--cp-panel-surface)]/40 px-3 py-2 dark:border-[color:var(--cp-border-soft)]/70 dark:bg-[color:var(--cp-panel-surface)]/70" data-tauri-drag-region>
+        <div className="flex shrink-0 items-center justify-between border-b border-[color:var(--cp-border-strong)]/20 bg-[color:var(--cp-panel-surface)]/40 px-3 py-2 dark:border-[color:var(--cp-border-strong)]/30 dark:bg-[color:var(--cp-panel-surface)]/70" data-tauri-drag-region>
           <div className="flex items-center gap-2">
             <div className="h-2.5 w-2.5 rounded-full bg-[color:var(--cp-accent-primary)] shadow-sm"></div>
             <span className="text-[12px] font-bold tracking-tight text-[color:var(--cp-text-primary)]">FloatPaste</span>

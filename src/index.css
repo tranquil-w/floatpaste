@@ -39,9 +39,9 @@
   --cp-control-surface-hover: var(--cp-surface1);
 
   /* 语义化边框 */
-  --cp-border-soft: rgba(204, 208, 218, 0.6);
+  --cp-border-soft: #ccd0da;
   --cp-border-strong: var(--cp-surface1);
-  --cp-focus-ring: rgba(114, 135, 253, 0.4);
+  --cp-focus-ring: #7287fd;
 
   /* 语义化强调 */
   --cp-accent-primary: var(--cp-lavender);
@@ -58,6 +58,7 @@
   --cp-text-rgb: 76, 79, 105;
   --cp-surface1-rgb: 188, 192, 204;
   --cp-surface2-rgb: 172, 176, 190;
+  --cp-accent-primary-rgb: 114, 135, 253;
 
   color: var(--cp-text);
   font-family: "Segoe UI", sans-serif;
@@ -102,9 +103,9 @@ html.dark {
   --cp-control-surface-hover: var(--cp-surface1);
 
   /* 语义化边框 */
-  --cp-border-soft: rgba(54, 58, 79, 0.6);
+  --cp-border-soft: #363a4f;
   --cp-border-strong: var(--cp-surface1);
-  --cp-focus-ring: rgba(183, 189, 248, 0.4);
+  --cp-focus-ring: #b7bdf8;
 
   /* 语义化强调 */
   --cp-accent-primary: var(--cp-lavender);
@@ -121,6 +122,7 @@ html.dark {
   --cp-text-rgb: 202, 211, 245;
   --cp-surface1-rgb: 73, 77, 100;
   --cp-surface2-rgb: 91, 96, 120;
+  --cp-accent-primary-rgb: 183, 189, 248;
 
   color: var(--cp-text);
   color-scheme: dark;
@@ -162,9 +164,9 @@ html.window-picker #root {
   background-color: transparent;
 }
 
-/* Picker 窗口的 body 需要有背景色，否则内容会完全透明 */
+/* Picker 窗口的 body 不能有背景色，否则圆角会被遮挡 */
 html.window-picker body {
-  background: var(--cp-window-shell);
+  background: transparent;
 }
 
 body {
@@ -199,12 +201,18 @@ select {
   font: inherit;
   color: inherit;
   background: transparent;
-  border: none;
-  outline: none;
 }
 
 button {
   cursor: pointer;
+  border: none;
+  outline: none;
+}
+
+input,
+textarea {
+  border: 1px solid transparent;
+  outline: none;
 }
 
 ::selection {

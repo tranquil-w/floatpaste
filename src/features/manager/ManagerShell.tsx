@@ -350,13 +350,13 @@ export function ManagerShell() {
                     </svg>
                   </div>
                   <input
-                    className="w-full rounded-2xl border border-[color:var(--cp-border-soft)] bg-[color:var(--cp-control-surface)]/40 py-3 pl-11 pr-5 text-sm outline-none backdrop-blur-sm transition-all duration-300 placeholder:text-[color:var(--cp-text-muted)] focus:border-[color:var(--cp-accent-primary)]/40 focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[color:var(--cp-accent-primary)]/10 dark:bg-[color:var(--cp-control-surface)] dark:focus:bg-[color:var(--cp-control-surface)]"
+                    className="w-full rounded-2xl border border-[color:var(--cp-border-strong)]/30 bg-[color:var(--cp-control-surface)]/40 py-3 pl-11 pr-5 text-sm outline-none backdrop-blur-sm transition-all duration-300 placeholder:text-[color:var(--cp-text-muted)] focus:border-[color:var(--cp-accent-primary)]/40 focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[color:var(--cp-accent-primary)]/10 dark:bg-[color:var(--cp-control-surface)]/20 dark:focus:bg-[color:var(--cp-control-surface)]/40"
                     onChange={(event) => setKeyword(event.target.value)}
                     placeholder="搜索全文、来源应用或关键短语"
                     value={keyword}
                   />
                 </div>
-                <label className="inline-flex cursor-pointer items-center gap-2 rounded-2xl border border-[color:var(--cp-border-soft)] bg-[color:var(--cp-control-surface)]/40 px-5 py-3 text-sm font-semibold text-[color:var(--cp-text-secondary)] shadow-sm transition-all duration-300 hover:border-[color:var(--cp-border-strong)]/30 hover:bg-[color:var(--cp-control-surface-hover)]/40 hover:text-[color:var(--cp-text-primary)] active:scale-95">
+                <label className="inline-flex cursor-pointer items-center gap-2 rounded-2xl border border-[color:var(--cp-border-strong)]/30 bg-[color:var(--cp-control-surface)]/40 px-5 py-3 text-sm font-semibold text-[color:var(--cp-text-secondary)] shadow-sm transition-all duration-300 hover:border-[color:var(--cp-border-strong)]/50 hover:bg-[color:var(--cp-control-surface-hover)]/40 hover:text-[color:var(--cp-text-primary)] active:scale-95">
                   <input
                     className="h-4 w-4 rounded border-[color:var(--cp-border-strong)] bg-cp-base text-[color:var(--cp-accent-primary)] focus:ring-[color:var(--cp-accent-primary)] dark:bg-[color:var(--cp-control-surface)]"
                     checked={favoritedOnly}
@@ -379,8 +379,8 @@ export function ManagerShell() {
                     return (
                       <button
                         className={`group w-full rounded-3xl border px-6 py-5 text-left transition-all duration-300 ${isSelected
-                            ? "relative z-10 scale-[1.01] border-[color:var(--cp-accent-primary)]/40 bg-[color:var(--cp-window-shell)] shadow-xl shadow-black/5 ring-1 ring-[color:var(--cp-accent-primary)]/30 dark:bg-[color:var(--cp-card-surface)]/40 dark:shadow-none dark:ring-[color:var(--cp-accent-primary)]/40"
-                            : "border-[color:var(--cp-border-soft)] bg-[color:var(--cp-card-surface)]/30 hover:-translate-y-0.5 hover:border-[color:var(--cp-border-strong)]/30 hover:bg-[color:var(--cp-card-surface)]/60 hover:shadow-md dark:bg-[color:var(--cp-card-surface)]/20 dark:hover:bg-[color:var(--cp-card-surface)]/40"
+                            ? "relative z-10 scale-[1.01] border-[color:var(--cp-accent-primary)]/40 bg-[color:var(--cp-window-shell)] shadow-xl shadow-black/5 ring-1 ring-[color:var(--cp-accent-primary)]/30 dark:bg-[color:var(--cp-card-surface)]/60 dark:shadow-none dark:ring-[color:var(--cp-accent-primary)]/40"
+                            : "border-[color:var(--cp-border-strong)]/20 bg-[color:var(--cp-card-surface)]/30 hover:-translate-y-0.5 hover:border-[color:var(--cp-border-strong)]/40 hover:bg-[color:var(--cp-card-surface)]/60 hover:shadow-md dark:bg-[color:var(--cp-card-surface)]/20 dark:hover:bg-[color:var(--cp-card-surface)]/40"
                           }`}
                         key={item.id}
                         onClick={() => setSelectedItemId(item.id)}
@@ -441,7 +441,7 @@ export function ManagerShell() {
                 )}
               </div>
 
-              <div className="flex shrink-0 items-center justify-between gap-3 border-t border-[color:var(--cp-border-soft)]/60 px-1 pb-1 pt-4 text-[11px] font-bold uppercase tracking-wider text-[color:var(--cp-text-muted)]">
+              <div className="flex shrink-0 items-center justify-between gap-3 border-t border-[color:var(--cp-border-strong)]/20 px-1 pb-1 pt-4 text-[11px] font-bold uppercase tracking-wider text-[color:var(--cp-text-muted)]">
                 <span>{totalCount === 0 ? "当前没有可显示记录" : `当前显示第 ${pageStart}-${pageEnd} 条`}</span>
                 <div className="flex items-center gap-2">
                   <button
@@ -487,7 +487,7 @@ export function ManagerShell() {
         <Panel className="flex flex-col gap-4 lg:overflow-hidden min-h-[500px] lg:min-h-0">
           {detail.data && selectedSummary ? (
             <>
-              <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[color:var(--cp-border-soft)]/60 pb-4">
+              <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[color:var(--cp-border-strong)]/20 pb-4">
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="flex h-1.5 w-1.5 rounded-full bg-[color:var(--cp-accent-primary)]"></span>
@@ -652,14 +652,14 @@ export function ManagerShell() {
               {detail.data.type === "text" ? (
                 <>
                   <textarea
-                    className="min-h-[200px] flex-1 w-full resize-none rounded-2xl border border-[color:var(--cp-border-soft)] bg-[color:var(--cp-control-surface)]/30 px-5 py-5 text-[14px] leading-relaxed shadow-inner outline-none transition-all duration-300 focus:border-[color:var(--cp-accent-primary)]/50 focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[color:var(--cp-accent-primary)]/10 dark:bg-[color:var(--cp-control-surface)]/20 dark:focus:bg-[color:var(--cp-control-surface)]/30"
+                    className="min-h-[200px] flex-1 w-full resize-none rounded-2xl border border-[color:var(--cp-border-strong)]/30 bg-[color:var(--cp-control-surface)]/30 px-5 py-5 text-[14px] leading-relaxed shadow-inner outline-none transition-all duration-300 focus:border-[color:var(--cp-accent-primary)]/50 focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[color:var(--cp-accent-primary)]/10 dark:bg-[color:var(--cp-control-surface)]/20 dark:focus:bg-[color:var(--cp-control-surface)]/30"
                     onChange={(event) => setDraftText(event.target.value)}
                     value={draftText}
                   />
 
                   <div className="flex shrink-0 flex-wrap gap-2 pt-2">
                     <button
-                      className="rounded-xl border border-[color:var(--cp-border-soft)] bg-[color:var(--cp-control-surface)]/40 px-5 py-2.5 text-sm font-bold text-[color:var(--cp-text-primary)] shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-[color:var(--cp-border-strong)]/30 hover:bg-[color:var(--cp-control-surface-hover)]/60 active:scale-95 disabled:opacity-50"
+                      className="rounded-xl border border-[color:var(--cp-border-strong)]/40 bg-[color:var(--cp-control-surface)]/40 px-5 py-2.5 text-sm font-bold text-[color:var(--cp-text-primary)] shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-[color:var(--cp-border-strong)]/60 hover:bg-[color:var(--cp-control-surface-hover)]/60 active:scale-95 disabled:opacity-50"
                       disabled={updateTextMutation.isPending}
                       onClick={() =>
                         updateTextMutation.mutate({
@@ -677,7 +677,7 @@ export function ManagerShell() {
                       </span>
                     </button>
                     <button
-                      className="rounded-xl border border-[color:var(--cp-danger)]/10 bg-[color:var(--cp-danger)]/5 px-5 py-2.5 text-sm font-bold text-[color:var(--cp-danger)] transition-all duration-300 hover:bg-[color:var(--cp-danger)]/15 active:scale-95 disabled:opacity-50"
+                      className="rounded-xl border border-[color:var(--cp-danger)]/20 bg-[color:var(--cp-danger)]/5 px-5 py-2.5 text-sm font-bold text-[color:var(--cp-danger)] transition-all duration-300 hover:bg-[color:var(--cp-danger)]/15 hover:border-[color:var(--cp-danger)]/40 active:scale-95 disabled:opacity-50"
                       disabled={deleteMutation.isPending}
                       onClick={() => {
                         deleteMutation.mutate(detail.data.id, {
@@ -702,7 +702,7 @@ export function ManagerShell() {
                           : "该类型记录不支持文本编辑"}
                     </p>
                     {detail.data.type === "file" && (
-                      <div className="mt-4 w-full rounded-xl border border-[color:var(--cp-border-soft)] bg-[color:var(--cp-control-surface)]/30 p-4 text-left">
+                      <div className="mt-4 w-full rounded-xl border border-[color:var(--cp-border-strong)]/30 bg-[color:var(--cp-control-surface)]/30 p-4 text-left">
                         <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-[color:var(--cp-text-muted)]">
                           文件路径
                         </p>
@@ -718,7 +718,7 @@ export function ManagerShell() {
                   </div>
                   <div className="flex shrink-0 flex-wrap gap-2 pt-2">
                     <button
-                      className="rounded-xl border border-[color:var(--cp-danger)]/10 bg-[color:var(--cp-danger)]/5 px-5 py-2.5 text-sm font-bold text-[color:var(--cp-danger)] transition-all duration-300 hover:bg-[color:var(--cp-danger)]/15 active:scale-95 disabled:opacity-50"
+                      className="rounded-xl border border-[color:var(--cp-danger)]/20 bg-[color:var(--cp-danger)]/5 px-5 py-2.5 text-sm font-bold text-[color:var(--cp-danger)] transition-all duration-300 hover:bg-[color:var(--cp-danger)]/15 hover:border-[color:var(--cp-danger)]/40 active:scale-95 disabled:opacity-50"
                       disabled={deleteMutation.isPending}
                       onClick={() => {
                         deleteMutation.mutate(detail.data.id, {
@@ -818,7 +818,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
       <label className="block">
         <span className="mb-2.5 block text-[13px] font-bold text-[color:var(--cp-text-primary)]">全局快捷键</span>
         <input
-          className="w-full rounded-2xl border border-[color:var(--cp-border-soft)] bg-[color:var(--cp-control-surface)]/30 px-5 py-3.5 text-sm font-medium outline-none transition-all focus:border-[color:var(--cp-accent-primary)]/50 focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[color:var(--cp-accent-primary)]/10 dark:bg-[color:var(--cp-control-surface)]/20 dark:focus:bg-[color:var(--cp-control-surface)]/30"
+          className="w-full rounded-2xl border border-[color:var(--cp-border-strong)]/30 bg-[color:var(--cp-control-surface)]/30 px-5 py-3.5 text-sm font-medium outline-none transition-all focus:border-[color:var(--cp-accent-primary)]/50 focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[color:var(--cp-accent-primary)]/10 dark:bg-[color:var(--cp-control-surface)]/20 dark:focus:bg-[color:var(--cp-control-surface)]/40"
           onChange={(event) => setShortcut(event.target.value)}
           value={shortcut}
         />
@@ -827,7 +827,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
       <label className="block">
         <span className="mb-2.5 block text-[13px] font-bold text-[color:var(--cp-text-primary)]">历史记录上限</span>
         <input
-          className="w-full rounded-2xl border border-[color:var(--cp-border-soft)] bg-[color:var(--cp-control-surface)]/30 px-5 py-3.5 text-sm font-medium outline-none transition-all focus:border-[color:var(--cp-accent-primary)]/50 focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[color:var(--cp-accent-primary)]/10 dark:bg-[color:var(--cp-control-surface)]/20 dark:focus:bg-[color:var(--cp-control-surface)]/30"
+          className="w-full rounded-2xl border border-[color:var(--cp-border-strong)]/30 bg-[color:var(--cp-control-surface)]/30 px-5 py-3.5 text-sm font-medium outline-none transition-all focus:border-[color:var(--cp-accent-primary)]/50 focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[color:var(--cp-accent-primary)]/10 dark:bg-[color:var(--cp-control-surface)]/20 dark:focus:bg-[color:var(--cp-control-surface)]/40"
           min={100}
           onChange={(event) => setHistoryLimit(Number(event.target.value) || 1000)}
           step={100}
@@ -839,7 +839,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
       <label className="block">
         <span className="mb-2.5 block text-[13px] font-bold text-[color:var(--cp-text-primary)]">速贴窗口记录数</span>
         <input
-          className="w-full rounded-2xl border border-[color:var(--cp-border-soft)] bg-[color:var(--cp-control-surface)]/30 px-5 py-3.5 text-sm font-medium outline-none transition-all focus:border-[color:var(--cp-accent-primary)]/50 focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[color:var(--cp-accent-primary)]/10 dark:bg-[color:var(--cp-control-surface)]/20 dark:focus:bg-[color:var(--cp-control-surface)]/30"
+          className="w-full rounded-2xl border border-[color:var(--cp-border-strong)]/30 bg-[color:var(--cp-control-surface)]/30 px-5 py-3.5 text-sm font-medium outline-none transition-all focus:border-[color:var(--cp-accent-primary)]/50 focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[color:var(--cp-accent-primary)]/10 dark:bg-[color:var(--cp-control-surface)]/20 dark:focus:bg-[color:var(--cp-control-surface)]/40"
           max={1000}
           min={9}
           onChange={(event) => setPickerRecordLimit(Number(event.target.value) || 50)}
@@ -858,7 +858,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
             <label
               className={`flex cursor-pointer items-start gap-3 rounded-2xl border px-5 py-4 transition-all duration-300 ${themeMode === option.value
                   ? "border-[color:var(--cp-accent-primary)]/40 bg-[color:var(--cp-accent-primary)]/5 ring-1 ring-[color:var(--cp-accent-primary)]/10"
-                  : "border-[color:var(--cp-border-soft)] bg-[color:var(--cp-control-surface)]/20 hover:border-[color:var(--cp-border-strong)]/30 hover:bg-[color:var(--cp-control-surface-hover)]/30"
+                  : "border-[color:var(--cp-border-strong)]/10 bg-[color:var(--cp-control-surface)]/20 hover:border-[color:var(--cp-border-strong)]/30 hover:bg-[color:var(--cp-control-surface-hover)]/30"
                 }`}
               key={option.value}
             >
@@ -887,7 +887,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
             <label
               className={`flex cursor-pointer items-start gap-3 rounded-2xl border px-5 py-4 transition-all duration-300 ${pickerPositionMode === option.value
                   ? "border-[color:var(--cp-accent-primary)]/40 bg-[color:var(--cp-accent-primary)]/5 ring-1 ring-[color:var(--cp-accent-primary)]/10"
-                  : "border-[color:var(--cp-border-soft)] bg-[color:var(--cp-control-surface)]/20 hover:border-[color:var(--cp-border-strong)]/30 hover:bg-[color:var(--cp-control-surface-hover)]/30"
+                  : "border-[color:var(--cp-border-strong)]/10 bg-[color:var(--cp-control-surface)]/20 hover:border-[color:var(--cp-border-strong)]/30 hover:bg-[color:var(--cp-control-surface-hover)]/30"
                 }`}
               key={option.value}
             >
@@ -912,7 +912,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
       <label className="block">
         <span className="mb-2.5 block text-[13px] font-bold text-[color:var(--cp-text-primary)]">排除应用</span>
         <textarea
-          className="min-h-[120px] w-full rounded-2xl border border-[color:var(--cp-border-soft)] bg-[color:var(--cp-control-surface)]/30 px-5 py-3.5 text-sm font-medium leading-relaxed outline-none transition-all focus:border-[color:var(--cp-accent-primary)]/50 focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[color:var(--cp-accent-primary)]/10 dark:bg-[color:var(--cp-control-surface)]/20 dark:focus:bg-[color:var(--cp-control-surface)]/30"
+          className="w-full rounded-2xl border border-[color:var(--cp-border-strong)]/30 bg-[color:var(--cp-control-surface)]/30 px-5 py-3.5 text-sm font-medium leading-relaxed outline-none transition-all focus:border-[color:var(--cp-accent-primary)]/50 focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[color:var(--cp-accent-primary)]/10 dark:bg-[color:var(--cp-control-surface)]/20 dark:focus:bg-[color:var(--cp-control-surface)]/40"
           onChange={(event) => setExcludedAppsText(event.target.value)}
           placeholder={"每行一个可执行文件名，例如：\nKeePass.exe\nWindowsTerminal.exe"}
           value={excludedAppsText}
