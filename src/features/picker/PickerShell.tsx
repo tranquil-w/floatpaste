@@ -287,7 +287,7 @@ export function PickerShell() {
 
   return (
     <div className="flex h-screen w-screen items-start justify-center overflow-hidden bg-transparent p-0 text-ink select-none">
-      <div className="relative flex h-full w-full flex-col overflow-hidden rounded-[18px] border border-[color:var(--cp-border-soft)] bg-[color:var(--cp-window-shell)]/98 shadow-[0_12px_40px_-8px_rgba(0,0,0,0.3)] ring-1 ring-black/5 ring-inset backdrop-blur-xl dark:border-[color:var(--cp-border-soft)]/80 dark:bg-[color:var(--cp-window-shell)]/98 dark:shadow-[0_20px_50px_-12px_rgba(0,0,0,0.8)] dark:ring-[color:var(--cp-border-soft)]/20">
+      <div className="relative flex h-full w-full flex-col overflow-hidden rounded-[18px] border border-[rgba(var(--cp-surface0-rgb),0.6)] bg-[color:var(--cp-window-shell)] shadow-[0_12px_40px_-8px_rgba(0,0,0,0.3)] ring-1 ring-black/5 ring-inset backdrop-blur-xl dark:border-[rgba(var(--cp-surface0-rgb),0.4)] dark:bg-[color:var(--cp-window-shell)] dark:shadow-[0_20px_50px_-12px_rgba(0,0,0,0.8)]">
         {tauriRuntime
           ? PICKER_RESIZE_HANDLES.map((handle) => (
             <div
@@ -298,7 +298,7 @@ export function PickerShell() {
             />
           ))
           : null}
-        <div className="flex shrink-0 items-center justify-between border-b border-[color:var(--cp-border-strong)]/20 bg-[color:var(--cp-panel-surface)]/40 px-3 py-2 dark:border-[color:var(--cp-border-strong)]/30 dark:bg-[color:var(--cp-panel-surface)]/70" data-tauri-drag-region>
+        <div className="flex shrink-0 items-center justify-between border-b border-[rgba(var(--cp-surface1-rgb),0.3)] bg-[rgba(var(--cp-mantle-rgb),0.4)] px-3 py-2 dark:border-[rgba(var(--cp-surface1-rgb),0.2)] dark:bg-[rgba(var(--cp-mantle-rgb),0.7)]" data-tauri-drag-region>
           <div className="flex items-center gap-2">
             <div className="h-2.5 w-2.5 rounded-full bg-[color:var(--cp-accent-primary)] shadow-sm"></div>
             <span className="text-[12px] font-bold tracking-tight text-[color:var(--cp-text-primary)]">FloatPaste</span>
@@ -306,7 +306,7 @@ export function PickerShell() {
           </div>
           <div className="flex items-center gap-1.5">
             <button
-              className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold text-[color:var(--cp-text-secondary)] transition-colors hover:bg-[color:var(--cp-control-surface-hover)]/50 hover:text-[color:var(--cp-text-primary)]"
+              className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold text-[color:var(--cp-text-secondary)] transition-colors hover:bg-[rgba(var(--cp-surface1-rgb),0.3)] hover:text-[color:var(--cp-text-primary)]"
               onClick={() => void handleOpenManager()}
               type="button"
             >
@@ -325,9 +325,9 @@ export function PickerShell() {
                   ref={(el) => {
                     itemRefs.current[index] = el;
                   }}
-                  className={`group relative flex w-full flex-col gap-1.5 rounded-[12px] px-3 py-2.5 text-left transition-all duration-200 ${isSelected
-                    ? "bg-[color:var(--cp-accent-primary)]/15 shadow-sm ring-1 ring-[color:var(--cp-accent-primary)]/30 dark:bg-[color:var(--cp-accent-primary)]/20 dark:shadow-none dark:ring-[color:var(--cp-accent-primary)]/40"
-                    : "bg-transparent hover:bg-[color:var(--cp-control-surface-hover)]/30 dark:hover:bg-[color:var(--cp-control-surface-hover)]/40"
+                  className={`group relative flex w-full flex-col gap-1.5 rounded-[12px] px-3 py-2.5 text-left transition-all duration-200 border ${isSelected
+                    ? "bg-[rgba(var(--cp-lavender-rgb),0.12)] border-[rgba(var(--cp-lavender-rgb),0.3)] shadow-sm dark:bg-[rgba(var(--cp-lavender-rgb),0.15)] dark:border-[rgba(var(--cp-lavender-rgb),0.4)]"
+                    : "bg-transparent border-transparent hover:bg-[rgba(var(--cp-surface1-rgb),0.2)] dark:hover:bg-[rgba(var(--cp-surface1-rgb),0.3)]"
                     }`}
                   key={item.id}
                   onClick={() => {
@@ -346,16 +346,16 @@ export function PickerShell() {
                     {item.contentPreview}
                   </p>
 
-                  <div className={`flex w-full items-center gap-2 text-[10px] leading-none transition-colors ${isSelected ? "text-[color:var(--cp-accent-primary)]/80" : "text-[color:var(--cp-text-muted)]"}`}>
+                  <div className={`flex w-full items-center gap-2 text-[10px] leading-none transition-colors ${isSelected ? "text-[rgba(var(--cp-lavender-rgb),0.8)]" : "text-[color:var(--cp-text-muted)]"}`}>
                     {index < 9 ? (
                       <kbd className={`flex h-[16px] min-w-[16px] px-1 items-center justify-center rounded-[5px] font-mono text-[9px] font-bold transition-colors ${isSelected
                         ? "bg-[color:var(--cp-accent-primary)] text-cp-base dark:text-cp-mantle"
-                        : "bg-[color:var(--cp-control-surface)] text-[color:var(--cp-text-secondary)] group-hover:bg-[color:var(--cp-control-surface-hover)] group-hover:text-[color:var(--cp-text-primary)]"
+                        : "bg-[rgba(var(--cp-surface0-rgb),0.5)] text-[color:var(--cp-text-secondary)] group-hover:bg-[rgba(var(--cp-surface1-rgb),0.5)] group-hover:text-[color:var(--cp-text-primary)]"
                         }`}>
                         {index + 1}
                       </kbd>
                     ) : null}
-                    <span className="shrink-0 rounded-[4px] bg-[color:var(--cp-control-surface)]/60 px-1.5 py-0.5 font-medium text-[color:var(--cp-text-secondary)]">
+                    <span className="shrink-0 rounded-[4px] bg-[rgba(var(--cp-surface0-rgb),0.3)] px-1.5 py-0.5 font-medium text-[color:var(--cp-text-secondary)]">
                       {getClipTypeLabel(item)}
                     </span>
                     <span className="min-w-0 flex-1 truncate font-medium opacity-80">
