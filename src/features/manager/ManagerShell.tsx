@@ -272,7 +272,7 @@ export function ManagerShell() {
               {favorites.data?.length ? (
                 favorites.data.map((item) => (
                   <button
-                    className="group w-full rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.3)] bg-[rgba(var(--cp-surface0-rgb),0.2)] px-4 py-3 text-left transition-all duration-300 hover:-translate-y-0.5 hover:border-[rgba(var(--cp-surface1-rgb),0.5)] hover:bg-[rgba(var(--cp-surface1-rgb),0.2)] dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
+                    className="group w-full rounded-2xl border border-[rgba(var(--cp-surface2-rgb),0.4)] bg-cp-mantle/50 px-4 py-3 text-left transition-all duration-300 hover:-translate-y-0.5 hover:border-[rgba(var(--cp-surface2-rgb),0.6)] hover:bg-cp-mantle dark:border-[rgba(var(--cp-surface1-rgb),0.3)] dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
                     key={item.id}
                     onClick={() => {
                       setViewMode("history");
@@ -350,13 +350,13 @@ export function ManagerShell() {
                     </svg>
                   </div>
                   <input
-                    className="w-full rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.4)] bg-[rgba(var(--cp-surface0-rgb),0.2)] py-3 pl-11 pr-5 text-sm outline-none backdrop-blur-sm transition-all duration-300 placeholder:text-[color:var(--cp-text-muted)] focus:border-[rgba(var(--cp-lavender-rgb),0.4)] focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[rgba(var(--cp-lavender-rgb),0.1)] dark:bg-[rgba(var(--cp-surface0-rgb),0.3)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
+                    className="w-full rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.5)] bg-cp-mantle py-3 pl-11 pr-5 text-sm outline-none backdrop-blur-sm transition-all duration-300 placeholder:text-[color:var(--cp-text-muted)] focus:border-[rgba(var(--cp-lavender-rgb),0.4)] focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[rgba(var(--cp-lavender-rgb),0.1)] dark:border-[rgba(var(--cp-surface1-rgb),0.4)] dark:bg-[rgba(var(--cp-surface0-rgb),0.3)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
                     onChange={(event) => setKeyword(event.target.value)}
                     placeholder="搜索全文、来源应用或关键短语"
                     value={keyword}
                   />
                 </div>
-                <label className="inline-flex cursor-pointer items-center gap-2 rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.4)] bg-[rgba(var(--cp-surface0-rgb),0.2)] px-5 py-3 text-sm font-semibold text-[color:var(--cp-text-secondary)] shadow-sm transition-all duration-300 hover:border-[rgba(var(--cp-surface1-rgb),0.6)] hover:bg-[rgba(var(--cp-surface1-rgb),0.2)] hover:text-[color:var(--cp-text-primary)] active:scale-95">
+                <label className="inline-flex cursor-pointer items-center gap-2 rounded-2xl border border-[rgba(var(--cp-surface2-rgb),0.3)] bg-cp-mantle px-5 py-3 text-sm font-semibold text-[color:var(--cp-text-secondary)] shadow-sm transition-all duration-300 hover:border-[rgba(var(--cp-surface2-rgb),0.5)] hover:bg-cp-mantle/80 hover:text-[color:var(--cp-text-primary)] active:scale-95">
                   <input
                     className="h-4 w-4 rounded border-[rgba(var(--cp-surface1-rgb),0.6)] bg-cp-base text-[color:var(--cp-accent-primary)] focus:ring-[color:var(--cp-accent-primary)]"
                     checked={favoritedOnly}
@@ -379,8 +379,8 @@ export function ManagerShell() {
                     return (
                       <button
                         className={`group w-full rounded-3xl border px-6 py-5 text-left transition-all duration-300 ${isSelected
-                            ? "relative z-10 scale-[1.01] border-[rgba(var(--cp-lavender-rgb),0.4)] bg-[color:var(--cp-window-shell)] shadow-xl shadow-black/5 ring-1 ring-[rgba(var(--cp-lavender-rgb),0.3)] dark:bg-[rgba(var(--cp-surface0-rgb),0.6)] dark:shadow-none dark:ring-[rgba(var(--cp-lavender-rgb),0.4)]"
-                            : "border-[rgba(var(--cp-surface1-rgb),0.3)] bg-[rgba(var(--cp-card-surface-rgb),0.3)] hover:-translate-y-0.5 hover:border-[rgba(var(--cp-surface1-rgb),0.6)] hover:bg-[rgba(var(--cp-card-surface-rgb),0.6)] hover:shadow-md dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
+                            ? "relative z-10 scale-[1.01] border-[rgba(var(--cp-lavender-rgb),0.6)] bg-cp-mantle shadow-xl shadow-black/5 ring-1 ring-[rgba(var(--cp-lavender-rgb),0.3)] dark:border-[rgba(var(--cp-lavender-rgb),0.5)] dark:bg-[rgba(var(--cp-surface0-rgb),0.6)] dark:shadow-none dark:ring-[rgba(var(--cp-lavender-rgb),0.4)]"
+                            : "border-[rgba(var(--cp-surface2-rgb),0.4)] bg-cp-mantle/30 hover:-translate-y-0.5 hover:border-[rgba(var(--cp-surface2-rgb),0.6)] hover:bg-cp-mantle/60 hover:shadow-md dark:border-[rgba(var(--cp-surface1-rgb),0.3)] dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
                           }`}
                         key={item.id}
                         onClick={() => setSelectedItemId(item.id)}
@@ -652,7 +652,7 @@ export function ManagerShell() {
               {detail.data.type === "text" ? (
                 <>
                   <textarea
-                    className="min-h-[200px] flex-1 w-full resize-none rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.3)] bg-[rgba(var(--cp-surface0-rgb),0.2)] px-5 py-5 text-[14px] leading-relaxed shadow-inner outline-none transition-all duration-300 focus:border-[rgba(var(--cp-lavender-rgb),0.4)] focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[rgba(var(--cp-lavender-rgb),0.1)] dark:bg-[rgba(var(--cp-surface0-rgb),0.3)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
+                    className="min-h-[200px] flex-1 w-full resize-none rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.5)] bg-cp-mantle px-5 py-5 text-[14px] leading-relaxed outline-none transition-all duration-300 focus:border-[rgba(var(--cp-lavender-rgb),0.4)] focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[rgba(var(--cp-lavender-rgb),0.1)] dark:border-[rgba(var(--cp-surface1-rgb),0.4)] dark:bg-[rgba(var(--cp-surface0-rgb),0.3)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
                     onChange={(event) => setDraftText(event.target.value)}
                     value={draftText}
                   />
@@ -702,7 +702,7 @@ export function ManagerShell() {
                           : "该类型记录不支持文本编辑"}
                     </p>
                     {detail.data.type === "file" && (
-                      <div className="mt-4 w-full rounded-xl border border-[rgba(var(--cp-surface1-rgb),0.3)] bg-[rgba(var(--cp-surface0-rgb),0.2)] p-4 text-left">
+                      <div className="mt-4 w-full rounded-xl border border-[rgba(var(--cp-surface2-rgb),0.5)] bg-cp-mantle p-4 text-left dark:border-[rgba(var(--cp-surface1-rgb),0.3)] dark:bg-[rgba(var(--cp-surface0-rgb),0.2)]">
                         <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-[color:var(--cp-text-muted)]">
                           文件路径
                         </p>
@@ -818,7 +818,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
       <label className="block">
         <span className="mb-2.5 block text-[13px] font-bold text-[color:var(--cp-text-primary)]">全局快捷键</span>
         <input
-          className="w-full rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.4)] bg-[rgba(var(--cp-surface0-rgb),0.2)] px-5 py-3.5 text-sm font-medium outline-none transition-all focus:border-[rgba(var(--cp-lavender-rgb),0.4)] focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[rgba(var(--cp-lavender-rgb),0.1)] dark:bg-[rgba(var(--cp-surface0-rgb),0.3)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
+          className="w-full rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.5)] bg-cp-mantle px-5 py-3.5 text-sm font-medium outline-none transition-all focus:border-[rgba(var(--cp-lavender-rgb),0.4)] focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[rgba(var(--cp-lavender-rgb),0.1)] dark:border-[rgba(var(--cp-surface1-rgb),0.4)] dark:bg-[rgba(var(--cp-surface0-rgb),0.3)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
           onChange={(event) => setShortcut(event.target.value)}
           value={shortcut}
         />
@@ -827,7 +827,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
       <label className="block">
         <span className="mb-2.5 block text-[13px] font-bold text-[color:var(--cp-text-primary)]">历史记录上限</span>
         <input
-          className="w-full rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.4)] bg-[rgba(var(--cp-surface0-rgb),0.2)] px-5 py-3.5 text-sm font-medium outline-none transition-all focus:border-[rgba(var(--cp-lavender-rgb),0.4)] focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[rgba(var(--cp-lavender-rgb),0.1)] dark:bg-[rgba(var(--cp-surface0-rgb),0.3)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
+          className="w-full rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.5)] bg-cp-mantle px-5 py-3.5 text-sm font-medium outline-none transition-all focus:border-[rgba(var(--cp-lavender-rgb),0.4)] focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[rgba(var(--cp-lavender-rgb),0.1)] dark:border-[rgba(var(--cp-surface1-rgb),0.4)] dark:bg-[rgba(var(--cp-surface0-rgb),0.3)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
           min={100}
           onChange={(event) => setHistoryLimit(Number(event.target.value) || 1000)}
           step={100}
@@ -839,7 +839,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
       <label className="block">
         <span className="mb-2.5 block text-[13px] font-bold text-[color:var(--cp-text-primary)]">速贴窗口记录数</span>
         <input
-          className="w-full rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.4)] bg-[rgba(var(--cp-surface0-rgb),0.2)] px-5 py-3.5 text-sm font-medium outline-none transition-all focus:border-[rgba(var(--cp-lavender-rgb),0.4)] focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[rgba(var(--cp-lavender-rgb),0.1)] dark:bg-[rgba(var(--cp-surface0-rgb),0.3)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
+          className="w-full rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.5)] bg-cp-mantle px-5 py-3.5 text-sm font-medium outline-none transition-all focus:border-[rgba(var(--cp-lavender-rgb),0.4)] focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[rgba(var(--cp-lavender-rgb),0.1)] dark:border-[rgba(var(--cp-surface1-rgb),0.4)] dark:bg-[rgba(var(--cp-surface0-rgb),0.3)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
           max={1000}
           min={9}
           onChange={(event) => setPickerRecordLimit(Number(event.target.value) || 50)}
@@ -851,14 +851,14 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
         </p>
       </label>
 
-      <div>
+      <label className="block">
         <span className="mb-2.5 block text-[13px] font-bold text-[color:var(--cp-text-primary)]">界面主题</span>
         <div className="space-y-3">
           {themeModeOptions.map((option) => (
             <label
               className={`flex cursor-pointer items-start gap-3 rounded-2xl border px-5 py-4 transition-all duration-300 ${themeMode === option.value
                   ? "border-[rgba(var(--cp-lavender-rgb),0.4)] bg-[rgba(var(--cp-lavender-rgb),0.05)] ring-1 ring-[rgba(var(--cp-lavender-rgb),0.1)]"
-                  : "border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[rgba(var(--cp-surface0-rgb),0.1)] hover:border-[rgba(var(--cp-surface1-rgb),0.4)] hover:bg-[rgba(var(--cp-surface1-rgb),0.1)]"
+                  : "border-[rgba(var(--cp-surface1-rgb),0.3)] bg-cp-mantle hover:border-[rgba(var(--cp-surface1-rgb),0.4)] hover:bg-[rgba(var(--cp-surface1-rgb),0.15)]"
                 }`}
               key={option.value}
             >
@@ -878,7 +878,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
             </label>
           ))}
         </div>
-      </div>
+      </label>
 
       <div>
         <span className="mb-2.5 block text-[13px] font-bold text-[color:var(--cp-text-primary)]">速贴窗口显示位置</span>
@@ -887,7 +887,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
             <label
               className={`flex cursor-pointer items-start gap-3 rounded-2xl border px-5 py-4 transition-all duration-300 ${pickerPositionMode === option.value
                   ? "border-[rgba(var(--cp-lavender-rgb),0.4)] bg-[rgba(var(--cp-lavender-rgb),0.05)] ring-1 ring-[rgba(var(--cp-lavender-rgb),0.1)]"
-                  : "border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[rgba(var(--cp-surface0-rgb),0.1)] hover:border-[rgba(var(--cp-surface1-rgb),0.4)] hover:bg-[rgba(var(--cp-surface1-rgb),0.1)]"
+                  : "border-[rgba(var(--cp-surface1-rgb),0.3)] bg-cp-mantle hover:border-[rgba(var(--cp-surface1-rgb),0.4)] hover:bg-[rgba(var(--cp-surface1-rgb),0.15)]"
                 }`}
               key={option.value}
             >
@@ -912,7 +912,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
       <label className="block">
         <span className="mb-2.5 block text-[13px] font-bold text-[color:var(--cp-text-primary)]">排除应用</span>
         <textarea
-          className="w-full rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.4)] bg-[rgba(var(--cp-surface0-rgb),0.2)] px-5 py-3.5 text-sm font-medium leading-relaxed outline-none transition-all focus:border-[rgba(var(--cp-lavender-rgb),0.4)] focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[rgba(var(--cp-lavender-rgb),0.1)] dark:bg-[rgba(var(--cp-surface0-rgb),0.3)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
+          className="w-full rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.5)] bg-cp-mantle px-5 py-3.5 text-sm font-medium leading-relaxed outline-none transition-all focus:border-[rgba(var(--cp-lavender-rgb),0.4)] focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[rgba(var(--cp-lavender-rgb),0.1)] dark:border-[rgba(var(--cp-surface1-rgb),0.4)] dark:bg-[rgba(var(--cp-surface0-rgb),0.3)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
           onChange={(event) => setExcludedAppsText(event.target.value)}
           placeholder={"每行一个可执行文件名，例如：\nKeePass.exe\nWindowsTerminal.exe"}
           value={excludedAppsText}
@@ -920,7 +920,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
       </label>
 
       <div className="space-y-3">
-        <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[rgba(var(--cp-surface0-rgb),0.2)] px-5 py-4 transition-all duration-300 hover:border-[rgba(var(--cp-surface1-rgb),0.4)]/30 hover:bg-[rgba(var(--cp-surface1-rgb),0.3)]">
+        <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-cp-mantle px-5 py-4 transition-all duration-300 hover:border-[rgba(var(--cp-surface1-rgb),0.4)]/30 hover:bg-[rgba(var(--cp-surface1-rgb),0.2)]">
           <input
             className="h-4 w-4 rounded border-[rgba(var(--cp-surface1-rgb),0.4)] bg-cp-base text-[color:var(--cp-accent-primary)] focus:ring-[color:var(--cp-accent-primary)] dark:bg-[color:var(--cp-control-surface)]"
             checked={launchOnStartup}
@@ -952,7 +952,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
           <span className={`text-sm font-bold transition-colors ${launchOnStartup ? "text-[color:var(--cp-text-secondary)]" : "text-[color:var(--cp-text-muted)]"}`}>开机自启时静默启动</span>
         </label>
 
-        <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[rgba(var(--cp-surface0-rgb),0.2)] px-5 py-4 transition-all duration-300 hover:border-[rgba(var(--cp-surface1-rgb),0.4)]/30 hover:bg-[rgba(var(--cp-surface1-rgb),0.3)]">
+        <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-cp-mantle px-5 py-4 transition-all duration-300 hover:border-[rgba(var(--cp-surface1-rgb),0.4)]/30 hover:bg-[rgba(var(--cp-surface1-rgb),0.2)]">
           <input
             className="h-4 w-4 rounded border-[rgba(var(--cp-surface1-rgb),0.4)] bg-cp-base text-[color:var(--cp-accent-primary)] focus:ring-[color:var(--cp-accent-primary)] dark:bg-[color:var(--cp-control-surface)]"
             checked={restoreClipboardAfterPaste}
@@ -962,7 +962,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
           <span className="text-sm font-bold text-[color:var(--cp-text-secondary)]">回贴后恢复原始剪贴板</span>
         </label>
 
-        <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[rgba(var(--cp-surface0-rgb),0.2)] px-5 py-4 transition-all duration-300 hover:border-[rgba(var(--cp-surface1-rgb),0.4)]/30 hover:bg-[rgba(var(--cp-surface1-rgb),0.3)]">
+        <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-cp-mantle px-5 py-4 transition-all duration-300 hover:border-[rgba(var(--cp-surface1-rgb),0.4)]/30 hover:bg-[rgba(var(--cp-surface1-rgb),0.2)]">
           <input
             className="h-4 w-4 rounded border-[rgba(var(--cp-surface1-rgb),0.4)] bg-cp-base text-[color:var(--cp-accent-primary)] focus:ring-[color:var(--cp-accent-primary)] dark:bg-[color:var(--cp-control-surface)]"
             checked={pauseMonitoring}

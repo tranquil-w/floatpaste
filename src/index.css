@@ -34,6 +34,8 @@
   /* RGB components for rgba() usage */
   --cp-text-rgb: 76, 79, 105;
   --cp-subtext0-rgb: 108, 111, 133;
+  --cp-overlay1-rgb: 140, 143, 161;
+  --cp-overlay0-rgb: 156, 160, 176;
   --cp-surface0-rgb: 204, 208, 218;
   --cp-surface1-rgb: 188, 192, 204;
   --cp-surface2-rgb: 172, 176, 190;
@@ -48,10 +50,15 @@
 
   /* 语义化表面 */
   --cp-window-shell: var(--cp-base);
+  --cp-window-shell-rgb: var(--cp-base-rgb);
   --cp-panel-surface: var(--cp-mantle);
+  --cp-panel-surface-rgb: var(--cp-mantle-rgb);
   --cp-card-surface: var(--cp-base);
+  --cp-card-surface-rgb: var(--cp-base-rgb);
   --cp-control-surface: var(--cp-surface0);
+  --cp-control-surface-rgb: var(--cp-surface0-rgb);
   --cp-control-surface-hover: var(--cp-surface1);
+  --cp-control-surface-hover-rgb: var(--cp-surface1-rgb);
 
   /* 语义化边框 */
   --cp-border-soft: rgba(var(--cp-surface0-rgb), 0.6);
@@ -122,10 +129,15 @@ html.dark {
 
   /* 语义化表面 */
   --cp-window-shell: var(--cp-base);
+  --cp-window-shell-rgb: var(--cp-base-rgb);
   --cp-panel-surface: var(--cp-mantle);
+  --cp-panel-surface-rgb: var(--cp-mantle-rgb);
   --cp-card-surface: var(--cp-surface0);
+  --cp-card-surface-rgb: var(--cp-surface0-rgb);
   --cp-control-surface: var(--cp-surface0);
+  --cp-control-surface-rgb: var(--cp-surface0-rgb);
   --cp-control-surface-hover: var(--cp-surface1);
+  --cp-control-surface-hover-rgb: var(--cp-surface1-rgb);
 
   /* 语义化边框 */
   --cp-border-soft: rgba(var(--cp-surface0-rgb), 0.4);
@@ -221,7 +233,7 @@ select {
 
 button {
   cursor: pointer;
-  border: none;
+  border: 1px solid transparent;
   outline: none;
 }
 
