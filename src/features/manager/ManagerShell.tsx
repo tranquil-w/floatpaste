@@ -243,7 +243,7 @@ export function ManagerShell() {
             </StatusBadge>
           </div>
 
-          <div className="relative shrink-0 overflow-hidden rounded-3xl bg-[color:var(--cp-card-surface)]/40 px-6 py-6 text-[color:var(--cp-text-primary)] shadow-xl shadow-black/5 ring-1 ring-[color:var(--cp-border-soft)] transition-transform duration-500 hover:scale-[1.01] dark:bg-[color:var(--cp-card-surface)]/30 dark:shadow-none dark:ring-[color:var(--cp-border-soft)]/50">
+          <div className="relative shrink-0 overflow-hidden rounded-3xl bg-[color:var(--cp-card-surface)]/40 px-6 py-6 text-[color:var(--cp-text-primary)] shadow-xl shadow-black/5 ring-1 ring-[rgba(var(--cp-surface1-rgb),0.2)] transition-transform duration-500 hover:scale-[1.01] dark:bg-[color:var(--cp-card-surface)]/30 dark:shadow-none dark:ring-[rgba(var(--cp-surface1-rgb),0.2)]/50">
             <div className="relative z-10">
               <div className="flex items-center gap-2">
                 <div className="h-1.5 w-1.5 rounded-full bg-[color:var(--cp-accent-primary)] shadow-[0_0_8px_rgba(114,135,253,0.5)]"></div>
@@ -272,7 +272,7 @@ export function ManagerShell() {
               {favorites.data?.length ? (
                 favorites.data.map((item) => (
                   <button
-                    className="group w-full rounded-2xl border border-[color:var(--cp-border-soft)] bg-[color:var(--cp-card-surface)]/50 px-4 py-3 text-left transition-all duration-300 hover:-translate-y-0.5 hover:border-[color:var(--cp-border-strong)]/30 hover:bg-[color:var(--cp-card-surface)]/80 dark:bg-[color:var(--cp-card-surface)]/20 dark:hover:bg-[color:var(--cp-card-surface)]/40"
+                    className="group w-full rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.3)] bg-[rgba(var(--cp-surface0-rgb),0.2)] px-4 py-3 text-left transition-all duration-300 hover:-translate-y-0.5 hover:border-[rgba(var(--cp-surface1-rgb),0.5)] hover:bg-[rgba(var(--cp-surface1-rgb),0.2)] dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
                     key={item.id}
                     onClick={() => {
                       setViewMode("history");
@@ -306,10 +306,10 @@ export function ManagerShell() {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
                 </svg> open picker
               </button>
-              <div className="grid grid-cols-2 gap-2 rounded-2xl bg-[color:var(--cp-control-surface)]/40 p-1.5 backdrop-blur-sm ring-1 ring-[color:var(--cp-border-soft)]">
+              <div className="grid grid-cols-2 gap-2 rounded-2xl bg-[color:var(--cp-control-surface)]/40 p-1.5 backdrop-blur-sm ring-1 ring-[rgba(var(--cp-surface1-rgb),0.2)]">
                 <button
                   className={`flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold transition-all duration-300 ${viewMode === "history"
-                      ? "bg-[color:var(--cp-window-shell)] text-[color:var(--cp-text-primary)] shadow-sm ring-1 ring-[color:var(--cp-border-soft)]"
+                      ? "bg-[color:var(--cp-window-shell)] text-[color:var(--cp-text-primary)] shadow-sm ring-1 ring-[rgba(var(--cp-surface1-rgb),0.2)]"
                       : "text-[color:var(--cp-text-secondary)] hover:text-[color:var(--cp-text-primary)] hover:bg-[color:var(--cp-control-surface-hover)]/40"
                     }`}
                   onClick={() => setViewMode("history")}
@@ -322,7 +322,7 @@ export function ManagerShell() {
                 </button>
                 <button
                   className={`flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold transition-all duration-300 ${viewMode === "settings"
-                      ? "bg-[color:var(--cp-window-shell)] text-[color:var(--cp-text-primary)] shadow-sm ring-1 ring-[color:var(--cp-border-soft)]"
+                      ? "bg-[color:var(--cp-window-shell)] text-[color:var(--cp-text-primary)] shadow-sm ring-1 ring-[rgba(var(--cp-surface1-rgb),0.2)]"
                       : "text-[color:var(--cp-text-secondary)] hover:text-[color:var(--cp-text-primary)] hover:bg-[color:var(--cp-control-surface-hover)]/40"
                     }`}
                   onClick={() => setViewMode("settings")}
@@ -403,7 +403,7 @@ export function ManagerShell() {
                             </p>
                           </div>
                           <div className="flex shrink-0 flex-col items-end gap-2">
-                            <span className="inline-flex items-center rounded-full border border-[color:var(--cp-border-soft)] bg-[color:var(--cp-control-surface)]/50 px-2.5 py-1 text-[10px] font-bold text-[color:var(--cp-text-muted)] shadow-sm">
+                            <span className="inline-flex items-center rounded-full border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[color:var(--cp-control-surface)]/50 px-2.5 py-1 text-[10px] font-bold text-[color:var(--cp-text-muted)] shadow-sm">
                               {getClipTypeLabel(item)}
                             </span>
                             {item.isFavorited ? (
@@ -445,7 +445,7 @@ export function ManagerShell() {
                 <span>{totalCount === 0 ? "当前没有可显示记录" : `当前显示第 ${pageStart}-${pageEnd} 条`}</span>
                 <div className="flex items-center gap-2">
                   <button
-                    className="flex items-center gap-1.5 rounded-xl bg-[color:var(--cp-control-surface)]/40 px-3.5 py-2 text-xs font-bold text-[color:var(--cp-text-secondary)] shadow-sm ring-1 ring-inset ring-[color:var(--cp-border-soft)] transition-all hover:bg-[color:var(--cp-control-surface-hover)]/60 hover:text-[color:var(--cp-text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
+                    className="flex items-center gap-1.5 rounded-xl bg-[color:var(--cp-control-surface)]/40 px-3.5 py-2 text-xs font-bold text-[color:var(--cp-text-secondary)] shadow-sm ring-1 ring-inset ring-[rgba(var(--cp-surface1-rgb),0.2)] transition-all hover:bg-[color:var(--cp-control-surface-hover)]/60 hover:text-[color:var(--cp-text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
                     disabled={!hasPreviousPage}
                     onClick={() => setPageIndex((current) => Math.max(current - 1, 0))}
                     type="button"
@@ -456,7 +456,7 @@ export function ManagerShell() {
                     上一页
                   </button>
                   <button
-                    className="flex items-center gap-1.5 rounded-xl bg-[color:var(--cp-control-surface)]/40 px-3.5 py-2 text-xs font-bold text-[color:var(--cp-text-secondary)] shadow-sm ring-1 ring-inset ring-[color:var(--cp-border-soft)] transition-all hover:bg-[color:var(--cp-control-surface-hover)]/60 hover:text-[color:var(--cp-text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
+                    className="flex items-center gap-1.5 rounded-xl bg-[color:var(--cp-control-surface)]/40 px-3.5 py-2 text-xs font-bold text-[color:var(--cp-text-secondary)] shadow-sm ring-1 ring-inset ring-[rgba(var(--cp-surface1-rgb),0.2)] transition-all hover:bg-[color:var(--cp-control-surface-hover)]/60 hover:text-[color:var(--cp-text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
                     disabled={!hasNextPage}
                     onClick={() => setPageIndex((current) => current + 1)}
                     type="button"
@@ -503,7 +503,7 @@ export function ManagerShell() {
                   <button
                     className={`flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-bold transition-all duration-300 ${detail.data.isFavorited
                         ? "bg-[color:var(--cp-accent-warm)]/15 text-[color:var(--cp-accent-warm)] ring-1 ring-inset ring-[color:var(--cp-accent-warm)]/30 hover:bg-[color:var(--cp-accent-warm)]/25"
-                        : "bg-[color:var(--cp-control-surface)]/40 text-[color:var(--cp-text-secondary)] shadow-sm ring-1 ring-inset ring-[color:var(--cp-border-soft)] hover:bg-[color:var(--cp-control-surface-hover)]/60 hover:text-[color:var(--cp-text-primary)]"
+                        : "bg-[color:var(--cp-control-surface)]/40 text-[color:var(--cp-text-secondary)] shadow-sm ring-1 ring-inset ring-[rgba(var(--cp-surface1-rgb),0.2)] hover:bg-[color:var(--cp-control-surface-hover)]/60 hover:text-[color:var(--cp-text-primary)]"
                       }`}
                     onClick={() =>
                       favoritedMutation.mutate({
@@ -543,7 +543,7 @@ export function ManagerShell() {
               </div>
 
               <div className="grid shrink-0 gap-3 sm:grid-cols-2">
-                <div className="rounded-2xl border border-[color:var(--cp-border-soft)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[color:var(--cp-control-surface)]/20 dark:hover:bg-[color:var(--cp-control-surface)]/30">
+                <div className="rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[color:var(--cp-control-surface)]/30">
                   <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--cp-text-muted)]">
                     <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
@@ -552,7 +552,7 @@ export function ManagerShell() {
                   </p>
                   <p className="mt-2 text-[13px] font-bold text-[color:var(--cp-text-primary)]">{selectedSummary.sourceApp ?? "未知来源"}</p>
                 </div>
-                <div className="rounded-2xl border border-[color:var(--cp-border-soft)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[color:var(--cp-control-surface)]/20 dark:hover:bg-[color:var(--cp-control-surface)]/30">
+                <div className="rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[color:var(--cp-control-surface)]/30">
                   <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--cp-text-muted)]">
                     <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -561,7 +561,7 @@ export function ManagerShell() {
                   </p>
                   <p className="mt-2 text-[13px] font-bold text-[color:var(--cp-text-primary)]">{formatDateTime(selectedSummary.lastUsedAt)}</p>
                 </div>
-                <div className="rounded-2xl border border-[color:var(--cp-border-soft)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[color:var(--cp-control-surface)]/20 dark:hover:bg-[color:var(--cp-control-surface)]/30">
+                <div className="rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[color:var(--cp-control-surface)]/30">
                   <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--cp-text-muted)]">
                     <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
@@ -570,7 +570,7 @@ export function ManagerShell() {
                   </p>
                   <p className="mt-2 text-[13px] font-bold text-[color:var(--cp-text-primary)]">{formatDateTime(selectedSummary.createdAt)}</p>
                 </div>
-                <div className="rounded-2xl border border-[color:var(--cp-border-soft)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[color:var(--cp-control-surface)]/20 dark:hover:bg-[color:var(--cp-control-surface)]/30">
+                <div className="rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[color:var(--cp-control-surface)]/30">
                   <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--cp-text-muted)]">
                     <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -582,7 +582,7 @@ export function ManagerShell() {
                 {/* 图片或文件类型的额外信息 */}
                 {detail.data.type === "image" && (
                   <>
-                    <div className="rounded-2xl border border-[color:var(--cp-border-soft)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[color:var(--cp-control-surface)]/20 dark:hover:bg-[color:var(--cp-control-surface)]/30">
+                    <div className="rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[color:var(--cp-control-surface)]/30">
                       <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--cp-text-muted)]">
                         <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
@@ -593,7 +593,7 @@ export function ManagerShell() {
                         {detail.data.imageWidth} × {detail.data.imageHeight}
                       </p>
                     </div>
-                    <div className="rounded-2xl border border-[color:var(--cp-border-soft)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[color:var(--cp-control-surface)]/20 dark:hover:bg-[color:var(--cp-control-surface)]/30">
+                    <div className="rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[color:var(--cp-control-surface)]/30">
                       <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--cp-text-muted)]">
                         <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
@@ -605,7 +605,7 @@ export function ManagerShell() {
                       </p>
                     </div>
                     {detail.data.imageFormat && (
-                      <div className="rounded-2xl border border-[color:var(--cp-border-soft)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[color:var(--cp-control-surface)]/20 dark:hover:bg-[color:var(--cp-control-surface)]/30">
+                      <div className="rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[color:var(--cp-control-surface)]/30">
                         <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--cp-text-muted)]">
                           <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
@@ -619,7 +619,7 @@ export function ManagerShell() {
                 )}
                 {detail.data.type === "file" && (
                   <>
-                    <div className="rounded-2xl border border-[color:var(--cp-border-soft)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[color:var(--cp-control-surface)]/20 dark:hover:bg-[color:var(--cp-control-surface)]/30">
+                    <div className="rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[color:var(--cp-control-surface)]/30">
                       <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--cp-text-muted)]">
                         <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -630,7 +630,7 @@ export function ManagerShell() {
                         {detail.data.fileCount} 个
                       </p>
                     </div>
-                    <div className="rounded-2xl border border-[color:var(--cp-border-soft)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[color:var(--cp-control-surface)]/20 dark:hover:bg-[color:var(--cp-control-surface)]/30">
+                    <div className="rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[color:var(--cp-control-surface)]/30">
                       <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--cp-text-muted)]">
                         <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
@@ -920,9 +920,9 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
       </label>
 
       <div className="space-y-3">
-        <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-[color:var(--cp-border-soft)] bg-[color:var(--cp-control-surface)]/20 px-5 py-4 transition-all duration-300 hover:border-[color:var(--cp-border-strong)]/30 hover:bg-[color:var(--cp-control-surface-hover)]/30">
+        <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[rgba(var(--cp-surface0-rgb),0.2)] px-5 py-4 transition-all duration-300 hover:border-[rgba(var(--cp-surface1-rgb),0.4)]/30 hover:bg-[rgba(var(--cp-surface1-rgb),0.3)]">
           <input
-            className="h-4 w-4 rounded border-[color:var(--cp-border-strong)] bg-cp-base text-[color:var(--cp-accent-primary)] focus:ring-[color:var(--cp-accent-primary)] dark:bg-[color:var(--cp-control-surface)]"
+            className="h-4 w-4 rounded border-[rgba(var(--cp-surface1-rgb),0.4)] bg-cp-base text-[color:var(--cp-accent-primary)] focus:ring-[color:var(--cp-accent-primary)] dark:bg-[color:var(--cp-control-surface)]"
             checked={launchOnStartup}
             onChange={(event) => {
               const checked = event.target.checked;
@@ -938,12 +938,12 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
 
         <label
           className={`flex items-center gap-3 rounded-2xl border px-5 py-4 transition-all duration-300 ${launchOnStartup
-              ? "cursor-pointer border-[color:var(--cp-border-soft)] bg-[color:var(--cp-control-surface)]/20 hover:border-[color:var(--cp-border-strong)]/30 hover:bg-[color:var(--cp-control-surface-hover)]/30"
-              : "cursor-not-allowed border-[color:var(--cp-border-soft)] bg-[color:var(--cp-control-surface)]/10 text-[color:var(--cp-text-muted)]"
+              ? "cursor-pointer border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[rgba(var(--cp-surface0-rgb),0.2)] hover:border-[rgba(var(--cp-surface1-rgb),0.4)]/30 hover:bg-[rgba(var(--cp-surface1-rgb),0.3)]"
+              : "cursor-not-allowed border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[rgba(var(--cp-surface0-rgb),0.1)] text-[color:var(--cp-text-muted)]"
             }`}
         >
           <input
-            className="h-4 w-4 rounded border-[color:var(--cp-border-strong)] bg-cp-base text-[color:var(--cp-accent-primary)] focus:ring-[color:var(--cp-accent-primary)] dark:bg-[color:var(--cp-control-surface)]"
+            className="h-4 w-4 rounded border-[rgba(var(--cp-surface1-rgb),0.4)] bg-cp-base text-[color:var(--cp-accent-primary)] focus:ring-[color:var(--cp-accent-primary)] dark:bg-[color:var(--cp-control-surface)]"
             checked={silentOnStartup}
             disabled={!launchOnStartup}
             onChange={(event) => setSilentOnStartup(event.target.checked)}
@@ -952,9 +952,9 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
           <span className={`text-sm font-bold transition-colors ${launchOnStartup ? "text-[color:var(--cp-text-secondary)]" : "text-[color:var(--cp-text-muted)]"}`}>开机自启时静默启动</span>
         </label>
 
-        <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-[color:var(--cp-border-soft)] bg-[color:var(--cp-control-surface)]/20 px-5 py-4 transition-all duration-300 hover:border-[color:var(--cp-border-strong)]/30 hover:bg-[color:var(--cp-control-surface-hover)]/30">
+        <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[rgba(var(--cp-surface0-rgb),0.2)] px-5 py-4 transition-all duration-300 hover:border-[rgba(var(--cp-surface1-rgb),0.4)]/30 hover:bg-[rgba(var(--cp-surface1-rgb),0.3)]">
           <input
-            className="h-4 w-4 rounded border-[color:var(--cp-border-strong)] bg-cp-base text-[color:var(--cp-accent-primary)] focus:ring-[color:var(--cp-accent-primary)] dark:bg-[color:var(--cp-control-surface)]"
+            className="h-4 w-4 rounded border-[rgba(var(--cp-surface1-rgb),0.4)] bg-cp-base text-[color:var(--cp-accent-primary)] focus:ring-[color:var(--cp-accent-primary)] dark:bg-[color:var(--cp-control-surface)]"
             checked={restoreClipboardAfterPaste}
             onChange={(event) => setRestoreClipboardAfterPaste(event.target.checked)}
             type="checkbox"
@@ -962,9 +962,9 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
           <span className="text-sm font-bold text-[color:var(--cp-text-secondary)]">回贴后恢复原始剪贴板</span>
         </label>
 
-        <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-[color:var(--cp-border-soft)] bg-[color:var(--cp-control-surface)]/20 px-5 py-4 transition-all duration-300 hover:border-[color:var(--cp-border-strong)]/30 hover:bg-[color:var(--cp-control-surface-hover)]/30">
+        <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[rgba(var(--cp-surface0-rgb),0.2)] px-5 py-4 transition-all duration-300 hover:border-[rgba(var(--cp-surface1-rgb),0.4)]/30 hover:bg-[rgba(var(--cp-surface1-rgb),0.3)]">
           <input
-            className="h-4 w-4 rounded border-[color:var(--cp-border-strong)] bg-cp-base text-[color:var(--cp-accent-primary)] focus:ring-[color:var(--cp-accent-primary)] dark:bg-[color:var(--cp-control-surface)]"
+            className="h-4 w-4 rounded border-[rgba(var(--cp-surface1-rgb),0.4)] bg-cp-base text-[color:var(--cp-accent-primary)] focus:ring-[color:var(--cp-accent-primary)] dark:bg-[color:var(--cp-control-surface)]"
             checked={pauseMonitoring}
             onChange={(event) => setPauseMonitoring(event.target.checked)}
             type="checkbox"
