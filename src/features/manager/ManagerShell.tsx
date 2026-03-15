@@ -33,6 +33,26 @@ import {
   useUpdateTextMutation,
 } from "./queries";
 
+// --- 样式常量抽象 ---
+const STYLES = {
+  logoBadge: "inline-flex items-center gap-2 rounded-full border border-[color:var(--cp-accent-primary)]/20 bg-[color:var(--cp-accent-primary)]/10 pl-1.5 pr-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-[color:var(--cp-accent-primary)] shadow-sm",
+  logoIcon: "flex h-5 w-5 items-center justify-center rounded-full bg-[color:var(--cp-accent-primary)] text-cp-base shadow-sm",
+  shortcutCard: "relative shrink-0 overflow-hidden rounded-3xl bg-[color:var(--cp-card-surface)]/40 px-6 py-6 text-[color:var(--cp-text-primary)] shadow-xl shadow-black/5 ring-1 ring-[color:var(--cp-border-strong)] transition-transform duration-500 hover:scale-[1.01] dark:bg-[color:var(--cp-card-surface)]/30 dark:shadow-none dark:ring-[color:var(--cp-border-soft)]",
+  shortcutDot: "h-1.5 w-1.5 rounded-full bg-[color:var(--cp-accent-primary)] shadow-[0_0_8px_rgba(114,135,253,0.5)]",
+  favoriteItem: "group w-full rounded-2xl border border-[color:var(--cp-border-soft)] bg-cp-mantle/50 px-4 py-3 text-left transition-all duration-300 hover:-translate-y-0.5 hover:border-[color:var(--cp-border-strong)] hover:bg-cp-mantle dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[rgba(var(--cp-surface0-rgb),0.4)]",
+  primaryButton: "group relative flex w-full items-center justify-center gap-2 rounded-2xl bg-[color:var(--cp-accent-primary)] px-4 py-3.5 text-sm font-bold text-cp-base shadow-lg shadow-[color:var(--cp-accent-primary)]/20 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-[color:var(--cp-accent-primary)]/30 hover:brightness-110 active:translate-y-0",
+  viewModeToggle: (active: boolean) => `flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold transition-all duration-300 ${active
+    ? "bg-[color:var(--cp-window-shell)] text-[color:var(--cp-text-primary)] shadow-sm ring-1 ring-[color:var(--cp-border-strong)]"
+    : "text-[color:var(--cp-text-secondary)] hover:text-[color:var(--cp-text-primary)] hover:bg-[color:var(--cp-control-surface-hover)]/40"
+    }`,
+  searchInput: "w-full rounded-2xl border border-[color:var(--cp-border-strong)] bg-cp-mantle py-3 pl-11 pr-5 text-sm outline-none backdrop-blur-sm transition-all duration-300 placeholder:text-[color:var(--cp-text-muted)] focus:border-[rgba(var(--cp-lavender-rgb),0.4)] focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[rgba(var(--cp-lavender-rgb),0.1)] dark:bg-[rgba(var(--cp-surface0-rgb),0.3)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]",
+  historyItem: (selected: boolean) => `group w-full rounded-3xl border px-6 py-5 text-left transition-all duration-300 ${selected
+    ? "relative z-10 scale-[1.01] border-[rgba(var(--cp-lavender-rgb),0.6)] bg-cp-mantle shadow-xl shadow-black/5 ring-1 ring-[rgba(var(--cp-lavender-rgb),0.3)] dark:border-[rgba(var(--cp-lavender-rgb),0.5)] dark:bg-[rgba(var(--cp-surface0-rgb),0.6)] dark:shadow-none"
+    : "border-[color:var(--cp-border-soft)] bg-cp-mantle/30 hover:-translate-y-0.5 hover:border-[color:var(--cp-border-strong)] hover:bg-cp-mantle/60 hover:shadow-md dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
+    }`,
+  detailEditor: "min-h-[200px] flex-1 w-full resize-none rounded-2xl border border-[color:var(--cp-border-strong)] bg-cp-mantle px-5 py-5 text-[14px] leading-relaxed outline-none transition-all duration-300 focus:border-[rgba(var(--cp-lavender-rgb),0.4)] focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[rgba(var(--cp-lavender-rgb),0.1)] dark:bg-[rgba(var(--cp-surface0-rgb),0.3)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]",
+};
+
 const pickerPositionOptions: Array<{
   value: PickerPositionMode;
   label: string;
@@ -220,8 +240,8 @@ export function ManagerShell() {
       <div className="mx-auto grid w-full max-w-[1600px] flex-1 min-h-0 gap-4 xl:grid-cols-[280px_minmax(360px,1fr)_420px] lg:grid-cols-[260px_minmax(320px,1fr)_380px]">
         <Panel className="flex flex-col gap-5 lg:overflow-hidden min-h-[600px] lg:min-h-0">
           <div className="shrink-0">
-            <div className="inline-flex items-center gap-2 rounded-full border border-[color:var(--cp-accent-primary)]/20 bg-[color:var(--cp-accent-primary)]/10 pl-1.5 pr-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-[color:var(--cp-accent-primary)] shadow-sm">
-              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[color:var(--cp-accent-primary)] text-cp-base shadow-sm">
+            <div className={STYLES.logoBadge}>
+              <span className={STYLES.logoIcon}>
                 <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
                 </svg>
@@ -243,10 +263,10 @@ export function ManagerShell() {
             </StatusBadge>
           </div>
 
-          <div className="relative shrink-0 overflow-hidden rounded-3xl bg-[color:var(--cp-card-surface)]/40 px-6 py-6 text-[color:var(--cp-text-primary)] shadow-xl shadow-black/5 ring-1 ring-[rgba(var(--cp-surface1-rgb),0.2)] transition-transform duration-500 hover:scale-[1.01] dark:bg-[color:var(--cp-card-surface)]/30 dark:shadow-none dark:ring-[rgba(var(--cp-surface1-rgb),0.2)]/50">
+          <div className={STYLES.shortcutCard}>
             <div className="relative z-10">
               <div className="flex items-center gap-2">
-                <div className="h-1.5 w-1.5 rounded-full bg-[color:var(--cp-accent-primary)] shadow-[0_0_8px_rgba(114,135,253,0.5)]"></div>
+                <div className={STYLES.shortcutDot}></div>
                 <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-[color:var(--cp-text-muted)]">全局快捷键</p>
               </div>
               <p className="mt-2.5 font-display text-3xl font-medium tracking-wide text-[color:var(--cp-text-primary)]">{settings.data?.shortcut ?? "Ctrl+`"}</p>
@@ -272,7 +292,7 @@ export function ManagerShell() {
               {favorites.data?.length ? (
                 favorites.data.map((item) => (
                   <button
-                    className="group w-full rounded-2xl border border-[rgba(var(--cp-surface2-rgb),0.4)] bg-cp-mantle/50 px-4 py-3 text-left transition-all duration-300 hover:-translate-y-0.5 hover:border-[rgba(var(--cp-surface2-rgb),0.6)] hover:bg-cp-mantle dark:border-[rgba(var(--cp-surface1-rgb),0.3)] dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
+                    className={STYLES.favoriteItem}
                     key={item.id}
                     onClick={() => {
                       setViewMode("history");
@@ -298,7 +318,7 @@ export function ManagerShell() {
           <div className="mt-auto shrink-0 pt-6">
             <div className="flex flex-col gap-3">
               <button
-                className="group relative flex w-full items-center justify-center gap-2 rounded-2xl bg-[color:var(--cp-accent-primary)] px-4 py-3.5 text-sm font-bold text-cp-base shadow-lg shadow-[color:var(--cp-accent-primary)]/20 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-[color:var(--cp-accent-primary)]/30 hover:brightness-110 active:translate-y-0"
+                className={STYLES.primaryButton}
                 onClick={() => void showPicker()}
                 type="button"
               >
@@ -308,10 +328,7 @@ export function ManagerShell() {
               </button>
               <div className="grid grid-cols-2 gap-2 rounded-2xl bg-[color:var(--cp-control-surface)]/40 p-1.5 backdrop-blur-sm ring-1 ring-[rgba(var(--cp-surface1-rgb),0.2)]">
                 <button
-                  className={`flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold transition-all duration-300 ${viewMode === "history"
-                      ? "bg-[color:var(--cp-window-shell)] text-[color:var(--cp-text-primary)] shadow-sm ring-1 ring-[rgba(var(--cp-surface1-rgb),0.2)]"
-                      : "text-[color:var(--cp-text-secondary)] hover:text-[color:var(--cp-text-primary)] hover:bg-[color:var(--cp-control-surface-hover)]/40"
-                    }`}
+                  className={STYLES.viewModeToggle(viewMode === "history")}
                   onClick={() => setViewMode("history")}
                   type="button"
                 >
@@ -321,10 +338,7 @@ export function ManagerShell() {
                   历史库
                 </button>
                 <button
-                  className={`flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold transition-all duration-300 ${viewMode === "settings"
-                      ? "bg-[color:var(--cp-window-shell)] text-[color:var(--cp-text-primary)] shadow-sm ring-1 ring-[rgba(var(--cp-surface1-rgb),0.2)]"
-                      : "text-[color:var(--cp-text-secondary)] hover:text-[color:var(--cp-text-primary)] hover:bg-[color:var(--cp-control-surface-hover)]/40"
-                    }`}
+                  className={STYLES.viewModeToggle(viewMode === "settings")}
                   onClick={() => setViewMode("settings")}
                   type="button"
                 >
@@ -350,15 +364,15 @@ export function ManagerShell() {
                     </svg>
                   </div>
                   <input
-                    className="w-full rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.5)] bg-cp-mantle py-3 pl-11 pr-5 text-sm outline-none backdrop-blur-sm transition-all duration-300 placeholder:text-[color:var(--cp-text-muted)] focus:border-[rgba(var(--cp-lavender-rgb),0.4)] focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[rgba(var(--cp-lavender-rgb),0.1)] dark:border-[rgba(var(--cp-surface1-rgb),0.4)] dark:bg-[rgba(var(--cp-surface0-rgb),0.3)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
+                    className={STYLES.searchInput}
                     onChange={(event) => setKeyword(event.target.value)}
                     placeholder="搜索全文、来源应用或关键短语"
                     value={keyword}
                   />
                 </div>
-                <label className="inline-flex cursor-pointer items-center gap-2 rounded-2xl border border-[rgba(var(--cp-surface2-rgb),0.3)] bg-cp-mantle px-5 py-3 text-sm font-semibold text-[color:var(--cp-text-secondary)] shadow-sm transition-all duration-300 hover:border-[rgba(var(--cp-surface2-rgb),0.5)] hover:bg-cp-mantle/80 hover:text-[color:var(--cp-text-primary)] active:scale-95">
+                <label className="inline-flex cursor-pointer items-center gap-2 rounded-2xl border border-[color:var(--cp-border-soft)] bg-cp-mantle px-5 py-3 text-sm font-semibold text-[color:var(--cp-text-secondary)] shadow-sm transition-all duration-300 hover:border-[color:var(--cp-border-strong)] hover:bg-cp-mantle/80 hover:text-[color:var(--cp-text-primary)] active:scale-95">
                   <input
-                    className="h-4 w-4 rounded border-[rgba(var(--cp-surface1-rgb),0.6)] bg-cp-base text-[color:var(--cp-accent-primary)] focus:ring-[color:var(--cp-accent-primary)]"
+                    className="h-4 w-4 rounded border-[color:var(--cp-border-strong)] bg-cp-base text-[color:var(--cp-accent-primary)] focus:ring-[color:var(--cp-accent-primary)]"
                     checked={favoritedOnly}
                     onChange={(event) => setFavoritedOnly(event.target.checked)}
                     type="checkbox"
@@ -378,10 +392,7 @@ export function ManagerShell() {
                     const isSelected = item.id === selectedItemId;
                     return (
                       <button
-                        className={`group w-full rounded-3xl border px-6 py-5 text-left transition-all duration-300 ${isSelected
-                            ? "relative z-10 scale-[1.01] border-[rgba(var(--cp-lavender-rgb),0.6)] bg-cp-mantle shadow-xl shadow-black/5 ring-1 ring-[rgba(var(--cp-lavender-rgb),0.3)] dark:border-[rgba(var(--cp-lavender-rgb),0.5)] dark:bg-[rgba(var(--cp-surface0-rgb),0.6)] dark:shadow-none dark:ring-[rgba(var(--cp-lavender-rgb),0.4)]"
-                            : "border-[rgba(var(--cp-surface2-rgb),0.4)] bg-cp-mantle/30 hover:-translate-y-0.5 hover:border-[rgba(var(--cp-surface2-rgb),0.6)] hover:bg-cp-mantle/60 hover:shadow-md dark:border-[rgba(var(--cp-surface1-rgb),0.3)] dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
-                          }`}
+                        className={STYLES.historyItem(isSelected)}
                         key={item.id}
                         onClick={() => setSelectedItemId(item.id)}
                         type="button"
@@ -407,7 +418,7 @@ export function ManagerShell() {
                               {getClipTypeLabel(item)}
                             </span>
                             {item.isFavorited ? (
-                              <span className="inline-flex items-center gap-1 rounded-full bg-[color:var(--cp-accent-warm)]/15 px-2 py-1 text-[10px] font-bold text-[color:var(--cp-accent-warm)] ring-1 ring-inset ring-[color:var(--cp-accent-warm)]/20">
+                              <span className="inline-flex items-center gap-1 rounded-full bg-[color:var(--cp-favorite)]/15 px-2 py-1 text-[10px] font-bold text-[color:var(--cp-favorite)] ring-1 ring-inset ring-[color:var(--cp-favorite)]/20">
                                 <svg className="h-2.5 w-2.5" fill="currentColor" viewBox="0 0 20 20">
                                   <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
                                 </svg>
@@ -502,7 +513,7 @@ export function ManagerShell() {
                 <div className="flex gap-2">
                   <button
                     className={`flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-bold transition-all duration-300 ${detail.data.isFavorited
-                        ? "bg-[color:var(--cp-accent-warm)]/15 text-[color:var(--cp-accent-warm)] ring-1 ring-inset ring-[color:var(--cp-accent-warm)]/30 hover:bg-[color:var(--cp-accent-warm)]/25"
+                        ? "bg-[color:var(--cp-favorite)]/15 text-[color:var(--cp-favorite)] ring-1 ring-inset ring-[color:var(--cp-favorite)]/30 hover:bg-[color:var(--cp-favorite)]/25"
                         : "bg-[color:var(--cp-control-surface)]/40 text-[color:var(--cp-text-secondary)] shadow-sm ring-1 ring-inset ring-[rgba(var(--cp-surface1-rgb),0.2)] hover:bg-[color:var(--cp-control-surface-hover)]/60 hover:text-[color:var(--cp-text-primary)]"
                       }`}
                     onClick={() =>
@@ -513,7 +524,7 @@ export function ManagerShell() {
                     }
                     type="button"
                   >
-                    <svg className={`h-4 w-4 ${detail.data.isFavorited ? "text-[color:var(--cp-accent-warm)]" : "text-[color:var(--cp-text-muted)]"}`} fill="currentColor" viewBox="0 0 20 20">
+                    <svg className={`h-4 w-4 ${detail.data.isFavorited ? "text-[color:var(--cp-favorite)]" : "text-[color:var(--cp-text-muted)]"}`} fill="currentColor" viewBox="0 0 20 20">
                       <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
                     </svg>
                     {detail.data.isFavorited ? "已收藏" : "加入收藏"}
@@ -652,14 +663,14 @@ export function ManagerShell() {
               {detail.data.type === "text" ? (
                 <>
                   <textarea
-                    className="min-h-[200px] flex-1 w-full resize-none rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.5)] bg-cp-mantle px-5 py-5 text-[14px] leading-relaxed outline-none transition-all duration-300 focus:border-[rgba(var(--cp-lavender-rgb),0.4)] focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[rgba(var(--cp-lavender-rgb),0.1)] dark:border-[rgba(var(--cp-surface1-rgb),0.4)] dark:bg-[rgba(var(--cp-surface0-rgb),0.3)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
+                    className={STYLES.detailEditor}
                     onChange={(event) => setDraftText(event.target.value)}
                     value={draftText}
                   />
 
                   <div className="flex shrink-0 flex-wrap gap-2 pt-2">
                     <button
-                      className="rounded-xl border border-[rgba(var(--cp-surface1-rgb),0.4)] bg-[rgba(var(--cp-surface0-rgb),0.3)] px-5 py-2.5 text-sm font-bold text-[color:var(--cp-text-primary)] shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-[rgba(var(--cp-surface1-rgb),0.6)] hover:bg-[rgba(var(--cp-surface1-rgb),0.2)] active:scale-95 disabled:opacity-50"
+                      className="rounded-xl border border-[color:var(--cp-border-strong)] bg-[rgba(var(--cp-surface0-rgb),0.3)] px-5 py-2.5 text-sm font-bold text-[color:var(--cp-text-primary)] shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-[color:var(--cp-border-strong)] hover:bg-[rgba(var(--cp-surface1-rgb),0.2)] active:scale-95 disabled:opacity-50"
                       disabled={updateTextMutation.isPending}
                       onClick={() =>
                         updateTextMutation.mutate({
@@ -734,7 +745,7 @@ export function ManagerShell() {
               )}
 
               {pasteMutation.data ? (
-                <p className="shrink-0 rounded-2xl bg-[color:var(--cp-accent-warm)]/15 px-4 py-3 text-sm font-bold text-[color:var(--cp-accent-warm)] ring-1 ring-inset ring-[color:var(--cp-accent-warm)]/20 animate-in fade-in slide-in-from-bottom-2">
+                <p className="shrink-0 rounded-2xl bg-[color:var(--cp-favorite)]/15 px-4 py-3 text-sm font-bold text-[color:var(--cp-favorite)] ring-1 ring-inset ring-[color:var(--cp-favorite)]/20 animate-in fade-in slide-in-from-bottom-2">
                   {pasteMutation.data.message}
                 </p>
               ) : null}

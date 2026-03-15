@@ -22,6 +22,24 @@ import {
   usePickerSettingsQuery,
 } from "./queries";
 
+// --- 样式常量抽象 ---
+const STYLES = {
+  container: "relative flex h-[calc(100%-2px)] w-[calc(100%-2px)] flex-col overflow-hidden rounded-[18px] border border-[color:var(--cp-border-strong)] bg-[color:var(--cp-window-shell)] shadow-none ring-1 ring-black/5 ring-inset backdrop-blur-xl dark:bg-[color:var(--cp-window-shell)]",
+  header: "flex shrink-0 items-center justify-between border-b border-[rgba(var(--cp-surface1-rgb),0.3)] bg-[rgba(var(--cp-mantle-rgb),0.4)] px-3 py-2 dark:border-[rgba(var(--cp-surface1-rgb),0.2)] dark:bg-[rgba(var(--cp-mantle-rgb),0.7)]",
+  headerDot: "h-2.5 w-2.5 rounded-full bg-[color:var(--cp-accent-primary)] shadow-sm",
+  headerButton: "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold text-[color:var(--cp-text-secondary)] transition-colors hover:bg-[rgba(var(--cp-surface1-rgb),0.3)] hover:text-[color:var(--cp-text-primary)]",
+  itemButton: (selected: boolean) => `group relative flex w-full flex-col gap-1.5 rounded-[12px] px-3 py-2.5 text-left transition-all duration-200 border ${selected
+    ? "bg-[rgba(var(--cp-lavender-rgb),0.12)] border-[rgba(var(--cp-lavender-rgb),0.3)] shadow-sm dark:bg-[rgba(var(--cp-lavender-rgb),0.15)] dark:border-[rgba(var(--cp-lavender-rgb),0.4)]"
+    : "bg-transparent border-transparent hover:bg-[rgba(var(--cp-surface1-rgb),0.2)] dark:hover:bg-[rgba(var(--cp-surface1-rgb),0.3)]"
+    }`,
+  itemContent: (selected: boolean) => `${selected ? "text-[color:var(--cp-text-primary)]" : "text-[color:var(--cp-text-primary)]/90 dark:text-[color:var(--cp-text-primary)]/80"} line-clamp-5 text-[13px] font-medium leading-[1.6] tracking-tight break-words [overflow-wrap:anywhere] whitespace-pre-wrap transition-colors`,
+  kbdBadge: (selected: boolean) => `flex h-[16px] min-w-[16px] px-1 items-center justify-center rounded-[5px] font-mono text-[9px] font-bold transition-colors ${selected
+    ? "bg-[color:var(--cp-accent-primary)] text-cp-base dark:text-cp-mantle"
+    : "bg-[rgba(var(--cp-surface0-rgb),0.5)] text-[color:var(--cp-text-secondary)] group-hover:bg-[rgba(var(--cp-surface1-rgb),0.5)] group-hover:text-[color:var(--cp-text-primary)]"
+    }`,
+  typeBadge: "shrink-0 rounded-[4px] bg-[rgba(var(--cp-surface0-rgb),0.3)] px-1.5 py-0.5 font-medium text-[color:var(--cp-text-secondary)]",
+};
+
 const PICKER_RESIZE_HANDLES: Array<{
   direction: WindowResizeDirection;
   className: string;
@@ -287,7 +305,7 @@ export function PickerShell() {
 
   return (
     <div className="flex h-screen w-screen items-center justify-center overflow-hidden bg-transparent p-0 text-ink select-none">
-      <div className="relative flex h-[calc(100%-2px)] w-[calc(100%-2px)] flex-col overflow-hidden rounded-[18px] border border-[rgba(var(--cp-surface0-rgb),0.6)] bg-[color:var(--cp-window-shell)] shadow-none ring-1 ring-black/5 ring-inset backdrop-blur-xl dark:border-[rgba(var(--cp-surface0-rgb),0.4)] dark:bg-[color:var(--cp-window-shell)] dark:shadow-none">
+      <div className={STYLES.container}>
         {tauriRuntime
           ? PICKER_RESIZE_HANDLES.map((handle) => (
             <div
@@ -298,15 +316,15 @@ export function PickerShell() {
             />
           ))
           : null}
-        <div className="flex shrink-0 items-center justify-between border-b border-[rgba(var(--cp-surface1-rgb),0.3)] bg-[rgba(var(--cp-mantle-rgb),0.4)] px-3 py-2 dark:border-[rgba(var(--cp-surface1-rgb),0.2)] dark:bg-[rgba(var(--cp-mantle-rgb),0.7)]" data-tauri-drag-region>
+        <div className={STYLES.header} data-tauri-drag-region>
           <div className="flex items-center gap-2">
-            <div className="h-2.5 w-2.5 rounded-full bg-[color:var(--cp-accent-primary)] shadow-sm"></div>
+            <div className={STYLES.headerDot}></div>
             <span className="text-[12px] font-bold tracking-tight text-[color:var(--cp-text-primary)]">FloatPaste</span>
-            {lastMessage && <span className="ml-2 animate-pulse text-[10px] font-medium text-[color:var(--cp-accent-warm)]">{lastMessage}</span>}
+            {lastMessage && <span className="ml-2 animate-pulse text-[10px] font-medium text-[color:var(--cp-favorite)]">{lastMessage}</span>}
           </div>
           <div className="flex items-center gap-1.5">
             <button
-              className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold text-[color:var(--cp-text-secondary)] transition-colors hover:bg-[rgba(var(--cp-surface1-rgb),0.3)] hover:text-[color:var(--cp-text-primary)]"
+              className={STYLES.headerButton}
               onClick={() => void handleOpenManager()}
               type="button"
             >
@@ -325,10 +343,7 @@ export function PickerShell() {
                   ref={(el) => {
                     itemRefs.current[index] = el;
                   }}
-                  className={`group relative flex w-full flex-col gap-1.5 rounded-[12px] px-3 py-2.5 text-left transition-all duration-200 border ${isSelected
-                    ? "bg-[rgba(var(--cp-lavender-rgb),0.12)] border-[rgba(var(--cp-lavender-rgb),0.3)] shadow-sm dark:bg-[rgba(var(--cp-lavender-rgb),0.15)] dark:border-[rgba(var(--cp-lavender-rgb),0.4)]"
-                    : "bg-transparent border-transparent hover:bg-[rgba(var(--cp-surface1-rgb),0.2)] dark:hover:bg-[rgba(var(--cp-surface1-rgb),0.3)]"
-                    }`}
+                  className={STYLES.itemButton(isSelected)}
                   key={item.id}
                   onClick={() => {
                     selectedIndexRef.current = index;
@@ -340,7 +355,7 @@ export function PickerShell() {
                   type="button"
                 >
                   <p
-                    className={`${isSelected ? "text-[color:var(--cp-text-primary)]" : "text-[color:var(--cp-text-primary)]/90 dark:text-[color:var(--cp-text-primary)]/80"} line-clamp-5 text-[13px] font-medium leading-[1.6] tracking-tight break-words [overflow-wrap:anywhere] whitespace-pre-wrap transition-colors`}
+                    className={STYLES.itemContent(isSelected)}
                     title={item.tooltipText || item.contentPreview}
                   >
                     {item.contentPreview}
@@ -348,14 +363,11 @@ export function PickerShell() {
 
                   <div className={`flex w-full items-center gap-2 text-[10px] leading-none transition-colors ${isSelected ? "text-[rgba(var(--cp-lavender-rgb),0.8)]" : "text-[color:var(--cp-text-muted)]"}`}>
                     {index < 9 ? (
-                      <kbd className={`flex h-[16px] min-w-[16px] px-1 items-center justify-center rounded-[5px] font-mono text-[9px] font-bold transition-colors ${isSelected
-                        ? "bg-[color:var(--cp-accent-primary)] text-cp-base dark:text-cp-mantle"
-                        : "bg-[rgba(var(--cp-surface0-rgb),0.5)] text-[color:var(--cp-text-secondary)] group-hover:bg-[rgba(var(--cp-surface1-rgb),0.5)] group-hover:text-[color:var(--cp-text-primary)]"
-                        }`}>
+                      <kbd className={STYLES.kbdBadge(isSelected)}>
                         {index + 1}
                       </kbd>
                     ) : null}
-                    <span className="shrink-0 rounded-[4px] bg-[rgba(var(--cp-surface0-rgb),0.3)] px-1.5 py-0.5 font-medium text-[color:var(--cp-text-secondary)]">
+                    <span className={STYLES.typeBadge}>
                       {getClipTypeLabel(item)}
                     </span>
                     <span className="min-w-0 flex-1 truncate font-medium opacity-80">
@@ -366,7 +378,7 @@ export function PickerShell() {
                         {formatDateTime(item.lastUsedAt ?? item.createdAt)}
                       </span>
                       {item.isFavorited ? (
-                        <span className="text-[10px] text-[color:var(--cp-accent-warm)]">★</span>
+                        <span className="text-[10px] text-[color:var(--cp-favorite)]">★</span>
                       ) : null}
                     </span>
                   </div>

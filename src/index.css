@@ -48,27 +48,21 @@
   --cp-yellow-rgb: 223, 142, 29;
   --cp-green-rgb: 64, 160, 43;
 
-  /* 语义化表面 */
-  --cp-window-shell: var(--cp-base);
-  --cp-window-shell-rgb: var(--cp-base-rgb);
-  --cp-panel-surface: var(--cp-mantle);
-  --cp-panel-surface-rgb: var(--cp-mantle-rgb);
-  --cp-card-surface: var(--cp-base);
-  --cp-card-surface-rgb: var(--cp-base-rgb);
-  --cp-control-surface: var(--cp-surface0);
-  --cp-control-surface-rgb: var(--cp-surface0-rgb);
-  --cp-control-surface-hover: var(--cp-surface1);
-  --cp-control-surface-hover-rgb: var(--cp-surface1-rgb);
+  color: var(--cp-text);
+  font-family: "Segoe UI", sans-serif;
+  color-scheme: light;
+  background-color: var(--cp-base);
+}
 
-  /* 语义化边框 */
-  --cp-border-soft: rgba(var(--cp-surface0-rgb), 0.6);
-  --cp-border-strong: rgba(var(--cp-surface1-rgb), 0.8);
-  --cp-focus-ring: rgba(var(--cp-lavender-rgb), 0.4);
-
+/* 统一语义化映射：减少 html.dark 中的重复定义 */
+:root,
+html.dark {
   /* 语义化强调 */
   --cp-accent-primary: var(--cp-lavender);
   --cp-accent-primary-strong: var(--cp-blue);
-  --cp-accent-warm: var(--cp-yellow);
+  --cp-favorite: var(--cp-yellow);
+  --cp-success: var(--cp-green);
+  --cp-warning: var(--cp-peach);
   --cp-danger: var(--cp-red);
 
   /* 语义化文本 */
@@ -76,14 +70,34 @@
   --cp-text-secondary: var(--cp-subtext0);
   --cp-text-muted: var(--cp-overlay0);
 
-  color: var(--cp-text);
-  font-family: "Segoe UI", sans-serif;
-  color-scheme: light;
-  background-color: var(--cp-base);
+  /* 语义化表面 */
+  --cp-window-shell: var(--cp-base);
+  --cp-window-shell-rgb: var(--cp-base-rgb);
+  --cp-panel-surface: var(--cp-mantle);
+  --cp-panel-surface-rgb: var(--cp-mantle-rgb);
+  --cp-control-surface: var(--cp-surface0);
+  --cp-control-surface-rgb: var(--cp-surface0-rgb);
+  --cp-control-surface-hover: var(--cp-surface1);
+  --cp-control-surface-hover-rgb: var(--cp-surface1-rgb);
+
+  /* 语义化边框 */
+  --cp-border-soft: rgba(var(--cp-surface0-rgb), 0.5);
+  --cp-border-strong: rgba(var(--cp-surface1-rgb), 0.6);
+  --cp-focus-ring: rgba(var(--cp-lavender-rgb), 0.4);
+
+  /* 语义化卡片表面 */
+  --cp-card-surface: var(--cp-base);
+  --cp-card-surface-rgb: var(--cp-base-rgb);
 }
 
-/* Catppuccin Macchiato (Dark Theme) */
+/* Catppuccin Macchiato (Dark Theme) overrides */
 html.dark {
+  /* 针对深色模式的特定语义微调 */
+  --cp-card-surface: var(--cp-surface0);
+  --cp-card-surface-rgb: var(--cp-surface0-rgb);
+  --cp-border-soft: rgba(var(--cp-surface0-rgb), 0.4);
+  --cp-border-strong: rgba(var(--cp-surface1-rgb), 0.5);
+  
   /* Rosewater */ --cp-rosewater: #f4dbd6;
   /* Flamingo */ --cp-flamingo: #f0c6c6;
   /* Pink */ --cp-pink: #f5bde6;
@@ -127,31 +141,7 @@ html.dark {
   --cp-green-rgb: 166, 218, 149;
   --cp-accent-primary-rgb: 183, 189, 248;
 
-  /* 语义化表面 */
-  --cp-window-shell: var(--cp-base);
-  --cp-window-shell-rgb: var(--cp-base-rgb);
-  --cp-panel-surface: var(--cp-mantle);
-  --cp-panel-surface-rgb: var(--cp-mantle-rgb);
-  --cp-card-surface: var(--cp-surface0);
-  --cp-card-surface-rgb: var(--cp-surface0-rgb);
-  --cp-control-surface: var(--cp-surface0);
-  --cp-control-surface-rgb: var(--cp-surface0-rgb);
-  --cp-control-surface-hover: var(--cp-surface1);
-  --cp-control-surface-hover-rgb: var(--cp-surface1-rgb);
-
-  /* 语义化边框 */
-  --cp-border-soft: rgba(var(--cp-surface0-rgb), 0.4);
-  --cp-border-strong: rgba(var(--cp-surface1-rgb), 0.5);
-  --cp-focus-ring: rgba(var(--cp-lavender-rgb), 0.4);
-
-  /* 语义化文本 */
-  --cp-text-primary: var(--cp-text);
-  --cp-text-secondary: var(--cp-subtext0);
-  --cp-text-muted: var(--cp-overlay0);
-
-  color: var(--cp-text);
   color-scheme: dark;
-  background-color: var(--cp-base);
 }
 
 /* 滚动条样式 */
@@ -196,7 +186,11 @@ body {
     color 220ms ease;
 }
 
-/* Picker 窗口强制透明补丁：必须放在最后以确保最高优先级 */
+/* 
+  Picker 窗口强制透明补丁：必须放在最后以确保最高优先级。
+  !important 是必要的，因为 Tauri 窗口在切换主题或初始加载时
+  可能会继承错误的背景色，导致圆角处出现不透明的“尖角”闪烁。
+*/
 html.window-picker,
 html.window-picker body,
 html.window-picker #root {
