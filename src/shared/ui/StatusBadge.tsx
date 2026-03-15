@@ -4,9 +4,9 @@ interface StatusBadgeProps {
 }
 
 const toneClassMap: Record<StatusBadgeProps["tone"], string> = {
-  running: "bg-cp-green/15 text-cp-green ring-1 ring-inset ring-cp-green/30",
-  paused: "bg-cp-yellow/15 text-cp-yellow ring-1 ring-inset ring-cp-yellow/30",
-  muted: "bg-cp-surface0 text-cp-subtext0 ring-1 ring-inset ring-cp-surface2",
+  running: "bg-[color:var(--cp-green)]/15 text-[color:var(--cp-green)] ring-1 ring-inset ring-[color:var(--cp-green)]/30",
+  paused: "bg-[color:var(--cp-accent-warm)]/15 text-[color:var(--cp-accent-warm)] ring-1 ring-inset ring-[color:var(--cp-accent-warm)]/30",
+  muted: "bg-[color:var(--cp-control-surface)]/60 text-[color:var(--cp-text-muted)] ring-1 ring-inset ring-[color:var(--cp-border-soft)]",
 };
 
 export function StatusBadge({ tone, children }: StatusBadgeProps) {
