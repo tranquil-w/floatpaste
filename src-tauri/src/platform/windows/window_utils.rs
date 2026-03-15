@@ -1,12 +1,9 @@
 use tauri::WebviewWindow;
 use windows::Win32::Foundation::HWND;
-use windows::Win32::Graphics::Gdi::{CreateRoundRectRgn, DeleteObject, HGDIOBJ, SetWindowRgn};
 use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, ShowWindow, GWL_EXSTYLE, SWP_NOACTIVATE,
     SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SW_SHOWNOACTIVATE, WS_EX_NOACTIVATE,
 };
-
-const PICKER_WINDOW_CORNER_RADIUS: i32 = 16;
 
 pub fn show_window_no_activate(window: &WebviewWindow) -> Result<(), String> {
     let tauri_hwnd = window.hwnd().map_err(|e| e.to_string())?;
