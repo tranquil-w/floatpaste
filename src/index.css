@@ -87,12 +87,12 @@
     --cp-control-surface-hover: var(--cp-surface1);
     --cp-control-surface-hover-rgb: var(--cp-surface1-rgb);
 
-    /* 语义化边框 */
-    --cp-border-soft: rgba(var(--cp-surface0-rgb), 0.5);
-    --cp-border-medium: rgba(var(--cp-surface1-rgb), 0.6);
-    --cp-border-strong: rgba(var(--cp-surface1-rgb), 0.6);
-    --cp-border-accent: rgba(var(--cp-peach-rgb), 0.3);
-    --cp-focus-ring: rgba(var(--cp-peach-rgb), 0.4);
+    /* 语义化边框 (macOS 极弱风格) */
+    --cp-border-weak: rgba(var(--cp-surface1-rgb), 0.12);   /* 默认边框 - 极弱 */
+    --cp-border-medium: rgba(var(--cp-surface1-rgb), 0.2);  /* hover/focus 边框 - 稍强 */
+    --cp-border-strong: rgba(var(--cp-surface1-rgb), 0.25); /* 分隔线 - 中等 */
+    --cp-border-accent: rgba(var(--cp-peach-rgb), 0.25);   /* 暖色强调边框 */
+    --cp-focus-ring: rgba(var(--cp-peach-rgb), 0.25);
 
     /* 语义化卡片表面 */
     --cp-card-surface: var(--cp-base);
@@ -105,66 +105,45 @@
     --cp-shadow-lg: 0 4px 8px rgba(0, 0, 0, 0.06);
   }
 
- /* Graphite Dark Theme (黑灰色系) */
- html.dark {
-   /* 语义微调 */
-   --cp-card-surface: var(--cp-surface0);
-   --cp-card-surface-rgb: var(--cp-surface0-rgb);
-   --cp-border-soft: rgba(var(--cp-surface0-rgb), 0.4);
-   --cp-border-strong: rgba(var(--cp-surface1-rgb), 0.5);
-   
-    /* 强调色 (适配黑灰背景，调暗) */
-    /* Rosewater */ --cp-rosewater: #d4a99f;
-    /* Flamingo */ --cp-flamingo: #cf9a9a;
-    /* Pink */ --cp-pink: #d691c5;
-    /* Mauve */ --cp-mauve: #b89bd4;
-    /* Red */ --cp-red: #e07a7a;
-    /* Maroon */ --cp-maroon: #d98a8f;
-    /* Peach (darkened for graphite bg, 作为主强调色) */ --cp-peach: #d4855a;
-    /* Yellow (作为次强调色和收藏色) */ --cp-yellow: #d4b86a;
-    /* Green */ --cp-green: #8fb87a;
-    /* Teal */ --cp-teal: #7ab8ad;
-    /* Sky */ --cp-sky: #7ab8c9;
-    /* Sapphire */ --cp-sapphire: #7aabc4;
-    /* Blue */ --cp-blue: #8aace0;
-    /* Lavender */ --cp-lavender: #9aa8e0;
- 
-   /* 文本色 (灰白系) */
-   /* Text */ --cp-text: #e0e0e0;
-   /* Subtext1 */ --cp-subtext1: #b8b8b8;
-   /* Subtext0 */ --cp-subtext0: #999999;
-   /* Overlay2 */ --cp-overlay2: #7a7a7a;
-   /* Overlay1 */ --cp-overlay1: #666666;
-   /* Overlay0 */ --cp-overlay0: #525252;
- 
-   /* 表面色 (黑灰系) */
-   /* Surface2 */ --cp-surface2: #404040;
-   /* Surface1 */ --cp-surface1: #333333;
-   /* Surface0 */ --cp-surface0: #262626;
-   /* Base */ --cp-base: #1a1a1a;
-   /* Mantle */ --cp-mantle: #141414;
-   /* Crust */ --cp-crust: #0d0d0d;
- 
-   /* RGB components */
-   --cp-text-rgb: 224, 224, 224;
-   --cp-subtext0-rgb: 153, 153, 153;
-   --cp-surface0-rgb: 38, 38, 38;
-   --cp-surface1-rgb: 51, 51, 51;
-   --cp-surface2-rgb: 64, 64, 64;
-   --cp-base-rgb: 26, 26, 26;
-   --cp-mantle-rgb: 20, 20, 20;
-   --cp-crust-rgb: 13, 13, 13;
-   --cp-lavender-rgb: 154, 168, 224;
-   --cp-blue-rgb: 138, 172, 224;
-   --cp-red-rgb: 224, 122, 122;
-   --cp-yellow-rgb: 212, 184, 106;
-   --cp-green-rgb: 143, 184, 122;
-   --cp-accent-primary-rgb: 212, 133, 90;
-   --cp-peach-rgb: 212, 133, 90;
-   --cp-maroon-rgb: 217, 138, 143;
+ /* Catppuccin Macchiato (Dark Theme) */
+  html.dark {
+    /* Macchiato 基础色 */
+    --cp-base: #24273a;
+    --cp-mantle: #1e2030;
+    --cp-crust: #181926;
+    --cp-surface0: #363a4f;
+    --cp-surface1: #494d64;
+    --cp-surface2: #5b6078;
+    --cp-overlay0: #939ab7;
+    --cp-overlay1: #8087a2;
+    --cp-overlay2: #6e738d;
+    --cp-subtext0: #a5adcb;
+    --cp-subtext1: #b8c0e0;
+    --cp-text: #cad3f5;
 
-   color-scheme: dark;
-}
+    /* Macchiato RGB 组件 */
+    --cp-base-rgb: 36, 39, 58;
+    --cp-mantle-rgb: 30, 32, 48;
+    --cp-crust-rgb: 24, 25, 38;
+    --cp-surface0-rgb: 54, 58, 79;
+    --cp-surface1-rgb: 73, 77, 100;
+    --cp-surface2-rgb: 91, 96, 120;
+    --cp-overlay0-rgb: 147, 154, 183;
+    --cp-overlay1-rgb: 128, 135, 162;
+    --cp-overlay2-rgb: 110, 115, 141;
+    --cp-subtext0-rgb: 165, 173, 203;
+    --cp-subtext1-rgb: 184, 192, 224;
+    --cp-text-rgb: 202, 211, 245;
+
+    /* 语义微调 */
+    --cp-card-surface: var(--cp-surface0);
+    --cp-card-surface-rgb: var(--cp-surface0-rgb);
+
+    /* 深色主题下边框更弱 */
+    --cp-border-weak: rgba(var(--cp-surface1-rgb), 0.08);
+    --cp-border-medium: rgba(var(--cp-surface1-rgb), 0.15);
+    --cp-border-strong: rgba(var(--cp-surface1-rgb), 0.2);
+  }
 
 /* 滚动条样式 */
 ::-webkit-scrollbar {
@@ -189,24 +168,24 @@
   background-clip: content-box;
 }
 
-html,
-body,
-#root {
-  min-height: 100%;
-}
-
-* {
-  box-sizing: border-box;
-}
-
- body {
-   margin: 0;
-   color: var(--cp-text-primary);
-   background-color: var(--cp-window-shell);
-   transition:
-     background-color 250ms ease-out,
-     color 250ms ease-out;
+ html,
+ body,
+ #root {
+   min-height: 100%;
  }
+
+ * {
+   box-sizing: border-box;
+ }
+
+  body {
+    margin: 0;
+    color: var(--cp-text-primary);
+    background-color: var(--cp-window-shell);
+    transition:
+      background-color 250ms ease-out,
+      color 250ms ease-out;
+  }
 
 /* 
   Picker 窗口强制透明补丁：必须放在最后以确保最高优先级。
@@ -253,7 +232,7 @@ select {
    outline: none;
  }
 
-/* Focus-visible styles for keyboard navigation */
+ /* Focus-visible styles for keyboard navigation */
 button:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
@@ -263,11 +242,11 @@ select:focus-visible,
   outline-offset: 2px;
 }
 
- input,
- textarea {
-   border: 1px solid transparent;
-   outline: none;
- }
+  input,
+  textarea {
+    border: 1px solid transparent;
+    outline: none;
+  }
 
 /* Reduced motion support */
 @media (prefers-reduced-motion: reduce) {
