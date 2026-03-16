@@ -6,7 +6,7 @@ interface EmptyStateProps {
 export function EmptyState({ title, description }: EmptyStateProps) {
   return (
     <div
-      className="flex flex-col items-center justify-center rounded-[24px] border border-dashed border-[rgba(var(--cp-surface1-rgb),0.4)] bg-[rgba(var(--cp-mantle-rgb),0.5)] px-6 py-12 text-center"
+      className="flex flex-col items-center justify-center rounded-lg border border-dashed border-[rgba(var(--cp-surface1-rgb),0.4)] bg-[rgba(var(--cp-mantle-rgb),0.5)] px-6 py-12 text-center"
       role="status"
       aria-live="polite"
     >

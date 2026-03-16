@@ -56,41 +56,48 @@
   background-color: var(--cp-base);
 }
 
-/* 统一语义化映射：减少 html.dark 中的重复定义 */
- :root,
- html.dark {
-   /* 语义化强调 (暖阳橙风格) */
-   --cp-accent-primary: var(--cp-peach);
-   --cp-accent-primary-strong: var(--cp-maroon);
-  --cp-favorite: var(--cp-yellow);
-  --cp-success: var(--cp-green);
-  --cp-warning: var(--cp-yellow);
-  --cp-danger: var(--cp-red);
+  /* 统一语义化映射：减少 html.dark 中的重复定义 */
+  :root,
+  html.dark {
+    /* 语义化强调 (暖色系) */
+    --cp-accent-primary: var(--cp-peach);
+    --cp-accent-primary-rgb: var(--cp-peach-rgb);
+    --cp-accent-primary-strong: var(--cp-maroon);
+    --cp-accent-primary-strong-rgb: var(--cp-maroon-rgb);
+    --cp-accent-secondary: var(--cp-yellow);
+    --cp-accent-secondary-rgb: var(--cp-yellow-rgb);
+    --cp-favorite: var(--cp-yellow);
+    --cp-favorite-rgb: var(--cp-yellow-rgb);
+    --cp-success: var(--cp-peach);
+    --cp-warning: var(--cp-yellow);
+    --cp-danger: var(--cp-red);
 
-  /* 语义化文本 */
-  --cp-text-primary: var(--cp-text);
-  --cp-text-secondary: var(--cp-subtext0);
-  --cp-text-muted: var(--cp-overlay0);
+    /* 语义化文本 */
+    --cp-text-primary: var(--cp-text);
+    --cp-text-secondary: var(--cp-subtext0);
+    --cp-text-muted: var(--cp-overlay0);
 
-  /* 语义化表面 */
-  --cp-window-shell: var(--cp-base);
-  --cp-window-shell-rgb: var(--cp-base-rgb);
-  --cp-panel-surface: var(--cp-mantle);
-  --cp-panel-surface-rgb: var(--cp-mantle-rgb);
-  --cp-control-surface: var(--cp-surface0);
-  --cp-control-surface-rgb: var(--cp-surface0-rgb);
-  --cp-control-surface-hover: var(--cp-surface1);
-  --cp-control-surface-hover-rgb: var(--cp-surface1-rgb);
+    /* 语义化表面 */
+    --cp-window-shell: var(--cp-base);
+    --cp-window-shell-rgb: var(--cp-base-rgb);
+    --cp-panel-surface: var(--cp-mantle);
+    --cp-panel-surface-rgb: var(--cp-mantle-rgb);
+    --cp-control-surface: var(--cp-surface0);
+    --cp-control-surface-rgb: var(--cp-surface0-rgb);
+    --cp-control-surface-hover: var(--cp-surface1);
+    --cp-control-surface-hover-rgb: var(--cp-surface1-rgb);
 
-  /* 语义化边框 */
-  --cp-border-soft: rgba(var(--cp-surface0-rgb), 0.5);
-  --cp-border-strong: rgba(var(--cp-surface1-rgb), 0.6);
-  --cp-focus-ring: rgba(var(--cp-peach-rgb), 0.4);
+    /* 语义化边框 */
+    --cp-border-soft: rgba(var(--cp-surface0-rgb), 0.5);
+    --cp-border-medium: rgba(var(--cp-surface1-rgb), 0.6);
+    --cp-border-strong: rgba(var(--cp-surface1-rgb), 0.6);
+    --cp-border-accent: rgba(var(--cp-peach-rgb), 0.3);
+    --cp-focus-ring: rgba(var(--cp-peach-rgb), 0.4);
 
-  /* 语义化卡片表面 */
-  --cp-card-surface: var(--cp-base);
-  --cp-card-surface-rgb: var(--cp-base-rgb);
-}
+    /* 语义化卡片表面 */
+    --cp-card-surface: var(--cp-base);
+    --cp-card-surface-rgb: var(--cp-base-rgb);
+  }
 
  /* Graphite Dark Theme (黑灰色系) */
  html.dark {
@@ -100,21 +107,21 @@
    --cp-border-soft: rgba(var(--cp-surface0-rgb), 0.4);
    --cp-border-strong: rgba(var(--cp-surface1-rgb), 0.5);
    
-   /* 强调色 (适配黑灰背景，调暗) */
-   /* Rosewater */ --cp-rosewater: #d4a99f;
-   /* Flamingo */ --cp-flamingo: #cf9a9a;
-   /* Pink */ --cp-pink: #d691c5;
-   /* Mauve */ --cp-mauve: #b89bd4;
-   /* Red */ --cp-red: #e07a7a;
-   /* Maroon */ --cp-maroon: #d98a8f;
-   /* Peach (darkened for graphite bg) */ --cp-peach: #d4855a;
-   /* Yellow */ --cp-yellow: #d4b86a;
-   /* Green */ --cp-green: #8fb87a;
-   /* Teal */ --cp-teal: #7ab8ad;
-   /* Sky */ --cp-sky: #7ab8c9;
-   /* Sapphire */ --cp-sapphire: #7aabc4;
-   /* Blue */ --cp-blue: #8aace0;
-   /* Lavender */ --cp-lavender: #9aa8e0;
+    /* 强调色 (适配黑灰背景，调暗) */
+    /* Rosewater */ --cp-rosewater: #d4a99f;
+    /* Flamingo */ --cp-flamingo: #cf9a9a;
+    /* Pink */ --cp-pink: #d691c5;
+    /* Mauve */ --cp-mauve: #b89bd4;
+    /* Red */ --cp-red: #e07a7a;
+    /* Maroon */ --cp-maroon: #d98a8f;
+    /* Peach (darkened for graphite bg, 作为主强调色) */ --cp-peach: #d4855a;
+    /* Yellow (作为次强调色和收藏色) */ --cp-yellow: #d4b86a;
+    /* Green */ --cp-green: #8fb87a;
+    /* Teal */ --cp-teal: #7ab8ad;
+    /* Sky */ --cp-sky: #7ab8c9;
+    /* Sapphire */ --cp-sapphire: #7aabc4;
+    /* Blue */ --cp-blue: #8aace0;
+    /* Lavender */ --cp-lavender: #9aa8e0;
  
    /* 文本色 (灰白系) */
    /* Text */ --cp-text: #e0e0e0;

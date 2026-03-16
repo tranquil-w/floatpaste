@@ -35,22 +35,22 @@ import {
 
 // --- 样式常量抽象 ---
 const STYLES = {
-  logoBadge: "inline-flex items-center gap-2 rounded-full border border-[color:var(--cp-accent-primary)]/20 bg-[color:var(--cp-accent-primary)]/10 pl-1.5 pr-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-[color:var(--cp-accent-primary)] shadow-sm",
-  logoIcon: "flex h-5 w-5 items-center justify-center rounded-full bg-[color:var(--cp-accent-primary)] text-cp-base shadow-sm",
-  shortcutCard: "relative shrink-0 overflow-hidden rounded-3xl bg-[color:var(--cp-card-surface)]/40 px-6 py-6 text-[color:var(--cp-text-primary)] shadow-xl shadow-black/5 ring-1 ring-[color:var(--cp-border-strong)] transition-transform duration-500 hover:scale-[1.01] dark:bg-[color:var(--cp-card-surface)]/30 dark:shadow-none dark:ring-[color:var(--cp-border-soft)]",
-  shortcutDot: "h-1.5 w-1.5 rounded-full bg-[color:var(--cp-accent-primary)] shadow-[0_0_8px_rgba(114,135,253,0.5)]",
-  favoriteItem: "group w-full rounded-2xl border border-[color:var(--cp-border-soft)] bg-cp-mantle/50 px-4 py-3 text-left transition-all duration-300 hover:-translate-y-0.5 hover:border-[color:var(--cp-border-strong)] hover:bg-cp-mantle dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[rgba(var(--cp-surface0-rgb),0.4)]",
-  primaryButton: "group relative flex w-full items-center justify-center gap-2 rounded-2xl bg-[color:var(--cp-accent-primary)] px-4 py-3.5 text-sm font-bold text-cp-base shadow-lg shadow-[color:var(--cp-accent-primary)]/20 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-[color:var(--cp-accent-primary)]/30 hover:brightness-110 active:translate-y-0",
-  viewModeToggle: (active: boolean) => `flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold transition-all duration-300 ${active
-    ? "bg-[color:var(--cp-window-shell)] text-[color:var(--cp-text-primary)] shadow-sm ring-1 ring-[color:var(--cp-border-strong)]"
+   logoBadge: "inline-flex items-center gap-2 rounded-full border border-[color:var(--cp-accent-primary)]/20 bg-[color:var(--cp-accent-primary)]/10 pl-1.5 pr-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-[color:var(--cp-accent-primary)] shadow-sm",
+   logoIcon: "flex h-5 w-5 items-center justify-center rounded-full bg-[color:var(--cp-accent-primary)] text-cp-base shadow-sm",
+   shortcutCard: "relative shrink-0 overflow-hidden rounded-lg bg-[color:var(--cp-card-surface)]/40 px-6 py-6 text-[color:var(--cp-text-primary)] shadow-sm ring-1 ring-[color:var(--cp-border-soft)] transition-transform duration-500 hover:scale-[1.01] dark:bg-[color:var(--cp-card-surface)]/30 dark:shadow-none",
+   shortcutDot: "h-1.5 w-1.5 rounded-full bg-[color:var(--cp-accent-primary)] shadow-[0_0_8px_rgba(224,122,77,0.3)]",
+   favoriteItem: "group w-full rounded-md border border-[color:var(--cp-border-soft)] bg-cp-mantle/50 px-4 py-3 text-left transition-all duration-300 hover:-translate-y-0.5 hover:border-[color:var(--cp-border-medium)] hover:bg-cp-mantle dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[rgba(var(--cp-surface0-rgb),0.4)]",
+   primaryButton: "group relative flex w-full items-center justify-center gap-2 rounded-md bg-[color:var(--cp-accent-primary)] px-4 py-3.5 text-sm font-bold text-cp-base shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md hover:brightness-110 active:translate-y-0",
+   viewModeToggle: (active: boolean) => `flex items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-bold transition-all duration-300 ${active
+    ? "bg-[color:var(--cp-window-shell)] text-[color:var(--cp-text-primary)] shadow-sm ring-1 ring-[color:var(--cp-border-medium)]"
     : "text-[color:var(--cp-text-secondary)] hover:text-[color:var(--cp-text-primary)] hover:bg-[color:var(--cp-control-surface-hover)]/40"
     }`,
-  searchInput: "w-full rounded-2xl border border-[color:var(--cp-border-strong)] bg-cp-mantle py-3 pl-11 pr-5 text-sm outline-none backdrop-blur-sm transition-all duration-300 placeholder:text-[color:var(--cp-text-muted)] focus:border-[rgba(var(--cp-lavender-rgb),0.4)] focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[rgba(var(--cp-lavender-rgb),0.1)] dark:bg-[rgba(var(--cp-surface0-rgb),0.3)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]",
-  historyItem: (selected: boolean) => `group w-full rounded-3xl border px-6 py-5 text-left transition-all duration-300 ${selected
-    ? "relative z-10 scale-[1.01] border-[rgba(var(--cp-lavender-rgb),0.6)] bg-cp-mantle shadow-xl shadow-black/5 ring-1 ring-[rgba(var(--cp-lavender-rgb),0.3)] dark:border-[rgba(var(--cp-lavender-rgb),0.5)] dark:bg-[rgba(var(--cp-surface0-rgb),0.6)] dark:shadow-none"
-    : "border-[color:var(--cp-border-soft)] bg-cp-mantle/30 hover:-translate-y-0.5 hover:border-[color:var(--cp-border-strong)] hover:bg-cp-mantle/60 hover:shadow-md dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
+   searchInput: "w-full rounded-md border border-[color:var(--cp-border-medium)] bg-cp-mantle py-3 pl-11 pr-5 text-sm outline-none backdrop-blur-sm transition-all duration-300 placeholder:text-[color:var(--cp-text-muted)] focus:border-[rgba(var(--cp-accent-primary-rgb),0.4)] focus:bg-[color:var(--cp-window-shell)] focus:ring-2 focus:ring-[rgba(var(--cp-accent-primary-rgb),0.1)] dark:bg-[rgba(var(--cp-surface0-rgb),0.3)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]",
+   historyItem: (selected: boolean) => `group w-full rounded-md border px-6 py-5 text-left transition-all duration-300 ${selected
+    ? "relative z-10 scale-[1.01] border-[rgba(var(--cp-accent-primary-rgb),0.6)] bg-cp-mantle shadow-sm ring-1 ring-[rgba(var(--cp-accent-primary-rgb),0.3)] dark:border-[rgba(var(--cp-accent-primary-rgb),0.5)] dark:bg-[rgba(var(--cp-surface0-rgb),0.6)] dark:shadow-none"
+    : "border-[color:var(--cp-border-soft)] bg-cp-mantle/30 hover:-translate-y-0.5 hover:border-[color:var(--cp-border-medium)] hover:bg-cp-mantle/60 hover:shadow-sm dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
     }`,
-  detailEditor: "min-h-[200px] flex-1 w-full resize-none rounded-2xl border border-[color:var(--cp-border-strong)] bg-cp-mantle px-5 py-5 text-[14px] leading-relaxed outline-none transition-all duration-300 focus:border-[rgba(var(--cp-lavender-rgb),0.4)] focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[rgba(var(--cp-lavender-rgb),0.1)] dark:bg-[rgba(var(--cp-surface0-rgb),0.3)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]",
+   detailEditor: "min-h-[200px] flex-1 w-full resize-none rounded-md border border-[color:var(--cp-border-medium)] bg-cp-mantle px-5 py-5 text-[14px] leading-relaxed outline-none transition-all duration-300 focus:border-[rgba(var(--cp-accent-primary-rgb),0.4)] focus:bg-[color:var(--cp-window-shell)] focus:ring-2 focus:ring-[rgba(var(--cp-accent-primary-rgb),0.1)] dark:bg-[rgba(var(--cp-surface0-rgb),0.3)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]",
 };
 
 const pickerPositionOptions: Array<{
@@ -326,7 +326,7 @@ export function ManagerShell() {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
                 </svg> 打开速贴面板
               </button>
-              <div className="grid grid-cols-2 gap-2 rounded-2xl bg-[color:var(--cp-control-surface)]/40 p-1.5 backdrop-blur-sm ring-1 ring-[rgba(var(--cp-surface1-rgb),0.2)]">
+              <div className="grid grid-cols-2 gap-2 rounded-md bg-[color:var(--cp-control-surface)]/40 p-1.5 backdrop-blur-sm ring-1 ring-[rgba(var(--cp-surface1-rgb),0.2)]">
                 <button
                   className={STYLES.viewModeToggle(viewMode === "history")}
                   onClick={() => setViewMode("history")}
@@ -370,7 +370,7 @@ export function ManagerShell() {
                     value={keyword}
                   />
                 </div>
-                <label className="inline-flex cursor-pointer items-center gap-2 rounded-2xl border border-[color:var(--cp-border-soft)] bg-cp-mantle px-5 py-3 text-sm font-semibold text-[color:var(--cp-text-secondary)] shadow-sm transition-all duration-300 hover:border-[color:var(--cp-border-strong)] hover:bg-cp-mantle/80 hover:text-[color:var(--cp-text-primary)] active:scale-95">
+                <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-[color:var(--cp-border-soft)] bg-cp-mantle px-5 py-3 text-sm font-semibold text-[color:var(--cp-text-secondary)] shadow-sm transition-all duration-300 hover:border-[color:var(--cp-border-medium)] hover:bg-cp-mantle/80 hover:text-[color:var(--cp-text-primary)] active:scale-95">
                   <input
                     className="h-4 w-4 rounded border-[color:var(--cp-border-strong)] bg-cp-base text-[color:var(--cp-accent-primary)] focus:ring-[color:var(--cp-accent-primary)]"
                     checked={favoritedOnly}
@@ -399,7 +399,7 @@ export function ManagerShell() {
                       >
                         <div className="flex items-start justify-between gap-4">
                           <div className="flex-1 min-w-0">
-                            <div className={`inline-flex h-6 min-w-6 items-center justify-center rounded-lg px-1.5 text-[10px] font-bold transition-colors ${isSelected
+                            <div className={`inline-flex h-6 min-w-6 items-center justify-center rounded-md px-1.5 text-[10px] font-bold transition-colors ${isSelected
                                 ? "bg-[color:var(--cp-accent-primary)]/20 text-[color:var(--cp-accent-primary)] ring-1 ring-[color:var(--cp-accent-primary)]/30"
                                 : "bg-[color:var(--cp-control-surface)] text-[color:var(--cp-text-muted)] group-hover:bg-[color:var(--cp-control-surface-hover)] group-hover:text-[color:var(--cp-text-secondary)]"
                               }`}>
@@ -456,7 +456,7 @@ export function ManagerShell() {
                 <span>{totalCount === 0 ? "当前没有可显示记录" : `当前显示第 ${pageStart}-${pageEnd} 条`}</span>
                 <div className="flex items-center gap-2">
                   <button
-                    className="flex items-center gap-1.5 rounded-xl bg-[color:var(--cp-control-surface)]/40 px-3.5 py-2 text-xs font-bold text-[color:var(--cp-text-secondary)] shadow-sm ring-1 ring-inset ring-[rgba(var(--cp-surface1-rgb),0.2)] transition-all hover:bg-[color:var(--cp-control-surface-hover)]/60 hover:text-[color:var(--cp-text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
+                    className="flex items-center gap-1.5 rounded-md bg-[color:var(--cp-control-surface)]/40 px-3.5 py-2 text-xs font-bold text-[color:var(--cp-text-secondary)] shadow-sm ring-1 ring-inset ring-[rgba(var(--cp-surface1-rgb),0.2)] transition-all hover:bg-[color:var(--cp-control-surface-hover)]/60 hover:text-[color:var(--cp-text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
                     disabled={!hasPreviousPage}
                     onClick={() => setPageIndex((current) => Math.max(current - 1, 0))}
                     type="button"
@@ -467,7 +467,7 @@ export function ManagerShell() {
                     上一页
                   </button>
                   <button
-                    className="flex items-center gap-1.5 rounded-xl bg-[color:var(--cp-control-surface)]/40 px-3.5 py-2 text-xs font-bold text-[color:var(--cp-text-secondary)] shadow-sm ring-1 ring-inset ring-[rgba(var(--cp-surface1-rgb),0.2)] transition-all hover:bg-[color:var(--cp-control-surface-hover)]/60 hover:text-[color:var(--cp-text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
+                    className="flex items-center gap-1.5 rounded-md bg-[color:var(--cp-control-surface)]/40 px-3.5 py-2 text-xs font-bold text-[color:var(--cp-text-secondary)] shadow-sm ring-1 ring-inset ring-[rgba(var(--cp-surface1-rgb),0.2)] transition-all hover:bg-[color:var(--cp-control-surface-hover)]/60 hover:text-[color:var(--cp-text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
                     disabled={!hasNextPage}
                     onClick={() => setPageIndex((current) => current + 1)}
                     type="button"
@@ -512,7 +512,7 @@ export function ManagerShell() {
                 </div>
                 <div className="flex gap-2">
                   <button
-                    className={`flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-bold transition-all duration-300 ${detail.data.isFavorited
+                    className={`flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-bold transition-all duration-300 ${detail.data.isFavorited
                         ? "bg-[color:var(--cp-favorite)]/15 text-[color:var(--cp-favorite)] ring-1 ring-inset ring-[color:var(--cp-favorite)]/30 hover:bg-[color:var(--cp-favorite)]/25"
                         : "bg-[color:var(--cp-control-surface)]/40 text-[color:var(--cp-text-secondary)] shadow-sm ring-1 ring-inset ring-[rgba(var(--cp-surface1-rgb),0.2)] hover:bg-[color:var(--cp-control-surface-hover)]/60 hover:text-[color:var(--cp-text-primary)]"
                       }`}
@@ -530,7 +530,7 @@ export function ManagerShell() {
                     {detail.data.isFavorited ? "已收藏" : "加入收藏"}
                   </button>
                   <button
-                    className="group relative rounded-xl bg-[color:var(--cp-accent-primary)] px-4 py-2 text-sm font-bold text-cp-base shadow-md shadow-[color:var(--cp-accent-primary)]/10 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg hover:brightness-110 active:translate-y-0"
+                    className="group relative rounded-md bg-[color:var(--cp-accent-primary)] px-4 py-2 text-sm font-bold text-cp-base shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md hover:brightness-110 active:translate-y-0"
                     onClick={() =>
                       pasteMutation.mutate({
                         id: detail.data.id,
@@ -616,7 +616,7 @@ export function ManagerShell() {
                       </p>
                     </div>
                     {detail.data.imageFormat && (
-                      <div className="rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[color:var(--cp-control-surface)]/30">
+                 <div className="rounded-md border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[color:var(--cp-control-surface)]/30">
                         <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--cp-text-muted)]">
                           <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
@@ -668,38 +668,38 @@ export function ManagerShell() {
                     value={draftText}
                   />
 
-                  <div className="flex shrink-0 flex-wrap gap-2 pt-2">
-                    <button
-                      className="rounded-xl border border-[color:var(--cp-border-strong)] bg-[rgba(var(--cp-surface0-rgb),0.3)] px-5 py-2.5 text-sm font-bold text-[color:var(--cp-text-primary)] shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-[color:var(--cp-border-strong)] hover:bg-[rgba(var(--cp-surface1-rgb),0.2)] active:scale-95 disabled:opacity-50"
-                      disabled={updateTextMutation.isPending}
-                      onClick={() =>
-                        updateTextMutation.mutate({
-                          id: detail.data.id,
-                          text: draftText,
-                        })
-                      }
-                      type="button"
-                    >
-                      <span className="flex items-center gap-2">
-                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
-                        </svg>
-                        保存文本修改
-                      </span>
-                    </button>
-                    <button
-                      className="rounded-xl border border-[rgba(var(--cp-red-rgb),0.3)] bg-[rgba(var(--cp-red-rgb),0.05)] px-5 py-2.5 text-sm font-bold text-[color:var(--cp-danger)] transition-all duration-300 hover:bg-[rgba(var(--cp-red-rgb),0.15)] hover:border-[rgba(var(--cp-red-rgb),0.5)] active:scale-95 disabled:opacity-50"
-                      disabled={deleteMutation.isPending}
-                      onClick={() => {
-                        deleteMutation.mutate(detail.data.id, {
-                          onSuccess: () => setSelectedItemId(null),
-                        });
-                      }}
-                      type="button"
-                    >
-                      删除记录
-                    </button>
-                  </div>
+                   <div className="flex shrink-0 flex-wrap gap-2 pt-2">
+                     <button
+                       className="rounded-md border border-[color:var(--cp-border-medium)] bg-[rgba(var(--cp-surface0-rgb),0.3)] px-5 py-2.5 text-sm font-bold text-[color:var(--cp-text-primary)] shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-[color:var(--cp-border-medium)] hover:bg-[rgba(var(--cp-surface1-rgb),0.2)] active:scale-95 disabled:opacity-50"
+                       disabled={updateTextMutation.isPending}
+                       onClick={() =>
+                         updateTextMutation.mutate({
+                           id: detail.data.id,
+                           text: draftText,
+                         })
+                       }
+                       type="button"
+                     >
+                       <span className="flex items-center gap-2">
+                         <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                           <path strokeLinecap="round" strokeLinejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                         </svg>
+                         保存文本修改
+                       </span>
+                     </button>
+                     <button
+                       className="rounded-md border border-[rgba(var(--cp-red-rgb),0.3)] bg-[rgba(var(--cp-red-rgb),0.05)] px-5 py-2.5 text-sm font-bold text-[color:var(--cp-danger)] transition-all duration-300 hover:bg-[rgba(var(--cp-red-rgb),0.15)] hover:border-[rgba(var(--cp-red-rgb),0.5)] active:scale-95 disabled:opacity-50"
+                       disabled={deleteMutation.isPending}
+                       onClick={() => {
+                         deleteMutation.mutate(detail.data.id, {
+                           onSuccess: () => setSelectedItemId(null),
+                         });
+                       }}
+                       type="button"
+                     >
+                       删除记录
+                     </button>
+                   </div>
                 </>
               ) : (
                 <>
@@ -713,7 +713,7 @@ export function ManagerShell() {
                           : "该类型记录不支持文本编辑"}
                     </p>
                     {detail.data.type === "file" && (
-                      <div className="mt-4 w-full rounded-xl border border-[rgba(var(--cp-surface2-rgb),0.5)] bg-cp-mantle p-4 text-left dark:border-[rgba(var(--cp-surface1-rgb),0.3)] dark:bg-[rgba(var(--cp-surface0-rgb),0.2)]">
+                      <div className="mt-4 w-full rounded-md border border-[rgba(var(--cp-surface2-rgb),0.5)] bg-cp-mantle p-4 text-left dark:border-[rgba(var(--cp-surface1-rgb),0.3)] dark:bg-[rgba(var(--cp-surface0-rgb),0.2)]">
                         <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-[color:var(--cp-text-muted)]">
                           文件路径
                         </p>
@@ -727,25 +727,25 @@ export function ManagerShell() {
                       </div>
                     )}
                   </div>
-                  <div className="flex shrink-0 flex-wrap gap-2 pt-2">
-                    <button
-                      className="rounded-xl border border-[rgba(var(--cp-red-rgb),0.3)] bg-[rgba(var(--cp-red-rgb),0.05)] px-5 py-2.5 text-sm font-bold text-[color:var(--cp-danger)] transition-all duration-300 hover:bg-[rgba(var(--cp-red-rgb),0.15)] hover:border-[rgba(var(--cp-red-rgb),0.5)] active:scale-95 disabled:opacity-50"
-                      disabled={deleteMutation.isPending}
-                      onClick={() => {
-                        deleteMutation.mutate(detail.data.id, {
-                          onSuccess: () => setSelectedItemId(null),
-                        });
-                      }}
-                      type="button"
-                    >
-                      删除记录
-                    </button>
-                  </div>
+                   <div className="flex shrink-0 flex-wrap gap-2 pt-2">
+                     <button
+                       className="rounded-md border border-[rgba(var(--cp-red-rgb),0.3)] bg-[rgba(var(--cp-red-rgb),0.05)] px-5 py-2.5 text-sm font-bold text-[color:var(--cp-danger)] transition-all duration-300 hover:bg-[rgba(var(--cp-red-rgb),0.15)] hover:border-[rgba(var(--cp-red-rgb),0.5)] active:scale-95 disabled:opacity-50"
+                       disabled={deleteMutation.isPending}
+                       onClick={() => {
+                         deleteMutation.mutate(detail.data.id, {
+                           onSuccess: () => setSelectedItemId(null),
+                         });
+                       }}
+                       type="button"
+                     >
+                       删除记录
+                     </button>
+                   </div>
                 </>
               )}
 
               {pasteMutation.data ? (
-                <p className="shrink-0 rounded-2xl bg-[color:var(--cp-favorite)]/15 px-4 py-3 text-sm font-bold text-[color:var(--cp-favorite)] ring-1 ring-inset ring-[color:var(--cp-favorite)]/20 animate-in fade-in slide-in-from-bottom-2">
+                <p className="shrink-0 rounded-md bg-[color:var(--cp-favorite)]/15 px-4 py-3 text-sm font-bold text-[color:var(--cp-favorite)] ring-1 ring-inset ring-[color:var(--cp-favorite)]/20 animate-in fade-in slide-in-from-bottom-2">
                   {pasteMutation.data.message}
                 </p>
               ) : null}
@@ -814,7 +814,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
       </div>
 
       {errorMessage ? (
-        <div className="flex items-start justify-between gap-3 rounded-2xl bg-[color:var(--cp-danger)]/15 px-4 py-3 text-sm font-bold text-[color:var(--cp-danger)] ring-1 ring-inset ring-[color:var(--cp-danger)]/20">
+        <div className="flex items-start justify-between gap-3 rounded-md bg-[color:var(--cp-danger)]/15 px-4 py-3 text-sm font-bold text-[color:var(--cp-danger)] ring-1 ring-inset ring-[color:var(--cp-danger)]/20">
           <p className="leading-relaxed">{errorMessage}</p>
           <button
             className="shrink-0 text-xs font-bold uppercase tracking-wider transition-opacity hover:opacity-80"
@@ -829,7 +829,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
       <label className="block">
         <span className="mb-2.5 block text-[13px] font-bold text-[color:var(--cp-text-primary)]">全局快捷键</span>
         <input
-          className="w-full rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.5)] bg-cp-mantle px-5 py-3.5 text-sm font-medium outline-none transition-all focus:border-[rgba(var(--cp-lavender-rgb),0.4)] focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[rgba(var(--cp-lavender-rgb),0.1)] dark:border-[rgba(var(--cp-surface1-rgb),0.4)] dark:bg-[rgba(var(--cp-surface0-rgb),0.3)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
+          className="w-full rounded-md border border-[rgba(var(--cp-surface1-rgb),0.5)] bg-cp-mantle px-5 py-3.5 text-sm font-medium outline-none transition-all focus:border-[rgba(var(--cp-accent-primary-rgb),0.4)] focus:bg-[color:var(--cp-window-shell)] focus:ring-2 focus:ring-[rgba(var(--cp-accent-primary-rgb),0.1)] dark:border-[rgba(var(--cp-surface1-rgb),0.4)] dark:bg-[rgba(var(--cp-surface0-rgb),0.3)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
           onChange={(event) => setShortcut(event.target.value)}
           value={shortcut}
         />
@@ -838,7 +838,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
       <label className="block">
         <span className="mb-2.5 block text-[13px] font-bold text-[color:var(--cp-text-primary)]">历史记录上限</span>
         <input
-          className="w-full rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.5)] bg-cp-mantle px-5 py-3.5 text-sm font-medium outline-none transition-all focus:border-[rgba(var(--cp-lavender-rgb),0.4)] focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[rgba(var(--cp-lavender-rgb),0.1)] dark:border-[rgba(var(--cp-surface1-rgb),0.4)] dark:bg-[rgba(var(--cp-surface0-rgb),0.3)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
+          className="w-full rounded-md border border-[rgba(var(--cp-surface1-rgb),0.5)] bg-cp-mantle px-5 py-3.5 text-sm font-medium outline-none transition-all focus:border-[rgba(var(--cp-accent-primary-rgb),0.4)] focus:bg-[color:var(--cp-window-shell)] focus:ring-2 focus:ring-[rgba(var(--cp-accent-primary-rgb),0.1)] dark:border-[rgba(var(--cp-surface1-rgb),0.4)] dark:bg-[rgba(var(--cp-surface0-rgb),0.3)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
           min={100}
           onChange={(event) => setHistoryLimit(Number(event.target.value) || 1000)}
           step={100}
@@ -850,7 +850,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
       <label className="block">
         <span className="mb-2.5 block text-[13px] font-bold text-[color:var(--cp-text-primary)]">速贴窗口记录数</span>
         <input
-          className="w-full rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.5)] bg-cp-mantle px-5 py-3.5 text-sm font-medium outline-none transition-all focus:border-[rgba(var(--cp-lavender-rgb),0.4)] focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[rgba(var(--cp-lavender-rgb),0.1)] dark:border-[rgba(var(--cp-surface1-rgb),0.4)] dark:bg-[rgba(var(--cp-surface0-rgb),0.3)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
+          className="w-full rounded-md border border-[rgba(var(--cp-surface1-rgb),0.5)] bg-cp-mantle px-5 py-3.5 text-sm font-medium outline-none transition-all focus:border-[rgba(var(--cp-accent-primary-rgb),0.4)] focus:bg-[color:var(--cp-window-shell)] focus:ring-2 focus:ring-[rgba(var(--cp-accent-primary-rgb),0.1)] dark:border-[rgba(var(--cp-surface1-rgb),0.4)] dark:bg-[rgba(var(--cp-surface0-rgb),0.3)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
           max={1000}
           min={9}
           onChange={(event) => setPickerRecordLimit(Number(event.target.value) || 50)}
@@ -867,8 +867,8 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
         <div className="space-y-3">
           {themeModeOptions.map((option) => (
             <label
-              className={`flex cursor-pointer items-start gap-3 rounded-2xl border px-5 py-4 transition-all duration-300 ${themeMode === option.value
-                  ? "border-[rgba(var(--cp-lavender-rgb),0.4)] bg-[rgba(var(--cp-lavender-rgb),0.05)] ring-1 ring-[rgba(var(--cp-lavender-rgb),0.1)]"
+              className={`flex cursor-pointer items-start gap-3 rounded-md border px-5 py-4 transition-all duration-300 ${themeMode === option.value
+                  ? "border-[rgba(var(--cp-accent-primary-rgb),0.4)] bg-[rgba(var(--cp-accent-primary-rgb),0.05)] ring-1 ring-[rgba(var(--cp-accent-primary-rgb),0.1)]"
                   : "border-[rgba(var(--cp-surface1-rgb),0.3)] bg-cp-mantle hover:border-[rgba(var(--cp-surface1-rgb),0.4)] hover:bg-[rgba(var(--cp-surface1-rgb),0.15)]"
                 }`}
               key={option.value}
@@ -896,8 +896,8 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
         <div className="space-y-3">
           {pickerPositionOptions.map((option) => (
             <label
-              className={`flex cursor-pointer items-start gap-3 rounded-2xl border px-5 py-4 transition-all duration-300 ${pickerPositionMode === option.value
-                  ? "border-[rgba(var(--cp-lavender-rgb),0.4)] bg-[rgba(var(--cp-lavender-rgb),0.05)] ring-1 ring-[rgba(var(--cp-lavender-rgb),0.1)]"
+              className={`flex cursor-pointer items-start gap-3 rounded-md border px-5 py-4 transition-all duration-300 ${pickerPositionMode === option.value
+                  ? "border-[rgba(var(--cp-accent-primary-rgb),0.4)] bg-[rgba(var(--cp-accent-primary-rgb),0.05)] ring-1 ring-[rgba(var(--cp-accent-primary-rgb),0.1)]"
                   : "border-[rgba(var(--cp-surface1-rgb),0.3)] bg-cp-mantle hover:border-[rgba(var(--cp-surface1-rgb),0.4)] hover:bg-[rgba(var(--cp-surface1-rgb),0.15)]"
                 }`}
               key={option.value}
@@ -923,7 +923,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
       <label className="block">
         <span className="mb-2.5 block text-[13px] font-bold text-[color:var(--cp-text-primary)]">排除应用</span>
         <textarea
-          className="w-full rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.5)] bg-cp-mantle px-5 py-3.5 text-sm font-medium leading-relaxed outline-none transition-all focus:border-[rgba(var(--cp-lavender-rgb),0.4)] focus:bg-[color:var(--cp-window-shell)] focus:ring-4 focus:ring-[rgba(var(--cp-lavender-rgb),0.1)] dark:border-[rgba(var(--cp-surface1-rgb),0.4)] dark:bg-[rgba(var(--cp-surface0-rgb),0.3)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
+          className="w-full rounded-md border border-[rgba(var(--cp-surface1-rgb),0.5)] bg-cp-mantle px-5 py-3.5 text-sm font-medium leading-relaxed outline-none transition-all focus:border-[rgba(var(--cp-accent-primary-rgb),0.4)] focus:bg-[color:var(--cp-window-shell)] focus:ring-2 focus:ring-[rgba(var(--cp-accent-primary-rgb),0.1)] dark:border-[rgba(var(--cp-surface1-rgb),0.4)] dark:bg-[rgba(var(--cp-surface0-rgb),0.3)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
           onChange={(event) => setExcludedAppsText(event.target.value)}
           placeholder={"每行一个可执行文件名，例如：\nKeePass.exe\nWindowsTerminal.exe"}
           value={excludedAppsText}
@@ -931,7 +931,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
       </label>
 
       <div className="space-y-3">
-        <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-cp-mantle px-5 py-4 transition-all duration-300 hover:border-[rgba(var(--cp-surface1-rgb),0.4)]/30 hover:bg-[rgba(var(--cp-surface1-rgb),0.2)]">
+        <label className="flex cursor-pointer items-center gap-3 rounded-md border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-cp-mantle px-5 py-4 transition-all duration-300 hover:border-[rgba(var(--cp-surface1-rgb),0.4)]/30 hover:bg-[rgba(var(--cp-surface1-rgb),0.2)]">
           <input
             className="h-4 w-4 rounded border-[rgba(var(--cp-surface1-rgb),0.4)] bg-cp-base text-[color:var(--cp-accent-primary)] focus:ring-[color:var(--cp-accent-primary)] dark:bg-[color:var(--cp-control-surface)]"
             checked={launchOnStartup}
@@ -948,7 +948,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
         </label>
 
         <label
-          className={`flex items-center gap-3 rounded-2xl border px-5 py-4 transition-all duration-300 ${launchOnStartup
+          className={`flex items-center gap-3 rounded-md border px-5 py-4 transition-all duration-300 ${launchOnStartup
               ? "cursor-pointer border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[rgba(var(--cp-surface0-rgb),0.2)] hover:border-[rgba(var(--cp-surface1-rgb),0.4)]/30 hover:bg-[rgba(var(--cp-surface1-rgb),0.3)]"
               : "cursor-not-allowed border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[rgba(var(--cp-surface0-rgb),0.1)] text-[color:var(--cp-text-muted)]"
             }`}
@@ -963,7 +963,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
           <span className={`text-sm font-bold transition-colors ${launchOnStartup ? "text-[color:var(--cp-text-secondary)]" : "text-[color:var(--cp-text-muted)]"}`}>开机自启时静默启动</span>
         </label>
 
-        <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-cp-mantle px-5 py-4 transition-all duration-300 hover:border-[rgba(var(--cp-surface1-rgb),0.4)]/30 hover:bg-[rgba(var(--cp-surface1-rgb),0.2)]">
+        <label className="flex cursor-pointer items-center gap-3 rounded-md border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-cp-mantle px-5 py-4 transition-all duration-300 hover:border-[rgba(var(--cp-surface1-rgb),0.4)]/30 hover:bg-[rgba(var(--cp-surface1-rgb),0.2)]">
           <input
             className="h-4 w-4 rounded border-[rgba(var(--cp-surface1-rgb),0.4)] bg-cp-base text-[color:var(--cp-accent-primary)] focus:ring-[color:var(--cp-accent-primary)] dark:bg-[color:var(--cp-control-surface)]"
             checked={restoreClipboardAfterPaste}
@@ -973,7 +973,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
           <span className="text-sm font-bold text-[color:var(--cp-text-secondary)]">回贴后恢复原始剪贴板</span>
         </label>
 
-        <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-cp-mantle px-5 py-4 transition-all duration-300 hover:border-[rgba(var(--cp-surface1-rgb),0.4)]/30 hover:bg-[rgba(var(--cp-surface1-rgb),0.2)]">
+        <label className="flex cursor-pointer items-center gap-3 rounded-md border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-cp-mantle px-5 py-4 transition-all duration-300 hover:border-[rgba(var(--cp-surface1-rgb),0.4)]/30 hover:bg-[rgba(var(--cp-surface1-rgb),0.2)]">
           <input
             className="h-4 w-4 rounded border-[rgba(var(--cp-surface1-rgb),0.4)] bg-cp-base text-[color:var(--cp-accent-primary)] focus:ring-[color:var(--cp-accent-primary)] dark:bg-[color:var(--cp-control-surface)]"
             checked={pauseMonitoring}
@@ -986,7 +986,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
 
       <div className="pt-2">
         <button
-          className="rounded-2xl bg-[color:var(--cp-accent-primary)] px-8 py-4 text-sm font-bold text-cp-base shadow-lg shadow-[color:var(--cp-accent-primary)]/20 transition-all hover:brightness-110 hover:shadow-xl active:scale-95 disabled:opacity-50"
+          className="rounded-md bg-[color:var(--cp-accent-primary)] px-8 py-4 text-sm font-bold text-cp-base shadow-sm transition-all hover:brightness-110 hover:shadow-md active:scale-95 disabled:opacity-50"
           disabled={isPending}
           onClick={() =>
             onSave({
