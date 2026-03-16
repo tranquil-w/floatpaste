@@ -35,20 +35,20 @@ import {
 
 // --- 样式常量抽象 ---
 const STYLES = {
-   logoBadge: "inline-flex items-center gap-2 rounded-full border border-[color:var(--cp-accent-primary)]/20 bg-[color:var(--cp-accent-primary)]/10 pl-1.5 pr-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-[color:var(--cp-accent-primary)] shadow-sm",
-   logoIcon: "flex h-5 w-5 items-center justify-center rounded-full bg-[color:var(--cp-accent-primary)] text-cp-base shadow-sm",
-   shortcutCard: "relative shrink-0 overflow-hidden rounded-lg bg-[color:var(--cp-card-surface)]/40 px-6 py-6 text-[color:var(--cp-text-primary)] shadow-sm ring-1 ring-[color:var(--cp-border-soft)] transition-transform duration-500 hover:scale-[1.01] dark:bg-[color:var(--cp-card-surface)]/30 dark:shadow-none",
-   shortcutDot: "h-1.5 w-1.5 rounded-full bg-[color:var(--cp-accent-primary)] shadow-[0_0_8px_rgba(224,122,77,0.3)]",
-   favoriteItem: "group w-full rounded-md border border-[color:var(--cp-border-soft)] bg-cp-mantle/50 px-4 py-3 text-left transition-all duration-300 hover:-translate-y-0.5 hover:border-[color:var(--cp-border-medium)] hover:bg-cp-mantle dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[rgba(var(--cp-surface0-rgb),0.4)]",
-   primaryButton: "group relative flex w-full items-center justify-center gap-2 rounded-md bg-[color:var(--cp-accent-primary)] px-4 py-3.5 text-sm font-bold text-cp-base shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md hover:brightness-110 active:translate-y-0",
+   logoBadge: "inline-flex items-center gap-2 rounded-full border border-[color:var(--cp-accent-primary)]/20 bg-[color:var(--cp-accent-primary)]/10 pl-1.5 pr-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-[color:var(--cp-accent-primary)] shadow-none",
+   logoIcon: "flex h-5 w-5 items-center justify-center rounded-full bg-[color:var(--cp-accent-primary)] text-cp-base shadow-none",
+   shortcutCard: "relative shrink-0 overflow-hidden rounded-lg bg-[color:var(--cp-card-surface)]/40 px-6 py-6 text-[color:var(--cp-text-primary)] shadow-xs ring-1 ring-[color:var(--cp-border-soft)] transition-transform duration-500 hover:scale-[1.01] dark:bg-[color:var(--cp-card-surface)]/30 dark:shadow-none",
+   shortcutDot: "h-1.5 w-1.5 rounded-full bg-[color:var(--cp-accent-primary)] shadow-none",
+   favoriteItem: "group w-full rounded-md border border-[color:var(--cp-border-soft)] bg-cp-mantle/50 px-4 py-3 text-left transition-all duration-300 hover:border-[color:var(--cp-border-medium)] hover:bg-cp-mantle dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[rgba(var(--cp-surface0-rgb),0.4)]",
+   primaryButton: "group relative flex w-full items-center justify-center gap-2 rounded-md bg-[color:var(--cp-accent-primary)] px-4 py-3.5 text-sm font-bold text-cp-base shadow-sm transition-all duration-300 hover:brightness-110 active:translate-y-0",
    viewModeToggle: (active: boolean) => `flex items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-bold transition-all duration-300 ${active
-    ? "bg-[color:var(--cp-window-shell)] text-[color:var(--cp-text-primary)] shadow-sm ring-1 ring-[color:var(--cp-border-medium)]"
+     ? "bg-[color:var(--cp-window-shell)] text-[color:var(--cp-text-primary)] shadow-none ring-1 ring-[color:var(--cp-border-medium)]"
     : "text-[color:var(--cp-text-secondary)] hover:text-[color:var(--cp-text-primary)] hover:bg-[color:var(--cp-control-surface-hover)]/40"
     }`,
    searchInput: "w-full rounded-md border border-[color:var(--cp-border-medium)] bg-cp-mantle py-3 pl-11 pr-5 text-sm outline-none backdrop-blur-sm transition-all duration-300 placeholder:text-[color:var(--cp-text-muted)] focus:border-[rgba(var(--cp-accent-primary-rgb),0.4)] focus:bg-[color:var(--cp-window-shell)] focus:ring-2 focus:ring-[rgba(var(--cp-accent-primary-rgb),0.1)] dark:bg-[rgba(var(--cp-surface0-rgb),0.3)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]",
    historyItem: (selected: boolean) => `group w-full rounded-md border px-6 py-5 text-left transition-all duration-300 ${selected
-    ? "relative z-10 scale-[1.01] border-[rgba(var(--cp-accent-primary-rgb),0.6)] bg-cp-mantle shadow-sm ring-1 ring-[rgba(var(--cp-accent-primary-rgb),0.3)] dark:border-[rgba(var(--cp-accent-primary-rgb),0.5)] dark:bg-[rgba(var(--cp-surface0-rgb),0.6)] dark:shadow-none"
-    : "border-[color:var(--cp-border-soft)] bg-cp-mantle/30 hover:-translate-y-0.5 hover:border-[color:var(--cp-border-medium)] hover:bg-cp-mantle/60 hover:shadow-sm dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
+    ? "relative z-10 scale-[1.01] border-[rgba(var(--cp-accent-primary-rgb),0.6)] bg-cp-mantle shadow-xs ring-1 ring-[rgba(var(--cp-accent-primary-rgb),0.3)] dark:border-[rgba(var(--cp-accent-primary-rgb),0.5)] dark:bg-[rgba(var(--cp-surface0-rgb),0.6)] dark:shadow-none"
+    : "border-[color:var(--cp-border-soft)] bg-cp-mantle/30 hover:border-[color:var(--cp-border-medium)] hover:bg-cp-mantle/60 dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
     }`,
    detailEditor: "min-h-[200px] flex-1 w-full resize-none rounded-md border border-[color:var(--cp-border-medium)] bg-cp-mantle px-5 py-5 text-[14px] leading-relaxed outline-none transition-all duration-300 focus:border-[rgba(var(--cp-accent-primary-rgb),0.4)] focus:bg-[color:var(--cp-window-shell)] focus:ring-2 focus:ring-[rgba(var(--cp-accent-primary-rgb),0.1)] dark:bg-[rgba(var(--cp-surface0-rgb),0.3)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]",
 };
@@ -370,7 +370,7 @@ export function ManagerShell() {
                     value={keyword}
                   />
                 </div>
-                <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-[color:var(--cp-border-soft)] bg-cp-mantle px-5 py-3 text-sm font-semibold text-[color:var(--cp-text-secondary)] shadow-sm transition-all duration-300 hover:border-[color:var(--cp-border-medium)] hover:bg-cp-mantle/80 hover:text-[color:var(--cp-text-primary)] active:scale-95">
+                <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-[color:var(--cp-border-soft)] bg-cp-mantle px-5 py-3 text-sm font-semibold text-[color:var(--cp-text-secondary)] transition-all duration-300 hover:border-[color:var(--cp-border-medium)] hover:bg-cp-mantle/80 hover:text-[color:var(--cp-text-primary)] active:scale-95">
                   <input
                     className="h-4 w-4 rounded border-[color:var(--cp-border-strong)] bg-cp-base text-[color:var(--cp-accent-primary)] focus:ring-[color:var(--cp-accent-primary)]"
                     checked={favoritedOnly}
@@ -414,7 +414,7 @@ export function ManagerShell() {
                             </p>
                           </div>
                           <div className="flex shrink-0 flex-col items-end gap-2">
-                            <span className="inline-flex items-center rounded-full border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[color:var(--cp-control-surface)]/50 px-2.5 py-1 text-[10px] font-bold text-[color:var(--cp-text-muted)] shadow-sm">
+                            <span className="inline-flex items-center rounded-full border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[color:var(--cp-control-surface)]/50 px-2.5 py-1 text-[10px] font-bold text-[color:var(--cp-text-muted)] shadow-none">
                               {getClipTypeLabel(item)}
                             </span>
                             {item.isFavorited ? (
@@ -456,7 +456,7 @@ export function ManagerShell() {
                 <span>{totalCount === 0 ? "当前没有可显示记录" : `当前显示第 ${pageStart}-${pageEnd} 条`}</span>
                 <div className="flex items-center gap-2">
                   <button
-                    className="flex items-center gap-1.5 rounded-md bg-[color:var(--cp-control-surface)]/40 px-3.5 py-2 text-xs font-bold text-[color:var(--cp-text-secondary)] shadow-sm ring-1 ring-inset ring-[rgba(var(--cp-surface1-rgb),0.2)] transition-all hover:bg-[color:var(--cp-control-surface-hover)]/60 hover:text-[color:var(--cp-text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
+                    className="flex items-center gap-1.5 rounded-md bg-[color:var(--cp-control-surface)]/40 px-3.5 py-2 text-xs font-bold text-[color:var(--cp-text-secondary)] shadow-xs ring-1 ring-inset ring-[rgba(var(--cp-surface1-rgb),0.2)] transition-all hover:bg-[color:var(--cp-control-surface-hover)]/60 hover:text-[color:var(--cp-text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
                     disabled={!hasPreviousPage}
                     onClick={() => setPageIndex((current) => Math.max(current - 1, 0))}
                     type="button"
@@ -467,7 +467,7 @@ export function ManagerShell() {
                     上一页
                   </button>
                   <button
-                    className="flex items-center gap-1.5 rounded-md bg-[color:var(--cp-control-surface)]/40 px-3.5 py-2 text-xs font-bold text-[color:var(--cp-text-secondary)] shadow-sm ring-1 ring-inset ring-[rgba(var(--cp-surface1-rgb),0.2)] transition-all hover:bg-[color:var(--cp-control-surface-hover)]/60 hover:text-[color:var(--cp-text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
+                    className="flex items-center gap-1.5 rounded-md bg-[color:var(--cp-control-surface)]/40 px-3.5 py-2 text-xs font-bold text-[color:var(--cp-text-secondary)] shadow-xs ring-1 ring-inset ring-[rgba(var(--cp-surface1-rgb),0.2)] transition-all hover:bg-[color:var(--cp-control-surface-hover)]/60 hover:text-[color:var(--cp-text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
                     disabled={!hasNextPage}
                     onClick={() => setPageIndex((current) => current + 1)}
                     type="button"
@@ -512,9 +512,9 @@ export function ManagerShell() {
                 </div>
                 <div className="flex gap-2">
                   <button
-                    className={`flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-bold transition-all duration-300 ${detail.data.isFavorited
+                     className={`flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-bold transition-all duration-300 ${detail.data.isFavorited
                         ? "bg-[color:var(--cp-favorite)]/15 text-[color:var(--cp-favorite)] ring-1 ring-inset ring-[color:var(--cp-favorite)]/30 hover:bg-[color:var(--cp-favorite)]/25"
-                        : "bg-[color:var(--cp-control-surface)]/40 text-[color:var(--cp-text-secondary)] shadow-sm ring-1 ring-inset ring-[rgba(var(--cp-surface1-rgb),0.2)] hover:bg-[color:var(--cp-control-surface-hover)]/60 hover:text-[color:var(--cp-text-primary)]"
+                        : "bg-[color:var(--cp-control-surface)]/40 text-[color:var(--cp-text-secondary)] shadow-none ring-1 ring-inset ring-[rgba(var(--cp-surface1-rgb),0.2)] hover:bg-[color:var(--cp-control-surface-hover)]/60 hover:text-[color:var(--cp-text-primary)]"
                       }`}
                     onClick={() =>
                       favoritedMutation.mutate({
@@ -530,7 +530,7 @@ export function ManagerShell() {
                     {detail.data.isFavorited ? "已收藏" : "加入收藏"}
                   </button>
                   <button
-                    className="group relative rounded-md bg-[color:var(--cp-accent-primary)] px-4 py-2 text-sm font-bold text-cp-base shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md hover:brightness-110 active:translate-y-0"
+                    className="group relative rounded-md bg-[color:var(--cp-accent-primary)] px-4 py-2 text-sm font-bold text-cp-base shadow-sm transition-all duration-300 hover:brightness-110 active:translate-y-0"
                     onClick={() =>
                       pasteMutation.mutate({
                         id: detail.data.id,
@@ -670,7 +670,7 @@ export function ManagerShell() {
 
                    <div className="flex shrink-0 flex-wrap gap-2 pt-2">
                      <button
-                       className="rounded-md border border-[color:var(--cp-border-medium)] bg-[rgba(var(--cp-surface0-rgb),0.3)] px-5 py-2.5 text-sm font-bold text-[color:var(--cp-text-primary)] shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-[color:var(--cp-border-medium)] hover:bg-[rgba(var(--cp-surface1-rgb),0.2)] active:scale-95 disabled:opacity-50"
+                       className="rounded-md border border-[color:var(--cp-border-medium)] bg-[rgba(var(--cp-surface0-rgb),0.3)] px-5 py-2.5 text-sm font-bold text-[color:var(--cp-text-primary)] shadow-none transition-all duration-300 hover:border-[color:var(--cp-border-medium)] hover:bg-[rgba(var(--cp-surface1-rgb),0.2)] active:scale-95 disabled:opacity-50"
                        disabled={updateTextMutation.isPending}
                        onClick={() =>
                          updateTextMutation.mutate({
@@ -986,7 +986,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
 
       <div className="pt-2">
         <button
-          className="rounded-md bg-[color:var(--cp-accent-primary)] px-8 py-4 text-sm font-bold text-cp-base shadow-sm transition-all hover:brightness-110 hover:shadow-md active:scale-95 disabled:opacity-50"
+          className="rounded-md bg-[color:var(--cp-accent-primary)] px-8 py-4 text-sm font-bold text-cp-base shadow-sm transition-all hover:brightness-110 active:scale-95 disabled:opacity-50"
           disabled={isPending}
           onClick={() =>
             onSave({

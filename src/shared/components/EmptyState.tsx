@@ -11,7 +11,7 @@ export function EmptyState({ title, description }: EmptyStateProps) {
       aria-live="polite"
     >
       <div
-        className="mb-5 flex h-12 w-12 items-center justify-center rounded-full bg-[rgba(var(--cp-surface0-rgb),0.6)] ring-8 ring-[color:var(--cp-window-shell)] shadow-sm"
+        className="mb-5 flex h-12 w-12 items-center justify-center rounded-full bg-[rgba(var(--cp-surface0-rgb),0.6)] ring-8 ring-[color:var(--cp-window-shell)] shadow-none"
         aria-hidden="true"
       >
         <div className="h-4 w-4 rounded-sm bg-[rgba(var(--cp-surface1-rgb),0.8)]" />

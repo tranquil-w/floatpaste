@@ -97,6 +97,12 @@
     /* 语义化卡片表面 */
     --cp-card-surface: var(--cp-base);
     --cp-card-surface-rgb: var(--cp-base-rgb);
+
+    /* macOS 风格阴影系统 */
+    --cp-shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
+    --cp-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.08);
+    --cp-shadow-md: 0 2px 4px rgba(0, 0, 0, 0.08);
+    --cp-shadow-lg: 0 4px 8px rgba(0, 0, 0, 0.06);
   }
 
  /* Graphite Dark Theme (黑灰色系) */
