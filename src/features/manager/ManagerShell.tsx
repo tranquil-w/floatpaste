@@ -236,7 +236,7 @@ export function ManagerShell() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col overflow-y-auto px-4 py-6 text-ink lg:h-screen lg:overflow-hidden md:px-6">
+    <main className="flex min-h-screen flex-col overflow-y-auto px-4 py-6 text-ink lg:h-screen lg:overflow-hidden md:px-6">
       <div className="mx-auto grid w-full max-w-[1600px] flex-1 min-h-0 gap-4 xl:grid-cols-[280px_minmax(360px,1fr)_420px] lg:grid-cols-[260px_minmax(320px,1fr)_380px]">
         <Panel className="flex flex-col gap-5 lg:overflow-hidden min-h-[600px] lg:min-h-0">
           <div className="shrink-0">
@@ -758,7 +758,7 @@ export function ManagerShell() {
           )}
         </Panel>
       </div>
-    </div>
+    </main>
   );
 }
 
@@ -862,8 +862,8 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
         </p>
       </label>
 
-      <label className="block">
-        <span className="mb-2.5 block text-[13px] font-bold text-[color:var(--cp-text-primary)]">界面主题</span>
+      <fieldset className="block border-0 p-0 m-0">
+        <legend className="mb-2.5 block text-[13px] font-bold text-[color:var(--cp-text-primary)]">界面主题</legend>
         <div className="space-y-3">
           {themeModeOptions.map((option) => (
             <label
@@ -889,10 +889,10 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
             </label>
           ))}
         </div>
-      </label>
+      </fieldset>
 
-      <div>
-        <span className="mb-2.5 block text-[13px] font-bold text-[color:var(--cp-text-primary)]">速贴窗口显示位置</span>
+      <fieldset className="border-0 p-0 m-0">
+        <legend className="mb-2.5 block text-[13px] font-bold text-[color:var(--cp-text-primary)]">速贴窗口显示位置</legend>
         <div className="space-y-3">
           {pickerPositionOptions.map((option) => (
             <label
@@ -918,7 +918,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
             </label>
           ))}
         </div>
-      </div>
+      </fieldset>
 
       <label className="block">
         <span className="mb-2.5 block text-[13px] font-bold text-[color:var(--cp-text-primary)]">排除应用</span>

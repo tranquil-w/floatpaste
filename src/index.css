@@ -10,7 +10,7 @@
   /* Mauve */ --cp-mauve: #8839ef;
   /* Red */ --cp-red: #d20f39;
   /* Maroon */ --cp-maroon: #e64553;
-  /* Peach */ --cp-peach: #fe640b;
+  /* Peach (softened coral) */ --cp-peach: #e07a4d;
   /* Yellow */ --cp-yellow: #df8e1d;
   /* Green */ --cp-green: #40a02b;
   /* Teal */ --cp-teal: #179299;
@@ -27,9 +27,9 @@
   /* Surface2 */ --cp-surface2: #acb0be;
   /* Surface1 */ --cp-surface1: #bcc0cc;
   /* Surface0 */ --cp-surface0: #ccd0da;
-  /* Base */ --cp-base: #eff1f5;
-  /* Mantle */ --cp-mantle: #e6e9ef;
-  /* Crust */ --cp-crust: #dce0e8;
+  /* Base (warm cream white) */ --cp-base: #faf8f5;
+  /* Mantle (warm) */ --cp-mantle: #f5f2ed;
+  /* Crust (warm) */ --cp-crust: #ebe7e0;
 
   /* RGB components for rgba() usage */
   --cp-text-rgb: 76, 79, 105;
@@ -39,15 +39,17 @@
   --cp-surface0-rgb: 204, 208, 218;
   --cp-surface1-rgb: 188, 192, 204;
   --cp-surface2-rgb: 172, 176, 190;
-  --cp-base-rgb: 239, 241, 245;
-  --cp-mantle-rgb: 230, 233, 239;
-  --cp-crust-rgb: 220, 224, 232;
+  --cp-base-rgb: 250, 248, 245;
+  --cp-mantle-rgb: 245, 242, 237;
+  --cp-crust-rgb: 235, 231, 224;
   --cp-lavender-rgb: 114, 135, 253;
   --cp-blue-rgb: 30, 102, 245;
   --cp-red-rgb: 210, 15, 57;
   --cp-yellow-rgb: 223, 142, 29;
   --cp-green-rgb: 64, 160, 43;
-
+  --cp-peach-rgb: 224, 122, 77;
+  --cp-maroon-rgb: 230, 69, 83;
+ 
   color: var(--cp-text);
   font-family: "Segoe UI", sans-serif;
   color-scheme: light;
@@ -55,14 +57,14 @@
 }
 
 /* 统一语义化映射：减少 html.dark 中的重复定义 */
-:root,
-html.dark {
-  /* 语义化强调 */
-  --cp-accent-primary: var(--cp-lavender);
-  --cp-accent-primary-strong: var(--cp-blue);
+ :root,
+ html.dark {
+   /* 语义化强调 (暖阳橙风格) */
+   --cp-accent-primary: var(--cp-peach);
+   --cp-accent-primary-strong: var(--cp-maroon);
   --cp-favorite: var(--cp-yellow);
   --cp-success: var(--cp-green);
-  --cp-warning: var(--cp-peach);
+  --cp-warning: var(--cp-yellow);
   --cp-danger: var(--cp-red);
 
   /* 语义化文本 */
@@ -83,65 +85,72 @@ html.dark {
   /* 语义化边框 */
   --cp-border-soft: rgba(var(--cp-surface0-rgb), 0.5);
   --cp-border-strong: rgba(var(--cp-surface1-rgb), 0.6);
-  --cp-focus-ring: rgba(var(--cp-lavender-rgb), 0.4);
+  --cp-focus-ring: rgba(var(--cp-peach-rgb), 0.4);
 
   /* 语义化卡片表面 */
   --cp-card-surface: var(--cp-base);
   --cp-card-surface-rgb: var(--cp-base-rgb);
 }
 
-/* Catppuccin Macchiato (Dark Theme) overrides */
-html.dark {
-  /* 针对深色模式的特定语义微调 */
-  --cp-card-surface: var(--cp-surface0);
-  --cp-card-surface-rgb: var(--cp-surface0-rgb);
-  --cp-border-soft: rgba(var(--cp-surface0-rgb), 0.4);
-  --cp-border-strong: rgba(var(--cp-surface1-rgb), 0.5);
-  
-  /* Rosewater */ --cp-rosewater: #f4dbd6;
-  /* Flamingo */ --cp-flamingo: #f0c6c6;
-  /* Pink */ --cp-pink: #f5bde6;
-  /* Mauve */ --cp-mauve: #c6a0f6;
-  /* Red */ --cp-red: #ed8796;
-  /* Maroon */ --cp-maroon: #ee99a0;
-  /* Peach */ --cp-peach: #f5a97f;
-  /* Yellow */ --cp-yellow: #eccd92;
-  /* Green */ --cp-green: #a6da95;
-  /* Teal */ --cp-teal: #8bd5ca;
-  /* Sky */ --cp-sky: #91d7e3;
-  /* Sapphire */ --cp-sapphire: #7dc4e4;
-  /* Blue */ --cp-blue: #8aadf4;
-  /* Lavender */ --cp-lavender: #b7bdf8;
-  /* Text */ --cp-text: #cad3f5;
-  /* Subtext1 */ --cp-subtext1: #b8c0e0;
-  /* Subtext0 */ --cp-subtext0: #a5adcb;
-  /* Overlay2 */ --cp-overlay2: #939ab7;
-  /* Overlay1 */ --cp-overlay1: #8087a2;
-  /* Overlay0 */ --cp-overlay0: #6e738d;
-  /* Surface2 */ --cp-surface2: #5b6078;
-  /* Surface1 */ --cp-surface1: #494d64;
-  /* Surface0 */ --cp-surface0: #363a4f;
-  /* Base */ --cp-base: #24273a;
-  /* Mantle */ --cp-mantle: #1e2030;
-  /* Crust */ --cp-crust: #181926;
+ /* Graphite Dark Theme (黑灰色系) */
+ html.dark {
+   /* 语义微调 */
+   --cp-card-surface: var(--cp-surface0);
+   --cp-card-surface-rgb: var(--cp-surface0-rgb);
+   --cp-border-soft: rgba(var(--cp-surface0-rgb), 0.4);
+   --cp-border-strong: rgba(var(--cp-surface1-rgb), 0.5);
+   
+   /* 强调色 (适配黑灰背景，调暗) */
+   /* Rosewater */ --cp-rosewater: #d4a99f;
+   /* Flamingo */ --cp-flamingo: #cf9a9a;
+   /* Pink */ --cp-pink: #d691c5;
+   /* Mauve */ --cp-mauve: #b89bd4;
+   /* Red */ --cp-red: #e07a7a;
+   /* Maroon */ --cp-maroon: #d98a8f;
+   /* Peach (darkened for graphite bg) */ --cp-peach: #d4855a;
+   /* Yellow */ --cp-yellow: #d4b86a;
+   /* Green */ --cp-green: #8fb87a;
+   /* Teal */ --cp-teal: #7ab8ad;
+   /* Sky */ --cp-sky: #7ab8c9;
+   /* Sapphire */ --cp-sapphire: #7aabc4;
+   /* Blue */ --cp-blue: #8aace0;
+   /* Lavender */ --cp-lavender: #9aa8e0;
+ 
+   /* 文本色 (灰白系) */
+   /* Text */ --cp-text: #e0e0e0;
+   /* Subtext1 */ --cp-subtext1: #b8b8b8;
+   /* Subtext0 */ --cp-subtext0: #999999;
+   /* Overlay2 */ --cp-overlay2: #7a7a7a;
+   /* Overlay1 */ --cp-overlay1: #666666;
+   /* Overlay0 */ --cp-overlay0: #525252;
+ 
+   /* 表面色 (黑灰系) */
+   /* Surface2 */ --cp-surface2: #404040;
+   /* Surface1 */ --cp-surface1: #333333;
+   /* Surface0 */ --cp-surface0: #262626;
+   /* Base */ --cp-base: #1a1a1a;
+   /* Mantle */ --cp-mantle: #141414;
+   /* Crust */ --cp-crust: #0d0d0d;
+ 
+   /* RGB components */
+   --cp-text-rgb: 224, 224, 224;
+   --cp-subtext0-rgb: 153, 153, 153;
+   --cp-surface0-rgb: 38, 38, 38;
+   --cp-surface1-rgb: 51, 51, 51;
+   --cp-surface2-rgb: 64, 64, 64;
+   --cp-base-rgb: 26, 26, 26;
+   --cp-mantle-rgb: 20, 20, 20;
+   --cp-crust-rgb: 13, 13, 13;
+   --cp-lavender-rgb: 154, 168, 224;
+   --cp-blue-rgb: 138, 172, 224;
+   --cp-red-rgb: 224, 122, 122;
+   --cp-yellow-rgb: 212, 184, 106;
+   --cp-green-rgb: 143, 184, 122;
+   --cp-accent-primary-rgb: 212, 133, 90;
+   --cp-peach-rgb: 212, 133, 90;
+   --cp-maroon-rgb: 217, 138, 143;
 
-  /* RGB components for rgba() usage */
-  --cp-text-rgb: 202, 211, 245;
-  --cp-subtext0-rgb: 165, 173, 203;
-  --cp-surface0-rgb: 54, 58, 79;
-  --cp-surface1-rgb: 73, 77, 100;
-  --cp-surface2-rgb: 91, 96, 120;
-  --cp-base-rgb: 36, 39, 58;
-  --cp-mantle-rgb: 30, 32, 48;
-  --cp-crust-rgb: 24, 25, 38;
-  --cp-lavender-rgb: 183, 189, 248;
-  --cp-blue-rgb: 138, 173, 244;
-  --cp-red-rgb: 237, 135, 150;
-  --cp-yellow-rgb: 236, 205, 146;
-  --cp-green-rgb: 166, 218, 149;
-  --cp-accent-primary-rgb: 183, 189, 248;
-
-  color-scheme: dark;
+   color-scheme: dark;
 }
 
 /* 滚动条样式 */
@@ -177,14 +186,14 @@ body,
   box-sizing: border-box;
 }
 
-body {
-  margin: 0;
-  color: var(--cp-text-primary);
-  background-color: var(--cp-window-shell);
-  transition:
-    background 220ms ease,
-    color 220ms ease;
-}
+ body {
+   margin: 0;
+   color: var(--cp-text-primary);
+   background-color: var(--cp-window-shell);
+   transition:
+     background-color 250ms ease-out,
+     color 250ms ease-out;
+ }
 
 /* 
   Picker 窗口强制透明补丁：必须放在最后以确保最高优先级。
@@ -225,19 +234,59 @@ select {
   background: transparent;
 }
 
-button {
-  cursor: pointer;
-  border: 1px solid transparent;
-  outline: none;
+ button {
+   cursor: pointer;
+   border: 1px solid transparent;
+   outline: none;
+ }
+
+/* Focus-visible styles for keyboard navigation */
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[role="button"]:focus-visible {
+  outline: 2px solid var(--cp-accent-primary);
+  outline-offset: 2px;
 }
 
-input,
-textarea {
-  border: 1px solid transparent;
-  outline: none;
+ input,
+ textarea {
+   border: 1px solid transparent;
+   outline: none;
+ }
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
-::selection {
-  color: var(--cp-base);
+/* Skip link for keyboard navigation */
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: 0;
   background: var(--cp-accent-primary);
+  color: var(--cp-base);
+  padding: 8px;
+  text-decoration: none;
+  z-index: 100;
+  border-radius: 0 0 4px;
+  font-weight: bold;
 }
+
+.skip-link:focus {
+  top: 0;
+}
+
+ ::selection {
+   color: var(--cp-base);
+   background: rgba(var(--cp-peach-rgb), 0.85);
+ }

@@ -24,16 +24,16 @@ import {
 
 // --- 样式常量抽象 ---
 const STYLES = {
-  container: "relative flex h-[calc(100%-2px)] w-[calc(100%-2px)] flex-col overflow-hidden rounded-[18px] border border-[color:var(--cp-border-strong)] bg-[color:var(--cp-window-shell)] shadow-none ring-1 ring-black/5 ring-inset backdrop-blur-xl dark:bg-[color:var(--cp-window-shell)]",
-  header: "flex shrink-0 items-center justify-between border-b border-[rgba(var(--cp-surface1-rgb),0.3)] bg-[rgba(var(--cp-mantle-rgb),0.4)] px-3 py-2 dark:border-[rgba(var(--cp-surface1-rgb),0.2)] dark:bg-[rgba(var(--cp-mantle-rgb),0.7)]",
-  headerDot: "h-2.5 w-2.5 rounded-full bg-[color:var(--cp-accent-primary)] shadow-sm",
-  headerButton: "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold text-[color:var(--cp-text-secondary)] transition-colors hover:bg-[rgba(var(--cp-surface1-rgb),0.3)] hover:text-[color:var(--cp-text-primary)]",
-  itemButton: (selected: boolean) => `group relative flex w-full flex-col gap-1.5 rounded-[12px] px-3 py-2.5 text-left transition-all duration-200 border ${selected
+   container: "relative flex h-[calc(100%-2px)] w-[calc(100%-2px)] flex-col overflow-hidden rounded-[18px] border border-[color:var(--cp-border-strong)] bg-[color:var(--cp-window-shell)] shadow-none ring-1 ring-black/5 ring-inset dark:bg-[color:var(--cp-window-shell)]",
+   header: "flex shrink-0 items-center justify-between border-b border-[rgba(var(--cp-surface1-rgb),0.3)] bg-[rgba(var(--cp-mantle-rgb),0.4)] px-3 py-2 dark:border-[rgba(var(--cp-surface1-rgb),0.2)] dark:bg-[rgba(var(--cp-mantle-rgb),0.7)]",
+   headerDot: "h-2.5 w-2.5 rounded-full bg-[color:var(--cp-accent-primary)] shadow-sm",
+   headerButton: "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold text-[color:var(--cp-text-secondary)] transition-all duration-250 hover:bg-[rgba(var(--cp-surface1-rgb),0.3)] hover:text-[color:var(--cp-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cp-accent-primary)] focus-visible:ring-offset-2",
+  itemButton: (selected: boolean) => `group relative flex w-full flex-col gap-1.5 rounded-[12px] px-3 py-2.5 text-left transition-all duration-250 border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cp-accent-primary)] focus-visible:ring-offset-2 ${selected
     ? "bg-[rgba(var(--cp-lavender-rgb),0.12)] border-[rgba(var(--cp-lavender-rgb),0.3)] shadow-sm dark:bg-[rgba(var(--cp-lavender-rgb),0.15)] dark:border-[rgba(var(--cp-lavender-rgb),0.4)]"
     : "bg-transparent border-transparent hover:bg-[rgba(var(--cp-surface1-rgb),0.2)] dark:hover:bg-[rgba(var(--cp-surface1-rgb),0.3)]"
     }`,
-  itemContent: (selected: boolean) => `${selected ? "text-[color:var(--cp-text-primary)]" : "text-[color:var(--cp-text-primary)]/90 dark:text-[color:var(--cp-text-primary)]/80"} line-clamp-5 text-[13px] font-medium leading-[1.6] tracking-tight break-words [overflow-wrap:anywhere] whitespace-pre-wrap transition-colors`,
-  kbdBadge: (selected: boolean) => `flex h-[16px] min-w-[16px] px-1 items-center justify-center rounded-[5px] font-mono text-[9px] font-bold transition-colors ${selected
+  itemContent: (selected: boolean) => `${selected ? "text-[color:var(--cp-text-primary)]" : "text-[color:var(--cp-text-primary)]/90 dark:text-[color:var(--cp-text-primary)]/80"} line-clamp-5 text-[13px] font-medium leading-[1.6] tracking-tight break-words [overflow-wrap:anywhere] whitespace-pre-wrap transition-colors duration-250`,
+  kbdBadge: (selected: boolean) => `flex h-[16px] min-w-[16px] px-1 items-center justify-center rounded-[5px] font-mono text-[9px] font-bold transition-colors duration-250 ${selected
     ? "bg-[color:var(--cp-accent-primary)] text-cp-base dark:text-cp-mantle"
     : "bg-[rgba(var(--cp-surface0-rgb),0.5)] text-[color:var(--cp-text-secondary)] group-hover:bg-[rgba(var(--cp-surface1-rgb),0.5)] group-hover:text-[color:var(--cp-text-primary)]"
     }`,
