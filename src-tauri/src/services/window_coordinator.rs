@@ -212,7 +212,7 @@ fn ensure_manager_window(app: &AppHandle) -> Result<WebviewWindow, AppError> {
 
     let window = WebviewWindowBuilder::new(app, MANAGER_WINDOW_LABEL, WebviewUrl::default())
         .title(MANAGER_WINDOW_TITLE)
-        .inner_size(1480.0, 920.0)
+        .inner_size(1200.0, 760.0)
         .resizable(true)
         .center()
         .visible(false)

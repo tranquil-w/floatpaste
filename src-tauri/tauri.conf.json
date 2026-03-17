@@ -14,8 +14,8 @@
       {
         "label": "manager",
         "title": "FloatPaste / 浮贴",
-        "width": 1480,
-        "height": 920,
+        "width": 1200,
+        "height": 760,
         "resizable": true,
         "center": true,
         "visible": false

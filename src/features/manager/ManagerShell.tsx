@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { Panel } from "../../shared/ui/Panel";
 import { StatusBadge } from "../../shared/ui/StatusBadge";
 import { EmptyState } from "../../shared/components/EmptyState";
+import { LoadingSpinner } from "../../shared/ui/LoadingSpinner";
 import { showPicker } from "../../bridge/commands";
 import {
   CLIPS_CHANGED_EVENT,
@@ -37,11 +38,11 @@ import {
 const STYLES = {
    logoBadge: "inline-flex items-center gap-2 rounded-full border border-[color:var(--cp-accent-primary)]/20 bg-[color:var(--cp-accent-primary)]/10 pl-1.5 pr-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-[color:var(--cp-accent-primary)] shadow-none",
    logoIcon: "flex h-5 w-5 items-center justify-center rounded-full bg-[color:var(--cp-accent-primary)] text-cp-base shadow-none",
-    shortcutCard: "relative shrink-0 overflow-hidden rounded-lg bg-gradient-to-br from-[color:var(--cp-card-surface)]/40 to-[rgba(var(--cp-peach-rgb),0.06)] px-6 py-6 text-[color:var(--cp-text-primary)] shadow-xs ring-1 ring-[color:var(--cp-border-soft)] transition-all duration-500 hover:scale-[1.01] hover:ring-[rgba(var(--cp-peach-rgb),0.2)] dark:bg-[color:var(--cp-card-surface)]/30 dark:shadow-none",
+    shortcutCard: "relative shrink-0 overflow-hidden rounded-lg bg-[color:var(--cp-card-surface)] px-6 py-6 text-[color:var(--cp-text-primary)] shadow-xs ring-1 ring-[color:var(--cp-border-soft)] transition-all duration-300 hover:ring-[rgba(var(--cp-peach-rgb),0.2)] dark:bg-[color:var(--cp-card-surface)]/30 dark:shadow-none",
     shortcutDot: "h-2 w-2 rounded-full bg-[color:var(--cp-accent-primary)] shadow-sm ring-2 ring-[rgba(var(--cp-peach-rgb),0.2)]",
     favoriteItem: "group w-full rounded-md border border-[color:var(--cp-border-weak)] bg-cp-mantle/50 px-4 py-3 text-left transition-all duration-300 hover:border-[rgba(var(--cp-peach-rgb),0.25)] hover:shadow-sm hover:bg-cp-mantle dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[rgba(var(--cp-surface0-rgb),0.4)]",
-    primaryButton: "group relative flex w-full items-center justify-center gap-2 rounded-md bg-gradient-to-r from-[color:var(--cp-accent-primary)] to-[color:var(--cp-accent-primary-strong)] px-4 py-3.5 text-sm font-bold text-cp-base shadow-sm transition-all duration-300 hover:shadow-md hover:shadow-[rgba(var(--cp-peach-rgb),0.25)] active:translate-y-0",
-    viewModeToggle: (active: boolean) => `flex items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-bold transition-all duration-300 ${active
+    primaryButton: "group relative flex w-full items-center justify-center gap-2 rounded-md bg-[color:var(--cp-accent-primary)] px-4 py-3.5 text-sm font-bold text-cp-base shadow-sm transition-all duration-300 hover:bg-[color:var(--cp-accent-primary-strong)] active:translate-y-0",
+    viewModeToggle: (active: boolean) => `flex items-center justify-center gap-2 whitespace-nowrap rounded-md px-4 py-2.5 text-sm font-bold transition-all duration-300 ${active
       ? "bg-gradient-to-r from-[rgba(var(--cp-peach-rgb),0.15)] to-[rgba(var(--cp-peach-rgb),0.08)] text-[color:var(--cp-accent-primary-strong)] shadow-none ring-1 ring-[rgba(var(--cp-peach-rgb),0.3)]"
      : "text-[color:var(--cp-text-secondary)] hover:text-[color:var(--cp-text-primary)] hover:bg-[color:var(--cp-control-surface-hover)]/40"
      }`,
@@ -250,7 +251,7 @@ export function ManagerShell() {
             </div>
             <h1 className="mt-4 font-display text-[2rem] font-medium tracking-tight text-[color:var(--cp-text-primary)]">资料库窗口</h1>
             <p className="mt-3 text-[13px] leading-relaxed text-[color:var(--cp-text-secondary)]">
-              当前版本已经打通文本、图片、文件记录的入库与基础浏览，搜索、收藏、设置与速贴主链路也已接入。
+              管理文本、图片、文件的剪贴记录，支持搜索、收藏与快捷粘贴。
             </p>
           </div>
 
@@ -272,7 +273,6 @@ export function ManagerShell() {
               <p className="mt-2.5 font-display text-3xl font-medium tracking-wide text-[color:var(--cp-text-primary)]">{settings.data?.shortcut ?? "Ctrl+`"}</p>
               <p className="mt-3 text-xs leading-relaxed text-[color:var(--cp-text-muted)] font-medium">唤起速贴面板进行剪贴板管理</p>
             </div>
-            <div className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-[color:var(--cp-accent-primary)]/10 blur-[40px] transition-all duration-700 group-hover:bg-[color:var(--cp-accent-primary)]/20"></div>
           </div>
 
           <div className="flex min-h-[200px] lg:min-h-0 flex-1 flex-col">
@@ -387,7 +387,11 @@ export function ManagerShell() {
               </div>
 
               <div className="flex-1 space-y-3 overflow-y-auto pr-2 pl-1 py-1">
-                {currentItems.length ? (
+                {clips.isLoading ? (
+                  <div className="flex h-full items-center justify-center">
+                    <LoadingSpinner text="加载历史记录..." />
+                  </div>
+                ) : currentItems.length ? (
                   currentItems.map((item, index) => {
                     const isSelected = item.id === selectedItemId;
                     return (
@@ -496,7 +500,11 @@ export function ManagerShell() {
         </Panel>
 
         <Panel className="flex flex-col gap-4 lg:overflow-hidden min-h-[500px] lg:min-h-0">
-          {detail.data && selectedSummary ? (
+          {detail.isLoading ? (
+            <div className="flex h-full items-center justify-center">
+              <LoadingSpinner text="加载详情..." />
+            </div>
+          ) : detail.data && selectedSummary ? (
             <>
               <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[rgba(var(--cp-surface1-rgb),0.2)] pb-4">
                 <div>
@@ -530,7 +538,7 @@ export function ManagerShell() {
                     {detail.data.isFavorited ? "已收藏" : "加入收藏"}
                   </button>
                   <button
-                    className="group relative rounded-md bg-gradient-to-r from-[color:var(--cp-accent-primary)] to-[color:var(--cp-accent-primary-strong)] px-4 py-2 text-sm font-bold text-cp-base shadow-sm transition-all duration-300 hover:shadow-md hover:shadow-[rgba(var(--cp-peach-rgb),0.25)] active:translate-y-0"
+                    className="group relative rounded-md bg-[color:var(--cp-accent-primary)] px-4 py-2 text-sm font-bold text-cp-base shadow-sm transition-all duration-300 hover:bg-[color:var(--cp-accent-primary-strong)] active:translate-y-0"
                     onClick={() =>
                       pasteMutation.mutate({
                         id: detail.data.id,
@@ -553,111 +561,60 @@ export function ManagerShell() {
                 </div>
               </div>
 
-              <div className="grid shrink-0 gap-3 sm:grid-cols-2">
-                <div className="rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[color:var(--cp-control-surface)]/30">
-                  <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--cp-text-muted)]">
-                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
-                    </svg>
-                    来源应用
-                  </p>
-                  <p className="mt-2 text-[13px] font-bold text-[color:var(--cp-text-primary)]">{selectedSummary.sourceApp ?? "未知来源"}</p>
+              <dl className="grid shrink-0 gap-3 sm:grid-cols-2 text-sm">
+                <div className="flex items-center justify-between sm:block py-2 border-b border-[rgba(var(--cp-surface1-rgb),0.1)]">
+                  <dt className="text-[color:var(--cp-text-muted)]">来源应用</dt>
+                  <dd className="font-medium text-[color:var(--cp-text-primary)] sm:mt-1">{selectedSummary.sourceApp ?? "未知来源"}</dd>
                 </div>
-                <div className="rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[color:var(--cp-control-surface)]/30">
-                  <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--cp-text-muted)]">
-                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    最近使用
-                  </p>
-                  <p className="mt-2 text-[13px] font-bold text-[color:var(--cp-text-primary)]">{formatDateTime(selectedSummary.lastUsedAt)}</p>
+                <div className="flex items-center justify-between sm:block py-2 border-b border-[rgba(var(--cp-surface1-rgb),0.1)]">
+                  <dt className="text-[color:var(--cp-text-muted)]">最近使用</dt>
+                  <dd className="font-medium text-[color:var(--cp-text-primary)] sm:mt-1">{formatDateTime(selectedSummary.lastUsedAt)}</dd>
                 </div>
-                <div className="rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[color:var(--cp-control-surface)]/30">
-                  <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--cp-text-muted)]">
-                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                    </svg>
-                    创建时间
-                  </p>
-                  <p className="mt-2 text-[13px] font-bold text-[color:var(--cp-text-primary)]">{formatDateTime(selectedSummary.createdAt)}</p>
+                <div className="flex items-center justify-between sm:block py-2 border-b border-[rgba(var(--cp-surface1-rgb),0.1)]">
+                  <dt className="text-[color:var(--cp-text-muted)]">创建时间</dt>
+                  <dd className="font-medium text-[color:var(--cp-text-primary)] sm:mt-1">{formatDateTime(selectedSummary.createdAt)}</dd>
                 </div>
-                <div className="rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[color:var(--cp-control-surface)]/30">
-                  <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--cp-text-muted)]">
-                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    更新时间
-                  </p>
-                  <p className="mt-2 text-[13px] font-bold text-[color:var(--cp-text-primary)]">{formatDateTime(selectedSummary.updatedAt)}</p>
+                <div className="flex items-center justify-between sm:block py-2 border-b border-[rgba(var(--cp-surface1-rgb),0.1)]">
+                  <dt className="text-[color:var(--cp-text-muted)]">更新时间</dt>
+                  <dd className="font-medium text-[color:var(--cp-text-primary)] sm:mt-1">{formatDateTime(selectedSummary.updatedAt)}</dd>
                 </div>
                 {/* 图片或文件类型的额外信息 */}
                 {detail.data.type === "image" && (
                   <>
-                    <div className="rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[color:var(--cp-control-surface)]/30">
-                      <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--cp-text-muted)]">
-                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-                        </svg>
-                        尺寸
-                      </p>
-                      <p className="mt-2 text-[13px] font-bold text-[color:var(--cp-text-primary)]">
-                        {detail.data.imageWidth} × {detail.data.imageHeight}
-                      </p>
+                    <div className="flex items-center justify-between sm:block py-2 border-b border-[rgba(var(--cp-surface1-rgb),0.1)]">
+                      <dt className="text-[color:var(--cp-text-muted)]">尺寸</dt>
+                      <dd className="font-medium text-[color:var(--cp-text-primary)] sm:mt-1">{detail.data.imageWidth} × {detail.data.imageHeight}</dd>
                     </div>
-                    <div className="rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[color:var(--cp-control-surface)]/30">
-                      <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--cp-text-muted)]">
-                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-                        </svg>
-                        大小
-                      </p>
-                      <p className="mt-2 text-[13px] font-bold text-[color:var(--cp-text-primary)]">
-                        {formatBytes(detail.data.fileSize)}
-                      </p>
+                    <div className="flex items-center justify-between sm:block py-2 border-b border-[rgba(var(--cp-surface1-rgb),0.1)]">
+                      <dt className="text-[color:var(--cp-text-muted)]">大小</dt>
+                      <dd className="font-medium text-[color:var(--cp-text-primary)] sm:mt-1">{formatBytes(detail.data.fileSize)}</dd>
                     </div>
                     {detail.data.imageFormat && (
-                 <div className="rounded-md border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[color:var(--cp-control-surface)]/30">
-                        <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--cp-text-muted)]">
-                          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-                          </svg>
-                          格式
-                        </p>
-                        <p className="mt-2 text-[13px] font-bold text-[color:var(--cp-text-primary)]">{detail.data.imageFormat}</p>
+                      <div className="flex items-center justify-between sm:block py-2 border-b border-[rgba(var(--cp-surface1-rgb),0.1)]">
+                        <dt className="text-[color:var(--cp-text-muted)]">格式</dt>
+                        <dd className="font-medium text-[color:var(--cp-text-primary)] sm:mt-1">{detail.data.imageFormat}</dd>
                       </div>
                     )}
                   </>
                 )}
                 {detail.data.type === "file" && (
                   <>
-                    <div className="rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[color:var(--cp-control-surface)]/30">
-                      <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--cp-text-muted)]">
-                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                        </svg>
-                        {getFileCountLabel(detail.data.fileCount, detail.data.directoryCount)}
-                      </p>
-                      <p className="mt-2 text-[13px] font-bold text-[color:var(--cp-text-primary)]">
-                        {detail.data.fileCount} 个
-                      </p>
+                    <div className="flex items-center justify-between sm:block py-2 border-b border-[rgba(var(--cp-surface1-rgb),0.1)]">
+                      <dt className="text-[color:var(--cp-text-muted)]">{getFileCountLabel(detail.data.fileCount, detail.data.directoryCount)}</dt>
+                      <dd className="font-medium text-[color:var(--cp-text-primary)] sm:mt-1">{detail.data.fileCount} 个</dd>
                     </div>
-                    <div className="rounded-2xl border border-[rgba(var(--cp-surface1-rgb),0.2)] bg-[color:var(--cp-control-surface)]/30 p-4 transition-all hover:bg-[color:var(--cp-control-surface)]/50 dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[color:var(--cp-control-surface)]/30">
-                      <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--cp-text-muted)]">
-                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-                        </svg>
-                        总大小
-                      </p>
-                      <p className="mt-2 text-[13px] font-bold text-[color:var(--cp-text-primary)]">
+                    <div className="flex items-center justify-between sm:block py-2 border-b border-[rgba(var(--cp-surface1-rgb),0.1)]">
+                      <dt className="text-[color:var(--cp-text-muted)]">总大小</dt>
+                      <dd className="font-medium text-[color:var(--cp-text-primary)] sm:mt-1">
                         {detail.data.directoryCount > 0 ? "未统计" : formatBytes(detail.data.totalSize)}
-                      </p>
-                      {detail.data.directoryCount > 0 ? (
-                        <p className="mt-1 text-[10px] font-medium text-[color:var(--cp-text-muted)]">包含文件夹时默认不递归统计大小。</p>
-                      ) : null}
+                        {detail.data.directoryCount > 0 && (
+                          <span className="ml-2 text-[10px] text-[color:var(--cp-text-muted)]">包含文件夹时默认不递归统计大小。</span>
+                        )}
+                      </dd>
                     </div>
                   </>
                 )}
-              </div>
+              </dl>
 
               {/* 根据类型显示内容 */}
               {detail.data.type === "text" ? (
@@ -809,7 +766,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
         <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-[color:var(--cp-text-muted)]">设置</p>
         <h2 className="mt-1 font-display text-2xl font-medium tracking-tight text-[color:var(--cp-text-primary)]">运行设置</h2>
         <p className="mt-3 text-[13px] leading-relaxed text-[color:var(--cp-text-secondary)]">
-          当前设置直接映射到后端持久化配置。排除应用与真正的前台应用识别将在 Windows 平台适配阶段继续细化。
+          快捷键、历史记录上限、界面主题等偏好设置会自动保存。
         </p>
       </div>
 
@@ -986,7 +943,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
 
       <div className="pt-2">
         <button
-          className="rounded-md bg-gradient-to-r from-[color:var(--cp-accent-primary)] to-[color:var(--cp-accent-primary-strong)] px-8 py-4 text-sm font-bold text-cp-base shadow-sm transition-all duration-300 hover:shadow-md hover:shadow-[rgba(var(--cp-peach-rgb),0.25)] active:scale-95 disabled:opacity-50"
+          className="rounded-md bg-[color:var(--cp-accent-primary)] px-8 py-4 text-sm font-bold text-cp-base shadow-sm transition-all duration-300 hover:bg-[color:var(--cp-accent-primary-strong)] active:scale-95 disabled:opacity-50"
           disabled={isPending}
           onClick={() =>
             onSave({

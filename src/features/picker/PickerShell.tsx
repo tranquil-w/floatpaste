@@ -25,10 +25,10 @@ import {
   // --- 样式常量抽象 ---
 const STYLES = {
     container: "flex h-screen w-screen flex-col overflow-hidden rounded-md border border-[color:var(--cp-border-weak)] bg-[color:var(--cp-window-shell)] shadow-none dark:bg-[color:var(--cp-window-shell)]",
-    header: "flex shrink-0 items-center justify-between border-b border-[rgba(var(--cp-surface1-rgb),0.12)] bg-[rgba(var(--cp-mantle-rgb),0.4)] px-3 py-2 dark:border-[rgba(var(--cp-surface1-rgb),0.08)] dark:bg-[rgba(var(--cp-mantle-rgb),0.7)]",
+    header: "flex shrink-0 items-center justify-between border-b border-[rgba(var(--cp-surface1-rgb),0.12)] bg-[rgba(var(--cp-mantle-rgb),0.4)] px-2.5 py-1.5 dark:border-[rgba(var(--cp-surface1-rgb),0.08)] dark:bg-[rgba(var(--cp-mantle-rgb),0.7)]",
     headerDot: "h-2.5 w-2.5 rounded-full bg-[color:var(--cp-surface1)]",
     headerButton: "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-semibold text-[color:var(--cp-text-secondary)] transition-all duration-250 hover:bg-[rgba(var(--cp-surface1-rgb),0.2)] hover:text-[color:var(--cp-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(var(--cp-surface1-rgb),0.3)] focus-visible:ring-offset-2",
-    itemButton: (selected: boolean) => `group relative flex w-full flex-col gap-1.5 rounded-md px-3 py-2.5 text-left transition-all duration-250 border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(var(--cp-surface1-rgb),0.3)] focus-visible:ring-offset-2 ${selected
+    itemButton: (selected: boolean) => `group relative flex w-full flex-col gap-1 rounded-md px-2 py-1.5 text-left transition-all duration-250 border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(var(--cp-surface1-rgb),0.3)] focus-visible:ring-offset-2 ${selected
     ? "bg-[rgba(var(--cp-surface1-rgb),0.15)] border-[rgba(var(--cp-surface1-rgb),0.25)] shadow-xs dark:bg-[rgba(var(--cp-surface1-rgb),0.2)] dark:border-[rgba(var(--cp-surface1-rgb),0.3)]"
     : "bg-transparent border-transparent hover:bg-[rgba(var(--cp-surface1-rgb),0.12)] dark:hover:bg-[rgba(var(--cp-surface1-rgb),0.15)]"
     }`,
@@ -334,8 +334,8 @@ export function PickerShell() {
           </div>
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col p-2">
-          <div className="grid flex-1 gap-1 overflow-y-auto overflow-x-hidden px-1.5 pt-1 pb-1 transition-colors">
+        <div className="flex min-h-0 flex-1 flex-col px-1 py-1.5">
+          <div className="grid flex-1 gap-1 overflow-y-auto overflow-x-hidden px-0.5 transition-colors">
             {items.map((item, index) => {
               const isSelected = index === selectedIndex;
               return (
