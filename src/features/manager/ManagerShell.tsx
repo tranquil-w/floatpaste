@@ -37,20 +37,20 @@ import {
 const STYLES = {
    logoBadge: "inline-flex items-center gap-2 rounded-full border border-[color:var(--cp-accent-primary)]/20 bg-[color:var(--cp-accent-primary)]/10 pl-1.5 pr-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-[color:var(--cp-accent-primary)] shadow-none",
    logoIcon: "flex h-5 w-5 items-center justify-center rounded-full bg-[color:var(--cp-accent-primary)] text-cp-base shadow-none",
-   shortcutCard: "relative shrink-0 overflow-hidden rounded-lg bg-[color:var(--cp-card-surface)]/40 px-6 py-6 text-[color:var(--cp-text-primary)] shadow-xs ring-1 ring-[color:var(--cp-border-soft)] transition-transform duration-500 hover:scale-[1.01] dark:bg-[color:var(--cp-card-surface)]/30 dark:shadow-none",
-   shortcutDot: "h-1.5 w-1.5 rounded-full bg-[color:var(--cp-accent-primary)] shadow-none",
-   favoriteItem: "group w-full rounded-md border border-[color:var(--cp-border-weak)] bg-cp-mantle/50 px-4 py-3 text-left transition-all duration-300 hover:border-[color:var(--cp-border-weak)] hover:bg-cp-mantle dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[rgba(var(--cp-surface0-rgb),0.4)]",
-   primaryButton: "group relative flex w-full items-center justify-center gap-2 rounded-md bg-[color:var(--cp-accent-primary)] px-4 py-3.5 text-sm font-bold text-cp-base shadow-sm transition-all duration-300 hover:brightness-110 active:translate-y-0",
-   viewModeToggle: (active: boolean) => `flex items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-bold transition-all duration-300 ${active
-     ? "bg-[color:var(--cp-window-shell)] text-[color:var(--cp-text-primary)] shadow-none ring-1 ring-[color:var(--cp-border-medium)]"
-    : "text-[color:var(--cp-text-secondary)] hover:text-[color:var(--cp-text-primary)] hover:bg-[color:var(--cp-control-surface-hover)]/40"
-    }`,
-    searchInput: "w-full rounded-md border border-[color:var(--cp-border-weak)] bg-cp-mantle py-3 pl-11 pr-5 text-sm outline-none backdrop-blur-sm transition-all duration-300 placeholder:text-[color:var(--cp-text-muted)] focus:border-[rgba(var(--cp-accent-primary-rgb),0.25)] focus:bg-[color:var(--cp-window-shell)] focus-visible:outline-none dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]",
-   historyItem: (selected: boolean) => `group w-full rounded-md border px-6 py-5 text-left transition-all duration-300 ${selected
-    ? "relative z-10 scale-[1.01] border-[rgba(var(--cp-accent-primary-rgb),0.25)] bg-cp-mantle shadow-xs ring-1 ring-[rgba(var(--cp-accent-primary-rgb),0.2)] dark:border-[rgba(var(--cp-accent-primary-rgb),0.35)] dark:bg-[rgba(var(--cp-surface0-rgb),0.6)] dark:shadow-none"
-    : "border-[color:var(--cp-border-weak)] bg-cp-mantle/30 hover:border-[color:var(--cp-border-weak)] hover:bg-cp-mantle/60 dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
-    }`,
-    detailEditor: "min-h-[200px] flex-1 w-full resize-none rounded-md border border-[color:var(--cp-border-weak)] bg-cp-mantle px-5 py-5 text-[14px] leading-relaxed outline-none transition-all duration-300 focus:border-[rgba(var(--cp-accent-primary-rgb),0.25)] focus:bg-[color:var(--cp-window-shell)] focus-visible:outline-none dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]",
+    shortcutCard: "relative shrink-0 overflow-hidden rounded-lg bg-gradient-to-br from-[color:var(--cp-card-surface)]/40 to-[rgba(var(--cp-peach-rgb),0.06)] px-6 py-6 text-[color:var(--cp-text-primary)] shadow-xs ring-1 ring-[color:var(--cp-border-soft)] transition-all duration-500 hover:scale-[1.01] hover:ring-[rgba(var(--cp-peach-rgb),0.2)] dark:bg-[color:var(--cp-card-surface)]/30 dark:shadow-none",
+    shortcutDot: "h-2 w-2 rounded-full bg-[color:var(--cp-accent-primary)] shadow-sm ring-2 ring-[rgba(var(--cp-peach-rgb),0.2)]",
+    favoriteItem: "group w-full rounded-md border border-[color:var(--cp-border-weak)] bg-cp-mantle/50 px-4 py-3 text-left transition-all duration-300 hover:border-[rgba(var(--cp-peach-rgb),0.25)] hover:shadow-sm hover:bg-cp-mantle dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[rgba(var(--cp-surface0-rgb),0.4)]",
+    primaryButton: "group relative flex w-full items-center justify-center gap-2 rounded-md bg-gradient-to-r from-[color:var(--cp-accent-primary)] to-[color:var(--cp-accent-primary-strong)] px-4 py-3.5 text-sm font-bold text-cp-base shadow-sm transition-all duration-300 hover:shadow-md hover:shadow-[rgba(var(--cp-peach-rgb),0.25)] active:translate-y-0",
+    viewModeToggle: (active: boolean) => `flex items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-bold transition-all duration-300 ${active
+      ? "bg-gradient-to-r from-[rgba(var(--cp-peach-rgb),0.15)] to-[rgba(var(--cp-peach-rgb),0.08)] text-[color:var(--cp-accent-primary-strong)] shadow-none ring-1 ring-[rgba(var(--cp-peach-rgb),0.3)]"
+     : "text-[color:var(--cp-text-secondary)] hover:text-[color:var(--cp-text-primary)] hover:bg-[color:var(--cp-control-surface-hover)]/40"
+     }`,
+    searchInput: "w-full rounded-md border border-[color:var(--cp-border-weak)] bg-cp-mantle py-3 pl-11 pr-5 text-sm outline-none backdrop-blur-sm transition-all duration-300 placeholder:text-[color:var(--cp-text-muted)] focus:border-[rgba(var(--cp-peach-rgb),0.35)] focus:bg-[color:var(--cp-window-shell)] focus:shadow-sm focus:shadow-[rgba(var(--cp-peach-rgb),0.08)] focus-visible:outline-none dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]",
+    historyItem: (selected: boolean) => `group w-full rounded-md border px-6 py-5 text-left transition-all duration-300 ${selected
+     ? "relative z-10 scale-[1.01] border-[rgba(var(--cp-peach-rgb),0.4)] bg-gradient-to-br from-cp-mantle to-[rgba(var(--cp-peach-rgb),0.05)] shadow-sm shadow-[rgba(var(--cp-peach-rgb),0.08)] ring-1 ring-[rgba(var(--cp-peach-rgb),0.2)] dark:border-[rgba(var(--cp-peach-rgb),0.35)] dark:bg-gradient-to-br dark:from-[rgba(var(--cp-surface0-rgb),0.6)] dark:to-[rgba(var(--cp-peach-rgb),0.08)] dark:shadow-none"
+     : "border-[color:var(--cp-border-weak)] bg-cp-mantle/30 hover:border-[rgba(var(--cp-peach-rgb),0.2)] hover:bg-cp-mantle/60 dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:hover:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
+     }`,
+    detailEditor: "min-h-[200px] flex-1 w-full resize-none rounded-md border border-[color:var(--cp-border-weak)] bg-cp-mantle px-5 py-5 text-[14px] leading-relaxed outline-none transition-all duration-300 focus:border-[rgba(var(--cp-peach-rgb),0.35)] focus:bg-[color:var(--cp-window-shell)] focus:shadow-sm focus:shadow-[rgba(var(--cp-peach-rgb),0.08)] focus-visible:outline-none dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]",
 };
 
 const pickerPositionOptions: Array<{
@@ -358,7 +358,7 @@ export function ManagerShell() {
             <>
               <div className="flex shrink-0 flex-col gap-2.5 sm:flex-row">
                 <div className="relative flex-1 group">
-                  <div className="absolute inset-y-0 left-0 flex items-center pl-4 text-[color:var(--cp-text-muted)] transition-colors pointer-events-none group-focus-within:text-[color:var(--cp-accent-primary)]">
+                  <div className="absolute inset-y-0 left-0 flex items-center pl-4 text-[color:var(--cp-text-muted)] transition-colors pointer-events-none group-focus-within:text-[color:var(--cp-accent-primary-strong)]">
                     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                     </svg>
@@ -530,7 +530,7 @@ export function ManagerShell() {
                     {detail.data.isFavorited ? "已收藏" : "加入收藏"}
                   </button>
                   <button
-                    className="group relative rounded-md bg-[color:var(--cp-accent-primary)] px-4 py-2 text-sm font-bold text-cp-base shadow-sm transition-all duration-300 hover:brightness-110 active:translate-y-0"
+                    className="group relative rounded-md bg-gradient-to-r from-[color:var(--cp-accent-primary)] to-[color:var(--cp-accent-primary-strong)] px-4 py-2 text-sm font-bold text-cp-base shadow-sm transition-all duration-300 hover:shadow-md hover:shadow-[rgba(var(--cp-peach-rgb),0.25)] active:translate-y-0"
                     onClick={() =>
                       pasteMutation.mutate({
                         id: detail.data.id,
@@ -986,7 +986,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
 
       <div className="pt-2">
         <button
-          className="rounded-md bg-[color:var(--cp-accent-primary)] px-8 py-4 text-sm font-bold text-cp-base shadow-sm transition-all hover:brightness-110 active:scale-95 disabled:opacity-50"
+          className="rounded-md bg-gradient-to-r from-[color:var(--cp-accent-primary)] to-[color:var(--cp-accent-primary-strong)] px-8 py-4 text-sm font-bold text-cp-base shadow-sm transition-all duration-300 hover:shadow-md hover:shadow-[rgba(var(--cp-peach-rgb),0.25)] active:scale-95 disabled:opacity-50"
           disabled={isPending}
           onClick={() =>
             onSave({
