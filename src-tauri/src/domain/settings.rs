@@ -303,4 +303,16 @@ mod tests {
         // 冲突时应重置为默认值，而不是报错
         assert_eq!(settings.workbench_shortcut, "Ctrl+Shift+F");
     }
+
+    #[test]
+    fn workbench_shortcut_gets_disabled_when_default_value_also_conflicts_with_main_shortcut() {
+        let settings = UserSetting {
+            shortcut: "Ctrl+Shift+F".to_string(),
+            workbench_shortcut: "Ctrl+Shift+F".to_string(),
+            workbench_shortcut_enabled: true,
+            ..UserSetting::default()
+        }
+        .sanitized();
+        assert!(!settings.workbench_shortcut_enabled);
+    }
 }
