@@ -15,7 +15,10 @@ use crate::{
     app_bootstrap::AppState,
     domain::{
         error::AppError,
-        events::{PICKER_CONFIRM_EVENT, PICKER_NAVIGATE_EVENT, PICKER_SELECT_INDEX_EVENT},
+        events::{
+            PICKER_CONFIRM_EVENT, PICKER_NAVIGATE_EVENT, PICKER_SELECT_INDEX_EVENT,
+            WORKBENCH_NAVIGATE_EVENT,
+        },
     },
     services::window_coordinator::WindowCoordinator,
 };
@@ -25,6 +28,9 @@ pub struct ShortcutManager;
 const PICKER_SESSION_SHORTCUTS: [&str; 14] = [
     "Up", "Down", "Enter", "Escape", "Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6",
     "Digit7", "Digit8", "Digit9", "Tab",
+];
+const WORKBENCH_SESSION_SHORTCUTS: [&str; 8] = [
+    "Up", "Down", "Enter", "Escape", "Ctrl+E", "Ctrl+F", "Ctrl+S", "Delete",
 ];
 const PICKER_NAV_REPEAT_INITIAL_DELAY: Duration = Duration::from_millis(280);
 const PICKER_NAV_REPEAT_INTERVAL: Duration = Duration::from_millis(85);
@@ -87,6 +93,89 @@ impl ShortcutManager {
         for shortcut in PICKER_SESSION_SHORTCUTS {
             let _ = manager.unregister(shortcut);
         }
+    }
+
+    pub fn register_workbench_session_shortcuts(app: &AppHandle) -> Result<(), AppError> {
+        let manager = app.global_shortcut();
+        Self::unregister_workbench_session_shortcuts(app);
+        let mut failures = Vec::new();
+        for shortcut in WORKBENCH_SESSION_SHORTCUTS {
+            if let Err(error) = manager.register(shortcut) {
+                failures.push(format!("{shortcut}: {error}"));
+            }
+        }
+
+        if !failures.is_empty() {
+            return Err(AppError::Message(format!(
+                "注册 Workbench 会话快捷键失败: {}",
+                failures.join("; ")
+            )));
+        }
+
+        info!(
+            "已注册 Workbench 会话快捷键: {}",
+            WORKBENCH_SESSION_SHORTCUTS.join(", ")
+        );
+        Ok(())
+    }
+
+    pub fn unregister_workbench_session_shortcuts(app: &AppHandle) {
+        let manager = app.global_shortcut();
+        for shortcut in WORKBENCH_SESSION_SHORTCUTS {
+            let _ = manager.unregister(shortcut);
+        }
+    }
+
+    pub fn sync_registered_shortcuts(
+        app: &AppHandle,
+        main_shortcut: &str,
+        workbench_shortcut: Option<&str>,
+    ) -> Result<(), AppError> {
+        let main_shortcut = normalize_shortcut(main_shortcut)?;
+        if main_shortcut.is_empty() {
+            return Err(AppError::Message("主快捷键不能为空".to_string()));
+        }
+
+        let manager = app.global_shortcut();
+        manager
+            .unregister_all()
+            .map_err(|error| AppError::Message(format!("清理旧快捷键失败: {error}")))?;
+
+        // 注册主快捷键
+        manager
+            .register(main_shortcut.as_str())
+            .map_err(|error| AppError::Message(format!("注册主快捷键失败: {error}")))?;
+
+        // 注册工作窗快捷键（如果启用）
+        if let Some(workbench) = workbench_shortcut {
+            let workbench = normalize_shortcut(workbench)?;
+            if !workbench.is_empty() && workbench != main_shortcut {
+                manager
+                    .register(workbench.as_str())
+                    .map_err(|error| AppError::Message(format!("注册工作窗快捷键失败: {error}")))?;
+                info!("已注册工作窗快捷键: {workbench}");
+            }
+        }
+
+        // 重新注册 Picker 会话快捷键
+        if picker_is_active(app) || has_registered_picker_session_shortcut(app) {
+            if let Err(error) = Self::register_picker_session_shortcuts(app) {
+                warn!("重新注册 Picker 会话快捷键失败，将保留鼠标可用的降级路径: {error}");
+            }
+        }
+
+        // 重新注册 Workbench 会话快捷键
+        if workbench_is_active(app) || has_registered_workbench_session_shortcut(app) {
+            if let Err(error) = Self::register_workbench_session_shortcuts(app) {
+                warn!("重新注册 Workbench 会话快捷键失败，将保留鼠标可用的降级路径: {error}");
+            }
+        }
+
+        info!(
+            "已注册全局快捷键: 主={main_shortcut}, 工作窗={:?}",
+            workbench_shortcut
+        );
+        Ok(())
     }
 
     pub fn handle_shortcut_event(app: &AppHandle, shortcut: String, event: &ShortcutEvent) {
@@ -156,6 +245,113 @@ impl ShortcutManager {
                     }
                 });
             });
+            return;
+        }
+
+        // 检查是否为工作窗快捷键
+        let workbench_shortcut = state
+            .current_settings()
+            .ok()
+            .filter(|s| s.workbench_shortcut_enabled)
+            .map(|s| s.workbench_shortcut);
+
+        if let Some(ref ws) = workbench_shortcut {
+            if normalized == normalize_shortcut(ws).unwrap_or_default() {
+                if event.state != ShortcutState::Pressed {
+                    return;
+                }
+
+                info!("命中工作窗快捷键: {normalized}");
+                let app_handle = app.clone();
+                let state_clone = state.clone();
+                if state.is_workbench_active() {
+                    // 已打开则关闭
+                    thread::spawn(move || {
+                        let app_clone = app_handle.clone();
+                        let _ = app_handle.run_on_main_thread(move || {
+                            Self::unregister_workbench_session_shortcuts(&app_clone);
+                            if let Err(error) =
+                                WindowCoordinator::hide_workbench_and_restore_target(
+                                    &app_clone,
+                                    &state_clone,
+                                )
+                            {
+                                error!("关闭 Workbench 失败: {error}");
+                            }
+                        });
+                    });
+                } else {
+                    // 未打开则打开
+                    thread::spawn(move || {
+                        let app_clone = app_handle.clone();
+                        let _ = app_handle.run_on_main_thread(move || {
+                            if let Err(error) =
+                                WindowCoordinator::open_workbench_global(&app_clone, &state_clone)
+                            {
+                                error!("打开 Workbench 失败: {error}");
+                            } else if let Err(error) =
+                                Self::register_workbench_session_shortcuts(&app_clone)
+                            {
+                                warn!("打开 Workbench 后注册会话快捷键失败: {error}");
+                            }
+                        });
+                    });
+                }
+                return;
+            }
+        }
+
+        // 处理 Workbench 会话内快捷键
+        if state.is_workbench_active() {
+            if event.state != ShortcutState::Pressed {
+                return;
+            }
+
+            match normalized.as_str() {
+                "up" | "arrowup" => {
+                    if let Err(error) = app.emit(WORKBENCH_NAVIGATE_EVENT, "up") {
+                        error!("向 Workbench 发送导航事件失败: {error}");
+                    }
+                }
+                "down" | "arrowdown" => {
+                    if let Err(error) = app.emit(WORKBENCH_NAVIGATE_EVENT, "down") {
+                        error!("向 Workbench 发送导航事件失败: {error}");
+                    }
+                }
+                "escape" | "esc" => {
+                    info!("命中 Workbench 关闭快捷键: {normalized}");
+                    let app_handle = app.clone();
+                    let state_clone = state.clone();
+                    thread::spawn(move || {
+                        let app_clone = app_handle.clone();
+                        let _ = app_handle.run_on_main_thread(move || {
+                            Self::unregister_workbench_session_shortcuts(&app_clone);
+                            if let Err(error) =
+                                WindowCoordinator::hide_workbench_and_restore_target(
+                                    &app_clone,
+                                    &state_clone,
+                                )
+                            {
+                                error!("关闭 Workbench 失败: {error}");
+                            }
+                        });
+                    });
+                }
+                _ => {
+                    // Enter、Ctrl+E、Ctrl+F、Ctrl+S、Delete 等事件由前端监听处理
+                }
+            }
+            return;
+        }
+
+        if !state.is_workbench_active() && is_workbench_session_shortcut(normalized.as_str()) {
+            if event.state == ShortcutState::Pressed {
+                warn!("检测到 Workbench 已隐藏但会话快捷键仍在注册，正在自动释放这些快捷键");
+                let app_handle = app.clone();
+                let _ = app.run_on_main_thread(move || {
+                    Self::unregister_workbench_session_shortcuts(&app_handle);
+                });
+            }
             return;
         }
 
@@ -321,6 +517,35 @@ fn picker_is_active(app: &AppHandle) -> bool {
     app.try_state::<AppState>()
         .map(|state| state.is_picker_active())
         .unwrap_or(false)
+}
+
+fn workbench_is_active(app: &AppHandle) -> bool {
+    app.try_state::<AppState>()
+        .map(|state| state.is_workbench_active())
+        .unwrap_or(false)
+}
+
+fn has_registered_workbench_session_shortcut(app: &AppHandle) -> bool {
+    let manager = app.global_shortcut();
+    WORKBENCH_SESSION_SHORTCUTS
+        .iter()
+        .any(|shortcut| manager.is_registered(*shortcut))
+}
+
+fn is_workbench_session_shortcut(shortcut: &str) -> bool {
+    matches!(
+        shortcut,
+        "up" | "arrowup"
+            | "down"
+            | "arrowdown"
+            | "enter"
+            | "escape"
+            | "esc"
+            | "ctrl+e"
+            | "ctrl+f"
+            | "ctrl+s"
+            | "delete"
+    )
 }
 
 fn has_registered_picker_session_shortcut(app: &AppHandle) -> bool {

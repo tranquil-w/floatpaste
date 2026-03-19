@@ -13,6 +13,7 @@ pub const WORKBENCH_SESSION_END_EVENT: &str = "workbench://session-end";
 pub const WORKBENCH_EDIT_ITEM_EVENT: &str = "workbench://edit-item";
 pub const WORKBENCH_SEARCH_EVENT: &str = "workbench://search";
 pub const WORKBENCH_PASTE_EVENT: &str = "workbench://paste";
+pub const WORKBENCH_NAVIGATE_EVENT: &str = "workbench://navigate";
 
 // Picker 新增跳转事件
 pub const PICKER_OPEN_WORKBENCH_EDIT_EVENT: &str = "picker://open-workbench-edit";
