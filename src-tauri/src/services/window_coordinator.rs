@@ -10,7 +10,10 @@ use crate::{
     app_bootstrap::AppState,
     domain::{
         error::AppError,
-        events::{PICKER_SESSION_END_EVENT, PICKER_SESSION_START_EVENT},
+        events::{
+            PICKER_SESSION_END_EVENT, PICKER_SESSION_START_EVENT,
+            WORKBENCH_SESSION_END_EVENT, WORKBENCH_SESSION_START_EVENT,
+        },
         settings::UserSetting,
     },
     platform::windows::active_app::ActiveAppResolver,
@@ -25,12 +28,22 @@ pub const MANAGER_WINDOW_LABEL: &str = "manager";
 pub const MANAGER_WINDOW_TITLE: &str = "FloatPaste / 浮贴";
 pub const PICKER_WINDOW_LABEL: &str = "picker";
 pub const PICKER_WINDOW_TITLE: &str = "FloatPaste Picker";
+pub const WORKBENCH_WINDOW_LABEL: &str = "workbench";
+pub const WORKBENCH_WINDOW_TITLE: &str = "FloatPaste Workbench";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PickerSessionPayload {
     session_id: String,
     shown_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkbenchSessionPayload {
+    source: &'static str,
+    item_id: Option<String>,
+    initial_keyword: Option<String>,
 }
 
 impl WindowCoordinator {
@@ -203,6 +216,161 @@ impl WindowCoordinator {
 
         Ok(())
     }
+
+    /// 从 Picker 编辑进入 Workbench
+    pub fn open_workbench_from_picker_edit(
+        app: &AppHandle,
+        state: &AppState,
+        item_id: String,
+    ) -> Result<(), AppError> {
+        let window = ensure_workbench_window(app)?;
+        let picker_session = state.picker_session()?;
+
+        let workbench_session = crate::domain::workbench_session::WorkbenchSession {
+            target_window_hwnd: picker_session.target_window_hwnd,
+            source: crate::domain::workbench_session::WorkbenchSource::PickerEdit,
+            current_item_id: Some(item_id.clone()),
+            from_picker: true,
+            picker_selected_index: None,
+        };
+
+        state.set_workbench_session(workbench_session)?;
+        Self::hide_picker(app)?;
+
+        window
+            .show()
+            .map_err(|error| AppError::Message(error.to_string()))?;
+        window
+            .set_focus()
+            .map_err(|error| AppError::Message(error.to_string()))?;
+
+        state.begin_workbench_activation();
+
+        window
+            .emit(WORKBENCH_SESSION_START_EVENT, WorkbenchSessionPayload {
+                source: "picker_edit",
+                item_id: Some(item_id.clone()),
+                initial_keyword: None,
+            })
+            .map_err(|error| AppError::Message(error.to_string()))?;
+
+        info!("从 Picker 编辑进入 Workbench, item_id={item_id}");
+        Ok(())
+    }
+
+    /// 从 Picker 搜索进入 Workbench
+    pub fn open_workbench_from_picker_search(
+        app: &AppHandle,
+        state: &AppState,
+        initial_keyword: Option<String>,
+    ) -> Result<(), AppError> {
+        let window = ensure_workbench_window(app)?;
+        let picker_session = state.picker_session()?;
+
+        let workbench_session = crate::domain::workbench_session::WorkbenchSession {
+            target_window_hwnd: picker_session.target_window_hwnd,
+            source: crate::domain::workbench_session::WorkbenchSource::PickerSearch,
+            current_item_id: None,
+            from_picker: true,
+            picker_selected_index: None,
+        };
+
+        state.set_workbench_session(workbench_session)?;
+        Self::hide_picker(app)?;
+
+        window
+            .show()
+            .map_err(|error| AppError::Message(error.to_string()))?;
+        window
+            .set_focus()
+            .map_err(|error| AppError::Message(error.to_string()))?;
+
+        state.begin_workbench_activation();
+
+        window
+            .emit(WORKBENCH_SESSION_START_EVENT, WorkbenchSessionPayload {
+                source: "picker_search",
+                item_id: None,
+                initial_keyword: initial_keyword.clone(),
+            })
+            .map_err(|error| AppError::Message(error.to_string()))?;
+
+        info!("从 Picker 搜索进入 Workbench, keyword={initial_keyword:?}");
+        Ok(())
+    }
+
+    /// 全局快捷键直接打开 Workbench
+    pub fn open_workbench_global(app: &AppHandle, state: &AppState) -> Result<(), AppError> {
+        let window = ensure_workbench_window(app)?;
+
+        if state.is_workbench_active() {
+            window
+                .set_focus()
+                .map_err(|error| AppError::Message(error.to_string()))?;
+            return Ok(());
+        }
+
+        let target_window = ActiveAppResolver::current_foreground_window_handle();
+
+        let workbench_session = crate::domain::workbench_session::WorkbenchSession {
+            target_window_hwnd: target_window,
+            source: crate::domain::workbench_session::WorkbenchSource::GlobalShortcut,
+            current_item_id: None,
+            from_picker: false,
+            picker_selected_index: None,
+        };
+
+        state.set_workbench_session(workbench_session)?;
+
+        window
+            .show()
+            .map_err(|error| AppError::Message(error.to_string()))?;
+        window
+            .set_focus()
+            .map_err(|error| AppError::Message(error.to_string()))?;
+
+        state.begin_workbench_activation();
+
+        window
+            .emit(WORKBENCH_SESSION_START_EVENT, WorkbenchSessionPayload {
+                source: "global",
+                item_id: None,
+                initial_keyword: None,
+            })
+            .map_err(|error| AppError::Message(error.to_string()))?;
+
+        info!("全局快捷键打开 Workbench");
+        Ok(())
+    }
+
+    /// 隐藏 Workbench 并恢复目标窗口
+    pub fn hide_workbench_and_restore_target(
+        app: &AppHandle,
+        state: &AppState,
+    ) -> Result<(), AppError> {
+        state.end_workbench_activation();
+        let session = state.workbench_session()?;
+
+        let Some(window) = app.get_webview_window(WORKBENCH_WINDOW_LABEL) else {
+            return Ok(());
+        };
+
+        window
+            .hide()
+            .map_err(|error| AppError::Message(error.to_string()))?;
+
+        let _ = window.emit(WORKBENCH_SESSION_END_EVENT, ());
+        state.clear_workbench_session()?;
+
+        if let Some(ref sess) = session {
+            if let Some(hwnd) = sess.target_window_hwnd {
+                let _ = ActiveAppResolver::restore_foreground_window(hwnd);
+            }
+        }
+
+        info!("隐藏 Workbench");
+        Ok(())
+    }
 }
 
 fn ensure_manager_window(app: &AppHandle) -> Result<WebviewWindow, AppError> {
@@ -244,6 +412,47 @@ fn ensure_picker_window(app: &AppHandle) -> Result<WebviewWindow, AppError> {
 
     configure_picker_window(&window);
     Ok(window)
+}
+
+fn ensure_workbench_window(app: &AppHandle) -> Result<WebviewWindow, AppError> {
+    if let Some(window) = app.get_webview_window(WORKBENCH_WINDOW_LABEL) {
+        return Ok(window);
+    }
+
+    let window = WebviewWindowBuilder::new(app, WORKBENCH_WINDOW_LABEL, WebviewUrl::default())
+        .title(WORKBENCH_WINDOW_TITLE)
+        .inner_size(900.0, 600.0)
+        .min_inner_size(600.0, 400.0)
+        .resizable(true)
+        .visible(false)
+        .decorations(true)
+        .always_on_top(false)
+        .skip_taskbar(false)
+        .center()
+        .build()
+        .map_err(|error| AppError::Message(format!("创建 workbench 窗口失败: {error}")))?;
+
+    configure_workbench_window(&window);
+    Ok(window)
+}
+
+fn configure_workbench_window(window: &WebviewWindow) {
+    let app = window.app_handle().clone();
+    let handle = window.clone();
+    window.on_window_event(move |event| {
+        if let WindowEvent::CloseRequested { api, .. } = event {
+            if app
+                .try_state::<AppState>()
+                .map(|state| state.is_quitting())
+                .unwrap_or(false)
+            {
+                return;
+            }
+            api.prevent_close();
+            let _ = handle.hide();
+            let _ = app.emit(WORKBENCH_SESSION_END_EVENT, ());
+        }
+    });
 }
 
 fn configure_manager_window(window: &WebviewWindow) {
