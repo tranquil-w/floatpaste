@@ -8,7 +8,7 @@ use tauri::{App, AppHandle, Emitter, Manager};
 use tracing::{info, warn};
 
 use crate::{
-    domain::{error::AppError, events::CLIPS_CHANGED_EVENT, settings::UserSetting},
+    domain::{error::AppError, events::CLIPS_CHANGED_EVENT, settings::UserSetting, workbench_session::WorkbenchSession},
     launch_mode::LaunchMode,
     platform::windows::clipboard_monitor::ClipboardMonitor,
     repository::sqlite_repository::SqliteRepository,
@@ -28,6 +28,8 @@ pub struct AppState {
     picker_session: Arc<Mutex<PickerSession>>,
     picker_active: Arc<AtomicBool>,
     quitting: Arc<AtomicBool>,
+    workbench_session: Arc<Mutex<Option<WorkbenchSession>>>,
+    workbench_active: Arc<AtomicBool>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -50,6 +52,8 @@ impl AppState {
             picker_session: Arc::new(Mutex::new(PickerSession::default())),
             picker_active: Arc::new(AtomicBool::new(false)),
             quitting: Arc::new(AtomicBool::new(false)),
+            workbench_session: Arc::new(Mutex::new(None)),
+            workbench_active: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -100,6 +104,34 @@ impl AppState {
 
     pub fn is_quitting(&self) -> bool {
         self.quitting.load(Ordering::SeqCst)
+    }
+
+    pub fn set_workbench_session(&self, session: WorkbenchSession) -> Result<(), AppError> {
+        let mut current = self.workbench_session.lock()?;
+        *current = Some(session);
+        Ok(())
+    }
+
+    pub fn workbench_session(&self) -> Result<Option<WorkbenchSession>, AppError> {
+        Ok(self.workbench_session.lock()?.clone())
+    }
+
+    pub fn clear_workbench_session(&self) -> Result<(), AppError> {
+        let mut current = self.workbench_session.lock()?;
+        *current = None;
+        Ok(())
+    }
+
+    pub fn begin_workbench_activation(&self) {
+        self.workbench_active.store(true, Ordering::SeqCst);
+    }
+
+    pub fn end_workbench_activation(&self) {
+        self.workbench_active.store(false, Ordering::SeqCst);
+    }
+
+    pub fn is_workbench_active(&self) -> bool {
+        self.workbench_active.load(Ordering::SeqCst)
     }
 }
 
