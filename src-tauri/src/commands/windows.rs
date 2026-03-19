@@ -44,3 +44,39 @@ pub fn open_manager_from_picker(state: State<'_, AppState>, app: AppHandle) -> R
     ShortcutManager::unregister_picker_session_shortcuts(&app);
     WindowCoordinator::hide_picker_and_open_manager(&app, &state).map_err(map_error)
 }
+
+#[tauri::command]
+pub fn open_workbench_from_picker_edit(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    item_id: String,
+) -> Result<(), String> {
+    WindowCoordinator::open_workbench_from_picker_edit(&app, &state, item_id)
+        .map_err(map_error)
+}
+
+#[tauri::command]
+pub fn open_workbench_from_picker_search(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    initial_keyword: Option<String>,
+) -> Result<(), String> {
+    WindowCoordinator::open_workbench_from_picker_search(&app, &state, initial_keyword)
+        .map_err(map_error)
+}
+
+#[tauri::command]
+pub fn open_workbench_global(
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<(), String> {
+    WindowCoordinator::open_workbench_global(&app, &state).map_err(map_error)
+}
+
+#[tauri::command]
+pub fn hide_workbench(
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<(), String> {
+    WindowCoordinator::hide_workbench_and_restore_target(&app, &state).map_err(map_error)
+}

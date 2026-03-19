@@ -135,3 +135,31 @@ export async function openManagerFromPicker(): Promise<void> {
   }
   return invoke("open_manager_from_picker");
 }
+
+export async function openWorkbenchFromPickerEdit(itemId: string): Promise<void> {
+  if (!isTauriRuntime()) {
+    return;
+  }
+  return invoke("open_workbench_from_picker_edit", { itemId });
+}
+
+export async function openWorkbenchFromPickerSearch(initialKeyword?: string): Promise<void> {
+  if (!isTauriRuntime()) {
+    return;
+  }
+  return invoke("open_workbench_from_picker_search", { initialKeyword });
+}
+
+export async function openWorkbenchGlobal(): Promise<void> {
+  if (!isTauriRuntime()) {
+    return;
+  }
+  return invoke("open_workbench_global");
+}
+
+export async function hideWorkbench(): Promise<void> {
+  if (!isTauriRuntime()) {
+    return;
+  }
+  return invoke("hide_workbench");
+}
