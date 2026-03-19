@@ -81,6 +81,8 @@ pub struct UserSetting {
     pub restore_clipboard_after_paste: bool,
     pub pause_monitoring: bool,
     pub theme_mode: ThemeMode,
+    pub workbench_shortcut: String,
+    pub workbench_shortcut_enabled: bool,
 }
 
 impl Default for UserSetting {
@@ -100,6 +102,8 @@ impl Default for UserSetting {
             restore_clipboard_after_paste: true,
             pause_monitoring: false,
             theme_mode: ThemeMode::System,
+            workbench_shortcut: "Ctrl+Shift+F".to_string(),
+            workbench_shortcut_enabled: true,
         }
     }
 }
@@ -123,6 +127,17 @@ impl UserSetting {
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty())
             .collect();
+
+        self.workbench_shortcut = self.workbench_shortcut.trim().to_string();
+        if self.workbench_shortcut_enabled
+            && self.workbench_shortcut == self.shortcut
+        {
+            self.workbench_shortcut = "Ctrl+Shift+F".to_string();
+        }
+        if self.workbench_shortcut.is_empty() {
+            self.workbench_shortcut = "Ctrl+Shift+F".to_string();
+        }
+
         self
     }
 }
@@ -247,5 +262,20 @@ mod tests {
         .unwrap();
 
         assert_eq!(settings.theme_mode, ThemeMode::System);
+    }
+
+    #[test]
+    fn test_workbench_shortcut_default() {
+        let settings = UserSetting::default();
+        assert_eq!(settings.workbench_shortcut, "Ctrl+Shift+F");
+        assert!(settings.workbench_shortcut_enabled);
+    }
+
+    #[test]
+    fn test_deserialize_without_workbench_shortcut() {
+        // 旧配置（没有 workbench 字段）反序列化后应得到默认值
+        let settings: UserSetting = serde_json::from_str(r#"{"shortcut":"Ctrl+`","launchOnStartup":false,"historyLimit":1000,"pickerRecordLimit":50,"excludedApps":[],"restoreClipboardAfterPaste":true,"pauseMonitoring":false}"#).unwrap();
+        assert_eq!(settings.workbench_shortcut, "Ctrl+Shift+F");
+        assert!(settings.workbench_shortcut_enabled);
     }
 }
