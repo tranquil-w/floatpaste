@@ -129,13 +129,15 @@ impl UserSetting {
             .collect();
 
         self.workbench_shortcut = self.workbench_shortcut.trim().to_string();
-        if self.workbench_shortcut_enabled
-            && self.workbench_shortcut == self.shortcut
-        {
-            self.workbench_shortcut = "Ctrl+Shift+F".to_string();
-        }
         if self.workbench_shortcut.is_empty() {
             self.workbench_shortcut = "Ctrl+Shift+F".to_string();
+        }
+        if self.workbench_shortcut_enabled && self.workbench_shortcut == self.shortcut {
+            self.workbench_shortcut = "Ctrl+Shift+F".to_string();
+            // 如果默认值与主快捷键也相同，则禁用工作窗快捷键
+            if self.workbench_shortcut == self.shortcut {
+                self.workbench_shortcut_enabled = false;
+            }
         }
 
         self
@@ -265,17 +267,40 @@ mod tests {
     }
 
     #[test]
-    fn test_workbench_shortcut_default() {
+    fn workbench_shortcut_defaults_to_ctrl_shift_f() {
         let settings = UserSetting::default();
         assert_eq!(settings.workbench_shortcut, "Ctrl+Shift+F");
         assert!(settings.workbench_shortcut_enabled);
     }
 
     #[test]
-    fn test_deserialize_without_workbench_shortcut() {
-        // 旧配置（没有 workbench 字段）反序列化后应得到默认值
-        let settings: UserSetting = serde_json::from_str(r#"{"shortcut":"Ctrl+`","launchOnStartup":false,"historyLimit":1000,"pickerRecordLimit":50,"excludedApps":[],"restoreClipboardAfterPaste":true,"pauseMonitoring":false}"#).unwrap();
+    fn deserialize_old_settings_without_workbench_shortcut_uses_defaults() {
+        let settings: UserSetting = serde_json::from_str(
+            r#"{
+                "shortcut":"Ctrl+`",
+                "launchOnStartup":false,
+                "historyLimit":1000,
+                "pickerRecordLimit":50,
+                "excludedApps":[],
+                "restoreClipboardAfterPaste":true,
+                "pauseMonitoring":false
+            }"#,
+        )
+        .unwrap();
         assert_eq!(settings.workbench_shortcut, "Ctrl+Shift+F");
         assert!(settings.workbench_shortcut_enabled);
+    }
+
+    #[test]
+    fn workbench_shortcut_resets_to_default_when_conflicts_with_main_shortcut() {
+        let settings = UserSetting {
+            shortcut: "Ctrl+`".to_string(),
+            workbench_shortcut: "Ctrl+`".to_string(),
+            workbench_shortcut_enabled: true,
+            ..UserSetting::default()
+        }
+        .sanitized();
+        // 冲突时应重置为默认值，而不是报错
+        assert_eq!(settings.workbench_shortcut, "Ctrl+Shift+F");
     }
 }
