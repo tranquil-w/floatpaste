@@ -363,6 +363,7 @@ impl WindowCoordinator {
         state.clear_workbench_session()?;
 
         if let Some(ref sess) = session {
+            // Workbench 是普通装饰窗口（非 show_window_no_activate），隐藏后可立即还焦，无需 50ms 延时
             if let Some(hwnd) = sess.target_window_hwnd {
                 let _ = ActiveAppResolver::restore_foreground_window(hwnd);
             }
@@ -438,7 +439,6 @@ fn ensure_workbench_window(app: &AppHandle) -> Result<WebviewWindow, AppError> {
 
 fn configure_workbench_window(window: &WebviewWindow) {
     let app = window.app_handle().clone();
-    let handle = window.clone();
     window.on_window_event(move |event| {
         if let WindowEvent::CloseRequested { api, .. } = event {
             if app
@@ -449,8 +449,9 @@ fn configure_workbench_window(window: &WebviewWindow) {
                 return;
             }
             api.prevent_close();
-            let _ = handle.hide();
-            let _ = app.emit(WORKBENCH_SESSION_END_EVENT, ());
+            if let Some(state) = app.try_state::<AppState>() {
+                let _ = WindowCoordinator::hide_workbench_and_restore_target(&app, &state);
+            }
         }
     });
 }
