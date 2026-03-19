@@ -6,3 +6,14 @@ export const PICKER_SESSION_END_EVENT = "picker://session-end";
 export const PICKER_NAVIGATE_EVENT = "picker://navigate";
 export const PICKER_CONFIRM_EVENT = "picker://confirm";
 export const PICKER_SELECT_INDEX_EVENT = "picker://select-index";
+
+// Workbench 相关事件
+export const WORKBENCH_SESSION_START_EVENT = "workbench://session-start";
+export const WORKBENCH_SESSION_END_EVENT = "workbench://session-end";
+export const WORKBENCH_EDIT_ITEM_EVENT = "workbench://edit-item";
+export const WORKBENCH_SEARCH_EVENT = "workbench://search";
+export const WORKBENCH_PASTE_EVENT = "workbench://paste";
+
+// Picker 新增跳转事件
+export const PICKER_OPEN_WORKBENCH_EDIT_EVENT = "picker://open-workbench-edit";
+export const PICKER_OPEN_WORKBENCH_SEARCH_EVENT = "picker://open-workbench-search";
