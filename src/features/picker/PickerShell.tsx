@@ -1,11 +1,13 @@
 import { type MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { queryClient } from "../../app/queryClient";
-import { hidePicker, openManagerFromPicker, pasteItem } from "../../bridge/commands";
+import { hidePicker, openManagerFromPicker, openWorkbenchFromPickerEdit, openWorkbenchFromPickerSearch, pasteItem } from "../../bridge/commands";
 import {
   CLIPS_CHANGED_EVENT,
   PICKER_CONFIRM_EVENT,
   PICKER_NAVIGATE_EVENT,
+  PICKER_OPEN_WORKBENCH_EDIT_EVENT,
+  PICKER_OPEN_WORKBENCH_SEARCH_EVENT,
   PICKER_SELECT_INDEX_EVENT,
   SETTINGS_CHANGED_EVENT,
   PICKER_SESSION_START_EVENT,
@@ -97,6 +99,18 @@ export function PickerShell() {
     await openManagerFromPicker();
   };
 
+  const handleOpenWorkbenchEdit = async () => {
+    const item = itemsRef.current[selectedIndexRef.current];
+    if (!item) {
+      return;
+    }
+    await openWorkbenchFromPickerEdit(item.id);
+  };
+
+  const handleOpenWorkbenchSearch = async () => {
+    await openWorkbenchFromPickerSearch();
+  };
+
   const handleResizeMouseDown =
     (direction: WindowResizeDirection) =>
       (event: ReactMouseEvent<HTMLDivElement>) => {
@@ -154,6 +168,8 @@ export function PickerShell() {
     let unlistenNavigate: (() => void) | undefined;
     let unlistenConfirm: (() => void) | undefined;
     let unlistenSelectIndex: (() => void) | undefined;
+    let unlistenWorkbenchEdit: (() => void) | undefined;
+    let unlistenWorkbenchSearch: (() => void) | undefined;
 
     void listen(PICKER_SESSION_START_EVENT, async () => {
       await queryClient.invalidateQueries({ queryKey: ["settings"] });
@@ -228,6 +244,28 @@ export function PickerShell() {
       unlistenSelectIndex = cleanup;
     });
 
+    void listen(PICKER_OPEN_WORKBENCH_EDIT_EVENT, async () => {
+      if (disposed) {
+        return;
+      }
+      const item = itemsRef.current[selectedIndexRef.current];
+      if (!item) {
+        return;
+      }
+      await openWorkbenchFromPickerEdit(item.id);
+    }).then((cleanup) => {
+      unlistenWorkbenchEdit = cleanup;
+    });
+
+    void listen(PICKER_OPEN_WORKBENCH_SEARCH_EVENT, async () => {
+      if (disposed) {
+        return;
+      }
+      await openWorkbenchFromPickerSearch();
+    }).then((cleanup) => {
+      unlistenWorkbenchSearch = cleanup;
+    });
+
     return () => {
       disposed = true;
       unlistenStart?.();
@@ -236,6 +274,8 @@ export function PickerShell() {
       unlistenNavigate?.();
       unlistenConfirm?.();
       unlistenSelectIndex?.();
+      unlistenWorkbenchEdit?.();
+      unlistenWorkbenchSearch?.();
     };
   }, [tauriRuntime]);
 
@@ -323,6 +363,26 @@ export function PickerShell() {
             {lastMessage && <span className="ml-2 animate-pulse text-[10px] font-medium text-[color:var(--cp-favorite)]">{lastMessage}</span>}
           </div>
           <div className="flex items-center gap-1.5">
+            <button
+              className={STYLES.headerButton}
+              onClick={() => void handleOpenWorkbenchEdit()}
+              title="编辑当前项 (Ctrl+E)"
+              type="button"
+            >
+              <svg className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" />
+              </svg>
+            </button>
+            <button
+              className={STYLES.headerButton}
+              onClick={() => void handleOpenWorkbenchSearch()}
+              title="搜索 (Ctrl+F)"
+              type="button"
+            >
+              <svg className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+              </svg>
+            </button>
             <button
               className={STYLES.headerButton}
               onClick={() => void handleOpenManager()}

@@ -16,8 +16,8 @@ use crate::{
     domain::{
         error::AppError,
         events::{
-            PICKER_CONFIRM_EVENT, PICKER_NAVIGATE_EVENT, PICKER_SELECT_INDEX_EVENT,
-            WORKBENCH_NAVIGATE_EVENT,
+            PICKER_CONFIRM_EVENT, PICKER_NAVIGATE_EVENT, PICKER_OPEN_WORKBENCH_EDIT_EVENT,
+            PICKER_OPEN_WORKBENCH_SEARCH_EVENT, PICKER_SELECT_INDEX_EVENT, WORKBENCH_NAVIGATE_EVENT,
         },
     },
     services::window_coordinator::WindowCoordinator,
@@ -25,9 +25,9 @@ use crate::{
 
 pub struct ShortcutManager;
 
-const PICKER_SESSION_SHORTCUTS: [&str; 14] = [
+const PICKER_SESSION_SHORTCUTS: [&str; 16] = [
     "Up", "Down", "Enter", "Escape", "Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6",
-    "Digit7", "Digit8", "Digit9", "Tab",
+    "Digit7", "Digit8", "Digit9", "Tab", "Ctrl+E", "Ctrl+F",
 ];
 const WORKBENCH_SESSION_SHORTCUTS: [&str; 8] = [
     "Up", "Down", "Enter", "Escape", "Ctrl+E", "Ctrl+F", "Ctrl+S", "Delete",
@@ -435,6 +435,14 @@ impl ShortcutManager {
             "digit7" => app.emit(PICKER_SELECT_INDEX_EVENT, 6),
             "digit8" => app.emit(PICKER_SELECT_INDEX_EVENT, 7),
             "digit9" => app.emit(PICKER_SELECT_INDEX_EVENT, 8),
+            "ctrl+e" => {
+                info!("命中 Ctrl+E 编辑当前项");
+                app.emit(PICKER_OPEN_WORKBENCH_EDIT_EVENT, ())
+            },
+            "ctrl+f" => {
+                info!("命中 Ctrl+F 进入搜索");
+                app.emit(PICKER_OPEN_WORKBENCH_SEARCH_EVENT, ())
+            }
             _ => return,
         };
 
@@ -574,6 +582,8 @@ fn is_picker_session_shortcut(shortcut: &str) -> bool {
             | "digit8"
             | "digit9"
             | "tab"
+            | "ctrl+e"
+            | "ctrl+f"
     )
 }
 
