@@ -738,6 +738,8 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
   const [pauseMonitoring, setPauseMonitoring] = useState(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>("system");
   const [excludedAppsText, setExcludedAppsText] = useState("");
+  const [workbenchShortcut, setWorkbenchShortcut] = useState("Ctrl+Shift+F");
+  const [workbenchShortcutEnabled, setWorkbenchShortcutEnabled] = useState(true);
 
   useEffect(() => {
     if (!data) {
@@ -754,6 +756,8 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
     setPauseMonitoring(data.pauseMonitoring);
     setThemeMode(data.themeMode);
     setExcludedAppsText(data.excludedApps.join("\n"));
+    setWorkbenchShortcut(data.workbenchShortcut);
+    setWorkbenchShortcutEnabled(data.workbenchShortcutEnabled);
   }, [data]);
 
   if (isLoading && !data) {
@@ -791,6 +795,31 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
           value={shortcut}
         />
       </label>
+
+      <div className="block">
+        <div className="mb-2.5 flex items-center justify-between">
+          <span className="text-[13px] font-bold text-[color:var(--cp-text-primary)]">工作窗快捷键</span>
+          <label className="flex cursor-pointer items-center gap-2">
+            <input
+              checked={workbenchShortcutEnabled}
+              className="h-4 w-4 rounded border-[rgba(var(--cp-surface1-rgb),0.4)] bg-cp-base text-[color:var(--cp-accent-primary)] focus:ring-[color:var(--cp-accent-primary)] dark:bg-[color:var(--cp-control-surface)]"
+              onChange={(event) => setWorkbenchShortcutEnabled(event.target.checked)}
+              type="checkbox"
+            />
+            <span className="text-[12px] font-medium text-[color:var(--cp-text-muted)]">启用</span>
+          </label>
+        </div>
+        <input
+          className="w-full rounded-md border border-[rgba(var(--cp-surface1-rgb),0.35)] bg-cp-mantle px-5 py-3.5 text-sm font-medium outline-none transition-all focus:border-[rgba(var(--cp-accent-primary-rgb),0.25)] focus:bg-[color:var(--cp-window-shell)] focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 dark:border-[rgba(var(--cp-surface1-rgb),0.4)] dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
+          disabled={!workbenchShortcutEnabled}
+          onChange={(event) => setWorkbenchShortcut(event.target.value)}
+          placeholder="Ctrl+Shift+F"
+          value={workbenchShortcut}
+        />
+        <p className="mt-2 text-[11px] font-medium leading-relaxed text-[color:var(--cp-text-muted)]">
+          全局快捷键，直接打开搜索/编辑工作窗。
+        </p>
+      </div>
 
       <label className="block">
         <span className="mb-2.5 block text-[13px] font-bold text-[color:var(--cp-text-primary)]">历史记录上限</span>
@@ -960,6 +989,8 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
                 .filter(Boolean),
               restoreClipboardAfterPaste,
               pauseMonitoring,
+              workbenchShortcut,
+              workbenchShortcutEnabled,
             })
           }
           type="button"
