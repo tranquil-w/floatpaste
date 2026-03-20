@@ -13,6 +13,7 @@ export const WORKBENCH_SESSION_END_EVENT = "workbench://session-end";
 export const WORKBENCH_EDIT_ITEM_EVENT = "workbench://edit-item";
 export const WORKBENCH_SEARCH_EVENT = "workbench://search";
 export const WORKBENCH_PASTE_EVENT = "workbench://paste";
+export const WORKBENCH_NAVIGATE_EVENT = "workbench://navigate";
 
 // Picker 新增跳转事件
 export const PICKER_OPEN_WORKBENCH_EDIT_EVENT = "picker://open-workbench-edit";

@@ -40,7 +40,8 @@
       "capabilities": [
         "background-capability",
         "manager-capability",
-        "picker-capability"
+        "picker-capability",
+        "workbench-capability"
       ]
     }
   },

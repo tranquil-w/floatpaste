@@ -51,8 +51,13 @@ pub fn open_workbench_from_picker_edit(
     app: AppHandle,
     item_id: String,
 ) -> Result<(), String> {
+    ShortcutManager::unregister_picker_session_shortcuts(&app);
     WindowCoordinator::open_workbench_from_picker_edit(&app, &state, item_id)
-        .map_err(map_error)
+        .map_err(map_error)?;
+    if let Err(error) = ShortcutManager::register_workbench_session_shortcuts(&app) {
+        warn!("从 Picker 编辑进入 Workbench 时注册会话快捷键失败: {error}");
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -61,8 +66,13 @@ pub fn open_workbench_from_picker_search(
     app: AppHandle,
     initial_keyword: Option<String>,
 ) -> Result<(), String> {
+    ShortcutManager::unregister_picker_session_shortcuts(&app);
     WindowCoordinator::open_workbench_from_picker_search(&app, &state, initial_keyword)
-        .map_err(map_error)
+        .map_err(map_error)?;
+    if let Err(error) = ShortcutManager::register_workbench_session_shortcuts(&app) {
+        warn!("从 Picker 搜索进入 Workbench 时注册会话快捷键失败: {error}");
+    }
+    Ok(())
 }
 
 #[tauri::command]

@@ -4,7 +4,7 @@ use tauri::{
     AppHandle, Emitter, Manager, PhysicalSize, Position, Size, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder, WindowEvent,
 };
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 use crate::{
     app_bootstrap::AppState,
@@ -237,9 +237,12 @@ impl WindowCoordinator {
         state.set_workbench_session(workbench_session)?;
         Self::hide_picker(app)?;
 
-        window
-            .show()
-            .map_err(|error| AppError::Message(error.to_string()))?;
+        if let Err(error) = window.show() {
+            error!("Workbench 显示失败，尝试恢复 Picker: {error}");
+            let _ = state.clear_workbench_session();
+            let _ = Self::show_picker(app, state);
+            return Err(AppError::Message(error.to_string()));
+        }
         window
             .set_focus()
             .map_err(|error| AppError::Message(error.to_string()))?;
@@ -278,9 +281,12 @@ impl WindowCoordinator {
         state.set_workbench_session(workbench_session)?;
         Self::hide_picker(app)?;
 
-        window
-            .show()
-            .map_err(|error| AppError::Message(error.to_string()))?;
+        if let Err(error) = window.show() {
+            error!("Workbench 显示失败，尝试恢复 Picker: {error}");
+            let _ = state.clear_workbench_session();
+            let _ = Self::show_picker(app, state);
+            return Err(AppError::Message(error.to_string()));
+        }
         window
             .set_focus()
             .map_err(|error| AppError::Message(error.to_string()))?;
@@ -359,7 +365,9 @@ impl WindowCoordinator {
             .hide()
             .map_err(|error| AppError::Message(error.to_string()))?;
 
-        let _ = window.emit(WORKBENCH_SESSION_END_EVENT, ());
+        if let Err(err) = window.emit(WORKBENCH_SESSION_END_EVENT, ()) {
+            error!("发送 WORKBENCH_SESSION_END_EVENT 失败: {err}");
+        }
         state.clear_workbench_session()?;
 
         if let Some(ref sess) = session {
@@ -450,7 +458,9 @@ fn configure_workbench_window(window: &WebviewWindow) {
             }
             api.prevent_close();
             if let Some(state) = app.try_state::<AppState>() {
-                let _ = WindowCoordinator::hide_workbench_and_restore_target(&app, &state);
+                if let Err(err) = WindowCoordinator::hide_workbench_and_restore_target(&app, &state) {
+                    error!("Workbench CloseRequested 处理失败: {err}");
+                }
             }
         }
     });

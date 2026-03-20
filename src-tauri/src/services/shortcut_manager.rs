@@ -39,30 +39,6 @@ static PICKER_NAV_REPEAT_DIRECTION: Mutex<Option<&str>> = Mutex::new(None);
 static PICKER_NAV_REPEAT_TOKEN: AtomicU64 = AtomicU64::new(0);
 
 impl ShortcutManager {
-    pub fn sync_registered_shortcut(app: &AppHandle, shortcut: &str) -> Result<(), AppError> {
-        let shortcut = normalize_shortcut(shortcut)?;
-        if shortcut.is_empty() {
-            return Err(AppError::Message("快捷键不能为空".to_string()));
-        }
-
-        let manager = app.global_shortcut();
-        manager
-            .unregister_all()
-            .map_err(|error| AppError::Message(format!("清理旧快捷键失败: {error}")))?;
-        manager
-            .register(shortcut.as_str())
-            .map_err(|error| AppError::Message(format!("注册快捷键失败: {error}")))?;
-
-        if picker_is_active(app) || has_registered_picker_session_shortcut(app) {
-            if let Err(error) = Self::register_picker_session_shortcuts(app) {
-                warn!("重新注册 Picker 会话快捷键失败，将保留鼠标可用的降级路径: {error}");
-            }
-        }
-
-        info!("已注册全局快捷键: {shortcut}");
-        Ok(())
-    }
-
     pub fn register_picker_session_shortcuts(app: &AppHandle) -> Result<(), AppError> {
         let manager = app.global_shortcut();
         Self::unregister_picker_session_shortcuts(app);
@@ -256,7 +232,14 @@ impl ShortcutManager {
             .map(|s| s.workbench_shortcut);
 
         if let Some(ref ws) = workbench_shortcut {
-            if normalized == normalize_shortcut(ws).unwrap_or_default() {
+            let normalized_ws = match normalize_shortcut(ws) {
+                Ok(s) => s,
+                Err(_) => {
+                    warn!("工作窗快捷键 '{ws}' 解析失败，跳过匹配");
+                    String::new()
+                }
+            };
+            if normalized == normalized_ws {
                 if event.state != ShortcutState::Pressed {
                     return;
                 }

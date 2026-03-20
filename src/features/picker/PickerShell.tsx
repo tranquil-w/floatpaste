@@ -252,18 +252,30 @@ export function PickerShell() {
       if (!item) {
         return;
       }
-      await openWorkbenchFromPickerEdit(item.id);
+      try {
+        await openWorkbenchFromPickerEdit(item.id);
+      } catch (err) {
+        console.error("打开 Workbench 编辑失败:", err);
+      }
     }).then((cleanup) => {
       unlistenWorkbenchEdit = cleanup;
+    }).catch((err: unknown) => {
+      console.error("监听 PICKER_OPEN_WORKBENCH_EDIT_EVENT 失败:", err);
     });
 
     void listen(PICKER_OPEN_WORKBENCH_SEARCH_EVENT, async () => {
       if (disposed) {
         return;
       }
-      await openWorkbenchFromPickerSearch();
+      try {
+        await openWorkbenchFromPickerSearch();
+      } catch (err) {
+        console.error("打开 Workbench 搜索失败:", err);
+      }
     }).then((cleanup) => {
       unlistenWorkbenchSearch = cleanup;
+    }).catch((err: unknown) => {
+      console.error("监听 PICKER_OPEN_WORKBENCH_SEARCH_EVENT 失败:", err);
     });
 
     return () => {
