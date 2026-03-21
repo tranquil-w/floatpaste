@@ -6,7 +6,7 @@ import { EDITOR_SESSION_END_EVENT, EDITOR_SESSION_START_EVENT } from "../../brid
 import { isTauriRuntime } from "../../bridge/runtime";
 import { useItemDetailQuery, useUpdateTextMutation } from "../manager/queries";
 import { useEditorStore, type EditorSession } from "./store";
-import { getEditorKeyboardAction } from "./keyboard";
+import { getEditorKeyboardAction, moveFocusInDialog } from "./keyboard";
 
 function getErrorMessage(error: unknown, fallback: string) {
   if (error instanceof Error && error.message.trim()) {
@@ -49,6 +49,7 @@ export function EditorShell() {
   const detailQuery = useItemDetailQuery(session?.itemId ?? null);
   const updateTextMutation = useUpdateTextMutation();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   const saveAndCloseButtonRef = useRef<HTMLButtonElement>(null);
   const requestCloseRef = useRef<() => Promise<void>>(async () => {});
 
@@ -123,7 +124,11 @@ export function EditorShell() {
         return;
       }
 
-      void handleSaveAndClose();
+      moveFocusInDialog({
+        activeElement: document.activeElement,
+        container: dialogRef.current,
+        shiftKey: event.shiftKey,
+      });
     };
 
     window.addEventListener("keydown", handleKeyDown, true);
@@ -303,6 +308,7 @@ export function EditorShell() {
       {closeConfirmOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 px-4">
           <div
+            ref={dialogRef}
             aria-labelledby="editor-close-confirm-title"
             aria-modal="true"
             className="w-full max-w-sm rounded-2xl bg-[color:var(--cp-window-shell)] p-6 shadow-2xl"
@@ -348,4 +354,8 @@ export function EditorShell() {
     </div>
   );
 }
+
+
+
+
 
