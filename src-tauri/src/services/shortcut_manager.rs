@@ -20,6 +20,7 @@ use crate::{
             PICKER_CONFIRM_EVENT, PICKER_NAVIGATE_EVENT, PICKER_OPEN_EDITOR_EVENT,
             PICKER_SELECT_INDEX_EVENT, WORKBENCH_EDIT_ITEM_EVENT, WORKBENCH_NAVIGATE_EVENT,
         },
+        settings::normalize_shortcut_for_registration,
     },
     services::window_coordinator::WindowCoordinator,
 };
@@ -613,7 +614,9 @@ fn normalize_shortcut(shortcut: &str) -> Result<String, AppError> {
         return Ok(String::new());
     }
 
-    Shortcut::from_str(trimmed)
+    let registerable = normalize_shortcut_for_registration(trimmed);
+
+    Shortcut::from_str(registerable.as_str())
         .map(|value| value.into_string().to_lowercase())
         .map_err(|error| AppError::Message(format!("无效快捷键格式: {error}")))
 }
@@ -621,7 +624,7 @@ fn normalize_shortcut(shortcut: &str) -> Result<String, AppError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_editor_session_shortcut, is_picker_session_shortcut,
+        is_editor_session_shortcut, is_picker_session_shortcut, normalize_shortcut,
         should_release_stale_picker_shortcuts, should_release_stale_workbench_shortcuts,
     };
 
@@ -663,5 +666,13 @@ mod tests {
     fn editor_window_should_not_register_navigation_shortcuts() {
         assert!(!is_editor_session_shortcut("arrowup"));
         assert!(!is_editor_session_shortcut("enter"));
+    }
+
+    #[test]
+    fn normalize_shortcut_accepts_win_modifier_alias() {
+        assert_eq!(
+            normalize_shortcut("Win+F").unwrap(),
+            normalize_shortcut("Super+F").unwrap()
+        );
     }
 }

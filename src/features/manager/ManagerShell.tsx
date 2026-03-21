@@ -270,7 +270,7 @@ export function ManagerShell() {
                 <div className={STYLES.shortcutDot}></div>
                 <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-[color:var(--cp-text-muted)]">全局快捷键</p>
               </div>
-              <p className="mt-2.5 font-display text-3xl font-medium tracking-wide text-[color:var(--cp-text-primary)]">{settings.data?.shortcut ?? "Ctrl+`"}</p>
+              <p className="mt-2.5 font-display text-3xl font-medium tracking-wide text-[color:var(--cp-text-primary)]">{settings.data?.shortcut ?? "Alt+Q"}</p>
               <p className="mt-3 text-xs leading-relaxed text-[color:var(--cp-text-muted)] font-medium">唤起速贴面板进行剪贴板管理</p>
             </div>
           </div>
@@ -728,7 +728,7 @@ interface SettingsPanelProps {
 
 function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: SettingsPanelProps) {
   const { data, isLoading } = useSettingsQuery();
-  const [shortcut, setShortcut] = useState("Ctrl+`");
+  const [shortcut, setShortcut] = useState("Alt+Q");
   const [launchOnStartup, setLaunchOnStartup] = useState(false);
   const [silentOnStartup, setSilentOnStartup] = useState(false);
   const [historyLimit, setHistoryLimit] = useState(1000);
@@ -738,7 +738,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
   const [pauseMonitoring, setPauseMonitoring] = useState(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>("system");
   const [excludedAppsText, setExcludedAppsText] = useState("");
-  const [workbenchShortcut, setWorkbenchShortcut] = useState("Win+F");
+  const [workbenchShortcut, setWorkbenchShortcut] = useState("Alt+S");
   const [workbenchShortcutEnabled, setWorkbenchShortcutEnabled] = useState(true);
 
   useEffect(() => {
@@ -813,7 +813,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
           className="w-full rounded-md border border-[rgba(var(--cp-surface1-rgb),0.35)] bg-cp-mantle px-5 py-3.5 text-sm font-medium outline-none transition-all focus:border-[rgba(var(--cp-accent-primary-rgb),0.25)] focus:bg-[color:var(--cp-window-shell)] focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 dark:border-[rgba(var(--cp-surface1-rgb),0.4)] dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
           disabled={!workbenchShortcutEnabled}
           onChange={(event) => setWorkbenchShortcut(event.target.value)}
-          placeholder="Win+F"
+          placeholder="Alt+S"
           value={workbenchShortcut}
         />
         <p className="mt-2 text-[11px] font-medium leading-relaxed text-[color:var(--cp-text-muted)]">
