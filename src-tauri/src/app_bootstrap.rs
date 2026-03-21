@@ -30,9 +30,11 @@ pub struct AppState {
     self_write_guard: SelfWriteGuard,
     picker_session: Arc<Mutex<PickerSession>>,
     picker_active: Arc<AtomicBool>,
+    picker_session_shortcuts_registered: Arc<AtomicBool>,
     quitting: Arc<AtomicBool>,
     workbench_session: Arc<Mutex<Option<WorkbenchSession>>>,
     workbench_active: Arc<AtomicBool>,
+    workbench_session_shortcuts_registered: Arc<AtomicBool>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -54,9 +56,11 @@ impl AppState {
             self_write_guard: SelfWriteGuard::default(),
             picker_session: Arc::new(Mutex::new(PickerSession::default())),
             picker_active: Arc::new(AtomicBool::new(false)),
+            picker_session_shortcuts_registered: Arc::new(AtomicBool::new(false)),
             quitting: Arc::new(AtomicBool::new(false)),
             workbench_session: Arc::new(Mutex::new(None)),
             workbench_active: Arc::new(AtomicBool::new(false)),
+            workbench_session_shortcuts_registered: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -101,6 +105,16 @@ impl AppState {
     pub fn is_picker_active(&self) -> bool {
         self.picker_active.load(Ordering::SeqCst)
     }
+
+    pub fn set_picker_session_shortcuts_registered(&self, registered: bool) {
+        self.picker_session_shortcuts_registered
+            .store(registered, Ordering::SeqCst);
+    }
+
+    pub fn picker_session_shortcuts_registered(&self) -> bool {
+        self.picker_session_shortcuts_registered.load(Ordering::SeqCst)
+    }
+
     pub fn begin_quit(&self) {
         self.quitting.store(true, Ordering::SeqCst);
     }
@@ -135,6 +149,16 @@ impl AppState {
 
     pub fn is_workbench_active(&self) -> bool {
         self.workbench_active.load(Ordering::SeqCst)
+    }
+
+    pub fn set_workbench_session_shortcuts_registered(&self, registered: bool) {
+        self.workbench_session_shortcuts_registered
+            .store(registered, Ordering::SeqCst);
+    }
+
+    pub fn workbench_session_shortcuts_registered(&self) -> bool {
+        self.workbench_session_shortcuts_registered
+            .load(Ordering::SeqCst)
     }
 }
 

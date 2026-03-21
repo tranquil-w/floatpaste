@@ -368,8 +368,8 @@ export function PickerShell() {
             />
           ))
           : null}
-        <div className={STYLES.header} data-tauri-drag-region>
-          <div className="flex items-center gap-2">
+        <div className={STYLES.header}>
+          <div className="flex min-w-0 flex-1 items-center gap-2" data-tauri-drag-region>
             <div className={STYLES.headerDot}></div>
             <span className="text-[12px] font-bold tracking-tight text-[color:var(--cp-text-primary)]">FloatPaste</span>
             {lastMessage && <span className="ml-2 animate-pulse text-[10px] font-medium text-[color:var(--cp-favorite)]">{lastMessage}</span>}

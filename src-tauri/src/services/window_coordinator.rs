@@ -55,6 +55,10 @@ impl WindowCoordinator {
         if let Some(window) = app.get_webview_window(PICKER_WINDOW_LABEL) {
             configure_picker_window(&window);
         }
+
+        if let Some(window) = app.get_webview_window(WORKBENCH_WINDOW_LABEL) {
+            configure_workbench_window(&window);
+        }
     }
 
     pub fn open_manager(app: &AppHandle) -> Result<(), AppError> {
@@ -364,6 +368,9 @@ impl WindowCoordinator {
         state: &AppState,
     ) -> Result<(), AppError> {
         state.end_workbench_activation();
+        crate::services::shortcut_manager::ShortcutManager::unregister_workbench_session_shortcuts(
+            app,
+        );
         let session = state.workbench_session()?;
 
         let Some(window) = app.get_webview_window(WORKBENCH_WINDOW_LABEL) else {

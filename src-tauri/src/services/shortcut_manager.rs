@@ -33,6 +33,7 @@ const PICKER_SESSION_SHORTCUTS: [&str; 16] = [
 const WORKBENCH_SESSION_SHORTCUTS: [&str; 8] = [
     "Up", "Down", "Enter", "Escape", "Ctrl+E", "Ctrl+F", "Ctrl+S", "Delete",
 ];
+const SHORTCUT_CALLBACK_DEFER_DELAY: Duration = Duration::from_millis(10);
 const PICKER_NAV_REPEAT_INITIAL_DELAY: Duration = Duration::from_millis(280);
 const PICKER_NAV_REPEAT_INTERVAL: Duration = Duration::from_millis(85);
 
@@ -51,12 +52,14 @@ impl ShortcutManager {
         }
 
         if !failures.is_empty() {
+            set_picker_shortcuts_registered(app, false);
             return Err(AppError::Message(format!(
                 "注册 Picker 会话快捷键失败: {}",
                 failures.join("; ")
             )));
         }
 
+        set_picker_shortcuts_registered(app, true);
         info!(
             "已注册 Picker 会话快捷键: {}",
             PICKER_SESSION_SHORTCUTS.join(", ")
@@ -70,6 +73,7 @@ impl ShortcutManager {
         for shortcut in PICKER_SESSION_SHORTCUTS {
             let _ = manager.unregister(shortcut);
         }
+        set_picker_shortcuts_registered(app, false);
     }
 
     pub fn register_workbench_session_shortcuts(app: &AppHandle) -> Result<(), AppError> {
@@ -83,12 +87,14 @@ impl ShortcutManager {
         }
 
         if !failures.is_empty() {
+            set_workbench_shortcuts_registered(app, false);
             return Err(AppError::Message(format!(
                 "注册 Workbench 会话快捷键失败: {}",
                 failures.join("; ")
             )));
         }
 
+        set_workbench_shortcuts_registered(app, true);
         info!(
             "已注册 Workbench 会话快捷键: {}",
             WORKBENCH_SESSION_SHORTCUTS.join(", ")
@@ -101,6 +107,7 @@ impl ShortcutManager {
         for shortcut in WORKBENCH_SESSION_SHORTCUTS {
             let _ = manager.unregister(shortcut);
         }
+        set_workbench_shortcuts_registered(app, false);
     }
 
     pub fn sync_registered_shortcuts(
@@ -250,36 +257,29 @@ impl ShortcutManager {
                 let state_clone = state.clone();
                 if state.is_workbench_active() {
                     // 已打开则关闭
-                    thread::spawn(move || {
-                        let app_clone = app_handle.clone();
-                        let _ =
-                            app_handle.run_on_main_thread(move || {
-                                Self::unregister_workbench_session_shortcuts(&app_clone);
-                                if let Err(error) =
-                                    WindowCoordinator::hide_workbench_and_restore_target(
-                                        &app_clone,
-                                        &state_clone,
-                                    )
-                                {
-                                    error!("关闭 Workbench 失败: {error}");
-                                }
-                            });
+                    defer_shortcut_main_thread_action(app_handle, move |app_clone| {
+                        Self::unregister_workbench_session_shortcuts(&app_clone);
+                        if let Err(error) =
+                            WindowCoordinator::hide_workbench_and_restore_target(
+                                &app_clone,
+                                &state_clone,
+                            )
+                        {
+                            error!("关闭 Workbench 失败: {error}");
+                        }
                     });
                 } else {
                     // 未打开则打开
-                    thread::spawn(move || {
-                        let app_clone = app_handle.clone();
-                        let _ = app_handle.run_on_main_thread(move || {
-                            if let Err(error) =
-                                WindowCoordinator::open_workbench_global(&app_clone, &state_clone)
-                            {
-                                error!("打开 Workbench 失败: {error}");
-                            } else if let Err(error) =
-                                Self::register_workbench_session_shortcuts(&app_clone)
-                            {
-                                warn!("打开 Workbench 后注册会话快捷键失败: {error}");
-                            }
-                        });
+                    defer_shortcut_main_thread_action(app_handle, move |app_clone| {
+                        if let Err(error) =
+                            WindowCoordinator::open_workbench_global(&app_clone, &state_clone)
+                        {
+                            error!("打开 Workbench 失败: {error}");
+                        } else if let Err(error) =
+                            Self::register_workbench_session_shortcuts(&app_clone)
+                        {
+                            warn!("打开 Workbench 后注册会话快捷键失败: {error}");
+                        }
                     });
                 }
                 return;
@@ -307,20 +307,16 @@ impl ShortcutManager {
                     info!("命中 Workbench 关闭快捷键: {normalized}");
                     let app_handle = app.clone();
                     let state_clone = state.clone();
-                    thread::spawn(move || {
-                        let app_clone = app_handle.clone();
-                        let _ =
-                            app_handle.run_on_main_thread(move || {
-                                Self::unregister_workbench_session_shortcuts(&app_clone);
-                                if let Err(error) =
-                                    WindowCoordinator::hide_workbench_and_restore_target(
-                                        &app_clone,
-                                        &state_clone,
-                                    )
-                                {
-                                    error!("关闭 Workbench 失败: {error}");
-                                }
-                            });
+                    defer_shortcut_main_thread_action(app_handle, move |app_clone| {
+                        Self::unregister_workbench_session_shortcuts(&app_clone);
+                        if let Err(error) =
+                            WindowCoordinator::hide_workbench_and_restore_target(
+                                &app_clone,
+                                &state_clone,
+                            )
+                        {
+                            error!("关闭 Workbench 失败: {error}");
+                        }
                     });
                 }
                 _ => {
@@ -330,11 +326,15 @@ impl ShortcutManager {
             return;
         }
 
-        if !state.is_workbench_active() && is_workbench_session_shortcut(normalized.as_str()) {
+        if should_release_stale_workbench_shortcuts(
+            state.is_workbench_active(),
+            has_registered_workbench_session_shortcut(app),
+            normalized.as_str(),
+        ) {
             if event.state == ShortcutState::Pressed {
                 warn!("检测到 Workbench 已隐藏但会话快捷键仍在注册，正在自动释放这些快捷键");
                 let app_handle = app.clone();
-                let _ = app.run_on_main_thread(move || {
+                defer_shortcut_main_thread_action(app_handle, move |app_handle| {
                     Self::unregister_workbench_session_shortcuts(&app_handle);
                 });
             }
@@ -343,11 +343,15 @@ impl ShortcutManager {
 
         if !state.is_picker_active() {
             if event.state == ShortcutState::Pressed
-                && is_picker_session_shortcut(normalized.as_str())
+                && should_release_stale_picker_shortcuts(
+                    state.is_picker_active(),
+                    has_registered_picker_session_shortcut(app),
+                    normalized.as_str(),
+                )
             {
                 warn!("检测到 Picker 已隐藏但会话快捷键仍在注册，正在自动释放这些快捷键");
                 let app_handle = app.clone();
-                let _ = app.run_on_main_thread(move || {
+                defer_shortcut_main_thread_action(app_handle, move |app_handle| {
                     Self::unregister_picker_session_shortcuts(&app_handle);
                 });
             }
@@ -421,11 +425,11 @@ impl ShortcutManager {
             "digit7" => app.emit(PICKER_SELECT_INDEX_EVENT, 6),
             "digit8" => app.emit(PICKER_SELECT_INDEX_EVENT, 7),
             "digit9" => app.emit(PICKER_SELECT_INDEX_EVENT, 8),
-            "ctrl+e" => {
+            "ctrl+e" | "control+keye" => {
                 info!("命中 Ctrl+E 编辑当前项");
                 app.emit(PICKER_OPEN_WORKBENCH_EDIT_EVENT, ())
             }
-            "ctrl+f" => {
+            "ctrl+f" | "control+keyf" => {
                 info!("命中 Ctrl+F 进入搜索");
                 app.emit(PICKER_OPEN_WORKBENCH_SEARCH_EVENT, ())
             }
@@ -520,10 +524,9 @@ fn workbench_is_active(app: &AppHandle) -> bool {
 }
 
 fn has_registered_workbench_session_shortcut(app: &AppHandle) -> bool {
-    let manager = app.global_shortcut();
-    WORKBENCH_SESSION_SHORTCUTS
-        .iter()
-        .any(|shortcut| manager.is_registered(*shortcut))
+    app.try_state::<AppState>()
+        .map(|state| state.workbench_session_shortcuts_registered())
+        .unwrap_or(false)
 }
 
 fn is_workbench_session_shortcut(shortcut: &str) -> bool {
@@ -536,17 +539,27 @@ fn is_workbench_session_shortcut(shortcut: &str) -> bool {
             | "escape"
             | "esc"
             | "ctrl+e"
+            | "control+keye"
             | "ctrl+f"
+            | "control+keyf"
             | "ctrl+s"
+            | "control+keys"
             | "delete"
     )
 }
 
+fn should_release_stale_workbench_shortcuts(
+    workbench_active: bool,
+    shortcuts_registered: bool,
+    shortcut: &str,
+) -> bool {
+    !workbench_active && shortcuts_registered && is_workbench_session_shortcut(shortcut)
+}
+
 fn has_registered_picker_session_shortcut(app: &AppHandle) -> bool {
-    let manager = app.global_shortcut();
-    PICKER_SESSION_SHORTCUTS
-        .iter()
-        .any(|shortcut| manager.is_registered(*shortcut))
+    app.try_state::<AppState>()
+        .map(|state| state.picker_session_shortcuts_registered())
+        .unwrap_or(false)
 }
 
 fn is_picker_session_shortcut(shortcut: &str) -> bool {
@@ -569,8 +582,41 @@ fn is_picker_session_shortcut(shortcut: &str) -> bool {
             | "digit9"
             | "tab"
             | "ctrl+e"
+            | "control+keye"
             | "ctrl+f"
+            | "control+keyf"
     )
+}
+
+fn should_release_stale_picker_shortcuts(
+    picker_active: bool,
+    shortcuts_registered: bool,
+    shortcut: &str,
+) -> bool {
+    !picker_active && shortcuts_registered && is_picker_session_shortcut(shortcut)
+}
+
+fn defer_shortcut_main_thread_action<F>(app: AppHandle, action: F)
+where
+    F: FnOnce(AppHandle) + Send + 'static,
+{
+    thread::spawn(move || {
+        thread::sleep(SHORTCUT_CALLBACK_DEFER_DELAY);
+        let app_clone = app.clone();
+        let _ = app.run_on_main_thread(move || action(app_clone));
+    });
+}
+
+fn set_picker_shortcuts_registered(app: &AppHandle, registered: bool) {
+    if let Some(state) = app.try_state::<AppState>() {
+        state.set_picker_session_shortcuts_registered(registered);
+    }
+}
+
+fn set_workbench_shortcuts_registered(app: &AppHandle, registered: bool) {
+    if let Some(state) = app.try_state::<AppState>() {
+        state.set_workbench_session_shortcuts_registered(registered);
+    }
 }
 
 fn picker_navigation_direction(shortcut: &str) -> Option<&'static str> {
@@ -597,4 +643,38 @@ fn normalize_shortcut(shortcut: &str) -> Result<String, AppError> {
     Shortcut::from_str(trimmed)
         .map(|value| value.into_string().to_lowercase())
         .map_err(|error| AppError::Message(format!("无效快捷键格式: {error}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        is_picker_session_shortcut, should_release_stale_picker_shortcuts,
+        should_release_stale_workbench_shortcuts,
+    };
+
+    #[test]
+    fn workbench_hidden_without_registered_shortcuts_should_not_intercept_picker_escape() {
+        assert!(!should_release_stale_workbench_shortcuts(false, false, "escape"));
+    }
+
+    #[test]
+    fn workbench_hidden_with_registered_shortcuts_should_trigger_cleanup() {
+        assert!(should_release_stale_workbench_shortcuts(false, true, "escape"));
+    }
+
+    #[test]
+    fn picker_hidden_without_registered_shortcuts_should_not_attempt_cleanup() {
+        assert!(!should_release_stale_picker_shortcuts(false, false, "tab"));
+    }
+
+    #[test]
+    fn picker_hidden_with_registered_shortcuts_should_trigger_cleanup() {
+        assert!(should_release_stale_picker_shortcuts(false, true, "tab"));
+    }
+
+    #[test]
+    fn picker_session_shortcuts_should_match_normalized_ctrl_e_and_ctrl_f() {
+        assert!(is_picker_session_shortcut("control+keye"));
+        assert!(is_picker_session_shortcut("control+keyf"));
+    }
 }

@@ -34,6 +34,20 @@
         "skipTaskbar": true,
         "transparent": true,
         "shadow": false
+      },
+      {
+        "label": "workbench",
+        "title": "FloatPaste Workbench",
+        "width": 900,
+        "height": 600,
+        "minWidth": 600,
+        "minHeight": 400,
+        "resizable": true,
+        "center": true,
+        "visible": false,
+        "decorations": true,
+        "alwaysOnTop": false,
+        "skipTaskbar": false
       }
     ],
     "security": {
