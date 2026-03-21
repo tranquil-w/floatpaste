@@ -236,6 +236,7 @@ impl WindowCoordinator {
             current_item_id: Some(item_id.clone()),
             from_picker: true,
             picker_selected_index: None,
+            picker_reopen_manager_on_close: picker_session.reopen_manager_on_close,
         };
 
         state.set_workbench_session(workbench_session)?;
@@ -283,6 +284,7 @@ impl WindowCoordinator {
             current_item_id: None,
             from_picker: true,
             picker_selected_index: None,
+            picker_reopen_manager_on_close: picker_session.reopen_manager_on_close,
         };
 
         state.set_workbench_session(workbench_session)?;
@@ -334,6 +336,7 @@ impl WindowCoordinator {
             current_item_id: None,
             from_picker: false,
             picker_selected_index: None,
+            picker_reopen_manager_on_close: false,
         };
 
         state.set_workbench_session(workbench_session)?;
@@ -362,6 +365,60 @@ impl WindowCoordinator {
         Ok(())
     }
 
+    /// 恢复 Picker 窗口（在原位置显示，不重新计算位置）
+    pub fn restore_picker(
+        app: &AppHandle,
+        state: &AppState,
+        target_window_hwnd: Option<isize>,
+        reopen_manager_on_close: bool,
+    ) -> Result<(), AppError> {
+        let window = ensure_picker_window(app)?;
+
+        // 设置 picker 会话状态
+        state.set_picker_session(target_window_hwnd, reopen_manager_on_close)?;
+
+        // 恢复窗口大小和位置
+        restore_picker_window_size(app, &window);
+
+        // 使用 show_window_no_activate 避免焦点被抢占
+        #[cfg(target_os = "windows")]
+        {
+            crate::platform::windows::window_utils::show_window_no_activate(&window)
+                .map_err(|error| AppError::Message(error.to_string()))?;
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            window
+                .show()
+                .map_err(|error| AppError::Message(error.to_string()))?;
+        }
+
+        state.begin_picker_activation();
+
+        // 注册 Picker 会话快捷键
+        crate::services::shortcut_manager::ShortcutManager::register_picker_session_shortcuts(app)?;
+
+        #[cfg(target_os = "windows")]
+        {
+            crate::platform::windows::picker_mouse_monitor::PickerMouseMonitor::begin_session(
+                app.clone(),
+            );
+        }
+
+        window
+            .emit(
+                PICKER_SESSION_START_EVENT,
+                PickerSessionPayload {
+                    session_id: Utc::now().timestamp_millis().to_string(),
+                    shown_at: Utc::now().to_rfc3339(),
+                },
+            )
+            .map_err(|error| AppError::Message(error.to_string()))?;
+
+        info!("恢复 Picker 窗口");
+        Ok(())
+    }
+
     /// 隐藏 Workbench 并恢复目标窗口
     pub fn hide_workbench_and_restore_target(
         app: &AppHandle,
@@ -384,15 +441,20 @@ impl WindowCoordinator {
         if let Err(err) = window.emit(WORKBENCH_SESSION_END_EVENT, ()) {
             error!("发送 WORKBENCH_SESSION_END_EVENT 失败: {err}");
         }
-        state.clear_workbench_session()?;
 
         if let Some(ref sess) = session {
-            // Workbench 是普通装饰窗口（非 show_window_no_activate），隐藏后可立即还焦，无需 50ms 延时
-            if let Some(hwnd) = sess.target_window_hwnd {
-                let _ = ActiveAppResolver::restore_foreground_window(hwnd);
+            // 如果从 Picker 进入，关闭 Workbench 后返回 Picker
+            if sess.from_picker {
+                let _ = Self::restore_picker(app, state, sess.target_window_hwnd, sess.picker_reopen_manager_on_close);
+            } else {
+                // Workbench 是普通装饰窗口（非 show_window_no_activate），隐藏后可立即还焦，无需 50ms 延时
+                if let Some(hwnd) = sess.target_window_hwnd {
+                    let _ = ActiveAppResolver::restore_foreground_window(hwnd);
+                }
             }
         }
 
+        state.clear_workbench_session()?;
         info!("隐藏 Workbench");
         Ok(())
     }

@@ -13,6 +13,8 @@ pub struct WorkbenchSession {
     pub from_picker: bool,
     /// Picker 会话的原始选中索引（用于返回时恢复）
     pub picker_selected_index: Option<usize>,
+    /// Picker 会话是否需要在关闭时重新打开 Manager
+    pub picker_reopen_manager_on_close: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]

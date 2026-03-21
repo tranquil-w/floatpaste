@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useWorkbenchStore } from "./store";
 import {
@@ -144,6 +144,14 @@ function NoticeBanner({ message }: { message: string }) {
 
 function TopBar() {
   const { keyword, session, setKeyword, setNoticeMessage } = useWorkbenchStore();
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // 当从 picker 搜索或全局快捷键进入时，自动聚焦搜索框
+  useEffect(() => {
+    if (session && (session.source === "picker_search" || session.source === "global") && searchInputRef.current) {
+      searchInputRef.current.focus();
+    }
+  }, [session]);
 
   const handleClose = async () => {
     try {
@@ -164,6 +172,7 @@ function TopBar() {
         {session?.source === "global" && "全局搜索"}
       </span>
       <input
+        ref={searchInputRef}
         className="flex-1 rounded-md border border-[color:var(--cp-border-weak)] bg-[color:var(--cp-control-surface)] px-3 py-2 text-sm outline-none focus:border-[rgba(var(--cp-peach-rgb),0.35)]"
         placeholder="搜索记录..."
         value={keyword}
@@ -304,6 +313,7 @@ function EditPanel() {
     isDirty,
     savedText,
     selectedItemId,
+    session,
     setDraftText,
     setIsDirty,
     setMode,
@@ -317,6 +327,19 @@ function EditPanel() {
   const favoritedMutation = useSetFavoritedMutation();
   const deleteMutation = useDeleteItemMutation();
   const pasteMutation = usePasteMutation();
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // 当从 picker_edit 进入编辑模式时，自动聚焦编辑框
+  useEffect(() => {
+    if (
+      session?.source === "picker_edit" &&
+      selectedItemId &&
+      detail.data?.type === "text" &&
+      textareaRef.current
+    ) {
+      textareaRef.current.focus();
+    }
+  }, [session?.source, selectedItemId, detail.data?.type]);
 
   useEffect(() => {
     if (detail.data && !isDirty) {
@@ -444,6 +467,7 @@ function EditPanel() {
       <div className="min-h-0 flex-1 p-4">
         {isTextItem ? (
           <textarea
+            ref={textareaRef}
             className="h-full w-full resize-none rounded-md border border-[color:var(--cp-border-weak)] bg-[color:var(--cp-control-surface)] p-4 text-sm outline-none focus:border-[rgba(var(--cp-peach-rgb),0.35)]"
             value={draftText}
             onChange={(event) => setDraftText(event.target.value)}
