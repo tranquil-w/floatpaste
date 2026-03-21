@@ -9,11 +9,8 @@ use tracing::{info, warn};
 
 use crate::{
     domain::{
-        editor_session::EditorSession,
-        error::AppError,
-        events::CLIPS_CHANGED_EVENT,
-        settings::UserSetting,
-        workbench_session::WorkbenchSession,
+        editor_session::EditorSession, error::AppError, events::CLIPS_CHANGED_EVENT,
+        settings::UserSetting, workbench_session::WorkbenchSession,
     },
     launch_mode::LaunchMode,
     platform::windows::clipboard_monitor::ClipboardMonitor,
@@ -119,7 +116,8 @@ impl AppState {
     }
 
     pub fn picker_session_shortcuts_registered(&self) -> bool {
-        self.picker_session_shortcuts_registered.load(Ordering::SeqCst)
+        self.picker_session_shortcuts_registered
+            .load(Ordering::SeqCst)
     }
 
     pub fn begin_quit(&self) {

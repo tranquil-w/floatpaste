@@ -37,7 +37,7 @@
       },
       {
         "label": "workbench",
-        "title": "FloatPaste Workbench",
+        "title": "FloatPaste 搜索",
         "width": 900,
         "height": 600,
         "minWidth": 600,
@@ -80,3 +80,4 @@
     "icon": []
   }
 }
+

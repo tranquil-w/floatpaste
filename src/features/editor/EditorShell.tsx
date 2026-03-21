@@ -6,6 +6,7 @@ import { EDITOR_SESSION_END_EVENT, EDITOR_SESSION_START_EVENT } from "../../brid
 import { isTauriRuntime } from "../../bridge/runtime";
 import { useItemDetailQuery, useUpdateTextMutation } from "../manager/queries";
 import { useEditorStore, type EditorSession } from "./store";
+import { getEditorKeyboardAction } from "./keyboard";
 
 function getErrorMessage(error: unknown, fallback: string) {
   if (error instanceof Error && error.message.trim()) {
@@ -24,7 +25,7 @@ function getSourceLabel(session: EditorSession | null) {
     return "等待编辑会话";
   }
 
-  return session.source === "picker" ? "来自 Picker" : "来自 Workbench";
+  return session.source === "picker" ? "来自 Picker" : "来自搜索窗口";
 }
 
 export function EditorShell() {
@@ -48,6 +49,7 @@ export function EditorShell() {
   const detailQuery = useItemDetailQuery(session?.itemId ?? null);
   const updateTextMutation = useUpdateTextMutation();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const saveAndCloseButtonRef = useRef<HTMLButtonElement>(null);
   const requestCloseRef = useRef<() => Promise<void>>(async () => {});
 
   useEffect(() => {
@@ -93,16 +95,35 @@ export function EditorShell() {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
+      const action = getEditorKeyboardAction({
+        key: event.key,
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+        closeConfirmOpen,
+      });
+
+      if (!action) {
+        return;
+      }
+
+      event.preventDefault();
+
+      if (action === "request-close") {
         void requestCloseRef.current();
         return;
       }
 
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
-        event.preventDefault();
+      if (action === "save") {
         void saveCurrentText();
+        return;
       }
+
+      if (action === "confirm-cancel") {
+        setCloseConfirmOpen(false);
+        return;
+      }
+
+      void handleSaveAndClose();
     };
 
     window.addEventListener("keydown", handleKeyDown, true);
@@ -132,6 +153,12 @@ export function EditorShell() {
       textareaRef.current.setSelectionRange(draftText.length, draftText.length);
     }
   }, [detailQuery.data?.id, detailQuery.data?.type, draftText.length]);
+
+  useEffect(() => {
+    if (closeConfirmOpen) {
+      saveAndCloseButtonRef.current?.focus();
+    }
+  }, [closeConfirmOpen]);
 
   async function saveCurrentText() {
     if (!session || detailQuery.data?.type !== "text") {
@@ -275,8 +302,16 @@ export function EditorShell() {
 
       {closeConfirmOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 px-4">
-          <div className="w-full max-w-sm rounded-2xl bg-[color:var(--cp-window-shell)] p-6 shadow-2xl">
-            <h2 className="text-lg font-semibold text-[color:var(--cp-text-primary)]">
+          <div
+            aria-labelledby="editor-close-confirm-title"
+            aria-modal="true"
+            className="w-full max-w-sm rounded-2xl bg-[color:var(--cp-window-shell)] p-6 shadow-2xl"
+            role="dialog"
+          >
+            <h2
+              className="text-lg font-semibold text-[color:var(--cp-text-primary)]"
+              id="editor-close-confirm-title"
+            >
               发现未保存修改
             </h2>
             <p className="mt-2 text-sm leading-6 text-[color:var(--cp-text-secondary)]">
@@ -298,6 +333,7 @@ export function EditorShell() {
                 放弃修改
               </button>
               <button
+                ref={saveAndCloseButtonRef}
                 className="rounded-md bg-[color:var(--cp-accent-primary)] px-4 py-2 text-sm font-semibold text-cp-base disabled:opacity-50"
                 disabled={updateTextMutation.isPending}
                 onClick={() => void handleSaveAndClose()}
@@ -312,3 +348,4 @@ export function EditorShell() {
     </div>
   );
 }
+

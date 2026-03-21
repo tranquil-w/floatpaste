@@ -738,7 +738,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
   const [pauseMonitoring, setPauseMonitoring] = useState(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>("system");
   const [excludedAppsText, setExcludedAppsText] = useState("");
-  const [workbenchShortcut, setWorkbenchShortcut] = useState("Ctrl+Shift+F");
+  const [workbenchShortcut, setWorkbenchShortcut] = useState("Win+F");
   const [workbenchShortcutEnabled, setWorkbenchShortcutEnabled] = useState(true);
 
   useEffect(() => {
@@ -798,7 +798,7 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
 
       <div className="block">
         <div className="mb-2.5 flex items-center justify-between">
-          <span className="text-[13px] font-bold text-[color:var(--cp-text-primary)]">工作窗快捷键</span>
+          <span className="text-[13px] font-bold text-[color:var(--cp-text-primary)]">搜索窗口快捷键</span>
           <label className="flex cursor-pointer items-center gap-2">
             <input
               checked={workbenchShortcutEnabled}
@@ -813,11 +813,11 @@ function SettingsPanel({ errorMessage, isPending, onDismissError, onSave }: Sett
           className="w-full rounded-md border border-[rgba(var(--cp-surface1-rgb),0.35)] bg-cp-mantle px-5 py-3.5 text-sm font-medium outline-none transition-all focus:border-[rgba(var(--cp-accent-primary-rgb),0.25)] focus:bg-[color:var(--cp-window-shell)] focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 dark:border-[rgba(var(--cp-surface1-rgb),0.4)] dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
           disabled={!workbenchShortcutEnabled}
           onChange={(event) => setWorkbenchShortcut(event.target.value)}
-          placeholder="Ctrl+Shift+F"
+          placeholder="Win+F"
           value={workbenchShortcut}
         />
         <p className="mt-2 text-[11px] font-medium leading-relaxed text-[color:var(--cp-text-muted)]">
-          全局快捷键，直接打开搜索/编辑工作窗。
+          全局快捷键，直接打开搜索窗口。
         </p>
       </div>
 
@@ -1013,3 +1013,4 @@ function getErrorMessage(error: unknown): string {
 
   return "保存设置失败，请稍后重试。";
 }
+

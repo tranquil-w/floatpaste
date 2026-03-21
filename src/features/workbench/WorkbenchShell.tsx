@@ -156,7 +156,7 @@ export function WorkbenchShell() {
       await hideWorkbench();
       setNoticeMessage(null);
     } catch (error) {
-      setNoticeMessage(`关闭工作窗失败：${getErrorMessage(error, "请稍后重试。")}`);
+      setNoticeMessage(`关闭搜索窗口失败：${getErrorMessage(error, "请稍后重试。")}`);
     }
   }
 
@@ -189,7 +189,7 @@ export function WorkbenchShell() {
             搜索与定位
           </p>
           <h1 className="mt-1 text-base font-semibold text-[color:var(--cp-text-primary)]">
-            Workbench
+            搜索窗口
           </h1>
         </div>
         <input
@@ -252,7 +252,7 @@ export function WorkbenchShell() {
         <section className="min-w-0 flex-1 px-5 py-4">
           {!selectedItemId ? (
             <div className="flex h-full items-center justify-center text-sm text-[color:var(--cp-text-muted)]">
-              选择一条记录查看详情，按 Enter 或 Ctrl+E 可进入编辑器
+              选择一条记录查看详情，按 Enter 或 Ctrl+Enter 可进入编辑器
             </div>
           ) : detailQuery.isLoading ? (
             <div className="flex h-full items-center justify-center text-sm text-[color:var(--cp-text-muted)]">
@@ -310,7 +310,7 @@ export function WorkbenchShell() {
                 </div>
               ) : (
                 <div className="rounded-xl border border-[color:var(--cp-border-weak)] bg-[rgba(var(--cp-surface1-rgb),0.08)] p-4 text-sm leading-6 text-[color:var(--cp-text-secondary)]">
-                  当前条目不是文本类型，Workbench 只负责搜索与定位；如需编辑，请选择文本条目后再进入独立编辑窗口。
+                  当前条目不是文本类型，搜索窗口只负责搜索与定位；如需编辑，请选择文本条目后再进入独立编辑窗口。
                 </div>
               )}
             </div>
@@ -320,3 +320,4 @@ export function WorkbenchShell() {
     </div>
   );
 }
+

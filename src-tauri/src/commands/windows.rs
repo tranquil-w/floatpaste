@@ -10,7 +10,6 @@ fn map_error(error: impl ToString) -> String {
     error.to_string()
 }
 
-
 #[tauri::command]
 pub fn show_picker(state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
     WindowCoordinator::show_picker(&app, &state).map_err(map_error)?;

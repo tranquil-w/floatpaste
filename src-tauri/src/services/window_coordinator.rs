@@ -35,7 +35,7 @@ pub const MANAGER_WINDOW_TITLE: &str = "FloatPaste / 浮贴";
 pub const PICKER_WINDOW_LABEL: &str = "picker";
 pub const PICKER_WINDOW_TITLE: &str = "FloatPaste Picker";
 pub const WORKBENCH_WINDOW_LABEL: &str = "workbench";
-pub const WORKBENCH_WINDOW_TITLE: &str = "FloatPaste Workbench";
+pub const WORKBENCH_WINDOW_TITLE: &str = "FloatPaste 搜索";
 pub const EDITOR_WINDOW_LABEL: &str = "editor";
 pub const EDITOR_WINDOW_TITLE: &str = "FloatPaste Editor";
 

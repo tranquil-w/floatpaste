@@ -105,7 +105,7 @@ impl Default for UserSetting {
             restore_clipboard_after_paste: true,
             pause_monitoring: false,
             theme_mode: ThemeMode::System,
-            workbench_shortcut: "Ctrl+Shift+F".to_string(),
+            workbench_shortcut: "Win+F".to_string(),
             workbench_shortcut_enabled: true,
         }
     }
@@ -133,7 +133,7 @@ impl UserSetting {
 
         self.workbench_shortcut = self.workbench_shortcut.trim().to_string();
         if self.workbench_shortcut.is_empty() {
-            self.workbench_shortcut = "Ctrl+Shift+F".to_string();
+            self.workbench_shortcut = "Win+F".to_string();
         }
 
         self.resolve_workbench_shortcut_conflict();
@@ -148,7 +148,7 @@ impl UserSetting {
             return;
         }
 
-        self.workbench_shortcut = "Ctrl+Shift+F".to_string();
+        self.workbench_shortcut = "Win+F".to_string();
         if normalize_shortcut_for_compare(&self.workbench_shortcut)
             == normalize_shortcut_for_compare(&self.shortcut)
         {
@@ -287,9 +287,9 @@ mod tests {
     }
 
     #[test]
-    fn workbench_shortcut_defaults_to_ctrl_shift_f() {
+    fn workbench_shortcut_defaults_to_win_f() {
         let settings = UserSetting::default();
-        assert_eq!(settings.workbench_shortcut, "Ctrl+Shift+F");
+        assert_eq!(settings.workbench_shortcut, "Win+F");
         assert!(settings.workbench_shortcut_enabled);
     }
 
@@ -308,7 +308,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(settings.workbench_shortcut, "Ctrl+Shift+F");
+        assert_eq!(settings.workbench_shortcut, "Win+F");
         assert!(settings.workbench_shortcut_enabled);
     }
 
@@ -322,14 +322,14 @@ mod tests {
         }
         .sanitized();
 
-        assert_eq!(settings.workbench_shortcut, "Ctrl+Shift+F");
+        assert_eq!(settings.workbench_shortcut, "Win+F");
     }
 
     #[test]
     fn workbench_shortcut_gets_disabled_when_default_value_also_conflicts_with_main_shortcut() {
         let settings = UserSetting {
-            shortcut: "Ctrl+Shift+F".to_string(),
-            workbench_shortcut: "Ctrl+Shift+F".to_string(),
+            shortcut: "Win+F".to_string(),
+            workbench_shortcut: "Win+F".to_string(),
             workbench_shortcut_enabled: true,
             ..UserSetting::default()
         }
@@ -341,8 +341,8 @@ mod tests {
     #[test]
     fn workbench_shortcut_conflict_detection_uses_normalized_shortcuts() {
         let settings = UserSetting {
-            shortcut: "CTRL+SHIFT+F".to_string(),
-            workbench_shortcut: "ctrl+shift+f".to_string(),
+            shortcut: "WIN+F".to_string(),
+            workbench_shortcut: "win+f".to_string(),
             workbench_shortcut_enabled: true,
             ..UserSetting::default()
         }

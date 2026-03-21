@@ -284,15 +284,15 @@ export function PickerShell() {
         return;
       }
 
-      if (event.key === "Enter") {
+      if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
         event.preventDefault();
-        void confirmSelection(selectedIndexRef.current);
+        void handleOpenEditor();
         return;
       }
 
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "e") {
+      if (event.key === "Enter") {
         event.preventDefault();
-        void handleOpenEditor();
+        void confirmSelection(selectedIndexRef.current);
         return;
       }
 
@@ -341,7 +341,7 @@ export function PickerShell() {
             className={STYLES.headerButton}
             disabled={!canEditSelected}
             onClick={() => void handleOpenEditor()}
-            title="编辑当前项 (Ctrl+E)"
+            title="编辑当前项 (Ctrl+Enter)"
             type="button"
           >
             <svg className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
@@ -412,3 +412,4 @@ export function PickerShell() {
     </div>
   );
 }
+

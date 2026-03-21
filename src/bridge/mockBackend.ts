@@ -332,6 +332,7 @@ let settings: UserSetting = {
   restoreClipboardAfterPaste: true,
   pauseMonitoring: false,
   themeMode: "system",
-  workbenchShortcut: "Ctrl+Shift+F",
+  workbenchShortcut: "Win+F",
   workbenchShortcutEnabled: true,
 };
+
