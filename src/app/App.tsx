@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ManagerShell } from "../features/manager/ManagerShell";
+import { EditorShell } from "../features/editor";
 import { PickerShell } from "../features/picker/PickerShell";
 import { WorkbenchShell } from "../features/workbench/WorkbenchShell";
 import { getSettings } from "../bridge/commands";
@@ -21,8 +22,8 @@ export function App() {
   useEffect(() => {
     const label = getCurrentWindowLabel();
     setWindowLabel(label);
-    document.documentElement.classList.remove("window-picker", "window-manager", "window-workbench");
-    document.body.classList.remove("theme-picker", "theme-manager", "theme-workbench");
+    document.documentElement.classList.remove("window-picker", "window-manager", "window-workbench", "window-editor");
+    document.body.classList.remove("theme-picker", "theme-manager", "theme-workbench", "theme-editor");
 
     if (label === "picker") {
       document.documentElement.classList.add("window-picker");
@@ -30,6 +31,9 @@ export function App() {
     } else if (label === "workbench") {
       document.documentElement.classList.add("window-workbench");
       document.body.classList.add("theme-workbench");
+    } else if (label === "editor") {
+      document.documentElement.classList.add("window-editor");
+      document.body.classList.add("theme-editor");
     } else {
       document.documentElement.classList.add("window-manager");
       document.body.classList.add("theme-manager");
@@ -41,6 +45,9 @@ export function App() {
   }
   if (windowLabel === "workbench") {
     return <WorkbenchShell />;
+  }
+  if (windowLabel === "editor") {
+    return <EditorShell />;
   }
   return <ManagerShell />;
 }

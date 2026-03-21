@@ -9,27 +9,35 @@ use tracing::{error, info, warn};
 use crate::{
     app_bootstrap::AppState,
     domain::{
+        editor_session::{EditorReturnTarget, EditorSession, EditorSource},
         error::AppError,
         events::{
-            PICKER_SESSION_END_EVENT, PICKER_SESSION_START_EVENT, WORKBENCH_SESSION_END_EVENT,
-            WORKBENCH_SESSION_START_EVENT,
+            EDITOR_SESSION_END_EVENT, EDITOR_SESSION_START_EVENT, PICKER_SESSION_END_EVENT,
+            PICKER_SESSION_START_EVENT, WORKBENCH_SESSION_END_EVENT, WORKBENCH_SESSION_START_EVENT,
         },
         settings::UserSetting,
+        workbench_session::{WorkbenchSession, WorkbenchSource},
     },
     platform::windows::active_app::ActiveAppResolver,
-    services::picker_position_service::{
-        PickerPositionService, PICKER_DEFAULT_HEIGHT, PICKER_DEFAULT_WIDTH, PICKER_MIN_HEIGHT,
-        PICKER_MIN_WIDTH,
+    services::{
+        picker_position_service::{
+            PickerPositionService, PICKER_DEFAULT_HEIGHT, PICKER_DEFAULT_WIDTH, PICKER_MIN_HEIGHT,
+            PICKER_MIN_WIDTH,
+        },
+        shortcut_manager::ShortcutManager,
     },
 };
 
 pub struct WindowCoordinator;
+
 pub const MANAGER_WINDOW_LABEL: &str = "manager";
 pub const MANAGER_WINDOW_TITLE: &str = "FloatPaste / 浮贴";
 pub const PICKER_WINDOW_LABEL: &str = "picker";
 pub const PICKER_WINDOW_TITLE: &str = "FloatPaste Picker";
 pub const WORKBENCH_WINDOW_LABEL: &str = "workbench";
 pub const WORKBENCH_WINDOW_TITLE: &str = "FloatPaste Workbench";
+pub const EDITOR_WINDOW_LABEL: &str = "editor";
+pub const EDITOR_WINDOW_TITLE: &str = "FloatPaste Editor";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -58,6 +66,10 @@ impl WindowCoordinator {
 
         if let Some(window) = app.get_webview_window(WORKBENCH_WINDOW_LABEL) {
             configure_workbench_window(&window);
+        }
+
+        if let Some(window) = app.get_webview_window(EDITOR_WINDOW_LABEL) {
+            configure_editor_window(&window);
         }
     }
 
@@ -102,7 +114,6 @@ impl WindowCoordinator {
         {
             crate::platform::windows::window_utils::show_window_no_activate(&window)
                 .map_err(|error| AppError::Message(error.to_string()))?;
-            // 作为保险，如果焦点仍然被抢占，快速恢复原目标窗口焦点
             if let Some(hwnd) = target_window {
                 let _ = crate::platform::windows::active_app::ActiveAppResolver::restore_foreground_window(hwnd);
             }
@@ -153,9 +164,7 @@ impl WindowCoordinator {
         if let Some(state) = app.try_state::<AppState>() {
             state.end_picker_activation();
         }
-        crate::services::shortcut_manager::ShortcutManager::unregister_picker_session_shortcuts(
-            app,
-        );
+        ShortcutManager::unregister_picker_session_shortcuts(app);
         #[cfg(target_os = "windows")]
         {
             crate::platform::windows::picker_mouse_monitor::PickerMouseMonitor::end_session();
@@ -203,7 +212,25 @@ impl WindowCoordinator {
         Ok(())
     }
 
-    /// 全局快捷键直接打开 Workbench
+    pub fn open_editor_from_picker(
+        app: &AppHandle,
+        state: &AppState,
+        item_id: String,
+    ) -> Result<(), AppError> {
+        let picker_session = state.picker_session()?;
+        Self::hide_picker(app)?;
+
+        let session = EditorSession {
+            item_id,
+            source: EditorSource::Picker,
+            return_to: EditorReturnTarget::Picker,
+            target_window_hwnd: picker_session.target_window_hwnd,
+            reopen_manager_on_close: picker_session.reopen_manager_on_close,
+        };
+
+        Self::show_editor(app, state, session)
+    }
+
     pub fn open_workbench_global(app: &AppHandle, state: &AppState) -> Result<(), AppError> {
         let window = ensure_workbench_window(app)?;
 
@@ -215,10 +242,9 @@ impl WindowCoordinator {
         }
 
         let target_window = ActiveAppResolver::current_foreground_window_handle();
-
-        let workbench_session = crate::domain::workbench_session::WorkbenchSession {
+        let workbench_session = WorkbenchSession {
             target_window_hwnd: target_window,
-            source: crate::domain::workbench_session::WorkbenchSource::GlobalShortcut,
+            source: WorkbenchSource::GlobalShortcut,
             current_item_id: None,
         };
 
@@ -248,69 +274,34 @@ impl WindowCoordinator {
         Ok(())
     }
 
-    /// 恢复 Picker 窗口（在原位置显示，不重新计算位置）
-    pub fn restore_picker(
+    pub fn open_editor_from_workbench(
         app: &AppHandle,
         state: &AppState,
-        target_window_hwnd: Option<isize>,
-        reopen_manager_on_close: bool,
+        item_id: String,
     ) -> Result<(), AppError> {
-        let window = ensure_picker_window(app)?;
+        let target_window_hwnd = state
+            .workbench_session()?
+            .and_then(|session| session.target_window_hwnd);
 
-        // 设置 picker 会话状态
-        state.set_picker_session(target_window_hwnd, reopen_manager_on_close)?;
+        Self::hide_workbench_for_editor_transition(app, state)?;
 
-        // 恢复窗口大小和位置
-        restore_picker_window_size(app, &window);
+        let session = EditorSession {
+            item_id,
+            source: EditorSource::Workbench,
+            return_to: EditorReturnTarget::Workbench,
+            target_window_hwnd,
+            reopen_manager_on_close: false,
+        };
 
-        // 使用 show_window_no_activate 避免焦点被抢占
-        #[cfg(target_os = "windows")]
-        {
-            crate::platform::windows::window_utils::show_window_no_activate(&window)
-                .map_err(|error| AppError::Message(error.to_string()))?;
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            window
-                .show()
-                .map_err(|error| AppError::Message(error.to_string()))?;
-        }
-
-        state.begin_picker_activation();
-
-        // 注册 Picker 会话快捷键
-        crate::services::shortcut_manager::ShortcutManager::register_picker_session_shortcuts(app)?;
-
-        #[cfg(target_os = "windows")]
-        {
-            crate::platform::windows::picker_mouse_monitor::PickerMouseMonitor::begin_session(
-                app.clone(),
-            );
-        }
-
-        window
-            .emit(
-                PICKER_SESSION_START_EVENT,
-                PickerSessionPayload {
-                    session_id: Utc::now().timestamp_millis().to_string(),
-                    shown_at: Utc::now().to_rfc3339(),
-                },
-            )
-            .map_err(|error| AppError::Message(error.to_string()))?;
-
-        info!("恢复 Picker 窗口");
-        Ok(())
+        Self::show_editor(app, state, session)
     }
 
-    /// 隐藏 Workbench 并恢复目标窗口
     pub fn hide_workbench_and_restore_target(
         app: &AppHandle,
         state: &AppState,
     ) -> Result<(), AppError> {
         state.end_workbench_activation();
-        crate::services::shortcut_manager::ShortcutManager::unregister_workbench_session_shortcuts(
-            app,
-        );
+        ShortcutManager::unregister_workbench_session_shortcuts(app);
         let session = state.workbench_session()?;
 
         let Some(window) = app.get_webview_window(WORKBENCH_WINDOW_LABEL) else {
@@ -325,15 +316,94 @@ impl WindowCoordinator {
             error!("发送 WORKBENCH_SESSION_END_EVENT 失败: {err}");
         }
 
-        if let Some(ref sess) = session {
-            // Workbench 是普通装饰窗口（非 show_window_no_activate），隐藏后可立即还焦，无需 50ms 延时
-            if let Some(hwnd) = sess.target_window_hwnd {
+        if let Some(ref session) = session {
+            if let Some(hwnd) = session.target_window_hwnd {
                 let _ = ActiveAppResolver::restore_foreground_window(hwnd);
             }
         }
 
         state.clear_workbench_session()?;
         info!("隐藏 Workbench");
+        Ok(())
+    }
+
+    pub fn hide_editor_and_restore_source(
+        app: &AppHandle,
+        state: &AppState,
+    ) -> Result<(), AppError> {
+        state.end_editor_activation();
+        let session = state.editor_session()?;
+
+        let Some(window) = app.get_webview_window(EDITOR_WINDOW_LABEL) else {
+            state.clear_editor_session()?;
+            return Ok(());
+        };
+
+        if window
+            .is_visible()
+            .map_err(|error| AppError::Message(error.to_string()))?
+        {
+            window
+                .hide()
+                .map_err(|error| AppError::Message(error.to_string()))?;
+        }
+
+        let _ = window.emit(EDITOR_SESSION_END_EVENT, ());
+        state.clear_editor_session()?;
+
+        let Some(session) = session else {
+            return Ok(());
+        };
+
+        match session.return_to {
+            EditorReturnTarget::Picker => restore_picker_after_editor(app, state, &session),
+            EditorReturnTarget::Workbench => restore_workbench_after_editor(app, state),
+        }
+    }
+
+    fn show_editor(
+        app: &AppHandle,
+        state: &AppState,
+        session: EditorSession,
+    ) -> Result<(), AppError> {
+        let window = ensure_editor_window(app)?;
+        state.set_editor_session(session.clone())?;
+        state.begin_editor_activation();
+
+        window
+            .show()
+            .map_err(|error| AppError::Message(error.to_string()))?;
+        window
+            .set_focus()
+            .map_err(|error| AppError::Message(error.to_string()))?;
+        window
+            .emit(EDITOR_SESSION_START_EVENT, session)
+            .map_err(|error| AppError::Message(error.to_string()))?;
+
+        info!("打开 Editor");
+        Ok(())
+    }
+
+    fn hide_workbench_for_editor_transition(
+        app: &AppHandle,
+        state: &AppState,
+    ) -> Result<(), AppError> {
+        state.end_workbench_activation();
+        ShortcutManager::unregister_workbench_session_shortcuts(app);
+
+        let Some(window) = app.get_webview_window(WORKBENCH_WINDOW_LABEL) else {
+            return Ok(());
+        };
+
+        if window
+            .is_visible()
+            .map_err(|error| AppError::Message(error.to_string()))?
+        {
+            window
+                .hide()
+                .map_err(|error| AppError::Message(error.to_string()))?;
+        }
+
         Ok(())
     }
 }
@@ -401,6 +471,28 @@ fn ensure_workbench_window(app: &AppHandle) -> Result<WebviewWindow, AppError> {
     Ok(window)
 }
 
+fn ensure_editor_window(app: &AppHandle) -> Result<WebviewWindow, AppError> {
+    if let Some(window) = app.get_webview_window(EDITOR_WINDOW_LABEL) {
+        return Ok(window);
+    }
+
+    let window = WebviewWindowBuilder::new(app, EDITOR_WINDOW_LABEL, WebviewUrl::default())
+        .title(EDITOR_WINDOW_TITLE)
+        .inner_size(800.0, 600.0)
+        .min_inner_size(400.0, 300.0)
+        .resizable(true)
+        .visible(false)
+        .decorations(true)
+        .always_on_top(false)
+        .skip_taskbar(false)
+        .center()
+        .build()
+        .map_err(|error| AppError::Message(format!("创建 editor 窗口失败: {error}")))?;
+
+    configure_editor_window(&window);
+    Ok(window)
+}
+
 fn configure_workbench_window(window: &WebviewWindow) {
     let app = window.app_handle().clone();
     window.on_window_event(move |event| {
@@ -422,6 +514,8 @@ fn configure_workbench_window(window: &WebviewWindow) {
         }
     });
 }
+
+fn configure_editor_window(_window: &WebviewWindow) {}
 
 fn configure_manager_window(window: &WebviewWindow) {
     let app = window.app_handle().clone();
@@ -498,9 +592,58 @@ fn restore_picker_window_size(app: &AppHandle, window: &WebviewWindow) {
     }
 }
 
-/// 纯逻辑辅助：关闭 Workbench 后是否应恢复 Picker
-/// Picker 与 Workbench 解耦后，关闭 Workbench 永远不恢复 Picker
-fn should_restore_picker_after_workbench_close(_session: &crate::domain::workbench_session::WorkbenchSession) -> bool {
+fn restore_picker_after_editor(
+    app: &AppHandle,
+    state: &AppState,
+    session: &EditorSession,
+) -> Result<(), AppError> {
+    state.set_picker_session(session.target_window_hwnd, session.reopen_manager_on_close)?;
+    let window = ensure_picker_window(app)?;
+
+    restore_picker_window_size(app, &window);
+
+    #[cfg(target_os = "windows")]
+    {
+        crate::platform::windows::window_utils::show_window_no_activate(&window)
+            .map_err(|error| AppError::Message(error.to_string()))?;
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        window
+            .show()
+            .map_err(|error| AppError::Message(error.to_string()))?;
+    }
+
+    state.begin_picker_activation();
+    ShortcutManager::register_picker_session_shortcuts(app)?;
+
+    #[cfg(target_os = "windows")]
+    {
+        crate::platform::windows::picker_mouse_monitor::PickerMouseMonitor::begin_session(
+            app.clone(),
+        );
+    }
+
+    info!("从 Editor 返回 Picker");
+    Ok(())
+}
+
+fn restore_workbench_after_editor(app: &AppHandle, state: &AppState) -> Result<(), AppError> {
+    let window = ensure_workbench_window(app)?;
+    window
+        .show()
+        .map_err(|error| AppError::Message(error.to_string()))?;
+    window
+        .set_focus()
+        .map_err(|error| AppError::Message(error.to_string()))?;
+
+    state.begin_workbench_activation();
+    ShortcutManager::register_workbench_session_shortcuts(app)?;
+    info!("从 Editor 返回 Workbench");
+    Ok(())
+}
+
+fn should_restore_picker_after_workbench_close(_session: &WorkbenchSession) -> bool {
     false
 }
 

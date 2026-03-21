@@ -1,16 +1,4 @@
-import type { ClipItemDetail, ClipItemSummary } from "../../shared/types/clips";
-
-export function getCachedTextStateForSelection(detail: ClipItemDetail | null | undefined) {
-  if (!detail || detail.type !== "text") {
-    return null;
-  }
-
-  const nextText = detail.fullText ?? "";
-  return {
-    draftText: nextText,
-    savedText: nextText,
-  };
-}
+import type { ClipItemSummary } from "../../shared/types/clips";
 
 export function getNextWorkbenchNavigationIndex(
   items: ClipItemSummary[],

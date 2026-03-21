@@ -41,6 +41,29 @@ pub fn open_manager(_state: State<'_, AppState>, app: AppHandle) -> Result<(), S
 }
 
 #[tauri::command]
+pub fn open_editor_from_picker(
+    item_id: String,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<(), String> {
+    WindowCoordinator::open_editor_from_picker(&app, &state, item_id).map_err(map_error)
+}
+
+#[tauri::command]
+pub fn open_editor_from_workbench(
+    item_id: String,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<(), String> {
+    WindowCoordinator::open_editor_from_workbench(&app, &state, item_id).map_err(map_error)
+}
+
+#[tauri::command]
+pub fn hide_editor(state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
+    WindowCoordinator::hide_editor_and_restore_source(&app, &state).map_err(map_error)
+}
+
+#[tauri::command]
 pub fn open_workbench_global(state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
     WindowCoordinator::open_workbench_global(&app, &state).map_err(map_error)?;
     if let Err(error) = ShortcutManager::register_workbench_session_shortcuts(&app) {

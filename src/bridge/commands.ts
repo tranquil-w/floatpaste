@@ -129,25 +129,25 @@ export async function openManager(): Promise<void> {
   return invoke("open_manager");
 }
 
-export async function openManagerFromPicker(): Promise<void> {
+export async function openEditorFromPicker(itemId: string): Promise<void> {
   if (!isTauriRuntime()) {
     return;
   }
-  return invoke("open_manager_from_picker");
+  return invoke("open_editor_from_picker", { itemId });
 }
 
-export async function openWorkbenchFromPickerEdit(itemId: string): Promise<void> {
+export async function openEditorFromWorkbench(itemId: string): Promise<void> {
   if (!isTauriRuntime()) {
     return;
   }
-  return invoke("open_workbench_from_picker_edit", { itemId });
+  return invoke("open_editor_from_workbench", { itemId });
 }
 
-export async function openWorkbenchFromPickerSearch(initialKeyword?: string): Promise<void> {
+export async function hideEditor(): Promise<void> {
   if (!isTauriRuntime()) {
     return;
   }
-  return invoke("open_workbench_from_picker_search", { initialKeyword });
+  return invoke("hide_editor");
 }
 
 export async function openWorkbenchGlobal(): Promise<void> {

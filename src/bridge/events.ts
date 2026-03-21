@@ -1,13 +1,14 @@
 export const CLIPS_CHANGED_EVENT = "clips://changed";
 export const SETTINGS_CHANGED_EVENT = "settings://changed";
 export const MANAGER_OPEN_SETTINGS_EVENT = "manager://open-settings";
+
 export const PICKER_SESSION_START_EVENT = "picker://session-start";
 export const PICKER_SESSION_END_EVENT = "picker://session-end";
 export const PICKER_NAVIGATE_EVENT = "picker://navigate";
 export const PICKER_CONFIRM_EVENT = "picker://confirm";
 export const PICKER_SELECT_INDEX_EVENT = "picker://select-index";
+export const PICKER_OPEN_EDITOR_EVENT = "picker://open-editor";
 
-// Workbench 相关事件
 export const WORKBENCH_SESSION_START_EVENT = "workbench://session-start";
 export const WORKBENCH_SESSION_END_EVENT = "workbench://session-end";
 export const WORKBENCH_EDIT_ITEM_EVENT = "workbench://edit-item";
@@ -15,6 +16,5 @@ export const WORKBENCH_SEARCH_EVENT = "workbench://search";
 export const WORKBENCH_PASTE_EVENT = "workbench://paste";
 export const WORKBENCH_NAVIGATE_EVENT = "workbench://navigate";
 
-// Picker 新增跳转事件
-export const PICKER_OPEN_WORKBENCH_EDIT_EVENT = "picker://open-workbench-edit";
-export const PICKER_OPEN_WORKBENCH_SEARCH_EVENT = "picker://open-workbench-search";
+export const EDITOR_SESSION_START_EVENT = "editor://session-start";
+export const EDITOR_SESSION_END_EVENT = "editor://session-end";

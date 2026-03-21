@@ -11,7 +11,7 @@ export type WindowResizeDirection =
   | "SouthWest"
   | "West";
 
-export function getCurrentWindowLabel(): "picker" | "workbench" | "manager" {
+export function getCurrentWindowLabel(): "picker" | "workbench" | "editor" | "manager" {
   if (!isTauriRuntime()) {
     return "manager";
   }
@@ -22,6 +22,9 @@ export function getCurrentWindowLabel(): "picker" | "workbench" | "manager" {
   }
   if (label === "workbench") {
     return "workbench";
+  }
+  if (label === "editor") {
+    return "editor";
   }
   return "manager";
 }
