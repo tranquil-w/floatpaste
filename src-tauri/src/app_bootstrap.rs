@@ -9,7 +9,10 @@ use tracing::{info, warn};
 
 use crate::{
     domain::{
-        error::AppError, events::CLIPS_CHANGED_EVENT, settings::UserSetting,
+        editor_session::EditorSession,
+        error::AppError,
+        events::CLIPS_CHANGED_EVENT,
+        settings::UserSetting,
         workbench_session::WorkbenchSession,
     },
     launch_mode::LaunchMode,
@@ -35,6 +38,8 @@ pub struct AppState {
     workbench_session: Arc<Mutex<Option<WorkbenchSession>>>,
     workbench_active: Arc<AtomicBool>,
     workbench_session_shortcuts_registered: Arc<AtomicBool>,
+    editor_session: Arc<Mutex<Option<EditorSession>>>,
+    editor_active: Arc<AtomicBool>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -61,6 +66,8 @@ impl AppState {
             workbench_session: Arc::new(Mutex::new(None)),
             workbench_active: Arc::new(AtomicBool::new(false)),
             workbench_session_shortcuts_registered: Arc::new(AtomicBool::new(false)),
+            editor_session: Arc::new(Mutex::new(None)),
+            editor_active: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -159,6 +166,34 @@ impl AppState {
     pub fn workbench_session_shortcuts_registered(&self) -> bool {
         self.workbench_session_shortcuts_registered
             .load(Ordering::SeqCst)
+    }
+
+    pub fn set_editor_session(&self, session: EditorSession) -> Result<(), AppError> {
+        let mut current = self.editor_session.lock()?;
+        *current = Some(session);
+        Ok(())
+    }
+
+    pub fn editor_session(&self) -> Result<Option<EditorSession>, AppError> {
+        Ok(self.editor_session.lock()?.clone())
+    }
+
+    pub fn clear_editor_session(&self) -> Result<(), AppError> {
+        let mut current = self.editor_session.lock()?;
+        *current = None;
+        Ok(())
+    }
+
+    pub fn begin_editor_activation(&self) {
+        self.editor_active.store(true, Ordering::SeqCst);
+    }
+
+    pub fn end_editor_activation(&self) {
+        self.editor_active.store(false, Ordering::SeqCst);
+    }
+
+    pub fn is_editor_active(&self) -> bool {
+        self.editor_active.load(Ordering::SeqCst)
     }
 }
 

@@ -18,6 +18,10 @@ pub const WORKBENCH_SEARCH_EVENT: &str = "workbench://search";
 pub const WORKBENCH_PASTE_EVENT: &str = "workbench://paste";
 pub const WORKBENCH_NAVIGATE_EVENT: &str = "workbench://navigate";
 
-// Picker 新增跳转事件
+// Picker 跳转事件（将在 Task 6 中删除，待 Editor 完全接管后移除）
 pub const PICKER_OPEN_WORKBENCH_EDIT_EVENT: &str = "picker://open-workbench-edit";
 pub const PICKER_OPEN_WORKBENCH_SEARCH_EVENT: &str = "picker://open-workbench-search";
+
+// Editor 相关事件
+pub const EDITOR_SESSION_START_EVENT: &str = "editor://session-start";
+pub const EDITOR_SESSION_END_EVENT: &str = "editor://session-end";
