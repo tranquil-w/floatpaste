@@ -70,6 +70,36 @@ pub struct StoredWindowPosition {
     pub height: Option<u32>,
 }
 
+/// 用户设置结构
+///
+/// # 快捷键格式说明
+///
+/// - **主快捷键**: 用于打开 Picker 窗口
+/// - **工作窗快捷键**: 用于全局打开搜索窗口
+///
+/// ## 重要: Windows 键的格式
+///
+/// Tauri 的 global-shortcut 插件使用跨平台的修饰符格式:
+/// - **Windows**: 使用 `Super` 表示 Windows 键 (Win)
+/// - **macOS**: 使用 `Super` 表示 Command 键 (Cmd)
+/// - **Linux**: 使用 `Super` 表示 Super 键
+///
+/// ❌ **错误**: `Win+F`, `win+f`, `WIN+F`
+/// ✅ **正确**: `Super+F`, `super+f`
+///
+/// > **原因**: Tauri 的 `Shortcut::from_str()` 不识别 "Win" 修饰符,
+/// > 只识别 "Super" 作为跨平台的 Windows/Command 键表示。
+///
+/// # 示例
+///
+/// ```rust
+/// use crate::domain::settings::UserSetting;
+///
+/// let settings = UserSetting::default();
+/// assert_eq!(settings.shortcut, "Ctrl+`");
+/// assert_eq!(settings.workbench_shortcut, "Super+F"); // ✅ 正确
+/// // assert_eq!(settings.workbench_shortcut, "Win+F"); // ❌ 错误,无法注册
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(default)]
@@ -105,7 +135,7 @@ impl Default for UserSetting {
             restore_clipboard_after_paste: true,
             pause_monitoring: false,
             theme_mode: ThemeMode::System,
-            workbench_shortcut: "Win+F".to_string(),
+            workbench_shortcut: "Super+F".to_string(),
             workbench_shortcut_enabled: true,
         }
     }
@@ -133,8 +163,12 @@ impl UserSetting {
 
         self.workbench_shortcut = self.workbench_shortcut.trim().to_string();
         if self.workbench_shortcut.is_empty() {
-            self.workbench_shortcut = "Win+F".to_string();
+            self.workbench_shortcut = "Super+F".to_string();
         }
+
+        // 迁移旧的 Win 键格式到 Super (向后兼容)
+        // Tauri 的 global-shortcut 插件不支持 "Win" 修饰符,只支持 "Super"
+        self.workbench_shortcut = migrate_win_to_super(&self.workbench_shortcut);
 
         self.resolve_workbench_shortcut_conflict();
         self
@@ -148,7 +182,7 @@ impl UserSetting {
             return;
         }
 
-        self.workbench_shortcut = "Win+F".to_string();
+        self.workbench_shortcut = "Super+F".to_string();
         if normalize_shortcut_for_compare(&self.workbench_shortcut)
             == normalize_shortcut_for_compare(&self.shortcut)
         {
@@ -162,6 +196,28 @@ fn normalize_shortcut_for_compare(shortcut: &str) -> String {
     Shortcut::from_str(trimmed)
         .map(|value| value.into_string().to_lowercase())
         .unwrap_or_else(|_| trimmed.to_lowercase())
+}
+
+/// 迁移旧的 Win 键格式到 Super 格式
+///
+/// Tauri 的 global-shortcut 插件使用跨平台的 "Super" 修饰符:
+/// - Windows: Super = Windows 键 (Win)
+/// - macOS: Super = Command 键 (Cmd)
+/// - Linux: Super = Super 键
+///
+/// 这个函数将用户设置中的 "Win" 替换为 "Super",以支持向后兼容。
+fn migrate_win_to_super(shortcut: &str) -> String {
+    let lower = shortcut.to_lowercase();
+    if lower.contains("win+") || lower.contains("windows+") {
+        // 将 "Win" 替换为 "Super" (保留原始大小写)
+        shortcut
+            .replace("Win+", "Super+")
+            .replace("win+", "super+")
+            .replace("Windows+", "Super+")
+            .replace("windows+", "super+")
+    } else {
+        shortcut.to_string()
+    }
 }
 
 #[cfg(test)]
@@ -287,11 +343,47 @@ mod tests {
     }
 
     #[test]
-    fn workbench_shortcut_defaults_to_win_f() {
+    fn workbench_shortcut_defaults_to_super_f() {
         let settings = UserSetting::default();
-        assert_eq!(settings.workbench_shortcut, "Win+F");
+        assert_eq!(settings.workbench_shortcut, "Super+F");
         assert!(settings.workbench_shortcut_enabled);
     }
+
+    #[test]
+    fn migrate_win_to_super_converts_old_format() {
+        use super::migrate_win_to_super;
+
+        assert_eq!(migrate_win_to_super("Win+F"), "Super+F");
+        assert_eq!(migrate_win_to_super("win+f"), "super+f");
+        assert_eq!(migrate_win_to_super("WIN+F"), "WIN+F".replace("Win", "Super"));
+        assert_eq!(migrate_win_to_super("Windows+F"), "Super+F");
+        assert_eq!(migrate_win_to_super("windows+f"), "super+f");
+        assert_eq!(migrate_win_to_super("Super+F"), "Super+F");
+        assert_eq!(migrate_win_to_super("Ctrl+F"), "Ctrl+F");
+    }
+
+    #[test]
+    fn sanitized_migrates_win_to_super() {
+        let settings = UserSetting {
+            workbench_shortcut: "Win+F".to_string(),
+            ..UserSetting::default()
+        }
+        .sanitized();
+
+        assert_eq!(settings.workbench_shortcut, "Super+F");
+    }
+
+    #[test]
+    fn sanitized_preserves_super_format() {
+        let settings = UserSetting {
+            workbench_shortcut: "Super+F".to_string(),
+            ..UserSetting::default()
+        }
+        .sanitized();
+
+        assert_eq!(settings.workbench_shortcut, "Super+F");
+    }
+
 
     #[test]
     fn deserialize_old_settings_without_workbench_shortcut_uses_defaults() {
@@ -308,7 +400,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(settings.workbench_shortcut, "Win+F");
+        assert_eq!(settings.workbench_shortcut, "Super+F");
         assert!(settings.workbench_shortcut_enabled);
     }
 
@@ -322,14 +414,14 @@ mod tests {
         }
         .sanitized();
 
-        assert_eq!(settings.workbench_shortcut, "Win+F");
+        assert_eq!(settings.workbench_shortcut, "Super+F");
     }
 
     #[test]
     fn workbench_shortcut_gets_disabled_when_default_value_also_conflicts_with_main_shortcut() {
         let settings = UserSetting {
-            shortcut: "Win+F".to_string(),
-            workbench_shortcut: "Win+F".to_string(),
+            shortcut: "Super+F".to_string(),
+            workbench_shortcut: "Super+F".to_string(),
             workbench_shortcut_enabled: true,
             ..UserSetting::default()
         }
@@ -341,8 +433,8 @@ mod tests {
     #[test]
     fn workbench_shortcut_conflict_detection_uses_normalized_shortcuts() {
         let settings = UserSetting {
-            shortcut: "WIN+F".to_string(),
-            workbench_shortcut: "win+f".to_string(),
+            shortcut: "SUPER+F".to_string(),
+            workbench_shortcut: "super+f".to_string(),
             workbench_shortcut_enabled: true,
             ..UserSetting::default()
         }
