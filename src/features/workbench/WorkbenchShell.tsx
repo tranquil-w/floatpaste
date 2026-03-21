@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useWorkbenchStore } from "./store";
 import {
@@ -19,6 +19,11 @@ import { hideWorkbench } from "../../bridge/commands";
 import type { ClipItemDetail, ClipItemSummary } from "../../shared/types/clips";
 import { getClipTypeLabel } from "../../shared/utils/clipDisplay";
 import { formatDateTime } from "../../shared/utils/time";
+import { queryClient } from "../../app/queryClient";
+import {
+  getCachedTextStateForSelection,
+  getNextWorkbenchNavigationIndex,
+} from "./state";
 
 type WorkbenchSource = "picker_edit" | "picker_search" | "global";
 
@@ -197,9 +202,11 @@ function ResultList({
   onPendingSelect: (id: string) => void;
 }) {
   const {
+    draftText,
     isDirty,
     keyword,
     selectedItemId,
+    setDraftText,
     setIsDirty,
     setMode,
     setNoticeMessage,
@@ -213,18 +220,43 @@ function ResultList({
   const items: ClipItemSummary[] = hasKeyword ? (search.data?.items ?? []) : (recent.data ?? []);
   const isLoading = hasKeyword ? search.isLoading : recent.isLoading;
 
-  const handleSelectItem = (item: ClipItemSummary) => {
-    if (isDirty && selectedItemId) {
+  // 使用 ref 来存储最新的状态值，避免闭包陷阱
+  const itemsRef = useRef<ClipItemSummary[]>(items);
+  const selectedItemIdRef = useRef<string | null>(selectedItemId);
+  const isDirtyRef = useRef<boolean>(isDirty);
+
+  // 同步 ref 值
+  useEffect(() => {
+    itemsRef.current = items;
+    selectedItemIdRef.current = selectedItemId;
+    isDirtyRef.current = isDirty;
+  }, [items, selectedItemId, isDirty]);
+
+  const handleSelectItem = useCallback((item: ClipItemSummary) => {
+    if (isDirtyRef.current && selectedItemIdRef.current) {
       onPendingSelect(item.id);
       return;
     }
 
+    selectedItemIdRef.current = item.id;
     setSelectedItemId(item.id);
     setMode("edit");
     setIsDirty(false);
-    setSavedText("");
     setNoticeMessage(null);
-  };
+
+    const cachedTextState = getCachedTextStateForSelection(
+      queryClient.getQueryData<ClipItemDetail>(["detail", item.id]),
+    );
+
+    if (cachedTextState) {
+      setDraftText(cachedTextState.draftText);
+      setSavedText(cachedTextState.savedText);
+      return;
+    }
+
+    setDraftText("");
+    setSavedText("");
+  }, [onPendingSelect, setSelectedItemId, setMode, setDraftText, setIsDirty, setSavedText, setNoticeMessage]);
 
   useEffect(() => {
     if (!isTauriRuntime()) {
@@ -234,19 +266,17 @@ function ResultList({
     let offNavigate: (() => void) | undefined;
 
     void listen<string>(WORKBENCH_NAVIGATE_EVENT, (event) => {
-      if (!items.length) {
+      const currentItems = itemsRef.current;
+      if (!currentItems.length) {
         return;
       }
 
-      const currentIndex = Math.max(
-        0,
-        items.findIndex((item) => item.id === selectedItemId),
+      const nextIndex = getNextWorkbenchNavigationIndex(
+        currentItems,
+        selectedItemIdRef.current,
+        event.payload === "up" ? "up" : "down",
       );
-      const nextIndex =
-        event.payload === "up"
-          ? (currentIndex - 1 + items.length) % items.length
-          : (currentIndex + 1) % items.length;
-      handleSelectItem(items[nextIndex]);
+      handleSelectItem(currentItems[nextIndex]);
     })
       .then((cleanup) => {
         offNavigate = cleanup;
@@ -260,7 +290,7 @@ function ResultList({
     return () => {
       offNavigate?.();
     };
-  }, [isDirty, items, selectedItemId, setNoticeMessage]);
+  }, [handleSelectItem, setNoticeMessage]);
 
   void pendingSelectId;
 
@@ -342,11 +372,11 @@ function EditPanel() {
   }, [session?.source, selectedItemId, detail.data?.type]);
 
   useEffect(() => {
-    if (detail.data && !isDirty) {
+    if (detail.data && detail.data.type === "text") {
       setDraftText(detail.data.fullText ?? "");
       setSavedText(detail.data.fullText ?? "");
     }
-  }, [detail.data, isDirty, setDraftText, setSavedText]);
+  }, [detail.data, setDraftText, setSavedText]);
 
   useEffect(() => {
     setIsDirty(draftText !== savedText);
@@ -394,6 +424,7 @@ function EditPanel() {
 
     try {
       await deleteMutation.mutateAsync(selectedItemId);
+      setDraftText("");
       setSelectedItemId(null);
       setMode("search");
       setIsDirty(false);
@@ -554,8 +585,10 @@ function ConfirmDialog({
   onPendingSelectChange: (id: string | null) => void;
 }) {
   const {
+    draftText,
     isDirty,
     selectedItemId,
+    setDraftText,
     setIsDirty,
     setMode,
     setSavedText,
@@ -576,10 +609,10 @@ function ConfirmDialog({
     }
 
     try {
-      const { draftText } = useWorkbenchStore.getState();
       await updateTextMutation.mutateAsync({ id: selectedItemId, text: draftText });
       setIsDirty(false);
-      setSavedText(draftText);
+      setDraftText("");
+      setSavedText("");
       setSelectedItemId(pendingSelectId);
       setMode("edit");
       setErrorMessage(null);
@@ -597,6 +630,7 @@ function ConfirmDialog({
     }
 
     setIsDirty(false);
+    setDraftText("");
     setSavedText("");
     setSelectedItemId(pendingSelectId);
     setMode("edit");
