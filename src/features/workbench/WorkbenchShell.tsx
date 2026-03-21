@@ -46,6 +46,7 @@ export function WorkbenchShell() {
   } = useWorkbenchStore();
   const searchInputRef = useRef<HTMLInputElement>(null);
   const selectedItemIdRef = useRef<string | null>(selectedItemId);
+  const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const hasKeyword = keyword.trim().length > 0;
   const recentQuery = useWorkbenchRecentQuery(!hasKeyword);
   const searchQuery = useWorkbenchSearchQuery(keyword, hasKeyword);
@@ -60,6 +61,21 @@ export function WorkbenchShell() {
     itemsRef.current = items;
     selectedItemIdRef.current = selectedItemId;
   }, [items, selectedItemId]);
+
+  // 当选中项改变时，自动滚动到视图
+  useEffect(() => {
+    if (!selectedItemId) {
+      return;
+    }
+    const selectedIndex = items.findIndex((item) => item.id === selectedItemId);
+    const currentItem = itemRefs.current[selectedIndex];
+    if (currentItem) {
+      currentItem.scrollIntoView({
+        behavior: "auto",
+        block: "nearest",
+      });
+    }
+  }, [selectedItemId, items]);
 
   useEffect(() => {
     if (!items.length) {
@@ -226,8 +242,11 @@ export function WorkbenchShell() {
             </div>
           ) : (
             <div className="h-full overflow-y-auto">
-              {items.map((item) => (
+              {items.map((item, index) => (
                 <button
+                  ref={(el) => {
+                    itemRefs.current[index] = el;
+                  }}
                   className={`w-full border-b border-[color:var(--cp-border-weak)] px-4 py-3 text-left transition-colors hover:bg-[rgba(var(--cp-surface1-rgb),0.1)] ${
                     selectedItemId === item.id ? "bg-[rgba(var(--cp-peach-rgb),0.08)]" : ""
                   }`}

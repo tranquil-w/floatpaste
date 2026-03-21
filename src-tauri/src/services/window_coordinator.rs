@@ -241,6 +241,11 @@ impl WindowCoordinator {
             return Ok(());
         }
 
+        // 如果 picker 窗口已打开，先关闭它
+        if state.is_picker_active() {
+            Self::hide_picker(app)?;
+        }
+
         let target_window = ActiveAppResolver::current_foreground_window_handle();
         let workbench_session = WorkbenchSession {
             target_window_hwnd: target_window,
