@@ -16,8 +16,7 @@ use crate::{
     domain::{
         error::AppError,
         events::{
-            PICKER_CONFIRM_EVENT, PICKER_NAVIGATE_EVENT, PICKER_OPEN_WORKBENCH_EDIT_EVENT,
-            PICKER_OPEN_WORKBENCH_SEARCH_EVENT, PICKER_SELECT_INDEX_EVENT,
+            PICKER_CONFIRM_EVENT, PICKER_NAVIGATE_EVENT, PICKER_SELECT_INDEX_EVENT,
             WORKBENCH_NAVIGATE_EVENT,
         },
     },
@@ -403,13 +402,17 @@ impl ShortcutManager {
                 let app_handle = app.clone();
                 let state_clone = state.clone();
                 thread::spawn(move || {
+                    thread::sleep(Duration::from_millis(10));
                     let app_clone = app_handle.clone();
                     let _ = app_handle.run_on_main_thread(move || {
                         Self::unregister_picker_session_shortcuts(&app_clone);
-                        if let Err(error) = WindowCoordinator::hide_picker_and_open_manager(
+                        if let Err(error) = WindowCoordinator::hide_picker_and_restore_target(
                             &app_clone,
                             &state_clone,
                         ) {
+                            error!("从 Picker 关闭失败: {error}");
+                        }
+                        if let Err(error) = WindowCoordinator::open_manager(&app_clone) {
                             error!("从 Picker 切换到 Manager 失败: {error}");
                         }
                     });
@@ -426,12 +429,12 @@ impl ShortcutManager {
             "digit8" => app.emit(PICKER_SELECT_INDEX_EVENT, 7),
             "digit9" => app.emit(PICKER_SELECT_INDEX_EVENT, 8),
             "ctrl+e" | "control+keye" => {
-                info!("命中 Ctrl+E 编辑当前项");
-                app.emit(PICKER_OPEN_WORKBENCH_EDIT_EVENT, ())
+                // Ctrl+E 将由 Task 3 改为 open_editor_from_picker，此处暂保留为 noop
+                return;
             }
             "ctrl+f" | "control+keyf" => {
-                info!("命中 Ctrl+F 进入搜索");
-                app.emit(PICKER_OPEN_WORKBENCH_SEARCH_EVENT, ())
+                // Ctrl+F 搜索入口将在 Task 6 统一处理，此处暂保留为 noop
+                return;
             }
             _ => return,
         };

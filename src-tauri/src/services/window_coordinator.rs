@@ -203,120 +203,6 @@ impl WindowCoordinator {
         Ok(())
     }
 
-    pub fn hide_picker_and_open_manager(
-        app: &AppHandle,
-        _state: &AppState,
-    ) -> Result<(), AppError> {
-        Self::hide_picker(app)?;
-
-        let app_handle = app.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(50));
-            let app_clone = app_handle.clone();
-            let _ = app_handle.run_on_main_thread(move || {
-                let _ = Self::open_manager(&app_clone);
-            });
-        });
-
-        Ok(())
-    }
-
-    /// 从 Picker 编辑进入 Workbench
-    pub fn open_workbench_from_picker_edit(
-        app: &AppHandle,
-        state: &AppState,
-        item_id: String,
-    ) -> Result<(), AppError> {
-        let window = ensure_workbench_window(app)?;
-        let picker_session = state.picker_session()?;
-
-        let workbench_session = crate::domain::workbench_session::WorkbenchSession {
-            target_window_hwnd: picker_session.target_window_hwnd,
-            source: crate::domain::workbench_session::WorkbenchSource::PickerEdit,
-            current_item_id: Some(item_id.clone()),
-            from_picker: true,
-            picker_selected_index: None,
-            picker_reopen_manager_on_close: picker_session.reopen_manager_on_close,
-        };
-
-        state.set_workbench_session(workbench_session)?;
-        Self::hide_picker(app)?;
-
-        if let Err(error) = window.show() {
-            error!("Workbench 显示失败，尝试恢复 Picker: {error}");
-            let _ = state.clear_workbench_session();
-            let _ = Self::show_picker(app, state);
-            return Err(AppError::Message(error.to_string()));
-        }
-        window
-            .set_focus()
-            .map_err(|error| AppError::Message(error.to_string()))?;
-
-        state.begin_workbench_activation();
-
-        window
-            .emit(
-                WORKBENCH_SESSION_START_EVENT,
-                WorkbenchSessionPayload {
-                    source: "picker_edit",
-                    item_id: Some(item_id.clone()),
-                    initial_keyword: None,
-                },
-            )
-            .map_err(|error| AppError::Message(error.to_string()))?;
-
-        info!("从 Picker 编辑进入 Workbench, item_id={item_id}");
-        Ok(())
-    }
-
-    /// 从 Picker 搜索进入 Workbench
-    pub fn open_workbench_from_picker_search(
-        app: &AppHandle,
-        state: &AppState,
-        initial_keyword: Option<String>,
-    ) -> Result<(), AppError> {
-        let window = ensure_workbench_window(app)?;
-        let picker_session = state.picker_session()?;
-
-        let workbench_session = crate::domain::workbench_session::WorkbenchSession {
-            target_window_hwnd: picker_session.target_window_hwnd,
-            source: crate::domain::workbench_session::WorkbenchSource::PickerSearch,
-            current_item_id: None,
-            from_picker: true,
-            picker_selected_index: None,
-            picker_reopen_manager_on_close: picker_session.reopen_manager_on_close,
-        };
-
-        state.set_workbench_session(workbench_session)?;
-        Self::hide_picker(app)?;
-
-        if let Err(error) = window.show() {
-            error!("Workbench 显示失败，尝试恢复 Picker: {error}");
-            let _ = state.clear_workbench_session();
-            let _ = Self::show_picker(app, state);
-            return Err(AppError::Message(error.to_string()));
-        }
-        window
-            .set_focus()
-            .map_err(|error| AppError::Message(error.to_string()))?;
-
-        state.begin_workbench_activation();
-
-        window
-            .emit(
-                WORKBENCH_SESSION_START_EVENT,
-                WorkbenchSessionPayload {
-                    source: "picker_search",
-                    item_id: None,
-                    initial_keyword: initial_keyword.clone(),
-                },
-            )
-            .map_err(|error| AppError::Message(error.to_string()))?;
-
-        info!("从 Picker 搜索进入 Workbench, keyword={initial_keyword:?}");
-        Ok(())
-    }
-
     /// 全局快捷键直接打开 Workbench
     pub fn open_workbench_global(app: &AppHandle, state: &AppState) -> Result<(), AppError> {
         let window = ensure_workbench_window(app)?;
@@ -334,9 +220,6 @@ impl WindowCoordinator {
             target_window_hwnd: target_window,
             source: crate::domain::workbench_session::WorkbenchSource::GlobalShortcut,
             current_item_id: None,
-            from_picker: false,
-            picker_selected_index: None,
-            picker_reopen_manager_on_close: false,
         };
 
         state.set_workbench_session(workbench_session)?;
@@ -443,14 +326,9 @@ impl WindowCoordinator {
         }
 
         if let Some(ref sess) = session {
-            // 如果从 Picker 进入，关闭 Workbench 后返回 Picker
-            if sess.from_picker {
-                let _ = Self::restore_picker(app, state, sess.target_window_hwnd, sess.picker_reopen_manager_on_close);
-            } else {
-                // Workbench 是普通装饰窗口（非 show_window_no_activate），隐藏后可立即还焦，无需 50ms 延时
-                if let Some(hwnd) = sess.target_window_hwnd {
-                    let _ = ActiveAppResolver::restore_foreground_window(hwnd);
-                }
+            // Workbench 是普通装饰窗口（非 show_window_no_activate），隐藏后可立即还焦，无需 50ms 延时
+            if let Some(hwnd) = sess.target_window_hwnd {
+                let _ = ActiveAppResolver::restore_foreground_window(hwnd);
             }
         }
 
@@ -620,6 +498,12 @@ fn restore_picker_window_size(app: &AppHandle, window: &WebviewWindow) {
     }
 }
 
+/// 纯逻辑辅助：关闭 Workbench 后是否应恢复 Picker
+/// Picker 与 Workbench 解耦后，关闭 Workbench 永远不恢复 Picker
+fn should_restore_picker_after_workbench_close(_session: &crate::domain::workbench_session::WorkbenchSession) -> bool {
+    false
+}
+
 fn configure_picker_window(window: &WebviewWindow) {
     #[cfg(target_os = "windows")]
     if let Err(error) = crate::platform::windows::window_utils::apply_picker_window_shape(window) {
@@ -654,4 +538,20 @@ fn configure_picker_window(window: &WebviewWindow) {
         }
         _ => {}
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_restore_picker_after_workbench_close;
+    use crate::domain::workbench_session::{WorkbenchSession, WorkbenchSource};
+
+    #[test]
+    fn workbench_close_should_not_restore_picker_flow() {
+        let session = WorkbenchSession {
+            target_window_hwnd: None,
+            source: WorkbenchSource::GlobalShortcut,
+            current_item_id: None,
+        };
+        assert!(!should_restore_picker_after_workbench_close(&session));
+    }
 }

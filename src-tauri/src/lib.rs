@@ -63,9 +63,6 @@ pub fn run() {
             commands::windows::show_picker_from_manager,
             commands::windows::hide_picker,
             commands::windows::open_manager,
-            commands::windows::open_manager_from_picker,
-            commands::windows::open_workbench_from_picker_edit,
-            commands::windows::open_workbench_from_picker_search,
             commands::windows::open_workbench_global,
             commands::windows::hide_workbench
         ])
