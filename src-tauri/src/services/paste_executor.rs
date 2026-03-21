@@ -57,11 +57,23 @@ impl PasteExecutor {
             });
         }
 
-        ShortcutManager::unregister_picker_session_shortcuts(app);
-        WindowCoordinator::hide_picker(app)?;
+        let target_hwnd = if state.is_picker_active() {
+            let hwnd = state.picker_session()?.target_window_hwnd;
+            ShortcutManager::unregister_picker_session_shortcuts(app);
+            WindowCoordinator::hide_picker(app)?;
+            hwnd
+        } else if state.is_workbench_active() {
+            let hwnd = state
+                .workbench_session()?
+                .and_then(|session| session.target_window_hwnd);
+            ShortcutManager::unregister_workbench_session_shortcuts(app);
+            WindowCoordinator::hide_workbench_and_restore_target(app, state)?;
+            hwnd
+        } else {
+            state.picker_session()?.target_window_hwnd
+        };
 
-        let picker_session = state.picker_session()?;
-        let paste_result = if let Some(target_hwnd) = picker_session.target_window_hwnd {
+        let paste_result = if let Some(target_hwnd) = target_hwnd {
             thread::sleep(Duration::from_millis(90));
             if ActiveAppResolver::restore_foreground_window(target_hwnd) {
                 thread::sleep(Duration::from_millis(60));

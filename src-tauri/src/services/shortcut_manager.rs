@@ -19,6 +19,7 @@ use crate::{
         events::{
             PICKER_CONFIRM_EVENT, PICKER_NAVIGATE_EVENT, PICKER_OPEN_EDITOR_EVENT,
             PICKER_SELECT_INDEX_EVENT, WORKBENCH_EDIT_ITEM_EVENT, WORKBENCH_NAVIGATE_EVENT,
+            WORKBENCH_PASTE_EVENT,
         },
         settings::normalize_shortcut_for_registration,
     },
@@ -305,7 +306,12 @@ impl ShortcutManager {
                         error!("向 Workbench 发送导航事件失败: {error}");
                     }
                 }
-                "enter" | "ctrl+enter" | "control+enter" => {
+                "enter" => {
+                    if let Err(error) = app.emit(WORKBENCH_PASTE_EVENT, ()) {
+                        error!("向 Workbench 发送粘贴事件失败: {error}");
+                    }
+                }
+                "ctrl+enter" | "control+enter" => {
                     if let Err(error) = app.emit(WORKBENCH_EDIT_ITEM_EVENT, ()) {
                         error!("向 Workbench 发送编辑事件失败: {error}");
                     }

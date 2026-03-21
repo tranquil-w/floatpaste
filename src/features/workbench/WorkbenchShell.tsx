@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { hideWorkbench, openEditorFromWorkbench } from "../../bridge/commands";
+import { hideWorkbench, openEditorFromWorkbench, pasteItem } from "../../bridge/commands";
 import {
   WORKBENCH_EDIT_ITEM_EVENT,
   WORKBENCH_NAVIGATE_EVENT,
+  WORKBENCH_PASTE_EVENT,
   WORKBENCH_SESSION_END_EVENT,
   WORKBENCH_SESSION_START_EVENT,
 } from "../../bridge/events";
@@ -110,6 +111,7 @@ export function WorkbenchShell() {
     let offEnd: (() => void) | undefined;
     let offNavigate: (() => void) | undefined;
     let offEdit: (() => void) | undefined;
+    let offPaste: (() => void) | undefined;
 
     void listen<{
       source: string;
@@ -159,11 +161,18 @@ export function WorkbenchShell() {
       offEdit = cleanup;
     });
 
+    void listen(WORKBENCH_PASTE_EVENT, () => {
+      void handlePasteSelected();
+    }).then((cleanup) => {
+      offPaste = cleanup;
+    });
+
     return () => {
       offStart?.();
       offEnd?.();
       offNavigate?.();
       offEdit?.();
+      offPaste?.();
     };
   }, [reset, setKeyword, setNoticeMessage, setSelectedItemId, setSession]);
 
@@ -192,6 +201,23 @@ export function WorkbenchShell() {
       setNoticeMessage(null);
     } catch (error) {
       setNoticeMessage(`打开编辑窗口失败：${getErrorMessage(error, "请稍后重试。")}`);
+    }
+  }
+
+  async function handlePasteSelected() {
+    const currentItem = itemsRef.current.find((item) => item.id === selectedItemIdRef.current);
+    if (!currentItem) {
+      return;
+    }
+
+    try {
+      const result = await pasteItem(currentItem.id, {
+        restoreClipboardAfterPaste: true,
+        pasteToTarget: true,
+      });
+      setNoticeMessage(result.message);
+    } catch (error) {
+      setNoticeMessage(`执行粘贴失败：${getErrorMessage(error, "请稍后重试。")}`);
     }
   }
 
@@ -252,6 +278,11 @@ export function WorkbenchShell() {
                   }`}
                   key={item.id}
                   onClick={() => setSelectedItemId(item.id)}
+                  onDoubleClick={() => {
+                    setSelectedItemId(item.id);
+                    selectedItemIdRef.current = item.id;
+                    void handlePasteSelected();
+                  }}
                   type="button"
                 >
                   <p className="line-clamp-2 text-sm text-[color:var(--cp-text-primary)]">
@@ -271,7 +302,7 @@ export function WorkbenchShell() {
         <section className="min-w-0 flex-1 px-5 py-4">
           {!selectedItemId ? (
             <div className="flex h-full items-center justify-center text-sm text-[color:var(--cp-text-muted)]">
-              选择一条记录查看详情，按 Enter 或 Ctrl+Enter 可进入编辑器
+              选择一条记录查看详情，按 Enter 或双击可粘贴，Ctrl+Enter 可进入编辑器
             </div>
           ) : detailQuery.isLoading ? (
             <div className="flex h-full items-center justify-center text-sm text-[color:var(--cp-text-muted)]">
@@ -339,4 +370,3 @@ export function WorkbenchShell() {
     </div>
   );
 }
-
