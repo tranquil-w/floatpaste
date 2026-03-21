@@ -8,7 +8,10 @@ use tauri::{App, AppHandle, Emitter, Manager};
 use tracing::{info, warn};
 
 use crate::{
-    domain::{error::AppError, events::CLIPS_CHANGED_EVENT, settings::UserSetting, workbench_session::WorkbenchSession},
+    domain::{
+        error::AppError, events::CLIPS_CHANGED_EVENT, settings::UserSetting,
+        workbench_session::WorkbenchSession,
+    },
     launch_mode::LaunchMode,
     platform::windows::clipboard_monitor::ClipboardMonitor,
     repository::sqlite_repository::SqliteRepository,

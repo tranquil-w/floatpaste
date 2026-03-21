@@ -17,7 +17,8 @@ use crate::{
         error::AppError,
         events::{
             PICKER_CONFIRM_EVENT, PICKER_NAVIGATE_EVENT, PICKER_OPEN_WORKBENCH_EDIT_EVENT,
-            PICKER_OPEN_WORKBENCH_SEARCH_EVENT, PICKER_SELECT_INDEX_EVENT, WORKBENCH_NAVIGATE_EVENT,
+            PICKER_OPEN_WORKBENCH_SEARCH_EVENT, PICKER_SELECT_INDEX_EVENT,
+            WORKBENCH_NAVIGATE_EVENT,
         },
     },
     services::window_coordinator::WindowCoordinator,
@@ -251,17 +252,18 @@ impl ShortcutManager {
                     // 已打开则关闭
                     thread::spawn(move || {
                         let app_clone = app_handle.clone();
-                        let _ = app_handle.run_on_main_thread(move || {
-                            Self::unregister_workbench_session_shortcuts(&app_clone);
-                            if let Err(error) =
-                                WindowCoordinator::hide_workbench_and_restore_target(
-                                    &app_clone,
-                                    &state_clone,
-                                )
-                            {
-                                error!("关闭 Workbench 失败: {error}");
-                            }
-                        });
+                        let _ =
+                            app_handle.run_on_main_thread(move || {
+                                Self::unregister_workbench_session_shortcuts(&app_clone);
+                                if let Err(error) =
+                                    WindowCoordinator::hide_workbench_and_restore_target(
+                                        &app_clone,
+                                        &state_clone,
+                                    )
+                                {
+                                    error!("关闭 Workbench 失败: {error}");
+                                }
+                            });
                     });
                 } else {
                     // 未打开则打开
@@ -307,17 +309,18 @@ impl ShortcutManager {
                     let state_clone = state.clone();
                     thread::spawn(move || {
                         let app_clone = app_handle.clone();
-                        let _ = app_handle.run_on_main_thread(move || {
-                            Self::unregister_workbench_session_shortcuts(&app_clone);
-                            if let Err(error) =
-                                WindowCoordinator::hide_workbench_and_restore_target(
-                                    &app_clone,
-                                    &state_clone,
-                                )
-                            {
-                                error!("关闭 Workbench 失败: {error}");
-                            }
-                        });
+                        let _ =
+                            app_handle.run_on_main_thread(move || {
+                                Self::unregister_workbench_session_shortcuts(&app_clone);
+                                if let Err(error) =
+                                    WindowCoordinator::hide_workbench_and_restore_target(
+                                        &app_clone,
+                                        &state_clone,
+                                    )
+                                {
+                                    error!("关闭 Workbench 失败: {error}");
+                                }
+                            });
                     });
                 }
                 _ => {
@@ -421,7 +424,7 @@ impl ShortcutManager {
             "ctrl+e" => {
                 info!("命中 Ctrl+E 编辑当前项");
                 app.emit(PICKER_OPEN_WORKBENCH_EDIT_EVENT, ())
-            },
+            }
             "ctrl+f" => {
                 info!("命中 Ctrl+F 进入搜索");
                 app.emit(PICKER_OPEN_WORKBENCH_SEARCH_EVENT, ())

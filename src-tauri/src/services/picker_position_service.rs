@@ -190,10 +190,7 @@ fn stored_window_size(position: StoredWindowPosition) -> Option<PhysicalSize<u32
 }
 
 fn clamp_window_size(width: u32, height: u32) -> (u32, u32) {
-    (
-        width.max(PICKER_MIN_WIDTH),
-        height.max(PICKER_MIN_HEIGHT),
-    )
+    (width.max(PICKER_MIN_WIDTH), height.max(PICKER_MIN_HEIGHT))
 }
 
 #[cfg(test)]

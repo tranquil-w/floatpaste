@@ -1,18 +1,22 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useWorkbenchStore } from "./store";
-import { WORKBENCH_SESSION_START_EVENT, WORKBENCH_SESSION_END_EVENT, WORKBENCH_NAVIGATE_EVENT } from "../../bridge/events";
+import {
+  WORKBENCH_NAVIGATE_EVENT,
+  WORKBENCH_SESSION_END_EVENT,
+  WORKBENCH_SESSION_START_EVENT,
+} from "../../bridge/events";
 import { isTauriRuntime } from "../../bridge/runtime";
 import { useWorkbenchRecentQuery, useWorkbenchSearchQuery } from "./queries";
 import {
-  useItemDetailQuery,
-  useUpdateTextMutation,
-  useSetFavoritedMutation,
   useDeleteItemMutation,
+  useItemDetailQuery,
   usePasteMutation,
+  useSetFavoritedMutation,
+  useUpdateTextMutation,
 } from "../manager/queries";
 import { hideWorkbench } from "../../bridge/commands";
-import type { ClipItemSummary, ClipItemDetail } from "../../shared/types/clips";
+import type { ClipItemDetail, ClipItemSummary } from "../../shared/types/clips";
 import { getClipTypeLabel } from "../../shared/utils/clipDisplay";
 import { formatDateTime } from "../../shared/utils/time";
 
@@ -22,19 +26,40 @@ function parseSource(raw: string): WorkbenchSource {
   if (raw === "picker_edit" || raw === "picker_search" || raw === "global") {
     return raw;
   }
+
   return "global";
 }
 
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+
+  if (typeof error === "string" && error.trim()) {
+    return error;
+  }
+
+  return fallback;
+}
+
 export function WorkbenchShell() {
-  const { setSession, setMode, setSelectedItemId, setKeyword } = useWorkbenchStore();
+  const {
+    noticeMessage,
+    setKeyword,
+    setMode,
+    setNoticeMessage,
+    setSelectedItemId,
+    setSession,
+  } = useWorkbenchStore();
   const [pendingSelectId, setPendingSelectId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isTauriRuntime()) return;
+    if (!isTauriRuntime()) {
+      return;
+    }
 
     let offStart: (() => void) | undefined;
     let offEnd: (() => void) | undefined;
-    let offNavigate: (() => void) | undefined;
 
     void listen<{
       source: string;
@@ -55,31 +80,38 @@ export function WorkbenchShell() {
         setSelectedItemId(null);
       }
       setKeyword(initialKeyword ?? "");
-    }).then((cleanup) => { offStart = cleanup; }).catch((err: unknown) => {
-      console.error("监听 WORKBENCH_SESSION_START_EVENT 失败:", err);
-    });
+      setNoticeMessage(null);
+    })
+      .then((cleanup) => {
+        offStart = cleanup;
+      })
+      .catch((error: unknown) => {
+        setNoticeMessage(
+          `工作窗初始化失败：${getErrorMessage(error, "无法监听启动事件，请重新打开工作窗。")}`,
+        );
+      });
 
     void listen(WORKBENCH_SESSION_END_EVENT, () => {
       setSession(null);
       setMode("search");
       setSelectedItemId(null);
       setKeyword("");
-    }).then((cleanup) => { offEnd = cleanup; }).catch((err: unknown) => {
-      console.error("监听 WORKBENCH_SESSION_END_EVENT 失败:", err);
-    });
-
-    void listen<string>(WORKBENCH_NAVIGATE_EVENT, (_event) => {
-      // TODO: 实现键盘导航（上/下方向键选中列表项）
-    }).then((cleanup) => { offNavigate = cleanup; }).catch((err: unknown) => {
-      console.error("监听 WORKBENCH_NAVIGATE_EVENT 失败:", err);
-    });
+      setNoticeMessage(null);
+    })
+      .then((cleanup) => {
+        offEnd = cleanup;
+      })
+      .catch((error: unknown) => {
+        setNoticeMessage(
+          `工作窗清理失败：${getErrorMessage(error, "无法监听关闭事件，请重新打开工作窗。")}`,
+        );
+      });
 
     return () => {
       offStart?.();
       offEnd?.();
-      offNavigate?.();
     };
-  }, [setSession, setMode, setSelectedItemId, setKeyword]);
+  }, [setKeyword, setMode, setNoticeMessage, setSelectedItemId, setSession]);
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-[color:var(--cp-window-shell)] text-ink">
@@ -87,6 +119,7 @@ export function WorkbenchShell() {
         <header className="shrink-0 border-b border-[color:var(--cp-border-weak)] px-4 py-3">
           <TopBar />
         </header>
+        {noticeMessage ? <NoticeBanner message={noticeMessage} /> : null}
         <main className="flex min-h-0 flex-1">
           <aside className="w-80 shrink-0 border-r border-[color:var(--cp-border-weak)]">
             <ResultList pendingSelectId={pendingSelectId} onPendingSelect={setPendingSelectId} />
@@ -101,8 +134,28 @@ export function WorkbenchShell() {
   );
 }
 
+function NoticeBanner({ message }: { message: string }) {
+  return (
+    <div className="border-b border-[rgba(var(--cp-red-rgb),0.18)] bg-[rgba(var(--cp-red-rgb),0.08)] px-4 py-2.5 text-sm text-[color:var(--cp-danger)]">
+      {message}
+    </div>
+  );
+}
+
 function TopBar() {
-  const { session, keyword, setKeyword } = useWorkbenchStore();
+  const { keyword, session, setKeyword, setNoticeMessage } = useWorkbenchStore();
+
+  const handleClose = async () => {
+    try {
+      await hideWorkbench();
+      setNoticeMessage(null);
+    } catch (error) {
+      setNoticeMessage(
+        `关闭工作窗失败：${getErrorMessage(error, "请稍后重试。")}`,
+      );
+    }
+  };
+
   return (
     <div className="flex items-center gap-4">
       <span className="text-xs text-[color:var(--cp-text-muted)]">
@@ -114,11 +167,11 @@ function TopBar() {
         className="flex-1 rounded-md border border-[color:var(--cp-border-weak)] bg-[color:var(--cp-control-surface)] px-3 py-2 text-sm outline-none focus:border-[rgba(var(--cp-peach-rgb),0.35)]"
         placeholder="搜索记录..."
         value={keyword}
-        onChange={(e) => setKeyword(e.target.value)}
+        onChange={(event) => setKeyword(event.target.value)}
       />
       <button
         className="rounded-md border border-[color:var(--cp-border-weak)] px-3 py-1.5 text-sm hover:bg-[rgba(var(--cp-surface1-rgb),0.1)]"
-        onClick={() => void hideWorkbench()}
+        onClick={() => void handleClose()}
         type="button"
       >
         关闭
@@ -134,31 +187,72 @@ function ResultList({
   pendingSelectId: string | null;
   onPendingSelect: (id: string) => void;
 }) {
-  const { keyword, selectedItemId, setSelectedItemId, setMode, isDirty, setIsDirty, setSavedText } = useWorkbenchStore();
+  const {
+    isDirty,
+    keyword,
+    selectedItemId,
+    setIsDirty,
+    setMode,
+    setNoticeMessage,
+    setSavedText,
+    setSelectedItemId,
+  } = useWorkbenchStore();
 
   const hasKeyword = keyword.trim().length > 0;
   const recent = useWorkbenchRecentQuery(!hasKeyword);
   const search = useWorkbenchSearchQuery(keyword, hasKeyword);
-
-  const items: ClipItemSummary[] = hasKeyword
-    ? (search.data?.items ?? [])
-    : (recent.data ?? []);
-
+  const items: ClipItemSummary[] = hasKeyword ? (search.data?.items ?? []) : (recent.data ?? []);
   const isLoading = hasKeyword ? search.isLoading : recent.isLoading;
 
   const handleSelectItem = (item: ClipItemSummary) => {
     if (isDirty && selectedItemId) {
-      // 有未保存修改，弹出确认框
       onPendingSelect(item.id);
       return;
     }
+
     setSelectedItemId(item.id);
     setMode("edit");
     setIsDirty(false);
     setSavedText("");
+    setNoticeMessage(null);
   };
 
-  // 抑制未使用警告（pendingSelectId 传入仅供未来高亮使用）
+  useEffect(() => {
+    if (!isTauriRuntime()) {
+      return;
+    }
+
+    let offNavigate: (() => void) | undefined;
+
+    void listen<string>(WORKBENCH_NAVIGATE_EVENT, (event) => {
+      if (!items.length) {
+        return;
+      }
+
+      const currentIndex = Math.max(
+        0,
+        items.findIndex((item) => item.id === selectedItemId),
+      );
+      const nextIndex =
+        event.payload === "up"
+          ? (currentIndex - 1 + items.length) % items.length
+          : (currentIndex + 1) % items.length;
+      handleSelectItem(items[nextIndex]);
+    })
+      .then((cleanup) => {
+        offNavigate = cleanup;
+      })
+      .catch((error: unknown) => {
+        setNoticeMessage(
+          `键盘导航不可用：${getErrorMessage(error, "请重新打开工作窗。")}`,
+        );
+      });
+
+    return () => {
+      offNavigate?.();
+    };
+  }, [isDirty, items, selectedItemId, setNoticeMessage]);
+
   void pendingSelectId;
 
   if (isLoading) {
@@ -194,7 +288,9 @@ function ResultList({
           <div className="mt-1 flex items-center gap-2 text-xs text-[color:var(--cp-text-muted)]">
             <span>{getClipTypeLabel(item)}</span>
             <span>{formatDateTime(item.lastUsedAt ?? item.createdAt)}</span>
-            {item.isFavorited && <span className="text-[color:var(--cp-favorite)]">★</span>}
+            {item.isFavorited ? (
+              <span className="text-[color:var(--cp-favorite)]">★</span>
+            ) : null}
           </div>
         </button>
       ))}
@@ -204,15 +300,16 @@ function ResultList({
 
 function EditPanel() {
   const {
-    selectedItemId,
     draftText,
-    setDraftText,
     isDirty,
-    setIsDirty,
     savedText,
+    selectedItemId,
+    setDraftText,
+    setIsDirty,
+    setMode,
+    setNoticeMessage,
     setSavedText,
     setSelectedItemId,
-    setMode,
   } = useWorkbenchStore();
 
   const detail = useItemDetailQuery(selectedItemId);
@@ -221,61 +318,78 @@ function EditPanel() {
   const deleteMutation = useDeleteItemMutation();
   const pasteMutation = usePasteMutation();
 
-  // 同步详情到编辑区
   useEffect(() => {
     if (detail.data && !isDirty) {
-      setDraftText(detail.data.textContent ?? "");
-      setSavedText(detail.data.textContent ?? "");
+      setDraftText(detail.data.fullText ?? "");
+      setSavedText(detail.data.fullText ?? "");
     }
   }, [detail.data, isDirty, setDraftText, setSavedText]);
 
-  // 检测脏状态
   useEffect(() => {
     setIsDirty(draftText !== savedText);
   }, [draftText, savedText, setIsDirty]);
 
   const handleSave = async () => {
-    if (!selectedItemId) return;
+    if (!selectedItemId) {
+      return;
+    }
+
     try {
       await updateTextMutation.mutateAsync({ id: selectedItemId, text: draftText });
       setSavedText(draftText);
       setIsDirty(false);
-    } catch (err) {
-      console.error("保存失败:", err);
+      setNoticeMessage(null);
+    } catch (error) {
+      setNoticeMessage(
+        `保存失败：${getErrorMessage(error, "当前修改未保存，请稍后重试。")}`,
+      );
     }
   };
 
   const handleToggleFavorite = async () => {
-    if (!selectedItemId || !detail.data) return;
+    if (!selectedItemId || !detail.data) {
+      return;
+    }
+
     try {
       await favoritedMutation.mutateAsync({
         id: selectedItemId,
         value: !detail.data.isFavorited,
       });
-    } catch (err) {
-      console.error("收藏操作失败:", err);
+      setNoticeMessage(null);
+    } catch (error) {
+      setNoticeMessage(
+        `收藏操作失败：${getErrorMessage(error, "请稍后重试。")}`,
+      );
     }
   };
 
   const handleDelete = async () => {
-    if (!selectedItemId) return;
+    if (!selectedItemId) {
+      return;
+    }
+
     try {
       await deleteMutation.mutateAsync(selectedItemId);
       setSelectedItemId(null);
       setMode("search");
       setIsDirty(false);
       setSavedText("");
-    } catch (err) {
-      console.error("删除失败:", err);
+      setNoticeMessage(null);
+    } catch (error) {
+      setNoticeMessage(
+        `删除失败：${getErrorMessage(error, "记录未删除，请稍后重试。")}`,
+      );
     }
   };
 
   const handlePaste = async () => {
-    if (!selectedItemId) return;
+    if (!selectedItemId) {
+      return;
+    }
 
-    // 检查未保存修改
     if (isDirty) {
-      // TODO: 弹出确认对话框
+      setNoticeMessage("回贴前请先保存修改，或放弃当前改动后再继续。");
       return;
     }
 
@@ -285,11 +399,17 @@ function EditPanel() {
         option: { restoreClipboardAfterPaste: true, pasteToTarget: true },
       });
 
-      if (result.success) {
-        await hideWorkbench();
+      if (!result.success) {
+        setNoticeMessage(result.message || "回贴失败，请稍后重试。");
+        return;
       }
-    } catch (err) {
-      console.error("回贴失败:", err);
+
+      setNoticeMessage(null);
+      await hideWorkbench();
+    } catch (error) {
+      setNoticeMessage(
+        `回贴失败：${getErrorMessage(error, "未能完成回贴，请稍后重试。")}`,
+      );
     }
   };
 
@@ -317,17 +437,16 @@ function EditPanel() {
     );
   }
 
-  const isTextItem = detail.data.clipType === "text";
+  const isTextItem = detail.data.type === "text";
 
   return (
     <div className="flex h-full flex-col">
-      {/* 编辑区或元信息区 */}
       <div className="min-h-0 flex-1 p-4">
         {isTextItem ? (
           <textarea
             className="h-full w-full resize-none rounded-md border border-[color:var(--cp-border-weak)] bg-[color:var(--cp-control-surface)] p-4 text-sm outline-none focus:border-[rgba(var(--cp-peach-rgb),0.35)]"
             value={draftText}
-            onChange={(e) => setDraftText(e.target.value)}
+            onChange={(event) => setDraftText(event.target.value)}
             placeholder="输入内容..."
           />
         ) : (
@@ -335,14 +454,13 @@ function EditPanel() {
         )}
       </div>
 
-      {/* 操作按钮区 */}
       <div className="shrink-0 border-t border-[color:var(--cp-border-weak)] px-4 py-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <button
               className="rounded-md bg-[color:var(--cp-accent-primary)] px-4 py-2 text-sm font-semibold text-cp-base disabled:opacity-50"
-              onClick={() => void handleSave()}
               disabled={!isDirty || updateTextMutation.isPending}
+              onClick={() => void handleSave()}
               type="button"
             >
               保存
@@ -388,12 +506,12 @@ function MetaInfoPanel({ detail }: { detail: ClipItemDetail }) {
           <dt className="text-[color:var(--cp-text-muted)]">创建时间</dt>
           <dd>{formatDateTime(detail.createdAt)}</dd>
         </div>
-        {detail.sourceApp && (
+        {detail.sourceApp ? (
           <div className="flex justify-between">
             <dt className="text-[color:var(--cp-text-muted)]">来源</dt>
             <dd>{detail.sourceApp}</dd>
           </div>
-        )}
+        ) : null}
       </dl>
       <div className="mt-4 rounded-md bg-[rgba(var(--cp-surface1-rgb),0.1)] p-3">
         <p className="text-xs text-[color:var(--cp-text-muted)]">
@@ -411,11 +529,28 @@ function ConfirmDialog({
   pendingSelectId: string | null;
   onPendingSelectChange: (id: string | null) => void;
 }) {
-  const { isDirty, setIsDirty, setSavedText, selectedItemId, setMode, setSelectedItemId } = useWorkbenchStore();
+  const {
+    isDirty,
+    selectedItemId,
+    setIsDirty,
+    setMode,
+    setSavedText,
+    setSelectedItemId,
+  } = useWorkbenchStore();
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const updateTextMutation = useUpdateTextMutation();
 
+  useEffect(() => {
+    if (!pendingSelectId) {
+      setErrorMessage(null);
+    }
+  }, [pendingSelectId]);
+
   const handleSaveAndSwitch = async () => {
-    if (!selectedItemId || !pendingSelectId) return;
+    if (!selectedItemId || !pendingSelectId) {
+      return;
+    }
+
     try {
       const { draftText } = useWorkbenchStore.getState();
       await updateTextMutation.mutateAsync({ id: selectedItemId, text: draftText });
@@ -423,25 +558,36 @@ function ConfirmDialog({
       setSavedText(draftText);
       setSelectedItemId(pendingSelectId);
       setMode("edit");
+      setErrorMessage(null);
       onPendingSelectChange(null);
-    } catch (err) {
-      console.error("保存并切换失败:", err);
+    } catch (error) {
+      setErrorMessage(
+        `保存后切换失败：${getErrorMessage(error, "当前修改仍未保存，请重试。")}`,
+      );
     }
   };
 
   const handleDiscardAndSwitch = () => {
-    if (!pendingSelectId) return;
+    if (!pendingSelectId) {
+      return;
+    }
+
     setIsDirty(false);
+    setSavedText("");
     setSelectedItemId(pendingSelectId);
     setMode("edit");
+    setErrorMessage(null);
     onPendingSelectChange(null);
   };
 
   const handleCancel = () => {
+    setErrorMessage(null);
     onPendingSelectChange(null);
   };
 
-  if (!pendingSelectId) return null;
+  if (!pendingSelectId || !isDirty) {
+    return null;
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -450,6 +596,11 @@ function ConfirmDialog({
         <p className="mt-2 text-sm text-[color:var(--cp-text-secondary)]">
           当前有未保存的修改，是否保存后切换？
         </p>
+        {errorMessage ? (
+          <p className="mt-3 rounded-md bg-[rgba(var(--cp-red-rgb),0.08)] px-3 py-2 text-sm text-[color:var(--cp-danger)]">
+            {errorMessage}
+          </p>
+        ) : null}
         <div className="mt-6 flex justify-end gap-2">
           <button
             className="rounded-md border border-[color:var(--cp-border-weak)] px-4 py-2 text-sm"
@@ -467,8 +618,8 @@ function ConfirmDialog({
           </button>
           <button
             className="rounded-md bg-[color:var(--cp-accent-primary)] px-4 py-2 text-sm font-semibold text-cp-base disabled:opacity-50"
-            onClick={() => void handleSaveAndSwitch()}
             disabled={updateTextMutation.isPending}
+            onClick={() => void handleSaveAndSwitch()}
             type="button"
           >
             保存

@@ -1,4 +1,7 @@
+use std::str::FromStr;
+
 use serde::{Deserialize, Deserializer, Serialize};
+use tauri_plugin_global_shortcut::Shortcut;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -132,16 +135,33 @@ impl UserSetting {
         if self.workbench_shortcut.is_empty() {
             self.workbench_shortcut = "Ctrl+Shift+F".to_string();
         }
-        if self.workbench_shortcut_enabled && self.workbench_shortcut == self.shortcut {
-            self.workbench_shortcut = "Ctrl+Shift+F".to_string();
-            // 如果默认值与主快捷键也相同，则禁用工作窗快捷键
-            if self.workbench_shortcut == self.shortcut {
-                self.workbench_shortcut_enabled = false;
-            }
-        }
 
+        self.resolve_workbench_shortcut_conflict();
         self
     }
+
+    fn resolve_workbench_shortcut_conflict(&mut self) {
+        if !self.workbench_shortcut_enabled
+            || normalize_shortcut_for_compare(&self.workbench_shortcut)
+                != normalize_shortcut_for_compare(&self.shortcut)
+        {
+            return;
+        }
+
+        self.workbench_shortcut = "Ctrl+Shift+F".to_string();
+        if normalize_shortcut_for_compare(&self.workbench_shortcut)
+            == normalize_shortcut_for_compare(&self.shortcut)
+        {
+            self.workbench_shortcut_enabled = false;
+        }
+    }
+}
+
+fn normalize_shortcut_for_compare(shortcut: &str) -> String {
+    let trimmed = shortcut.trim();
+    Shortcut::from_str(trimmed)
+        .map(|value| value.into_string().to_lowercase())
+        .unwrap_or_else(|_| trimmed.to_lowercase())
 }
 
 #[cfg(test)]
@@ -287,6 +307,7 @@ mod tests {
             }"#,
         )
         .unwrap();
+
         assert_eq!(settings.workbench_shortcut, "Ctrl+Shift+F");
         assert!(settings.workbench_shortcut_enabled);
     }
@@ -300,7 +321,7 @@ mod tests {
             ..UserSetting::default()
         }
         .sanitized();
-        // 冲突时应重置为默认值，而不是报错
+
         assert_eq!(settings.workbench_shortcut, "Ctrl+Shift+F");
     }
 
@@ -313,6 +334,20 @@ mod tests {
             ..UserSetting::default()
         }
         .sanitized();
+
+        assert!(!settings.workbench_shortcut_enabled);
+    }
+
+    #[test]
+    fn workbench_shortcut_conflict_detection_uses_normalized_shortcuts() {
+        let settings = UserSetting {
+            shortcut: "CTRL+SHIFT+F".to_string(),
+            workbench_shortcut: "ctrl+shift+f".to_string(),
+            workbench_shortcut_enabled: true,
+            ..UserSetting::default()
+        }
+        .sanitized();
+
         assert!(!settings.workbench_shortcut_enabled);
     }
 }

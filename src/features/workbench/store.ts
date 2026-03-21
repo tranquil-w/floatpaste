@@ -13,6 +13,8 @@ interface WorkbenchStore {
   setSession: (session: WorkbenchSession | null) => void;
   mode: WorkbenchMode;
   setMode: (mode: WorkbenchMode) => void;
+  noticeMessage: string | null;
+  setNoticeMessage: (message: string | null) => void;
   keyword: string;
   setKeyword: (keyword: string) => void;
   selectedItemId: string | null;
@@ -30,6 +32,8 @@ export const useWorkbenchStore = create<WorkbenchStore>((set) => ({
   setSession: (session) => set({ session }),
   mode: "search",
   setMode: (mode) => set({ mode }),
+  noticeMessage: null,
+  setNoticeMessage: (noticeMessage) => set({ noticeMessage }),
   keyword: "",
   setKeyword: (keyword) => set({ keyword }),
   selectedItemId: null,

@@ -11,8 +11,8 @@ use crate::{
     domain::{
         error::AppError,
         events::{
-            PICKER_SESSION_END_EVENT, PICKER_SESSION_START_EVENT,
-            WORKBENCH_SESSION_END_EVENT, WORKBENCH_SESSION_START_EVENT,
+            PICKER_SESSION_END_EVENT, PICKER_SESSION_START_EVENT, WORKBENCH_SESSION_END_EVENT,
+            WORKBENCH_SESSION_START_EVENT,
         },
         settings::UserSetting,
     },
@@ -250,11 +250,14 @@ impl WindowCoordinator {
         state.begin_workbench_activation();
 
         window
-            .emit(WORKBENCH_SESSION_START_EVENT, WorkbenchSessionPayload {
-                source: "picker_edit",
-                item_id: Some(item_id.clone()),
-                initial_keyword: None,
-            })
+            .emit(
+                WORKBENCH_SESSION_START_EVENT,
+                WorkbenchSessionPayload {
+                    source: "picker_edit",
+                    item_id: Some(item_id.clone()),
+                    initial_keyword: None,
+                },
+            )
             .map_err(|error| AppError::Message(error.to_string()))?;
 
         info!("从 Picker 编辑进入 Workbench, item_id={item_id}");
@@ -294,11 +297,14 @@ impl WindowCoordinator {
         state.begin_workbench_activation();
 
         window
-            .emit(WORKBENCH_SESSION_START_EVENT, WorkbenchSessionPayload {
-                source: "picker_search",
-                item_id: None,
-                initial_keyword: initial_keyword.clone(),
-            })
+            .emit(
+                WORKBENCH_SESSION_START_EVENT,
+                WorkbenchSessionPayload {
+                    source: "picker_search",
+                    item_id: None,
+                    initial_keyword: initial_keyword.clone(),
+                },
+            )
             .map_err(|error| AppError::Message(error.to_string()))?;
 
         info!("从 Picker 搜索进入 Workbench, keyword={initial_keyword:?}");
@@ -338,11 +344,14 @@ impl WindowCoordinator {
         state.begin_workbench_activation();
 
         window
-            .emit(WORKBENCH_SESSION_START_EVENT, WorkbenchSessionPayload {
-                source: "global",
-                item_id: None,
-                initial_keyword: None,
-            })
+            .emit(
+                WORKBENCH_SESSION_START_EVENT,
+                WorkbenchSessionPayload {
+                    source: "global",
+                    item_id: None,
+                    initial_keyword: None,
+                },
+            )
             .map_err(|error| AppError::Message(error.to_string()))?;
 
         info!("全局快捷键打开 Workbench");
@@ -458,7 +467,8 @@ fn configure_workbench_window(window: &WebviewWindow) {
             }
             api.prevent_close();
             if let Some(state) = app.try_state::<AppState>() {
-                if let Err(err) = WindowCoordinator::hide_workbench_and_restore_target(&app, &state) {
+                if let Err(err) = WindowCoordinator::hide_workbench_and_restore_target(&app, &state)
+                {
                     error!("Workbench CloseRequested 处理失败: {err}");
                 }
             }
@@ -549,32 +559,30 @@ fn configure_picker_window(window: &WebviewWindow) {
 
     let app = window.app_handle().clone();
     let handle = window.clone();
-    window.on_window_event(move |event| {
-        match event {
-            WindowEvent::CloseRequested { api, .. } => {
-                if app
-                    .try_state::<AppState>()
-                    .map(|state| state.is_quitting())
-                    .unwrap_or(false)
-                {
-                    return;
-                }
-                api.prevent_close();
-                if let Some(state) = app.try_state::<AppState>() {
-                    let _ = WindowCoordinator::hide_picker_and_restore_target(&app, &state);
-                } else {
-                    let _ = WindowCoordinator::hide_picker(&app);
-                }
+    window.on_window_event(move |event| match event {
+        WindowEvent::CloseRequested { api, .. } => {
+            if app
+                .try_state::<AppState>()
+                .map(|state| state.is_quitting())
+                .unwrap_or(false)
+            {
+                return;
             }
-            #[cfg(target_os = "windows")]
-            WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
-                if let Err(error) =
-                    crate::platform::windows::window_utils::apply_picker_window_shape(&handle)
-                {
-                    warn!("刷新 picker 圆角窗口失败: {error}");
-                }
+            api.prevent_close();
+            if let Some(state) = app.try_state::<AppState>() {
+                let _ = WindowCoordinator::hide_picker_and_restore_target(&app, &state);
+            } else {
+                let _ = WindowCoordinator::hide_picker(&app);
             }
-            _ => {}
         }
+        #[cfg(target_os = "windows")]
+        WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
+            if let Err(error) =
+                crate::platform::windows::window_utils::apply_picker_window_shape(&handle)
+            {
+                warn!("刷新 picker 圆角窗口失败: {error}");
+            }
+        }
+        _ => {}
     });
 }
