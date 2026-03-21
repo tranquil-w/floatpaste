@@ -213,6 +213,20 @@ body.theme-manager {
   background-color: var(--cp-window-shell);
 }
 
+body.theme-workbench {
+  background:
+    radial-gradient(circle at top right, rgba(var(--cp-peach-rgb), 0.08), transparent 45%),
+    radial-gradient(circle at bottom left, rgba(var(--cp-surface1-rgb), 0.22), transparent 50%),
+    var(--cp-window-shell);
+}
+
+html.dark body.theme-workbench {
+  background:
+    radial-gradient(circle at top right, rgba(var(--cp-peach-rgb), 0.1), transparent 45%),
+    radial-gradient(circle at bottom left, rgba(var(--cp-surface1-rgb), 0.16), transparent 55%),
+    var(--cp-window-shell);
+}
+
 .text-ink {
   color: var(--cp-text-primary);
 }

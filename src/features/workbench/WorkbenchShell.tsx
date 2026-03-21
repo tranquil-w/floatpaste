@@ -17,6 +17,32 @@ import { useWorkbenchRecentQuery, useWorkbenchSearchQuery } from "./queries";
 import { getNextWorkbenchNavigationIndex } from "./state";
 import { useWorkbenchStore } from "./store";
 
+const STYLES = {
+  shell:
+    "flex h-screen w-screen flex-col overflow-hidden bg-[color:var(--cp-window-shell)] text-ink",
+  header:
+    "flex shrink-0 items-center gap-4 border-b border-[rgba(var(--cp-surface1-rgb),0.28)] bg-[rgba(var(--cp-base-rgb),0.85)] px-4 py-3 backdrop-blur-sm dark:border-[rgba(var(--cp-surface1-rgb),0.18)] dark:bg-[rgba(var(--cp-crust-rgb),0.45)]",
+  searchInput:
+    "flex-1 rounded-lg border border-[rgba(var(--cp-surface1-rgb),0.35)] bg-[rgba(var(--cp-base-rgb),0.75)] px-3 py-2 text-sm outline-none transition-colors placeholder:text-[color:var(--cp-text-muted)] focus:border-[rgba(var(--cp-peach-rgb),0.35)] focus:bg-[color:var(--cp-base)] dark:border-[rgba(var(--cp-surface1-rgb),0.4)] dark:bg-[rgba(var(--cp-surface0-rgb),0.4)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.6)]",
+  closeButton:
+    "rounded-md border border-[rgba(var(--cp-surface1-rgb),0.3)] px-3 py-2 text-sm transition-colors hover:bg-[rgba(var(--cp-surface1-rgb),0.12)] dark:border-[rgba(var(--cp-surface1-rgb),0.35)] dark:hover:bg-[rgba(var(--cp-surface1-rgb),0.18)]",
+  sidebar:
+    "w-[360px] shrink-0 border-r border-[color:var(--cp-border-weak)] bg-[rgba(var(--cp-mantle-rgb),0.55)] dark:bg-[rgba(var(--cp-crust-rgb),0.35)]",
+  listItem: (selected: boolean) =>
+    `w-full border-b border-[color:var(--cp-border-weak)] px-4 py-3 text-left transition-colors hover:bg-[rgba(var(--cp-surface1-rgb),0.12)] dark:hover:bg-[rgba(var(--cp-surface1-rgb),0.16)] ${
+      selected
+        ? "bg-[rgba(var(--cp-peach-rgb),0.12)] dark:bg-[rgba(var(--cp-peach-rgb),0.14)]"
+        : ""
+    }`,
+  detailPanel: "min-w-0 flex-1 px-5 py-4 bg-[rgba(var(--cp-base-rgb),0.45)] dark:bg-transparent",
+  detailCard:
+    "rounded-xl border border-[rgba(var(--cp-surface1-rgb),0.3)] bg-[rgba(var(--cp-base-rgb),0.75)] p-4 dark:border-[rgba(var(--cp-surface1-rgb),0.25)] dark:bg-[rgba(var(--cp-surface0-rgb),0.2)]",
+  textPreview:
+    "min-h-0 flex-1 rounded-xl border border-[rgba(var(--cp-surface1-rgb),0.3)] bg-[rgba(var(--cp-base-rgb),0.75)] p-4 dark:border-[rgba(var(--cp-surface1-rgb),0.25)] dark:bg-[rgba(var(--cp-surface0-rgb),0.3)]",
+  nonTextNotice:
+    "rounded-xl border border-[rgba(var(--cp-surface1-rgb),0.3)] bg-[rgba(var(--cp-surface1-rgb),0.1)] p-4 text-sm leading-6 text-[color:var(--cp-text-secondary)] dark:border-[rgba(var(--cp-surface1-rgb),0.2)] dark:bg-[rgba(var(--cp-surface1-rgb),0.12)]",
+};
+
 function parseSource(_raw: string) {
   return "global" as const;
 }
@@ -224,8 +250,8 @@ export function WorkbenchShell() {
   const isLoading = hasKeyword ? searchQuery.isLoading : recentQuery.isLoading;
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-[color:var(--cp-window-shell)] text-ink">
-      <header className="flex shrink-0 items-center gap-4 border-b border-[color:var(--cp-border-weak)] px-4 py-3">
+    <div className={STYLES.shell}>
+      <header className={STYLES.header}>
         <div className="min-w-0">
           <p className="text-xs font-medium uppercase tracking-[0.16em] text-[color:var(--cp-text-muted)]">
             搜索与定位
@@ -236,13 +262,13 @@ export function WorkbenchShell() {
         </div>
         <input
           ref={searchInputRef}
-          className="flex-1 rounded-lg border border-[color:var(--cp-border-weak)] bg-[color:var(--cp-control-surface)] px-3 py-2 text-sm outline-none focus:border-[rgba(var(--cp-peach-rgb),0.35)]"
+          className={STYLES.searchInput}
           onChange={(event) => setKeyword(event.target.value)}
           placeholder="搜索记录..."
           value={keyword}
         />
         <button
-          className="rounded-md border border-[color:var(--cp-border-weak)] px-3 py-2 text-sm hover:bg-[rgba(var(--cp-surface1-rgb),0.12)]"
+          className={STYLES.closeButton}
           onClick={() => void handleClose()}
           type="button"
         >
@@ -257,7 +283,7 @@ export function WorkbenchShell() {
       ) : null}
 
       <main className="flex min-h-0 flex-1">
-        <aside className="w-[360px] shrink-0 border-r border-[color:var(--cp-border-weak)]">
+        <aside className={STYLES.sidebar}>
           {isLoading ? (
             <div className="flex h-full items-center justify-center text-sm text-[color:var(--cp-text-muted)]">
               加载中...
@@ -273,9 +299,7 @@ export function WorkbenchShell() {
                   ref={(el) => {
                     itemRefs.current[index] = el;
                   }}
-                  className={`w-full border-b border-[color:var(--cp-border-weak)] px-4 py-3 text-left transition-colors hover:bg-[rgba(var(--cp-surface1-rgb),0.1)] ${
-                    selectedItemId === item.id ? "bg-[rgba(var(--cp-peach-rgb),0.08)]" : ""
-                  }`}
+                  className={STYLES.listItem(selectedItemId === item.id)}
                   key={item.id}
                   onClick={() => setSelectedItemId(item.id)}
                   onDoubleClick={() => {
@@ -299,7 +323,7 @@ export function WorkbenchShell() {
           )}
         </aside>
 
-        <section className="min-w-0 flex-1 px-5 py-4">
+        <section className={STYLES.detailPanel}>
           {!selectedItemId ? (
             <div className="flex h-full items-center justify-center text-sm text-[color:var(--cp-text-muted)]">
               选择一条记录查看详情，按 Enter 或双击可粘贴，Ctrl+Enter 可进入编辑器
@@ -334,7 +358,7 @@ export function WorkbenchShell() {
               </div>
 
               <div className="grid gap-3 text-sm text-[color:var(--cp-text-secondary)] sm:grid-cols-2">
-                <div className="rounded-xl border border-[color:var(--cp-border-weak)] p-4">
+                <div className={STYLES.detailCard}>
                   <div className="text-xs uppercase tracking-[0.14em] text-[color:var(--cp-text-muted)]">
                     来源
                   </div>
@@ -342,7 +366,7 @@ export function WorkbenchShell() {
                     {detailQuery.data.sourceApp ?? "未知来源"}
                   </div>
                 </div>
-                <div className="rounded-xl border border-[color:var(--cp-border-weak)] p-4">
+                <div className={STYLES.detailCard}>
                   <div className="text-xs uppercase tracking-[0.14em] text-[color:var(--cp-text-muted)]">
                     更新时间
                   </div>
@@ -353,13 +377,13 @@ export function WorkbenchShell() {
               </div>
 
               {detailQuery.data.type === "text" ? (
-                <div className="min-h-0 flex-1 rounded-xl border border-[color:var(--cp-border-weak)] bg-[color:var(--cp-control-surface)] p-4">
+                <div className={STYLES.textPreview}>
                   <pre className="h-full overflow-auto whitespace-pre-wrap break-words text-sm leading-7 text-[color:var(--cp-text-primary)]">
                     {detailQuery.data.fullText || detailQuery.data.contentPreview}
                   </pre>
                 </div>
               ) : (
-                <div className="rounded-xl border border-[color:var(--cp-border-weak)] bg-[rgba(var(--cp-surface1-rgb),0.08)] p-4 text-sm leading-6 text-[color:var(--cp-text-secondary)]">
+                <div className={STYLES.nonTextNotice}>
                   当前条目不是文本类型，搜索窗口只负责搜索与定位；如需编辑，请选择文本条目后再进入独立编辑窗口。
                 </div>
               )}

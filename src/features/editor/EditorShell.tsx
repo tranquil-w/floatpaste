@@ -265,7 +265,7 @@ export function EditorShell() {
         ) : isTextItem ? (
           <textarea
             ref={textareaRef}
-            className="h-full w-full resize-none rounded-xl border border-[color:var(--cp-border-weak)] bg-[color:var(--cp-control-surface)] px-4 py-4 text-sm leading-7 text-[color:var(--cp-text-primary)] outline-none focus:border-[rgba(var(--cp-peach-rgb),0.35)]"
+            className="h-full w-full resize-none rounded-md border border-[color:var(--cp-border-weak)] bg-cp-mantle px-5 py-5 text-[14px] leading-relaxed text-[color:var(--cp-text-primary)] outline-none transition-all duration-300 focus:border-[rgba(var(--cp-peach-rgb),0.35)] focus:bg-[color:var(--cp-window-shell)] focus:shadow-sm focus:shadow-[rgba(var(--cp-peach-rgb),0.08)] focus-visible:outline-none dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
             onChange={(event) => setDraftText(event.target.value)}
             placeholder="输入或编辑文本内容..."
             value={draftText}
@@ -354,6 +354,7 @@ export function EditorShell() {
     </div>
   );
 }
+
 
 
 
