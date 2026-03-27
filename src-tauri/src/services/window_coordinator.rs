@@ -222,6 +222,7 @@ impl WindowCoordinator {
     ) {
         notify_workbench_input_state(app, target_window_hwnd, false);
     }
+
     pub fn open_editor_from_picker(
         app: &AppHandle,
         state: &AppState,
@@ -251,7 +252,6 @@ impl WindowCoordinator {
             return Ok(());
         }
 
-        // 如果 picker 窗口已打开，先关闭它
         if state.is_picker_active() {
             Self::hide_picker(app)?;
         }
@@ -473,7 +473,7 @@ fn ensure_workbench_window(app: &AppHandle) -> Result<WebviewWindow, AppError> {
         .min_inner_size(600.0, 400.0)
         .resizable(true)
         .visible(false)
-        .decorations(true)
+        .decorations(false)
         .always_on_top(false)
         .skip_taskbar(false)
         .center()
@@ -507,6 +507,20 @@ fn ensure_editor_window(app: &AppHandle) -> Result<WebviewWindow, AppError> {
 }
 
 fn configure_workbench_window(window: &WebviewWindow) {
+    #[cfg(target_os = "windows")]
+    if let Err(error) =
+        crate::platform::windows::window_utils::remove_window_system_menu(window)
+    {
+        warn!("移除搜索窗口系统菜单失败: {error}");
+    }
+
+    #[cfg(target_os = "windows")]
+    if let Err(error) =
+        crate::platform::windows::window_utils::block_alt_menu_activation(window)
+    {
+        warn!("æ‹¦æˆªæœç´¢çª—å£ Alt ç³»ç»Ÿèœå•æ¿€æ´»å¤±è´¥: {error}");
+    }
+
     let app = window.app_handle().clone();
     window.on_window_event(move |event| {
         if let WindowEvent::CloseRequested { api, .. } = event {
@@ -691,6 +705,13 @@ fn configure_picker_window(window: &WebviewWindow) {
         warn!("初始化 picker 圆角窗口失败: {error}");
     }
 
+    #[cfg(target_os = "windows")]
+    if let Err(error) =
+        crate::platform::windows::window_utils::remove_window_system_menu(window)
+    {
+        warn!("移除 Picker 系统菜单失败: {error}");
+    }
+
     let app = window.app_handle().clone();
     let handle = window.clone();
     window.on_window_event(move |event| match event {
@@ -725,6 +746,7 @@ fn configure_picker_window(window: &WebviewWindow) {
 mod tests {
     use super::should_restore_picker_after_workbench_close;
     use crate::domain::workbench_session::{WorkbenchSession, WorkbenchSource};
+    use serde_json::Value;
 
     #[test]
     fn workbench_close_should_not_restore_picker_flow() {
@@ -735,6 +757,16 @@ mod tests {
         };
         assert!(!should_restore_picker_after_workbench_close(&session));
     }
+
+    #[test]
+    fn tauri_config_should_disable_workbench_native_decorations() {
+        let config: Value = serde_json::from_str(include_str!("../../tauri.conf.json")).unwrap();
+        let windows = config["app"]["windows"].as_array().unwrap();
+        let workbench = windows
+            .iter()
+            .find(|window| window["label"] == "workbench")
+            .unwrap();
+
+        assert_eq!(workbench["decorations"], Value::Bool(false));
+    }
 }
-
-

@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
-import { hideWorkbench, openEditorFromWorkbench, pasteItem } from "../../bridge/commands";
+import { emitTo, listen } from "@tauri-apps/api/event";
+import { hidePicker, hideWorkbench, openEditorFromWorkbench, pasteItem } from "../../bridge/commands";
 import {
+  PICKER_CONFIRM_EVENT,
+  PICKER_NAVIGATE_EVENT,
+  PICKER_OPEN_EDITOR_EVENT,
+  PICKER_SELECT_INDEX_EVENT,
   WORKBENCH_EDIT_ITEM_EVENT,
   WORKBENCH_INPUT_RESUME_EVENT,
   WORKBENCH_INPUT_SUSPEND_EVENT,
@@ -151,6 +155,51 @@ export function WorkbenchShell() {
     }
   };
 
+  async function forwardPickerNavigate(direction: "up" | "down") {
+    try {
+      await emitTo("picker", PICKER_NAVIGATE_EVENT, direction);
+      setNoticeMessage(null);
+    } catch (error) {
+      setNoticeMessage(`控制速贴面板失败：${getErrorMessage(error, "请稍后重试。")}`);
+    }
+  }
+
+  async function forwardPickerConfirm() {
+    try {
+      await emitTo("picker", PICKER_CONFIRM_EVENT);
+      setNoticeMessage(null);
+    } catch (error) {
+      setNoticeMessage(`控制速贴面板失败：${getErrorMessage(error, "请稍后重试。")}`);
+    }
+  }
+
+  async function forwardPickerOpenEditor() {
+    try {
+      await emitTo("picker", PICKER_OPEN_EDITOR_EVENT);
+      setNoticeMessage(null);
+    } catch (error) {
+      setNoticeMessage(`控制速贴面板失败：${getErrorMessage(error, "请稍后重试。")}`);
+    }
+  }
+
+  async function forwardPickerSelectIndex(index: number) {
+    try {
+      await emitTo("picker", PICKER_SELECT_INDEX_EVENT, index);
+      setNoticeMessage(null);
+    } catch (error) {
+      setNoticeMessage(`控制速贴面板失败：${getErrorMessage(error, "请稍后重试。")}`);
+    }
+  }
+
+  async function closePickerFromWorkbench() {
+    try {
+      await hidePicker();
+      setNoticeMessage(null);
+    } catch (error) {
+      setNoticeMessage(`关闭速贴面板失败：${getErrorMessage(error, "请稍后重试。")}`);
+    }
+  }
+
   useEffect(() => {
     if (!isTauriRuntime()) {
       return;
@@ -222,6 +271,7 @@ export function WorkbenchShell() {
 
     void listen(WORKBENCH_INPUT_SUSPEND_EVENT, () => {
       setInputSuspended(true);
+      searchInputRef.current?.blur();
     }).then((cleanup) => {
       offSuspend = cleanup;
     });
@@ -246,6 +296,44 @@ export function WorkbenchShell() {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (inputSuspended && !event.isComposing) {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          void closePickerFromWorkbench();
+          return;
+        }
+
+        if (event.key === "ArrowUp") {
+          event.preventDefault();
+          void forwardPickerNavigate("up");
+          return;
+        }
+
+        if (event.key === "ArrowDown") {
+          event.preventDefault();
+          void forwardPickerNavigate("down");
+          return;
+        }
+
+        if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+          event.preventDefault();
+          void forwardPickerOpenEditor();
+          return;
+        }
+
+        if (event.key === "Enter") {
+          event.preventDefault();
+          void forwardPickerConfirm();
+          return;
+        }
+
+        if (/^[1-9]$/.test(event.key)) {
+          event.preventDefault();
+          void forwardPickerSelectIndex(Number(event.key) - 1);
+          return;
+        }
+      }
+
       const action = getWorkbenchKeyboardAction({
         key: event.key,
         ctrlKey: event.ctrlKey,
@@ -281,7 +369,7 @@ export function WorkbenchShell() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [inputSuspended, selectedItemId, keyword]);
+  }, [inputSuspended, keyword, selectedItemId]);
 
   async function handleClose() {
     try {
@@ -333,7 +421,7 @@ export function WorkbenchShell() {
   return (
     <div className={STYLES.shell}>
       <header className={STYLES.header}>
-        <div className="min-w-0">
+        <div className="min-w-0" data-tauri-drag-region>
           <p className="text-xs font-medium uppercase tracking-[0.16em] text-[color:var(--cp-text-muted)]">
             搜索与定位
           </p>
