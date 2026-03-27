@@ -15,6 +15,8 @@ export const WORKBENCH_EDIT_ITEM_EVENT = "workbench://edit-item";
 export const WORKBENCH_SEARCH_EVENT = "workbench://search";
 export const WORKBENCH_PASTE_EVENT = "workbench://paste";
 export const WORKBENCH_NAVIGATE_EVENT = "workbench://navigate";
+export const WORKBENCH_INPUT_SUSPEND_EVENT = "workbench://input-suspend";
+export const WORKBENCH_INPUT_RESUME_EVENT = "workbench://input-resume";
 
 export const EDITOR_SESSION_START_EVENT = "editor://session-start";
 export const EDITOR_SESSION_END_EVENT = "editor://session-end";

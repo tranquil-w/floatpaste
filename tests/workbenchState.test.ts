@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { ClipItemSummary } from "../src/shared/types/clips";
-import { getNextWorkbenchNavigationIndex } from "../src/features/workbench/state";
+import { getNextWorkbenchNavigationIndex } from "../src/features/workbench/state.ts";
 
 function createSummary(id: string): ClipItemSummary {
   return {
@@ -24,3 +24,4 @@ test("快速连续向下导航时，仍基于当前选中项计算下一个索�
   assert.equal(getNextWorkbenchNavigationIndex(items, "a", "down"), 1);
   assert.equal(getNextWorkbenchNavigationIndex(items, "b", "down"), 2);
 });
+

@@ -66,7 +66,6 @@ impl PasteExecutor {
             let hwnd = state
                 .workbench_session()?
                 .and_then(|session| session.target_window_hwnd);
-            ShortcutManager::unregister_workbench_session_shortcuts(app);
             WindowCoordinator::hide_workbench_and_restore_target(app, state)?;
             hwnd
         } else {
@@ -76,6 +75,7 @@ impl PasteExecutor {
         let paste_result = if let Some(target_hwnd) = target_hwnd {
             thread::sleep(Duration::from_millis(90));
             if ActiveAppResolver::restore_foreground_window(target_hwnd) {
+                WindowCoordinator::resume_workbench_input_if_target(app, Some(target_hwnd));
                 thread::sleep(Duration::from_millis(60));
                 if trigger_ctrl_v() {
                     PasteResult {

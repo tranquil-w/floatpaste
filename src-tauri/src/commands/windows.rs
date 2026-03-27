@@ -64,15 +64,11 @@ pub fn hide_editor(state: State<'_, AppState>, app: AppHandle) -> Result<(), Str
 
 #[tauri::command]
 pub fn open_workbench_global(state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
-    WindowCoordinator::open_workbench_global(&app, &state).map_err(map_error)?;
-    if let Err(error) = ShortcutManager::register_workbench_session_shortcuts(&app) {
-        warn!("通过全局快捷键打开 Workbench 时注册会话快捷键失败: {error}");
-    }
-    Ok(())
+    WindowCoordinator::open_workbench_global(&app, &state).map_err(map_error)
 }
 
 #[tauri::command]
 pub fn hide_workbench(state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
-    ShortcutManager::unregister_workbench_session_shortcuts(&app);
     WindowCoordinator::hide_workbench_and_restore_target(&app, &state).map_err(map_error)
 }
+

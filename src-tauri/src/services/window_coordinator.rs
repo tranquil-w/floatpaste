@@ -13,7 +13,9 @@ use crate::{
         error::AppError,
         events::{
             EDITOR_SESSION_END_EVENT, EDITOR_SESSION_START_EVENT, PICKER_SESSION_END_EVENT,
-            PICKER_SESSION_START_EVENT, WORKBENCH_SESSION_END_EVENT, WORKBENCH_SESSION_START_EVENT,
+            PICKER_SESSION_START_EVENT, WORKBENCH_INPUT_RESUME_EVENT,
+            WORKBENCH_INPUT_SUSPEND_EVENT, WORKBENCH_SESSION_END_EVENT,
+            WORKBENCH_SESSION_START_EVENT,
         },
         settings::UserSetting,
         workbench_session::{WorkbenchSession, WorkbenchSource},
@@ -108,6 +110,7 @@ impl WindowCoordinator {
         state.set_picker_session(target_window, manager_visible)?;
         let _ = window.unminimize();
         apply_picker_window_position(&window, state, &settings, target_window);
+        notify_workbench_input_state(app, target_window, true);
         info!("显示 Picker，manager_visible={manager_visible}, target_window={target_window:?}");
 
         #[cfg(target_os = "windows")]
@@ -206,12 +209,19 @@ impl WindowCoordinator {
                 } else if session.reopen_manager_on_close {
                     let _ = Self::open_manager(&app_clone);
                 }
+                notify_workbench_input_state(&app_clone, session.target_window_hwnd, false);
             });
         });
 
         Ok(())
     }
 
+    pub fn resume_workbench_input_if_target(
+        app: &AppHandle,
+        target_window_hwnd: Option<isize>,
+    ) {
+        notify_workbench_input_state(app, target_window_hwnd, false);
+    }
     pub fn open_editor_from_picker(
         app: &AppHandle,
         state: &AppState,
@@ -306,7 +316,6 @@ impl WindowCoordinator {
         state: &AppState,
     ) -> Result<(), AppError> {
         state.end_workbench_activation();
-        ShortcutManager::unregister_workbench_session_shortcuts(app);
         let session = state.workbench_session()?;
 
         let Some(window) = app.get_webview_window(WORKBENCH_WINDOW_LABEL) else {
@@ -394,7 +403,6 @@ impl WindowCoordinator {
         state: &AppState,
     ) -> Result<(), AppError> {
         state.end_workbench_activation();
-        ShortcutManager::unregister_workbench_session_shortcuts(app);
 
         let Some(window) = app.get_webview_window(WORKBENCH_WINDOW_LABEL) else {
             return Ok(());
@@ -603,6 +611,7 @@ fn restore_picker_after_editor(
     session: &EditorSession,
 ) -> Result<(), AppError> {
     state.set_picker_session(session.target_window_hwnd, session.reopen_manager_on_close)?;
+    notify_workbench_input_state(app, session.target_window_hwnd, true);
     let window = ensure_picker_window(app)?;
 
     restore_picker_window_size(app, &window);
@@ -643,11 +652,35 @@ fn restore_workbench_after_editor(app: &AppHandle, state: &AppState) -> Result<(
         .map_err(|error| AppError::Message(error.to_string()))?;
 
     state.begin_workbench_activation();
-    ShortcutManager::register_workbench_session_shortcuts(app)?;
     info!("从 Editor 返回 Workbench");
     Ok(())
 }
 
+fn notify_workbench_input_state(
+    app: &AppHandle,
+    target_window_hwnd: Option<isize>,
+    suspended: bool,
+) {
+    let Some(workbench) = app.get_webview_window(WORKBENCH_WINDOW_LABEL) else {
+        return;
+    };
+    let Ok(hwnd) = workbench.hwnd() else {
+        return;
+    };
+
+    if target_window_hwnd != Some(hwnd.0 as isize) {
+        return;
+    }
+
+    let event_name = if suspended {
+        WORKBENCH_INPUT_SUSPEND_EVENT
+    } else {
+        WORKBENCH_INPUT_RESUME_EVENT
+    };
+    let _ = workbench.emit(event_name, ());
+}
+
+#[cfg(test)]
 fn should_restore_picker_after_workbench_close(_session: &WorkbenchSession) -> bool {
     false
 }
@@ -703,3 +736,5 @@ mod tests {
         assert!(!should_restore_picker_after_workbench_close(&session));
     }
 }
+
+

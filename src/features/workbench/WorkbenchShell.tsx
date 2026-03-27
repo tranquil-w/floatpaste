@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { hideWorkbench, openEditorFromWorkbench, pasteItem } from "../../bridge/commands";
 import {
   WORKBENCH_EDIT_ITEM_EVENT,
+  WORKBENCH_INPUT_RESUME_EVENT,
+  WORKBENCH_INPUT_SUSPEND_EVENT,
   WORKBENCH_NAVIGATE_EVENT,
   WORKBENCH_PASTE_EVENT,
   WORKBENCH_SESSION_END_EVENT,
@@ -13,6 +15,7 @@ import type { ClipItemSummary } from "../../shared/types/clips";
 import { getClipTypeLabel } from "../../shared/utils/clipDisplay";
 import { formatDateTime } from "../../shared/utils/time";
 import { useItemDetailQuery } from "../manager/queries";
+import { getWorkbenchKeyboardAction } from "./keyboard";
 import { useWorkbenchRecentQuery, useWorkbenchSearchQuery } from "./queries";
 import { getNextWorkbenchNavigationIndex } from "./state";
 import { useWorkbenchStore } from "./store";
@@ -74,6 +77,7 @@ export function WorkbenchShell() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const selectedItemIdRef = useRef<string | null>(selectedItemId);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const [inputSuspended, setInputSuspended] = useState(false);
   const hasKeyword = keyword.trim().length > 0;
   const recentQuery = useWorkbenchRecentQuery(!hasKeyword);
   const searchQuery = useWorkbenchSearchQuery(keyword, hasKeyword);
@@ -128,6 +132,25 @@ export function WorkbenchShell() {
     }
   }, [session?.source]);
 
+  const navigateSelection = (direction: "up" | "down") => {
+    const currentItems = itemsRef.current;
+    if (!currentItems.length) {
+      return;
+    }
+
+    const nextIndex = getNextWorkbenchNavigationIndex(
+      currentItems,
+      selectedItemIdRef.current,
+      direction,
+    );
+
+    if (nextIndex >= 0) {
+      const nextId = currentItems[nextIndex]?.id ?? null;
+      selectedItemIdRef.current = nextId;
+      setSelectedItemId(nextId);
+    }
+  };
+
   useEffect(() => {
     if (!isTauriRuntime()) {
       return;
@@ -138,6 +161,8 @@ export function WorkbenchShell() {
     let offNavigate: (() => void) | undefined;
     let offEdit: (() => void) | undefined;
     let offPaste: (() => void) | undefined;
+    let offSuspend: (() => void) | undefined;
+    let offResume: (() => void) | undefined;
 
     void listen<{
       source: string;
@@ -152,11 +177,13 @@ export function WorkbenchShell() {
       setKeyword(event.payload.initialKeyword ?? "");
       setSelectedItemId(event.payload.itemId ?? null);
       setNoticeMessage(null);
+      setInputSuspended(false);
     }).then((cleanup) => {
       offStart = cleanup;
     });
 
     void listen(WORKBENCH_SESSION_END_EVENT, () => {
+      setInputSuspended(false);
       reset();
     }).then((cleanup) => {
       offEnd = cleanup;
@@ -193,14 +220,68 @@ export function WorkbenchShell() {
       offPaste = cleanup;
     });
 
+    void listen(WORKBENCH_INPUT_SUSPEND_EVENT, () => {
+      setInputSuspended(true);
+    }).then((cleanup) => {
+      offSuspend = cleanup;
+    });
+
+    void listen(WORKBENCH_INPUT_RESUME_EVENT, () => {
+      setInputSuspended(false);
+      searchInputRef.current?.focus();
+    }).then((cleanup) => {
+      offResume = cleanup;
+    });
+
     return () => {
       offStart?.();
       offEnd?.();
       offNavigate?.();
       offEdit?.();
       offPaste?.();
+      offSuspend?.();
+      offResume?.();
     };
   }, [reset, setKeyword, setNoticeMessage, setSelectedItemId, setSession]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const action = getWorkbenchKeyboardAction({
+        key: event.key,
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+        inputSuspended,
+        isComposing: event.isComposing,
+      });
+
+      if (!action) {
+        return;
+      }
+
+      event.preventDefault();
+
+      switch (action) {
+        case "navigate-up":
+          navigateSelection("up");
+          return;
+        case "navigate-down":
+          navigateSelection("down");
+          return;
+        case "paste":
+          void handlePasteSelected();
+          return;
+        case "edit-item":
+          void handleOpenEditor();
+          return;
+        case "close":
+          void handleClose();
+          return;
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [inputSuspended, selectedItemId, keyword]);
 
   async function handleClose() {
     try {

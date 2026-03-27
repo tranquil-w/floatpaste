@@ -34,7 +34,6 @@ pub struct AppState {
     quitting: Arc<AtomicBool>,
     workbench_session: Arc<Mutex<Option<WorkbenchSession>>>,
     workbench_active: Arc<AtomicBool>,
-    workbench_session_shortcuts_registered: Arc<AtomicBool>,
     editor_session: Arc<Mutex<Option<EditorSession>>>,
     editor_active: Arc<AtomicBool>,
 }
@@ -62,7 +61,6 @@ impl AppState {
             quitting: Arc::new(AtomicBool::new(false)),
             workbench_session: Arc::new(Mutex::new(None)),
             workbench_active: Arc::new(AtomicBool::new(false)),
-            workbench_session_shortcuts_registered: Arc::new(AtomicBool::new(false)),
             editor_session: Arc::new(Mutex::new(None)),
             editor_active: Arc::new(AtomicBool::new(false)),
         }
@@ -156,16 +154,6 @@ impl AppState {
         self.workbench_active.load(Ordering::SeqCst)
     }
 
-    pub fn set_workbench_session_shortcuts_registered(&self, registered: bool) {
-        self.workbench_session_shortcuts_registered
-            .store(registered, Ordering::SeqCst);
-    }
-
-    pub fn workbench_session_shortcuts_registered(&self) -> bool {
-        self.workbench_session_shortcuts_registered
-            .load(Ordering::SeqCst)
-    }
-
     pub fn set_editor_session(&self, session: EditorSession) -> Result<(), AppError> {
         let mut current = self.editor_session.lock()?;
         *current = Some(session);
@@ -190,9 +178,6 @@ impl AppState {
         self.editor_active.store(false, Ordering::SeqCst);
     }
 
-    pub fn is_editor_active(&self) -> bool {
-        self.editor_active.load(Ordering::SeqCst)
-    }
 }
 
 pub fn bootstrap(app: &mut App, launch_mode: LaunchMode) -> Result<(), AppError> {
