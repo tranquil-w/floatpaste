@@ -32,11 +32,11 @@ use crate::{
 
 pub struct WindowCoordinator;
 
-pub const SETTINGS_WINDOW_LABEL: &str = "settings";
+pub const SETTINGS_WINDOW_LABEL: &str = "manager";
 pub const SETTINGS_WINDOW_TITLE: &str = "FloatPaste · 设置";
 pub const PICKER_WINDOW_LABEL: &str = "picker";
 pub const PICKER_WINDOW_TITLE: &str = "FloatPaste · 速贴";
-pub const SEARCH_WINDOW_LABEL: &str = "search";
+pub const SEARCH_WINDOW_LABEL: &str = "workbench";
 pub const SEARCH_WINDOW_TITLE: &str = "FloatPaste · 搜索";
 pub const EDITOR_WINDOW_LABEL: &str = "editor";
 pub const EDITOR_WINDOW_TITLE: &str = "FloatPaste · 编辑";
