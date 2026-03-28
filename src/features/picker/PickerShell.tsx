@@ -312,7 +312,7 @@ export function PickerShell() {
   }, [tauriRuntime]);
 
   return (
-    <div className="m-0 h-screen w-screen select-none overflow-hidden bg-transparent p-0 text-ink">
+    <div className="m-0 h-screen w-screen select-none overflow-hidden bg-transparent p-0 text-[color:var(--pg-fg-default)]">
       <div className={STYLES.container}>
         {tauriRuntime
           ? PICKER_RESIZE_HANDLES.map((handle) => (
