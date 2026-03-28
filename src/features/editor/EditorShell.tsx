@@ -219,18 +219,18 @@ export function EditorShell() {
   const isTextItem = detailQuery.data?.type === "text";
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-[color:var(--cp-window-shell)] text-ink">
-      <header className="flex shrink-0 items-center justify-between border-b border-[color:var(--cp-border-weak)] px-5 py-3">
+    <div className="flex h-screen w-screen flex-col overflow-hidden bg-[color:var(--pg-canvas-default)] text-[color:var(--pg-fg-default)]">
+      <header className="flex shrink-0 items-center justify-between border-b border-[color:var(--pg-border-muted)] px-5 py-3">
         <div className="min-w-0">
-          <p className="text-xs font-medium uppercase tracking-[0.16em] text-[color:var(--cp-text-muted)]">
+          <p className="text-xs font-medium uppercase tracking-[0.16em] text-[color:var(--pg-fg-subtle)]">
             {getSourceLabel(session)}
           </p>
-          <h1 className="mt-1 text-lg font-semibold text-[color:var(--cp-text-primary)]">
+          <h1 className="mt-1 text-lg font-semibold text-[color:var(--pg-fg-default)]">
             独立编辑窗口
           </h1>
         </div>
         <button
-          className="rounded-md border border-[color:var(--cp-border-weak)] px-3 py-1.5 text-sm hover:bg-[rgba(var(--cp-surface1-rgb),0.12)]"
+          className="rounded-md border border-[color:var(--pg-border-default)] px-3 py-1.5 text-sm hover:bg-[color:var(--pg-canvas-subtle)]"
           onClick={() => void requestClose()}
           type="button"
         >
@@ -239,63 +239,63 @@ export function EditorShell() {
       </header>
 
       {noticeMessage ? (
-        <div className="border-b border-[rgba(var(--cp-green-rgb),0.16)] bg-[rgba(var(--cp-green-rgb),0.08)] px-5 py-2 text-sm text-[color:var(--cp-success)]">
+        <div className="border-b border-[color:var(--pg-success-fg)]/20 bg-[color:var(--pg-success-subtle)] px-5 py-2 text-sm text-[color:var(--pg-success-fg)]">
           {noticeMessage}
         </div>
       ) : null}
       {errorMessage ? (
-        <div className="border-b border-[rgba(var(--cp-red-rgb),0.16)] bg-[rgba(var(--cp-red-rgb),0.08)] px-5 py-2 text-sm text-[color:var(--cp-danger)]">
+        <div className="border-b border-[color:var(--pg-danger-fg)]/20 bg-[color:var(--pg-danger-subtle)] px-5 py-2 text-sm text-[color:var(--pg-danger-fg)]">
           {errorMessage}
         </div>
       ) : null}
 
       <main className="flex min-h-0 flex-1 flex-col px-5 py-4">
         {!session ? (
-          <div className="flex h-full items-center justify-center text-sm text-[color:var(--cp-text-muted)]">
+          <div className="flex h-full items-center justify-center text-sm text-[color:var(--pg-fg-subtle)]">
             等待编辑会话启动
           </div>
         ) : detailQuery.isLoading ? (
-          <div className="flex h-full items-center justify-center text-sm text-[color:var(--cp-text-muted)]">
+          <div className="flex h-full items-center justify-center text-sm text-[color:var(--pg-fg-subtle)]">
             正在加载条目内容...
           </div>
         ) : !detailQuery.data ? (
-          <div className="flex h-full items-center justify-center text-sm text-[color:var(--cp-text-muted)]">
+          <div className="flex h-full items-center justify-center text-sm text-[color:var(--pg-fg-subtle)]">
             未找到对应条目
           </div>
         ) : isTextItem ? (
           <textarea
             ref={textareaRef}
-            className="h-full w-full resize-none rounded-md border border-[color:var(--cp-border-weak)] bg-cp-mantle px-5 py-5 text-[14px] leading-relaxed text-[color:var(--cp-text-primary)] outline-none transition-all duration-300 focus:border-[rgba(var(--cp-peach-rgb),0.35)] focus:bg-[color:var(--cp-window-shell)] focus:shadow-sm focus:shadow-[rgba(var(--cp-peach-rgb),0.08)] focus-visible:outline-none dark:bg-[rgba(var(--cp-surface0-rgb),0.2)] dark:focus:bg-[rgba(var(--cp-surface0-rgb),0.4)]"
+            className="h-full w-full resize-none rounded-md border border-[color:var(--pg-border-default)] bg-[color:var(--pg-canvas-subtle)] px-5 py-5 text-[14px] leading-relaxed text-[color:var(--pg-fg-default)] outline-none transition-colors focus:border-[color:var(--pg-accent-fg)] focus:bg-[color:var(--pg-canvas-inset)] focus-visible:outline-none"
             onChange={(event) => setDraftText(event.target.value)}
             placeholder="输入或编辑文本内容..."
             value={draftText}
           />
         ) : (
-          <div className="rounded-xl border border-[color:var(--cp-border-weak)] bg-[rgba(var(--cp-surface1-rgb),0.08)] p-5">
-            <h2 className="text-base font-semibold text-[color:var(--cp-text-primary)]">
+          <div className="rounded-lg border border-[color:var(--pg-border-default)] bg-[color:var(--pg-canvas-subtle)] p-5">
+            <h2 className="text-base font-semibold text-[color:var(--pg-fg-default)]">
               当前条目不支持文本编辑
             </h2>
-            <p className="mt-2 text-sm leading-6 text-[color:var(--cp-text-secondary)]">
+            <p className="mt-2 text-sm leading-6 text-[color:var(--pg-fg-muted)]">
               仅文本条目可以进入独立编辑窗口。你可以关闭当前窗口并返回来源界面继续操作。
             </p>
           </div>
         )}
       </main>
 
-      <footer className="flex shrink-0 items-center justify-between border-t border-[color:var(--cp-border-weak)] px-5 py-3">
-        <div className="text-sm text-[color:var(--cp-text-muted)]">
+      <footer className="flex shrink-0 items-center justify-between border-t border-[color:var(--pg-border-muted)] px-5 py-3">
+        <div className="text-sm text-[color:var(--pg-fg-subtle)]">
           Enter 和方向键保留文本编辑语义，Ctrl+S 保存，Esc 请求关闭
         </div>
         <div className="flex items-center gap-2">
           <button
-            className="rounded-md border border-[color:var(--cp-border-weak)] px-4 py-2 text-sm hover:bg-[rgba(var(--cp-surface1-rgb),0.12)]"
+            className="rounded-md border border-[color:var(--pg-border-default)] px-4 py-2 text-sm hover:bg-[color:var(--pg-canvas-subtle)]"
             onClick={() => void requestClose()}
             type="button"
           >
             关闭
           </button>
           <button
-            className="rounded-md bg-[color:var(--cp-accent-primary)] px-4 py-2 text-sm font-semibold text-cp-base disabled:opacity-50"
+            className="rounded-md bg-[color:var(--pg-accent-emphasis)] px-4 py-2 text-sm font-semibold text-[color:var(--pg-fg-on-emphasis)] disabled:opacity-50"
             disabled={!isTextItem || !isDirty || updateTextMutation.isPending}
             onClick={() => void saveCurrentText()}
             type="button"
@@ -311,28 +311,28 @@ export function EditorShell() {
             ref={dialogRef}
             aria-labelledby="editor-close-confirm-title"
             aria-modal="true"
-            className="w-full max-w-sm rounded-2xl bg-[color:var(--cp-window-shell)] p-6 shadow-2xl"
+            className="w-full max-w-sm rounded-2xl bg-[color:var(--pg-canvas-default)] p-6 shadow-pg-xl"
             role="dialog"
           >
             <h2
-              className="text-lg font-semibold text-[color:var(--cp-text-primary)]"
+              className="text-lg font-semibold text-[color:var(--pg-fg-default)]"
               id="editor-close-confirm-title"
             >
               发现未保存修改
             </h2>
-            <p className="mt-2 text-sm leading-6 text-[color:var(--cp-text-secondary)]">
+            <p className="mt-2 text-sm leading-6 text-[color:var(--pg-fg-muted)]">
               你可以先保存当前内容再关闭，也可以放弃这次修改并直接返回来源窗口。
             </p>
             <div className="mt-6 flex justify-end gap-2">
               <button
-                className="rounded-md border border-[color:var(--cp-border-weak)] px-4 py-2 text-sm"
+                className="rounded-md border border-[color:var(--pg-border-default)] px-4 py-2 text-sm"
                 onClick={() => setCloseConfirmOpen(false)}
                 type="button"
               >
                 取消
               </button>
               <button
-                className="rounded-md border border-[color:var(--cp-border-weak)] px-4 py-2 text-sm text-[color:var(--cp-danger)]"
+                className="rounded-md border border-[color:var(--pg-border-default)] px-4 py-2 text-sm text-[color:var(--pg-danger-fg)]"
                 onClick={() => void closeEditor()}
                 type="button"
               >
@@ -340,7 +340,7 @@ export function EditorShell() {
               </button>
               <button
                 ref={saveAndCloseButtonRef}
-                className="rounded-md bg-[color:var(--cp-accent-primary)] px-4 py-2 text-sm font-semibold text-cp-base disabled:opacity-50"
+                className="rounded-md bg-[color:var(--pg-accent-emphasis)] px-4 py-2 text-sm font-semibold text-[color:var(--pg-fg-on-emphasis)] disabled:opacity-50"
                 disabled={updateTextMutation.isPending}
                 onClick={() => void handleSaveAndClose()}
                 type="button"
