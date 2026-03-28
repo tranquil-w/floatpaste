@@ -34,5 +34,5 @@ pnpm release:portable
 
 ## 文档
 
-- [测试版发布流程](docs/测试版发布流程.md)
-- [架构设计](docs/架构设计与MVP技术方案.md)
+- [发布流程](docs/release/流程.md)
+- [架构设计](docs/architecture/架构设计与MVP技术方案.md)

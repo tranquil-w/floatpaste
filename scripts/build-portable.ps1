@@ -95,8 +95,8 @@ $stagingDir = Join-Path $releaseRoot $artifactName
 $zipPath = Join-Path $releaseRoot "${artifactName}.zip"
 $checksumPath = Join-Path $releaseRoot "SHA256SUMS.txt"
 $exeSource = Join-Path $repoRoot "src-tauri\target\${buildProfile}\${exeName}"
-$defaultReleaseNotesPath = Join-Path $repoRoot "docs\测试版发布说明模板.md"
-$defaultTesterGuidePath = Join-Path $repoRoot "docs\测试版使用说明模板.md"
+$defaultReleaseNotesPath = Join-Path $repoRoot "docs\release\发布说明模板.md"
+$defaultTesterGuidePath = Join-Path $repoRoot "docs\release\使用说明模板.md"
 $resolvedReleaseNotesPath = Resolve-OptionalPath -Path $ReleaseNotesPath
 
 if (-not $resolvedReleaseNotesPath) {
