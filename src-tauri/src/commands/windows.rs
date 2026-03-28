@@ -35,8 +35,8 @@ pub fn hide_picker(state: State<'_, AppState>, app: AppHandle) -> Result<(), Str
 }
 
 #[tauri::command]
-pub fn open_manager(_state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
-    WindowCoordinator::open_manager(&app).map_err(map_error)
+pub fn open_settings(_state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
+    WindowCoordinator::open_settings(&app).map_err(map_error)
 }
 
 #[tauri::command]
@@ -49,12 +49,12 @@ pub fn open_editor_from_picker(
 }
 
 #[tauri::command]
-pub fn open_editor_from_workbench(
+pub fn open_editor_from_search(
     item_id: String,
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), String> {
-    WindowCoordinator::open_editor_from_workbench(&app, &state, item_id).map_err(map_error)
+    WindowCoordinator::open_editor_from_search(&app, &state, item_id).map_err(map_error)
 }
 
 #[tauri::command]
@@ -63,12 +63,12 @@ pub fn hide_editor(state: State<'_, AppState>, app: AppHandle) -> Result<(), Str
 }
 
 #[tauri::command]
-pub fn open_workbench_global(state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
-    WindowCoordinator::open_workbench_global(&app, &state).map_err(map_error)
+pub fn open_search_global(state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
+    WindowCoordinator::open_search_global(&app, &state).map_err(map_error)
 }
 
 #[tauri::command]
-pub fn hide_workbench(state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
-    WindowCoordinator::hide_workbench_and_restore_target(&app, &state).map_err(map_error)
+pub fn hide_search(state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
+    WindowCoordinator::hide_search_and_restore_target(&app, &state).map_err(map_error)
 }
 

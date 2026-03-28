@@ -14,14 +14,14 @@ pub struct EditorSession {
 #[serde(rename_all = "lowercase")]
 pub enum EditorSource {
     Picker,
-    Workbench,
+    Search,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum EditorReturnTarget {
     Picker,
-    Workbench,
+    Search,
 }
 
 #[cfg(test)]

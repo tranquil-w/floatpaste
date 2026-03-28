@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
-  "identifier": "workbench-capability",
+  "identifier": "search-capability",
   "description": "搜索窗口权限",
-  "windows": ["workbench"],
+  "windows": ["search"],
   "permissions": [
     "core:default",
     "core:event:default",

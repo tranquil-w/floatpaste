@@ -10,7 +10,7 @@ use tracing::{info, warn};
 use crate::{
     domain::{
         editor_session::EditorSession, error::AppError, events::CLIPS_CHANGED_EVENT,
-        settings::UserSetting, workbench_session::WorkbenchSession,
+        settings::UserSetting, search_session::SearchSession,
     },
     launch_mode::LaunchMode,
     platform::windows::clipboard_monitor::ClipboardMonitor,
@@ -32,8 +32,8 @@ pub struct AppState {
     picker_active: Arc<AtomicBool>,
     picker_session_shortcuts_registered: Arc<AtomicBool>,
     quitting: Arc<AtomicBool>,
-    workbench_session: Arc<Mutex<Option<WorkbenchSession>>>,
-    workbench_active: Arc<AtomicBool>,
+    search_session: Arc<Mutex<Option<SearchSession>>>,
+    search_active: Arc<AtomicBool>,
     editor_session: Arc<Mutex<Option<EditorSession>>>,
     editor_active: Arc<AtomicBool>,
 }
@@ -59,8 +59,8 @@ impl AppState {
             picker_active: Arc::new(AtomicBool::new(false)),
             picker_session_shortcuts_registered: Arc::new(AtomicBool::new(false)),
             quitting: Arc::new(AtomicBool::new(false)),
-            workbench_session: Arc::new(Mutex::new(None)),
-            workbench_active: Arc::new(AtomicBool::new(false)),
+            search_session: Arc::new(Mutex::new(None)),
+            search_active: Arc::new(AtomicBool::new(false)),
             editor_session: Arc::new(Mutex::new(None)),
             editor_active: Arc::new(AtomicBool::new(false)),
         }
@@ -126,32 +126,32 @@ impl AppState {
         self.quitting.load(Ordering::SeqCst)
     }
 
-    pub fn set_workbench_session(&self, session: WorkbenchSession) -> Result<(), AppError> {
-        let mut current = self.workbench_session.lock()?;
+    pub fn set_search_session(&self, session: SearchSession) -> Result<(), AppError> {
+        let mut current = self.search_session.lock()?;
         *current = Some(session);
         Ok(())
     }
 
-    pub fn workbench_session(&self) -> Result<Option<WorkbenchSession>, AppError> {
-        Ok(self.workbench_session.lock()?.clone())
+    pub fn search_session(&self) -> Result<Option<SearchSession>, AppError> {
+        Ok(self.search_session.lock()?.clone())
     }
 
-    pub fn clear_workbench_session(&self) -> Result<(), AppError> {
-        let mut current = self.workbench_session.lock()?;
+    pub fn clear_search_session(&self) -> Result<(), AppError> {
+        let mut current = self.search_session.lock()?;
         *current = None;
         Ok(())
     }
 
-    pub fn begin_workbench_activation(&self) {
-        self.workbench_active.store(true, Ordering::SeqCst);
+    pub fn begin_search_activation(&self) {
+        self.search_active.store(true, Ordering::SeqCst);
     }
 
-    pub fn end_workbench_activation(&self) {
-        self.workbench_active.store(false, Ordering::SeqCst);
+    pub fn end_search_activation(&self) {
+        self.search_active.store(false, Ordering::SeqCst);
     }
 
-    pub fn is_workbench_active(&self) -> bool {
-        self.workbench_active.load(Ordering::SeqCst)
+    pub fn is_search_active(&self) -> bool {
+        self.search_active.load(Ordering::SeqCst)
     }
 
     pub fn set_editor_session(&self, session: EditorSession) -> Result<(), AppError> {
@@ -202,7 +202,7 @@ pub fn bootstrap(app: &mut App, launch_mode: LaunchMode) -> Result<(), AppError>
     }
 
     if !launch_mode.is_silent() {
-        WindowCoordinator::open_manager(&app.handle())?;
+        WindowCoordinator::open_settings(&app.handle())?;
     }
 
     info!("FloatPaste MVP 已初始化，数据库路径: {}", db_path.display());

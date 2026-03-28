@@ -90,7 +90,7 @@ impl ShortcutManager {
     pub fn sync_registered_shortcuts(
         app: &AppHandle,
         main_shortcut: &str,
-        workbench_shortcut: Option<&str>,
+        search_shortcut: Option<&str>,
     ) -> Result<(), AppError> {
         let main_shortcut = normalize_shortcut(main_shortcut)?;
         if main_shortcut.is_empty() {
@@ -106,13 +106,13 @@ impl ShortcutManager {
             .register(main_shortcut.as_str())
             .map_err(|error| AppError::Message(format!("注册主快捷键失败: {error}")))?;
 
-        if let Some(workbench) = workbench_shortcut {
-            let workbench = normalize_shortcut(workbench)?;
-            if !workbench.is_empty() && workbench != main_shortcut {
+        if let Some(search) = search_shortcut {
+            let search = normalize_shortcut(search)?;
+            if !search.is_empty() && search != main_shortcut {
                 manager
-                    .register(workbench.as_str())
-                    .map_err(|error| AppError::Message(format!("注册工作窗快捷键失败: {error}")))?;
-                info!("已注册工作窗快捷键: {workbench}");
+                    .register(search.as_str())
+                    .map_err(|error| AppError::Message(format!("注册搜索快捷键失败: {error}")))?;
+                info!("已注册搜索快捷键: {search}");
             }
         }
 
@@ -124,8 +124,8 @@ impl ShortcutManager {
 
 
         info!(
-            "已注册全局快捷键: 主={main_shortcut}, 工作窗={:?}",
-            workbench_shortcut
+            "已注册全局快捷键: 主={main_shortcut}, 搜索={:?}",
+            search_shortcut
         );
         Ok(())
     }
@@ -257,45 +257,45 @@ impl ShortcutManager {
             return;
         }
 
-        let workbench_shortcut = state
+        let search_shortcut = state
             .current_settings()
             .ok()
-            .filter(|settings| settings.workbench_shortcut_enabled)
-            .map(|settings| settings.workbench_shortcut);
+            .filter(|settings| settings.search_shortcut_enabled)
+            .map(|settings| settings.search_shortcut);
 
-        if let Some(ref shortcut_value) = workbench_shortcut {
-            let normalized_workbench = match normalize_shortcut(shortcut_value) {
+        if let Some(ref shortcut_value) = search_shortcut {
+            let normalized_search = match normalize_shortcut(shortcut_value) {
                 Ok(value) => value,
                 Err(_) => {
-                    warn!("工作窗快捷键 '{shortcut_value}' 解析失败，跳过匹配");
+                    warn!("搜索快捷键 '{shortcut_value}' 解析失败，跳过匹配");
                     String::new()
                 }
             };
 
-            if normalized == normalized_workbench {
+            if normalized == normalized_search {
                 if event.state != ShortcutState::Pressed {
                     return;
                 }
 
-                info!("命中工作窗快捷键: {normalized}");
+                info!("命中搜索快捷键: {normalized}");
                 let app_handle = app.clone();
                 let state_clone = state.clone();
 
-                if state.is_workbench_active() {
+                if state.is_search_active() {
                     defer_shortcut_main_thread_action(app_handle, move |app_clone| {
-                        if let Err(error) = WindowCoordinator::hide_workbench_and_restore_target(
+                        if let Err(error) = WindowCoordinator::hide_search_and_restore_target(
                             &app_clone,
                             &state_clone,
                         ) {
-                            error!("关闭 Workbench 失败: {error}");
+                            error!("关闭 Search 失败: {error}");
                         }
                     });
                 } else {
                     defer_shortcut_main_thread_action(app_handle, move |app_clone| {
                         if let Err(error) =
-                            WindowCoordinator::open_workbench_global(&app_clone, &state_clone)
+                            WindowCoordinator::open_search_global(&app_clone, &state_clone)
                         {
-                            error!("打开 Workbench 失败: {error}");
+                            error!("打开 Search 失败: {error}");
                         }
                     });
                 }
@@ -394,7 +394,7 @@ fn picker_is_active(app: &AppHandle) -> bool {
 }
 
 #[cfg(test)]
-fn is_workbench_session_shortcut(shortcut: &str) -> bool {
+fn is_search_session_shortcut(shortcut: &str) -> bool {
     let _ = shortcut;
     false
 }
@@ -485,17 +485,17 @@ fn normalize_shortcut(shortcut: &str) -> Result<String, AppError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_picker_session_shortcut, is_workbench_session_shortcut, normalize_shortcut,
+        is_picker_session_shortcut, is_search_session_shortcut, normalize_shortcut,
         should_release_stale_picker_shortcuts,
     };
 
     #[test]
-    fn workbench_session_shortcuts_should_not_register_navigation_or_confirm_keys() {
-        assert!(!is_workbench_session_shortcut("up"));
-        assert!(!is_workbench_session_shortcut("arrowdown"));
-        assert!(!is_workbench_session_shortcut("enter"));
-        assert!(!is_workbench_session_shortcut("escape"));
-        assert!(!is_workbench_session_shortcut("control+enter"));
+    fn search_session_shortcuts_should_not_register_navigation_or_confirm_keys() {
+        assert!(!is_search_session_shortcut("up"));
+        assert!(!is_search_session_shortcut("arrowdown"));
+        assert!(!is_search_session_shortcut("enter"));
+        assert!(!is_search_session_shortcut("escape"));
+        assert!(!is_search_session_shortcut("control+enter"));
     }
 
     #[test]
@@ -511,7 +511,7 @@ mod tests {
     }
 
     #[test]
-    fn picker_session_shortcuts_should_not_contain_workbench_jump_keys_after_editor_split() {
+    fn picker_session_shortcuts_should_not_contain_search_jump_keys_after_editor_split() {
         assert!(!is_picker_session_shortcut("ctrl+f"));
         assert!(!is_picker_session_shortcut("control+keyf"));
         assert!(!is_picker_session_shortcut("control+keye"));

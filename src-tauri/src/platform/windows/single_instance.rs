@@ -11,7 +11,7 @@ use windows::{
     },
 };
 
-use crate::{launch_mode::LaunchMode, services::window_coordinator::MANAGER_WINDOW_TITLE};
+use crate::{launch_mode::LaunchMode, services::window_coordinator::SETTINGS_WINDOW_TITLE};
 
 const SINGLE_INSTANCE_MUTEX_NAME: &str = "Local\\FloatPaste.SingleInstance";
 
@@ -37,8 +37,8 @@ pub fn acquire_or_focus_existing(
     if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
         let _ = unsafe { CloseHandle(handle) };
         if !launch_mode.is_silent() {
-            if !focus_existing_manager_window() {
-                return Err("检测到已有实例，但唤醒现有资料库窗口失败".to_string());
+            if !focus_existing_settings_window() {
+                return Err("检测到已有实例，但唤醒现有设置窗口失败".to_string());
             }
         }
         return Ok(None);
@@ -47,9 +47,9 @@ pub fn acquire_or_focus_existing(
     Ok(Some(SingleInstanceGuard { handle }))
 }
 
-fn focus_existing_manager_window() -> bool {
+fn focus_existing_settings_window() -> bool {
     for _ in 0..10 {
-        if try_focus_existing_manager_window() {
+        if try_focus_existing_settings_window() {
             return true;
         }
         thread::sleep(Duration::from_millis(100));
@@ -58,8 +58,8 @@ fn focus_existing_manager_window() -> bool {
     false
 }
 
-fn try_focus_existing_manager_window() -> bool {
-    let title = to_wide(MANAGER_WINDOW_TITLE);
+fn try_focus_existing_settings_window() -> bool {
+    let title = to_wide(SETTINGS_WINDOW_TITLE);
     let hwnd = match unsafe { FindWindowW(None, PCWSTR::from_raw(title.as_ptr())) } {
         Ok(hwnd) => hwnd,
         Err(_) => return false,
