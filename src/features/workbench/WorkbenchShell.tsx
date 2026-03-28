@@ -18,7 +18,7 @@ import { isTauriRuntime } from "../../bridge/runtime";
 import type { ClipItemSummary } from "../../shared/types/clips";
 import { getClipTypeLabel } from "../../shared/utils/clipDisplay";
 import { formatDateTime } from "../../shared/utils/time";
-import { useItemDetailQuery } from "../manager/queries";
+import { useItemDetailQuery } from "../../shared/queries/clipQueries";
 import { getWorkbenchKeyboardAction } from "./keyboard";
 import { useWorkbenchRecentQuery, useWorkbenchSearchQuery } from "./queries";
 import { getNextWorkbenchNavigationIndex } from "./state";

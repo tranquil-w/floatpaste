@@ -4,7 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { hideEditor as hideEditorWindow } from "../../bridge/commands";
 import { EDITOR_SESSION_END_EVENT, EDITOR_SESSION_START_EVENT } from "../../bridge/events";
 import { isTauriRuntime } from "../../bridge/runtime";
-import { useItemDetailQuery, useUpdateTextMutation } from "../manager/queries";
+import { useItemDetailQuery, useUpdateTextMutation } from "../../shared/queries/clipQueries";
 import { useEditorStore, type EditorSession } from "./store";
 import { getEditorKeyboardAction, moveFocusInDialog } from "./keyboard";
 
