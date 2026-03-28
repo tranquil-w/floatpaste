@@ -18,11 +18,11 @@ export function LoadingSpinner({ size = "md", text }: LoadingSpinnerProps) {
       aria-busy="true"
     >
       <div
-        className={`${sizeClasses[size]} animate-spin rounded-full border-[color:var(--cp-surface1)] border-t-[color:var(--cp-accent-primary)]`}
+        className={`${sizeClasses[size]} animate-spin rounded-full border-[color:var(--pg-neutral-6)] border-t-[color:var(--pg-accent-fg)]`}
         aria-hidden="true"
       />
       {text && (
-        <span className="text-sm font-medium text-[color:var(--cp-text-secondary)]">
+        <span className="text-sm font-medium text-[color:var(--pg-fg-muted)]">
           {text}
         </span>
       )}

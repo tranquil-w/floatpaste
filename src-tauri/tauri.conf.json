@@ -34,13 +34,43 @@
         "skipTaskbar": true,
         "transparent": true,
         "shadow": false
+      },
+      {
+        "label": "workbench",
+        "title": "FloatPaste 搜索",
+        "width": 900,
+        "height": 600,
+        "minWidth": 600,
+        "minHeight": 400,
+        "resizable": true,
+        "center": true,
+        "visible": false,
+        "decorations": false,
+        "alwaysOnTop": false,
+        "skipTaskbar": false
+      },
+      {
+        "label": "editor",
+        "title": "FloatPaste Editor",
+        "width": 800,
+        "height": 600,
+        "minWidth": 400,
+        "minHeight": 300,
+        "resizable": true,
+        "center": true,
+        "visible": false,
+        "decorations": true,
+        "alwaysOnTop": false,
+        "skipTaskbar": false
       }
     ],
     "security": {
       "capabilities": [
         "background-capability",
         "manager-capability",
-        "picker-capability"
+        "picker-capability",
+        "workbench-capability",
+        "editor-capability"
       ]
     }
   },
@@ -50,3 +80,4 @@
     "icon": []
   }
 }
+

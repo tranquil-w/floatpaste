@@ -2,150 +2,190 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Catppuccin Latte (Light Theme) */
+/* ── Primer Light Theme ── */
 :root {
-  /* Rosewater */ --cp-rosewater: #dc8a78;
-  /* Flamingo */ --cp-flamingo: #dd7878;
-  /* Pink */ --cp-pink: #ea76cb;
-  /* Mauve */ --cp-mauve: #8839ef;
-  /* Red */ --cp-red: #d20f39;
-  /* Maroon */ --cp-maroon: #e64553;
-  /* Peach (softened coral) */ --cp-peach: #e07a4d;
-  /* Yellow */ --cp-yellow: #df8e1d;
-  /* Green */ --cp-green: #40a02b;
-  /* Teal */ --cp-teal: #179299;
-  /* Sky */ --cp-sky: #04a5e5;
-  /* Sapphire */ --cp-sapphire: #209fb5;
-  /* Blue */ --cp-blue: #1e66f5;
-  /* Lavender */ --cp-lavender: #7287fd;
-  /* Text */ --cp-text: #4c4f69;
-  /* Subtext1 */ --cp-subtext1: #5c5f77;
-  /* Subtext0 */ --cp-subtext0: #6c6f85;
-  /* Overlay2 */ --cp-overlay2: #7c7f93;
-  /* Overlay1 */ --cp-overlay1: #8c8fa1;
-  /* Overlay0 */ --cp-overlay0: #9ca0b0;
-  /* Surface2 */ --cp-surface2: #acb0be;
-  /* Surface1 */ --cp-surface1: #bcc0cc;
-  /* Surface0 */ --cp-surface0: #ccd0da;
-  /* Base (warm cream white) */ --cp-base: #faf8f5;
-  /* Mantle (warm) */ --cp-mantle: #f5f2ed;
-  /* Crust (warm) */ --cp-crust: #ebe7e0;
+  /* Neutral */
+  --pg-neutral-0: #ffffff;
+  --pg-neutral-1: #F6F8FA;
+  --pg-neutral-2: #EFF2F5;
+  --pg-neutral-3: #E6EAEF;
+  --pg-neutral-4: #E0E6EB;
+  --pg-neutral-5: #DAE0E7;
+  --pg-neutral-6: #D1D9E0;
+  --pg-neutral-7: #C8D1DA;
+  --pg-neutral-8: #818B98;
+  --pg-neutral-9: #59636E;
+  --pg-neutral-10: #454C54;
+  --pg-neutral-11: #393F46;
+  --pg-neutral-12: #25292E;
+  --pg-neutral-13: #1f2328;
 
-  /* RGB components for rgba() usage */
-  --cp-text-rgb: 76, 79, 105;
-  --cp-subtext0-rgb: 108, 111, 133;
-  --cp-overlay1-rgb: 140, 143, 161;
-  --cp-overlay0-rgb: 156, 160, 176;
-  --cp-surface0-rgb: 204, 208, 218;
-  --cp-surface1-rgb: 188, 192, 204;
-  --cp-surface2-rgb: 172, 176, 190;
-  --cp-base-rgb: 250, 248, 245;
-  --cp-mantle-rgb: 245, 242, 237;
-  --cp-crust-rgb: 235, 231, 224;
-  --cp-lavender-rgb: 114, 135, 253;
-  --cp-blue-rgb: 30, 102, 245;
-  --cp-red-rgb: 210, 15, 57;
-  --cp-yellow-rgb: 223, 142, 29;
-  --cp-green-rgb: 64, 160, 43;
-  --cp-peach-rgb: 224, 122, 77;
-  --cp-maroon-rgb: 230, 69, 83;
- 
-  color: var(--cp-text);
-  font-family: "Segoe UI", sans-serif;
+  /* Blue (accent) */
+  --pg-blue-0: #ddf4ff;
+  --pg-blue-1: #b6e3ff;
+  --pg-blue-2: #80ccff;
+  --pg-blue-3: #54aeff;
+  --pg-blue-4: #218bff;
+  --pg-blue-5: #0969da;
+  --pg-blue-6: #0550ae;
+  --pg-blue-7: #033d8b;
+  --pg-blue-8: #0a3069;
+  --pg-blue-9: #002155;
+
+  /* Green */
+  --pg-green-0: #dafbe1;
+  --pg-green-3: #4ac26b;
+  --pg-green-4: #2da44e;
+  --pg-green-5: #1a7f37;
+  --pg-green-7: #044f1e;
+
+  /* Yellow */
+  --pg-yellow-0: #fff8c5;
+  --pg-yellow-3: #d4a72c;
+  --pg-yellow-4: #bf8700;
+  --pg-yellow-5: #9a6700;
+  --pg-yellow-7: #633c01;
+
+  /* Orange */
+  --pg-orange-0: #fff1e5;
+  --pg-orange-3: #fb8f44;
+  --pg-orange-4: #e16f24;
+  --pg-orange-5: #bc4c00;
+  --pg-orange-7: #762c00;
+
+  /* Red */
+  --pg-red-0: #ffebe9;
+  --pg-red-3: #ff8182;
+  --pg-red-4: #fa4549;
+  --pg-red-5: #cf222e;
+  --pg-red-7: #82071e;
+
+  /* Purple */
+  --pg-purple-0: #fbefff;
+  --pg-purple-3: #c297ff;
+  --pg-purple-4: #a475f9;
+  --pg-purple-5: #8250df;
+  --pg-purple-7: #512a97;
+
+  color: var(--pg-fg-default);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;
   color-scheme: light;
-  background-color: var(--cp-base);
+  background-color: var(--pg-canvas-default);
 }
 
-  /* 统一语义化映射：减少 html.dark 中的重复定义 */
-  :root,
-  html.dark {
-    /* 语义化强调 (暖色系) */
-    --cp-accent-primary: var(--cp-peach);
-    --cp-accent-primary-rgb: var(--cp-peach-rgb);
-    --cp-accent-primary-strong: var(--cp-maroon);
-    --cp-accent-primary-strong-rgb: var(--cp-maroon-rgb);
-    --cp-accent-secondary: var(--cp-yellow);
-    --cp-accent-secondary-rgb: var(--cp-yellow-rgb);
-    --cp-favorite: var(--cp-yellow);
-    --cp-favorite-rgb: var(--cp-yellow-rgb);
-    --cp-success: var(--cp-peach);
-    --cp-warning: var(--cp-yellow);
-    --cp-danger: var(--cp-red);
+/* ── Primer Dark Theme ── */
+html.dark {
+  --pg-neutral-0: #010409;
+  --pg-neutral-1: #0D1117;
+  --pg-neutral-2: #151B23;
+  --pg-neutral-3: #212830;
+  --pg-neutral-4: #262C36;
+  --pg-neutral-5: #2A313C;
+  --pg-neutral-6: #2F3742;
+  --pg-neutral-7: #3D444D;
+  --pg-neutral-8: #656C76;
+  --pg-neutral-9: #9198A1;
+  --pg-neutral-10: #B7BDC8;
+  --pg-neutral-11: #D1D7E0;
+  --pg-neutral-12: #F0F6FC;
+  --pg-neutral-13: #ffffff;
 
-    /* 语义化文本 */
-    --cp-text-primary: var(--cp-text);
-    --cp-text-secondary: var(--cp-subtext0);
-    --cp-text-muted: var(--cp-overlay0);
+  --pg-blue-0: #cae8ff;
+  --pg-blue-1: #a5d6ff;
+  --pg-blue-2: #79c0ff;
+  --pg-blue-3: #58a6ff;
+  --pg-blue-4: #388bfd;
+  --pg-blue-5: #1f6feb;
+  --pg-blue-6: #1158c7;
+  --pg-blue-7: #0d419d;
+  --pg-blue-8: #0c2d6b;
+  --pg-blue-9: #051d4d;
 
-    /* 语义化表面 */
-    --cp-window-shell: var(--cp-base);
-    --cp-window-shell-rgb: var(--cp-base-rgb);
-    --cp-panel-surface: var(--cp-mantle);
-    --cp-panel-surface-rgb: var(--cp-mantle-rgb);
-    --cp-control-surface: var(--cp-surface0);
-    --cp-control-surface-rgb: var(--cp-surface0-rgb);
-    --cp-control-surface-hover: var(--cp-surface1);
-    --cp-control-surface-hover-rgb: var(--cp-surface1-rgb);
+  --pg-green-0: #aff5b4;
+  --pg-green-3: #3fb950;
+  --pg-green-4: #2ea043;
+  --pg-green-5: #238636;
+  --pg-green-7: #0f5323;
 
-    /* 语义化边框 (macOS 极弱风格) */
-    --cp-border-weak: rgba(var(--cp-surface1-rgb), 0.12);   /* 默认边框 - 极弱 */
-    --cp-border-medium: rgba(var(--cp-surface1-rgb), 0.2);  /* hover/focus 边框 - 稍强 */
-    --cp-border-strong: rgba(var(--cp-surface1-rgb), 0.25); /* 分隔线 - 中等 */
-    --cp-border-accent: rgba(var(--cp-peach-rgb), 0.25);   /* 暖色强调边框 */
-    --cp-focus-ring: rgba(var(--cp-peach-rgb), 0.25);
+  --pg-yellow-0: #f8e3a1;
+  --pg-yellow-3: #d29922;
+  --pg-yellow-4: #bb8009;
+  --pg-yellow-5: #9e6a03;
+  --pg-yellow-7: #693e00;
 
-    /* 语义化卡片表面 */
-    --cp-card-surface: var(--cp-base);
-    --cp-card-surface-rgb: var(--cp-base-rgb);
+  --pg-orange-0: #ffdfb6;
+  --pg-orange-3: #f0883e;
+  --pg-orange-4: #db6d28;
+  --pg-orange-5: #bd561d;
+  --pg-orange-7: #762d0a;
 
-    /* macOS 风格阴影系统 */
-    --cp-shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
-    --cp-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.08);
-    --cp-shadow-md: 0 2px 4px rgba(0, 0, 0, 0.08);
-    --cp-shadow-lg: 0 4px 8px rgba(0, 0, 0, 0.06);
-  }
+  --pg-red-0: #ffdcd7;
+  --pg-red-3: #ff7b72;
+  --pg-red-4: #f85149;
+  --pg-red-5: #da3633;
+  --pg-red-7: #8e1519;
 
- /* Catppuccin Macchiato (Dark Theme) */
-  html.dark {
-    /* Macchiato 基础色 */
-    --cp-base: #24273a;
-    --cp-mantle: #1e2030;
-    --cp-crust: #181926;
-    --cp-surface0: #363a4f;
-    --cp-surface1: #494d64;
-    --cp-surface2: #5b6078;
-    --cp-overlay0: #939ab7;
-    --cp-overlay1: #8087a2;
-    --cp-overlay2: #6e738d;
-    --cp-subtext0: #a5adcb;
-    --cp-subtext1: #b8c0e0;
-    --cp-text: #cad3f5;
+  --pg-purple-0: #eddeff;
+  --pg-purple-3: #BE8FFF;
+  --pg-purple-4: #AB7DF8;
+  --pg-purple-5: #8957e5;
+  --pg-purple-7: #553098;
+}
 
-    /* Macchiato RGB 组件 */
-    --cp-base-rgb: 36, 39, 58;
-    --cp-mantle-rgb: 30, 32, 48;
-    --cp-crust-rgb: 24, 25, 38;
-    --cp-surface0-rgb: 54, 58, 79;
-    --cp-surface1-rgb: 73, 77, 100;
-    --cp-surface2-rgb: 91, 96, 120;
-    --cp-overlay0-rgb: 147, 154, 183;
-    --cp-overlay1-rgb: 128, 135, 162;
-    --cp-overlay2-rgb: 110, 115, 141;
-    --cp-subtext0-rgb: 165, 173, 203;
-    --cp-subtext1-rgb: 184, 192, 224;
-    --cp-text-rgb: 202, 211, 245;
+/* ── Semantic Mapping (both themes) ── */
+:root,
+html.dark {
+  /* Foreground */
+  --pg-fg-default: var(--pg-neutral-13);
+  --pg-fg-muted: var(--pg-neutral-9);
+  --pg-fg-subtle: var(--pg-neutral-8);
+  --pg-fg-on-emphasis: #ffffff;
 
-    /* 语义微调 */
-    --cp-card-surface: var(--cp-surface0);
-    --cp-card-surface-rgb: var(--cp-surface0-rgb);
+  /* Accent */
+  --pg-accent-fg: var(--pg-blue-5);
+  --pg-accent-emphasis: var(--pg-blue-5);
+  --pg-accent-subtle: var(--pg-blue-0);
+  --pg-accent-hover: var(--pg-blue-4);
 
-    /* 深色主题下边框更弱 */
-    --cp-border-weak: rgba(var(--cp-surface1-rgb), 0.08);
-    --cp-border-medium: rgba(var(--cp-surface1-rgb), 0.15);
-    --cp-border-strong: rgba(var(--cp-surface1-rgb), 0.2);
-  }
+  /* Canvas */
+  --pg-canvas-default: var(--pg-neutral-0);
+  --pg-canvas-subtle: var(--pg-neutral-1);
+  --pg-canvas-inset: var(--pg-neutral-0);
 
-/* 滚动条样式 */
+  /* Border */
+  --pg-border-default: var(--pg-neutral-6);
+  --pg-border-muted: var(--pg-neutral-4);
+  --pg-border-subtle: var(--pg-neutral-3);
+  --pg-border-accent: var(--pg-blue-5);
+
+  /* Status */
+  --pg-success-fg: var(--pg-green-5);
+  --pg-success-emphasis: var(--pg-green-4);
+  --pg-success-subtle: var(--pg-green-0);
+
+  --pg-danger-fg: var(--pg-red-5);
+  --pg-danger-emphasis: var(--pg-red-5);
+  --pg-danger-subtle: var(--pg-red-0);
+
+  --pg-warning-fg: var(--pg-yellow-5);
+  --pg-warning-emphasis: var(--pg-yellow-4);
+  --pg-warning-subtle: var(--pg-yellow-0);
+
+  --pg-done-fg: var(--pg-purple-5);
+  --pg-done-emphasis: var(--pg-purple-5);
+  --pg-done-subtle: var(--pg-purple-0);
+
+  /* Favorite (reuse yellow) */
+  --pg-favorite: var(--pg-yellow-5);
+
+  /* Shadow */
+  --pg-shadow-sm: 0 1px 0 var(--pg-border-default);
+  --pg-shadow-md: 0 3px 6px rgba(31, 35, 40, 0.04);
+  --pg-shadow-lg: 0 8px 24px rgba(31, 35, 40, 0.12);
+  --pg-shadow-xl: 0 12px 28px rgba(31, 35, 40, 0.12), 0 2px 4px rgba(31, 35, 40, 0.08);
+}
+
+/* ── Scrollbar ── */
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
@@ -156,49 +196,44 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--cp-control-surface);
+  background: var(--pg-border-muted);
   border: 3px solid transparent;
   background-clip: content-box;
   border-radius: 10px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--cp-control-surface-hover);
+  background: var(--pg-border-default);
   border: 3px solid transparent;
   background-clip: content-box;
 }
 
- html,
- body,
- #root {
-   min-height: 100%;
- }
+html,
+body,
+#root {
+  min-height: 100%;
+}
 
- * {
-   box-sizing: border-box;
- }
+* {
+  box-sizing: border-box;
+}
 
-  body {
-    margin: 0;
-    color: var(--cp-text-primary);
-    background-color: var(--cp-window-shell);
-    transition:
-      background-color 250ms ease-out,
-      color 250ms ease-out;
-  }
+body {
+  margin: 0;
+  color: var(--pg-fg-default);
+  background-color: var(--pg-canvas-default);
+  transition:
+    background-color 250ms ease-out,
+    color 250ms ease-out;
+}
 
-/* 
-  Picker 窗口强制透明补丁：必须放在最后以确保最高优先级。
-  !important 是必要的，因为 Tauri 窗口在切换主题或初始加载时
-  可能会继承错误的背景色，导致圆角处出现不透明的“尖角”闪烁。
-*/
+/* Picker window transparency patch — must be last for highest priority */
 html.window-picker,
 html.window-picker body,
 html.window-picker #root {
   background: transparent !important;
   background-color: transparent !important;
   background-image: none !important;
-  /* 关键：禁用过渡动画，防止透明化延迟产生瞬时尖角 */
   transition: none !important;
   box-shadow: none !important;
 }
@@ -210,11 +245,14 @@ body.theme-picker {
 }
 
 body.theme-manager {
-  background-color: var(--cp-window-shell);
+  background-color: var(--pg-canvas-default);
 }
 
-.text-ink {
-  color: var(--cp-text-primary);
+body.theme-workbench {
+  background:
+    radial-gradient(circle at top right, rgba(9, 105, 218, 0.06), transparent 45%),
+    radial-gradient(circle at bottom left, rgba(31, 35, 40, 0.08), transparent 50%),
+    var(--pg-canvas-default);
 }
 
 button,
@@ -226,27 +264,27 @@ select {
   background: transparent;
 }
 
- button {
-   cursor: pointer;
-   border: 1px solid transparent;
-   outline: none;
- }
+button {
+  cursor: pointer;
+  border: 1px solid transparent;
+  outline: none;
+}
 
- /* Focus-visible styles for keyboard navigation */
+/* Focus-visible styles for keyboard navigation */
 button:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible,
 [role="button"]:focus-visible {
-  outline: 2px solid var(--cp-accent-primary);
+  outline: 2px solid var(--pg-accent-fg);
   outline-offset: 2px;
 }
 
-  input,
-  textarea {
-    border: 1px solid transparent;
-    outline: none;
-  }
+input,
+textarea {
+  border: 1px solid transparent;
+  outline: none;
+}
 
 /* Reduced motion support */
 @media (prefers-reduced-motion: reduce) {
@@ -265,8 +303,8 @@ select:focus-visible,
   position: absolute;
   top: -40px;
   left: 0;
-  background: var(--cp-accent-primary);
-  color: var(--cp-base);
+  background: var(--pg-accent-emphasis);
+  color: var(--pg-fg-on-emphasis);
   padding: 8px;
   text-decoration: none;
   z-index: 100;
@@ -278,7 +316,7 @@ select:focus-visible,
   top: 0;
 }
 
- ::selection {
-   color: var(--cp-base);
-   background: rgba(var(--cp-peach-rgb), 0.85);
- }
+::selection {
+  color: var(--pg-fg-on-emphasis);
+  background: var(--pg-accent-subtle);
+}

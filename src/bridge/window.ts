@@ -11,12 +11,22 @@ export type WindowResizeDirection =
   | "SouthWest"
   | "West";
 
-export function getCurrentWindowLabel(): string {
+export function getCurrentWindowLabel(): "picker" | "workbench" | "editor" | "manager" {
   if (!isTauriRuntime()) {
     return "manager";
   }
 
-  return getCurrentWebviewWindow().label;
+  const label = getCurrentWebviewWindow().label;
+  if (label === "picker") {
+    return "picker";
+  }
+  if (label === "workbench") {
+    return "workbench";
+  }
+  if (label === "editor") {
+    return "editor";
+  }
+  return "manager";
 }
 
 export async function hideCurrentWindow(): Promise<void> {

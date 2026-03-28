@@ -129,9 +129,37 @@ export async function openManager(): Promise<void> {
   return invoke("open_manager");
 }
 
-export async function openManagerFromPicker(): Promise<void> {
+export async function openEditorFromPicker(itemId: string): Promise<void> {
   if (!isTauriRuntime()) {
     return;
   }
-  return invoke("open_manager_from_picker");
+  return invoke("open_editor_from_picker", { itemId });
+}
+
+export async function openEditorFromWorkbench(itemId: string): Promise<void> {
+  if (!isTauriRuntime()) {
+    return;
+  }
+  return invoke("open_editor_from_workbench", { itemId });
+}
+
+export async function hideEditor(): Promise<void> {
+  if (!isTauriRuntime()) {
+    return;
+  }
+  return invoke("hide_editor");
+}
+
+export async function openWorkbenchGlobal(): Promise<void> {
+  if (!isTauriRuntime()) {
+    return;
+  }
+  return invoke("open_workbench_global");
+}
+
+export async function hideWorkbench(): Promise<void> {
+  if (!isTauriRuntime()) {
+    return;
+  }
+  return invoke("hide_workbench");
 }

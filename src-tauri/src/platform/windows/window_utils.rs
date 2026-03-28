@@ -1,26 +1,78 @@
 use tauri::WebviewWindow;
 use windows::Win32::Foundation::HWND;
+use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
+use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, ShowWindow, GWL_EXSTYLE, SWP_NOACTIVATE,
-    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SW_SHOWNOACTIVATE, WS_EX_NOACTIVATE,
+    GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, ShowWindow, GWL_EXSTYLE, GWL_STYLE,
+    SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW,
+    SW_SHOWNOACTIVATE, WM_SYSCOMMAND, WS_EX_NOACTIVATE, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
+    WS_SYSMENU, SC_KEYMENU,
 };
 
-pub fn show_window_no_activate(window: &WebviewWindow) -> Result<(), String> {
+fn strip_system_menu_style(style: isize) -> isize {
+    style
+        & !(WS_SYSMENU.0 as isize)
+        & !(WS_MINIMIZEBOX.0 as isize)
+        & !(WS_MAXIMIZEBOX.0 as isize)
+}
+
+const ALT_MENU_BLOCKER_SUBCLASS_ID: usize = 0x4650_0101;
+
+fn is_alt_menu_syscommand(wparam: usize) -> bool {
+    (wparam & 0xFFF0) == SC_KEYMENU as usize
+}
+
+pub fn remove_window_system_menu(window: &WebviewWindow) -> Result<(), String> {
     let tauri_hwnd = window.hwnd().map_err(|e| e.to_string())?;
-    // tauri_hwnd is either `isize` directly or a tuple struct `HWND(isize)`.
     let hwnd_isize = tauri_hwnd.0 as isize;
     let hwnd = HWND(hwnd_isize as *mut _);
 
     unsafe {
-        // 第一步：在调用显示之前，确保窗口带有 WS_EX_NOACTIVATE 属性
+        let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+        SetWindowLongPtrW(hwnd, GWL_STYLE, strip_system_menu_style(style));
+        let _ = SetWindowPos(
+            hwnd,
+            None,
+            0,
+            0,
+            0,
+            0,
+            SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER,
+        );
+    }
+
+    Ok(())
+}
+
+pub fn block_alt_menu_activation(window: &WebviewWindow) -> Result<(), String> {
+    let tauri_hwnd = window.hwnd().map_err(|e| e.to_string())?;
+    let hwnd_isize = tauri_hwnd.0 as isize;
+    let hwnd = HWND(hwnd_isize as *mut _);
+
+    unsafe {
+        let _ = SetWindowSubclass(
+            hwnd,
+            Some(alt_menu_blocker_subclass_proc),
+            ALT_MENU_BLOCKER_SUBCLASS_ID,
+            0,
+        );
+    }
+
+    Ok(())
+}
+
+pub fn show_window_no_activate(window: &WebviewWindow) -> Result<(), String> {
+    let tauri_hwnd = window.hwnd().map_err(|e| e.to_string())?;
+    let hwnd_isize = tauri_hwnd.0 as isize;
+    let hwnd = HWND(hwnd_isize as *mut _);
+
+    unsafe {
         let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
         SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_NOACTIVATE.0 as isize);
     }
 
-    // 第二步：必须调用 Tauri 的 show() 以驱动 WebView2 渲染管线，避免界面只出现边框并卡死
     window.show().map_err(|e| e.to_string())?;
 
-    // 第三步：以不激活的方式刷新窗口位置与显示状态
     unsafe {
         let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
         let _ = SetWindowPos(
@@ -38,9 +90,47 @@ pub fn show_window_no_activate(window: &WebviewWindow) -> Result<(), String> {
 }
 
 pub fn apply_picker_window_shape(_window: &WebviewWindow) -> Result<(), String> {
-    // 废弃旧的 SetWindowRgn 裁剪方案。
-    // 在现代 Windows 11 上，使用 SetWindowRgn 处理窗口圆角会触发 DWM 装饰冲突，
-    // 导致拖动窗口时出现 Picker 标题渗出以及背景割裂感。
-    // 现在改由前端 CSS `rounded` 属性配合 `transparent: true` 窗口配置来实现平滑圆角。
     Ok(())
+}
+
+unsafe extern "system" fn alt_menu_blocker_subclass_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _subclass_id: usize,
+    _ref_data: usize,
+) -> LRESULT {
+    if msg == WM_SYSCOMMAND && is_alt_menu_syscommand(wparam.0) {
+        return LRESULT(0);
+    }
+
+    DefSubclassProc(hwnd, msg, wparam, lparam)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_alt_menu_syscommand, strip_system_menu_style};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SC_CLOSE, SC_KEYMENU, WS_CAPTION, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_SYSMENU,
+    };
+
+    #[test]
+    fn strip_system_menu_style_removes_system_menu_related_flags() {
+        let style = (WS_CAPTION.0 | WS_SYSMENU.0 | WS_MINIMIZEBOX.0 | WS_MAXIMIZEBOX.0) as isize;
+
+        let stripped = strip_system_menu_style(style);
+
+        assert_ne!(stripped & WS_CAPTION.0 as isize, 0);
+        assert_eq!(stripped & WS_SYSMENU.0 as isize, 0);
+        assert_eq!(stripped & WS_MINIMIZEBOX.0 as isize, 0);
+        assert_eq!(stripped & WS_MAXIMIZEBOX.0 as isize, 0);
+    }
+
+    #[test]
+    fn alt_menu_syscommand_detection_only_matches_keymenu() {
+        assert!(is_alt_menu_syscommand(SC_KEYMENU as usize));
+        assert!(is_alt_menu_syscommand((SC_KEYMENU as usize) | 0x0001));
+        assert!(!is_alt_menu_syscommand(SC_CLOSE as usize));
+    }
 }

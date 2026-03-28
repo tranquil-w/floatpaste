@@ -11,6 +11,31 @@ import type { UserSetting } from "../shared/types/settings";
 const now = Date.now();
 const pickerPositionModes = new Set(["mouse", "lastPosition", "caret"]);
 const themeModes = new Set(["system", "light", "dark"]);
+const DEFAULT_MAIN_SHORTCUT = "Alt+Q";
+const DEFAULT_WORKBENCH_SHORTCUT = "Alt+S";
+const LEGACY_MAIN_SHORTCUT = "Ctrl+`";
+const LEGACY_WORKBENCH_SHORTCUTS = new Set(["win+f", "windows+f", "super+f"]);
+
+function normalizeMainShortcut(shortcut: string): string {
+  const trimmed = shortcut.trim();
+  if (!trimmed || trimmed.toLowerCase() === LEGACY_MAIN_SHORTCUT.toLowerCase()) {
+    return DEFAULT_MAIN_SHORTCUT;
+  }
+  return trimmed;
+}
+
+function normalizeWorkbenchShortcut(shortcut: string): string {
+  const trimmed = shortcut.trim();
+  if (!trimmed) {
+    return DEFAULT_WORKBENCH_SHORTCUT;
+  }
+
+  if (LEGACY_WORKBENCH_SHORTCUTS.has(trimmed.toLowerCase())) {
+    return DEFAULT_WORKBENCH_SHORTCUT;
+  }
+
+  return trimmed;
+}
 
 function sanitizeSettings(payload: UserSetting): UserSetting {
   const pickerPositionMode = pickerPositionModes.has(payload.pickerPositionMode)
@@ -20,10 +45,12 @@ function sanitizeSettings(payload: UserSetting): UserSetting {
 
   return {
     ...structuredClone(payload),
+    shortcut: normalizeMainShortcut(payload.shortcut),
     silentOnStartup: payload.launchOnStartup ? payload.silentOnStartup : false,
     pickerRecordLimit: Math.min(1000, Math.max(9, Math.trunc(payload.pickerRecordLimit || 50))),
     pickerPositionMode,
     themeMode,
+    workbenchShortcut: normalizeWorkbenchShortcut(payload.workbenchShortcut),
   };
 }
 
@@ -322,7 +349,7 @@ export async function mockResumeMonitoring(): Promise<UserSetting> {
 }
 
 let settings: UserSetting = {
-  shortcut: "Ctrl+`",
+  shortcut: DEFAULT_MAIN_SHORTCUT,
   launchOnStartup: false,
   silentOnStartup: false,
   historyLimit: 1000,
@@ -332,4 +359,7 @@ let settings: UserSetting = {
   restoreClipboardAfterPaste: true,
   pauseMonitoring: false,
   themeMode: "system",
+  workbenchShortcut: DEFAULT_WORKBENCH_SHORTCUT,
+  workbenchShortcutEnabled: true,
 };
+

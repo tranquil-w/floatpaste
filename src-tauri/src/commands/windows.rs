@@ -40,7 +40,35 @@ pub fn open_manager(_state: State<'_, AppState>, app: AppHandle) -> Result<(), S
 }
 
 #[tauri::command]
-pub fn open_manager_from_picker(state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
-    ShortcutManager::unregister_picker_session_shortcuts(&app);
-    WindowCoordinator::hide_picker_and_open_manager(&app, &state).map_err(map_error)
+pub fn open_editor_from_picker(
+    item_id: String,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<(), String> {
+    WindowCoordinator::open_editor_from_picker(&app, &state, item_id).map_err(map_error)
 }
+
+#[tauri::command]
+pub fn open_editor_from_workbench(
+    item_id: String,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<(), String> {
+    WindowCoordinator::open_editor_from_workbench(&app, &state, item_id).map_err(map_error)
+}
+
+#[tauri::command]
+pub fn hide_editor(state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
+    WindowCoordinator::hide_editor_and_restore_source(&app, &state).map_err(map_error)
+}
+
+#[tauri::command]
+pub fn open_workbench_global(state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
+    WindowCoordinator::open_workbench_global(&app, &state).map_err(map_error)
+}
+
+#[tauri::command]
+pub fn hide_workbench(state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
+    WindowCoordinator::hide_workbench_and_restore_target(&app, &state).map_err(map_error)
+}
+

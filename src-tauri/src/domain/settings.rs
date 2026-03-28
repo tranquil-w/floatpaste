@@ -1,4 +1,12 @@
+use std::str::FromStr;
+
 use serde::{Deserialize, Deserializer, Serialize};
+use tauri_plugin_global_shortcut::Shortcut;
+
+const DEFAULT_MAIN_SHORTCUT: &str = "Alt+Q";
+const DEFAULT_WORKBENCH_SHORTCUT: &str = "Alt+S";
+const LEGACY_MAIN_SHORTCUT: &str = "Ctrl+`";
+const LEGACY_WORKBENCH_SHORTCUTS: [&str; 2] = ["Win+F", "Super+F"];
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -67,6 +75,22 @@ pub struct StoredWindowPosition {
     pub height: Option<u32>,
 }
 
+/// 用户设置结构
+///
+/// # 快捷键格式说明
+///
+/// - **主快捷键**：用于打开 Picker 窗口
+/// - **搜索窗口快捷键**：用于全局打开搜索窗口
+///
+/// # 示例
+///
+/// ```ignore
+/// use crate::domain::settings::UserSetting;
+///
+/// let settings = UserSetting::default();
+/// assert_eq!(settings.shortcut, "Alt+Q");
+/// assert_eq!(settings.workbench_shortcut, "Alt+S");
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(default)]
@@ -81,12 +105,14 @@ pub struct UserSetting {
     pub restore_clipboard_after_paste: bool,
     pub pause_monitoring: bool,
     pub theme_mode: ThemeMode,
+    pub workbench_shortcut: String,
+    pub workbench_shortcut_enabled: bool,
 }
 
 impl Default for UserSetting {
     fn default() -> Self {
         Self {
-            shortcut: "Ctrl+`".to_string(),
+            shortcut: DEFAULT_MAIN_SHORTCUT.to_string(),
             launch_on_startup: false,
             silent_on_startup: false,
             history_limit: 1_000,
@@ -100,6 +126,8 @@ impl Default for UserSetting {
             restore_clipboard_after_paste: true,
             pause_monitoring: false,
             theme_mode: ThemeMode::System,
+            workbench_shortcut: DEFAULT_WORKBENCH_SHORTCUT.to_string(),
+            workbench_shortcut_enabled: true,
         }
     }
 }
@@ -108,7 +136,11 @@ impl UserSetting {
     pub fn sanitized(mut self) -> Self {
         self.shortcut = self.shortcut.trim().to_string();
         if self.shortcut.is_empty() {
-            self.shortcut = "Ctrl+`".to_string();
+            self.shortcut = DEFAULT_MAIN_SHORTCUT.to_string();
+        } else if normalize_shortcut_for_compare(&self.shortcut)
+            == normalize_shortcut_for_compare(LEGACY_MAIN_SHORTCUT)
+        {
+            self.shortcut = DEFAULT_MAIN_SHORTCUT.to_string();
         }
 
         if !self.launch_on_startup {
@@ -123,13 +155,67 @@ impl UserSetting {
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty())
             .collect();
+
+        self.workbench_shortcut = self.workbench_shortcut.trim().to_string();
+        if self.workbench_shortcut.is_empty() {
+            self.workbench_shortcut = DEFAULT_WORKBENCH_SHORTCUT.to_string();
+        } else if LEGACY_WORKBENCH_SHORTCUTS.iter().any(|legacy| {
+            normalize_shortcut_for_compare(&self.workbench_shortcut)
+                == normalize_shortcut_for_compare(legacy)
+        }) {
+            self.workbench_shortcut = DEFAULT_WORKBENCH_SHORTCUT.to_string();
+        }
+
+        self.resolve_workbench_shortcut_conflict();
         self
     }
+
+    fn resolve_workbench_shortcut_conflict(&mut self) {
+        if !self.workbench_shortcut_enabled
+            || normalize_shortcut_for_compare(&self.workbench_shortcut)
+                != normalize_shortcut_for_compare(&self.shortcut)
+        {
+            return;
+        }
+
+        self.workbench_shortcut = DEFAULT_WORKBENCH_SHORTCUT.to_string();
+        if normalize_shortcut_for_compare(&self.workbench_shortcut)
+            == normalize_shortcut_for_compare(&self.shortcut)
+        {
+            self.workbench_shortcut_enabled = false;
+        }
+    }
+}
+
+fn normalize_shortcut_for_compare(shortcut: &str) -> String {
+    let trimmed = shortcut.trim();
+    let registerable = normalize_shortcut_for_registration(trimmed);
+    Shortcut::from_str(&registerable)
+        .map(|value| value.into_string().to_lowercase())
+        .unwrap_or_else(|_| registerable.to_lowercase())
+}
+
+pub(crate) fn normalize_shortcut_for_registration(shortcut: &str) -> String {
+    shortcut
+        .trim()
+        .split('+')
+        .map(|token| {
+            let trimmed = token.trim();
+            if trimmed.eq_ignore_ascii_case("win") || trimmed.eq_ignore_ascii_case("windows") {
+                "Super".to_string()
+            } else {
+                trimmed.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("+")
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{PickerPositionMode, ThemeMode, UserSetting};
+    use super::{
+        PickerPositionMode, ThemeMode, UserSetting, normalize_shortcut_for_compare,
+    };
 
     #[test]
     fn sanitized_turns_off_silent_when_launch_on_startup_is_disabled() {
@@ -144,10 +230,16 @@ mod tests {
     }
 
     #[test]
+    fn shortcut_defaults_to_alt_q() {
+        let settings = UserSetting::default();
+        assert_eq!(settings.shortcut, "Alt+Q");
+    }
+
+    #[test]
     fn deserialize_old_settings_without_silent_on_startup_field() {
         let settings: UserSetting = serde_json::from_str(
             r#"{
-                "shortcut":"Ctrl+`",
+                "shortcut":"Alt+Q",
                 "launchOnStartup":true,
                 "historyLimit":1000,
                 "excludedApps":["KeePass.exe"],
@@ -168,7 +260,7 @@ mod tests {
     fn deserialize_picker_position_mode() {
         let settings: UserSetting = serde_json::from_str(
             r#"{
-                "shortcut":"Ctrl+`",
+                "shortcut":"Alt+Q",
                 "launchOnStartup":false,
                 "silentOnStartup":false,
                 "historyLimit":1000,
@@ -191,7 +283,7 @@ mod tests {
     fn deserialize_invalid_picker_position_mode_falls_back_to_mouse() {
         let settings: UserSetting = serde_json::from_str(
             r#"{
-                "shortcut":"Ctrl+`",
+                "shortcut":"Alt+Q",
                 "launchOnStartup":false,
                 "silentOnStartup":false,
                 "historyLimit":1000,
@@ -211,7 +303,7 @@ mod tests {
     fn deserialize_theme_mode() {
         let settings: UserSetting = serde_json::from_str(
             r#"{
-                "shortcut":"Ctrl+`",
+                "shortcut":"Alt+Q",
                 "launchOnStartup":false,
                 "silentOnStartup":false,
                 "historyLimit":1000,
@@ -232,7 +324,7 @@ mod tests {
     fn deserialize_invalid_theme_mode_falls_back_to_system() {
         let settings: UserSetting = serde_json::from_str(
             r#"{
-                "shortcut":"Ctrl+`",
+                "shortcut":"Alt+Q",
                 "launchOnStartup":false,
                 "silentOnStartup":false,
                 "historyLimit":1000,
@@ -247,5 +339,134 @@ mod tests {
         .unwrap();
 
         assert_eq!(settings.theme_mode, ThemeMode::System);
+    }
+
+    #[test]
+    fn workbench_shortcut_defaults_to_alt_s() {
+        let settings = UserSetting::default();
+        assert_eq!(settings.workbench_shortcut, "Alt+S");
+        assert!(settings.workbench_shortcut_enabled);
+    }
+
+    #[test]
+    fn normalize_shortcut_for_registration_uses_super_alias() {
+        use super::normalize_shortcut_for_registration;
+
+        assert_eq!(normalize_shortcut_for_registration("Win+F"), "Super+F");
+        assert_eq!(normalize_shortcut_for_registration("win+f"), "Super+f");
+        assert_eq!(normalize_shortcut_for_registration("Windows+Shift+F"), "Super+Shift+F");
+        assert_eq!(normalize_shortcut_for_registration("Super+F"), "Super+F");
+        assert_eq!(normalize_shortcut_for_registration("Ctrl+F"), "Ctrl+F");
+    }
+
+    #[test]
+    fn sanitized_migrates_legacy_ctrl_backtick_to_alt_q() {
+        let settings = UserSetting {
+            shortcut: "Ctrl+`".to_string(),
+            ..UserSetting::default()
+        }
+        .sanitized();
+
+        assert_eq!(settings.shortcut, "Alt+Q");
+    }
+
+    #[test]
+    fn sanitized_preserves_alt_s_as_display_value() {
+        let settings = UserSetting {
+            workbench_shortcut: "Alt+S".to_string(),
+            ..UserSetting::default()
+        }
+        .sanitized();
+
+        assert_eq!(settings.workbench_shortcut, "Alt+S");
+    }
+
+    #[test]
+    fn sanitized_migrates_legacy_win_f_to_alt_s() {
+        let settings = UserSetting {
+            workbench_shortcut: "Win+F".to_string(),
+            ..UserSetting::default()
+        }
+        .sanitized();
+
+        assert_eq!(settings.workbench_shortcut, "Alt+S");
+    }
+
+    #[test]
+    fn sanitized_migrates_legacy_super_f_to_alt_s() {
+        let settings = UserSetting {
+            workbench_shortcut: "Super+F".to_string(),
+            ..UserSetting::default()
+        }
+        .sanitized();
+
+        assert_eq!(settings.workbench_shortcut, "Alt+S");
+    }
+
+    #[test]
+    fn win_and_super_shortcuts_are_treated_as_the_same_combination() {
+        assert_eq!(
+            normalize_shortcut_for_compare("Win+F"),
+            normalize_shortcut_for_compare("Super+F")
+        );
+    }
+
+
+    #[test]
+    fn deserialize_old_settings_without_workbench_shortcut_uses_defaults() {
+        let settings: UserSetting = serde_json::from_str(
+            r#"{
+                "shortcut":"Alt+Q",
+                "launchOnStartup":false,
+                "historyLimit":1000,
+                "pickerRecordLimit":50,
+                "excludedApps":[],
+                "restoreClipboardAfterPaste":true,
+                "pauseMonitoring":false
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(settings.workbench_shortcut, "Alt+S");
+        assert!(settings.workbench_shortcut_enabled);
+    }
+
+    #[test]
+    fn workbench_shortcut_resets_to_default_when_conflicts_with_main_shortcut() {
+        let settings = UserSetting {
+            shortcut: "Alt+Q".to_string(),
+            workbench_shortcut: "Alt+Q".to_string(),
+            workbench_shortcut_enabled: true,
+            ..UserSetting::default()
+        }
+        .sanitized();
+
+        assert_eq!(settings.workbench_shortcut, "Alt+S");
+    }
+
+    #[test]
+    fn workbench_shortcut_gets_disabled_when_default_value_also_conflicts_with_main_shortcut() {
+        let settings = UserSetting {
+            shortcut: "Alt+S".to_string(),
+            workbench_shortcut: "Alt+S".to_string(),
+            workbench_shortcut_enabled: true,
+            ..UserSetting::default()
+        }
+        .sanitized();
+
+        assert!(!settings.workbench_shortcut_enabled);
+    }
+
+    #[test]
+    fn workbench_shortcut_conflict_detection_uses_normalized_shortcuts() {
+        let settings = UserSetting {
+            shortcut: "ALT+S".to_string(),
+            workbench_shortcut: "alt+s".to_string(),
+            workbench_shortcut_enabled: true,
+            ..UserSetting::default()
+        }
+        .sanitized();
+
+        assert!(!settings.workbench_shortcut_enabled);
     }
 }

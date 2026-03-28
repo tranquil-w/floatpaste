@@ -1,17 +1,18 @@
 import { type MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { queryClient } from "../../app/queryClient";
-import { hidePicker, openManagerFromPicker, pasteItem } from "../../bridge/commands";
+import { hidePicker, openEditorFromPicker, pasteItem } from "../../bridge/commands";
 import {
   CLIPS_CHANGED_EVENT,
   PICKER_CONFIRM_EVENT,
   PICKER_NAVIGATE_EVENT,
+  PICKER_OPEN_EDITOR_EVENT,
   PICKER_SELECT_INDEX_EVENT,
-  SETTINGS_CHANGED_EVENT,
   PICKER_SESSION_START_EVENT,
+  SETTINGS_CHANGED_EVENT,
 } from "../../bridge/events";
-import { startCurrentWindowResize, type WindowResizeDirection } from "../../bridge/window";
 import { isTauriRuntime } from "../../bridge/runtime";
+import { startCurrentWindowResize, type WindowResizeDirection } from "../../bridge/window";
 import type { ClipItemSummary } from "../../shared/types/clips";
 import { getClipTypeLabel } from "../../shared/utils/clipDisplay";
 import { formatDateTime } from "../../shared/utils/time";
@@ -22,61 +23,43 @@ import {
   usePickerSettingsQuery,
 } from "./queries";
 
-  // --- 样式常量抽象 ---
 const STYLES = {
-    container: "flex h-screen w-screen flex-col overflow-hidden rounded-md border border-[color:var(--cp-border-weak)] bg-[color:var(--cp-window-shell)] shadow-none dark:bg-[color:var(--cp-window-shell)]",
-    header: "flex shrink-0 items-center justify-between border-b border-[rgba(var(--cp-surface1-rgb),0.12)] bg-[rgba(var(--cp-mantle-rgb),0.4)] px-2.5 py-1.5 dark:border-[rgba(var(--cp-surface1-rgb),0.08)] dark:bg-[rgba(var(--cp-mantle-rgb),0.7)]",
-    headerDot: "h-2.5 w-2.5 rounded-full bg-[color:var(--cp-surface1)]",
-    headerButton: "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-semibold text-[color:var(--cp-text-secondary)] transition-all duration-250 hover:bg-[rgba(var(--cp-surface1-rgb),0.2)] hover:text-[color:var(--cp-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(var(--cp-surface1-rgb),0.3)] focus-visible:ring-offset-2",
-    itemButton: (selected: boolean) => `group relative flex w-full flex-col gap-1 rounded-md px-2 py-1.5 text-left transition-all duration-250 border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(var(--cp-surface1-rgb),0.3)] focus-visible:ring-offset-2 ${selected
-    ? "bg-[rgba(var(--cp-surface1-rgb),0.15)] border-[rgba(var(--cp-surface1-rgb),0.25)] shadow-xs dark:bg-[rgba(var(--cp-surface1-rgb),0.2)] dark:border-[rgba(var(--cp-surface1-rgb),0.3)]"
-    : "bg-transparent border-transparent hover:bg-[rgba(var(--cp-surface1-rgb),0.12)] dark:hover:bg-[rgba(var(--cp-surface1-rgb),0.15)]"
-    }`,
-    itemContent: (selected: boolean) => `${selected ? "text-[color:var(--cp-text-primary)]" : "text-[color:var(--cp-text-primary)]/90 dark:text-[color:var(--cp-text-primary)]/80"} line-clamp-5 text-[13px] font-medium leading-[1.6] tracking-tight break-words [overflow-wrap:anywhere] whitespace-pre-wrap transition-colors duration-250`,
-    kbdBadge: (selected: boolean) => `flex h-[16px] min-w-[16px] px-1 items-center justify-center rounded-[3px] font-mono text-[9px] font-bold transition-colors duration-250 ${selected
-    ? "bg-[color:var(--cp-surface1)] text-[color:var(--cp-text-primary)]"
-    : "bg-[rgba(var(--cp-surface0-rgb),0.5)] text-[color:var(--cp-text-secondary)] group-hover:bg-[rgba(var(--cp-surface1-rgb),0.4)] group-hover:text-[color:var(--cp-text-primary)]"
-    }`,
-    typeBadge: "shrink-0 rounded-[2px] bg-[rgba(var(--cp-surface0-rgb),0.3)] px-1.5 py-0.5 font-medium text-[color:var(--cp-text-secondary)]",
+  container:
+    "flex h-screen w-screen flex-col overflow-hidden rounded-md border border-[color:var(--pg-border-muted)] bg-[color:var(--pg-canvas-default)]",
+  header:
+    "flex shrink-0 items-center justify-between border-b border-[color:var(--pg-border-subtle)] bg-[color:var(--pg-canvas-subtle)] px-2.5 py-1.5",
+  headerDot: "h-2.5 w-2.5 rounded-full bg-[color:var(--pg-neutral-7)]",
+  headerButton:
+    "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-semibold text-[color:var(--pg-fg-muted)] transition-colors hover:bg-[color:var(--pg-accent-subtle)] hover:text-[color:var(--pg-fg-default)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pg-accent-fg)] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-45",
+  itemButton: (selected: boolean) => `group relative flex w-full flex-col gap-1 rounded-md px-2 py-1.5 text-left transition-colors border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pg-accent-fg)] focus-visible:ring-offset-2 ${
+    selected
+      ? "bg-[color:var(--pg-accent-subtle)] border-[color:var(--pg-accent-fg)]/30"
+      : "bg-transparent border-transparent hover:bg-[color:var(--pg-canvas-subtle)]"
+  }`,
+  itemContent: (selected: boolean) =>
+    `${selected ? "text-[color:var(--pg-fg-default)]" : "text-[color:var(--pg-fg-default)]/90"} line-clamp-5 text-[13px] font-medium leading-[1.6] tracking-tight break-words [overflow-wrap:anywhere] whitespace-pre-wrap transition-colors`,
+  kbdBadge: (selected: boolean) => `flex h-[16px] min-w-[16px] px-1 items-center justify-center rounded-[3px] font-mono text-[9px] font-bold transition-colors ${
+    selected
+      ? "bg-[color:var(--pg-neutral-7)] text-[color:var(--pg-fg-default)]"
+      : "bg-[color:var(--pg-neutral-3)] text-[color:var(--pg-fg-muted)] group-hover:bg-[color:var(--pg-neutral-6)] group-hover:text-[color:var(--pg-fg-default)]"
+  }`,
+  typeBadge:
+    "shrink-0 rounded-[2px] bg-[color:var(--pg-neutral-3)] px-1.5 py-0.5 font-medium text-[color:var(--pg-fg-muted)]",
 };
 
 const PICKER_RESIZE_HANDLES: Array<{
   direction: WindowResizeDirection;
   className: string;
 }> = [
-    {
-      direction: "North",
-      className: "absolute inset-x-3 top-0 z-20 h-2 cursor-ns-resize",
-    },
-    {
-      direction: "South",
-      className: "absolute inset-x-3 bottom-0 z-20 h-2 cursor-ns-resize",
-    },
-    {
-      direction: "West",
-      className: "absolute inset-y-3 left-0 z-20 w-2 cursor-ew-resize",
-    },
-    {
-      direction: "East",
-      className: "absolute inset-y-3 right-0 z-20 w-2 cursor-ew-resize",
-    },
-    {
-      direction: "NorthWest",
-      className: "absolute left-0 top-0 z-30 h-4 w-4 cursor-nwse-resize",
-    },
-    {
-      direction: "NorthEast",
-      className: "absolute right-0 top-0 z-30 h-4 w-4 cursor-nesw-resize",
-    },
-    {
-      direction: "SouthWest",
-      className: "absolute bottom-0 left-0 z-30 h-4 w-4 cursor-nesw-resize",
-    },
-    {
-      direction: "SouthEast",
-      className: "absolute bottom-0 right-0 z-30 h-4 w-4 cursor-nwse-resize",
-    },
-  ];
+  { direction: "North", className: "absolute inset-x-3 top-0 z-20 h-2 cursor-ns-resize" },
+  { direction: "South", className: "absolute inset-x-3 bottom-0 z-20 h-2 cursor-ns-resize" },
+  { direction: "West", className: "absolute inset-y-3 left-0 z-20 w-2 cursor-ew-resize" },
+  { direction: "East", className: "absolute inset-y-3 right-0 z-20 w-2 cursor-ew-resize" },
+  { direction: "NorthWest", className: "absolute left-0 top-0 z-30 h-4 w-4 cursor-nwse-resize" },
+  { direction: "NorthEast", className: "absolute right-0 top-0 z-30 h-4 w-4 cursor-nesw-resize" },
+  { direction: "SouthWest", className: "absolute bottom-0 left-0 z-30 h-4 w-4 cursor-nesw-resize" },
+  { direction: "SouthEast", className: "absolute bottom-0 right-0 z-30 h-4 w-4 cursor-nwse-resize" },
+];
 
 export function PickerShell() {
   const tauriRuntime = isTauriRuntime();
@@ -92,20 +75,18 @@ export function PickerShell() {
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   const items = useMemo(() => recent.data ?? [], [recent.data]);
-
-  const handleOpenManager = async () => {
-    await openManagerFromPicker();
-  };
+  const selectedItem = items[selectedIndex] ?? null;
+  const canEditSelected = selectedItem?.type === "text";
 
   const handleResizeMouseDown =
     (direction: WindowResizeDirection) =>
-      (event: ReactMouseEvent<HTMLDivElement>) => {
-        event.preventDefault();
-        event.stopPropagation();
-        void startCurrentWindowResize(direction).catch((error) => {
-          console.warn("启动 picker 窗口拉伸失败", error);
-        });
-      };
+    (event: ReactMouseEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void startCurrentWindowResize(direction).catch((error) => {
+        console.warn("启动 picker 窗口拉伸失败", error);
+      });
+    };
 
   const confirmSelection = async (index: number) => {
     const item = itemsRef.current[index];
@@ -113,8 +94,25 @@ export function PickerShell() {
       return;
     }
 
-    const result = await pasteItem(item.id, { restoreClipboardAfterPaste: true, pasteToTarget: true });
+    const result = await pasteItem(item.id, {
+      restoreClipboardAfterPaste: true,
+      pasteToTarget: true,
+    });
     setLastMessage(result.message);
+  };
+
+  const handleOpenEditor = async () => {
+    const item = itemsRef.current[selectedIndexRef.current];
+    if (!item) {
+      return;
+    }
+
+    if (item.type !== "text") {
+      setLastMessage("当前仅文本条目支持编辑");
+      return;
+    }
+
+    await openEditorFromPicker(item.id);
   };
 
   useEffect(() => {
@@ -154,6 +152,7 @@ export function PickerShell() {
     let unlistenNavigate: (() => void) | undefined;
     let unlistenConfirm: (() => void) | undefined;
     let unlistenSelectIndex: (() => void) | undefined;
+    let unlistenOpenEditor: (() => void) | undefined;
 
     void listen(PICKER_SESSION_START_EVENT, async () => {
       await queryClient.invalidateQueries({ queryKey: ["settings"] });
@@ -186,7 +185,7 @@ export function PickerShell() {
       unlistenSettings = cleanup;
     });
 
-    void listen<string>(PICKER_NAVIGATE_EVENT, async (event) => {
+    void listen<string>(PICKER_NAVIGATE_EVENT, (event) => {
       const itemCount = itemsRef.current.length;
       if (disposed || !itemCount) {
         return;
@@ -208,7 +207,6 @@ export function PickerShell() {
       if (disposed) {
         return;
       }
-
       await confirmSelection(selectedIndexRef.current);
     }).then((cleanup) => {
       unlistenConfirm = cleanup;
@@ -228,6 +226,15 @@ export function PickerShell() {
       unlistenSelectIndex = cleanup;
     });
 
+    void listen(PICKER_OPEN_EDITOR_EVENT, async () => {
+      if (disposed) {
+        return;
+      }
+      await handleOpenEditor();
+    }).then((cleanup) => {
+      unlistenOpenEditor = cleanup;
+    });
+
     return () => {
       disposed = true;
       unlistenStart?.();
@@ -236,6 +243,7 @@ export function PickerShell() {
       unlistenNavigate?.();
       unlistenConfirm?.();
       unlistenSelectIndex?.();
+      unlistenOpenEditor?.();
     };
   }, [tauriRuntime]);
 
@@ -276,15 +284,15 @@ export function PickerShell() {
         return;
       }
 
-      if (event.key === "Enter") {
+      if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
         event.preventDefault();
-        void confirmSelection(selectedIndexRef.current);
+        void handleOpenEditor();
         return;
       }
 
-      if (event.key === "Tab") {
+      if (event.key === "Enter") {
         event.preventDefault();
-        void handleOpenManager();
+        void confirmSelection(selectedIndexRef.current);
         return;
       }
 
@@ -304,34 +312,47 @@ export function PickerShell() {
   }, [tauriRuntime]);
 
   return (
-    <div className="h-screen w-screen overflow-hidden bg-transparent p-0 m-0 text-ink select-none">
+    <div className="m-0 h-screen w-screen select-none overflow-hidden bg-transparent p-0 text-[color:var(--pg-fg-default)]">
       <div className={STYLES.container}>
         {tauriRuntime
           ? PICKER_RESIZE_HANDLES.map((handle) => (
-            <div
-              aria-hidden="true"
-              className={handle.className}
-              key={handle.direction}
-              onMouseDown={handleResizeMouseDown(handle.direction)}
-            />
-          ))
+              <div
+                aria-hidden="true"
+                className={handle.className}
+                key={handle.direction}
+                onMouseDown={handleResizeMouseDown(handle.direction)}
+              />
+            ))
           : null}
-        <div className={STYLES.header} data-tauri-drag-region>
-          <div className="flex items-center gap-2">
-            <div className={STYLES.headerDot}></div>
-            <span className="text-[12px] font-bold tracking-tight text-[color:var(--cp-text-primary)]">FloatPaste</span>
-            {lastMessage && <span className="ml-2 animate-pulse text-[10px] font-medium text-[color:var(--cp-favorite)]">{lastMessage}</span>}
+
+        <div className={STYLES.header}>
+          <div className="flex min-w-0 flex-1 items-center gap-2" data-tauri-drag-region>
+            <div className={STYLES.headerDot} />
+            <span className="text-[12px] font-bold tracking-tight text-[color:var(--pg-fg-default)]">
+              FloatPaste
+            </span>
+            {lastMessage ? (
+              <span className="ml-2 animate-pulse text-[10px] font-medium text-[color:var(--pg-favorite)]">
+                {lastMessage}
+              </span>
+            ) : null}
           </div>
-          <div className="flex items-center gap-1.5">
-            <button
-              className={STYLES.headerButton}
-              onClick={() => void handleOpenManager()}
-              type="button"
-            >
-              资料库
-              <svg className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2.2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" /></svg>
-            </button>
-          </div>
+          <button
+            className={STYLES.headerButton}
+            disabled={!canEditSelected}
+            onClick={() => void handleOpenEditor()}
+            title="编辑当前项 (Ctrl+Enter)"
+            type="button"
+          >
+            <svg className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path
+                d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            编辑
+          </button>
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col px-1 py-1.5">
@@ -361,15 +382,15 @@ export function PickerShell() {
                     {item.contentPreview}
                   </p>
 
-                  <div className={`flex w-full items-center gap-2 text-[10px] leading-none transition-colors ${isSelected ? "text-[rgba(var(--cp-accent-primary-rgb),0.8)]" : "text-[color:var(--cp-text-muted)]"}`}>
-                    {index < 9 ? (
-                      <kbd className={STYLES.kbdBadge(isSelected)}>
-                        {index + 1}
-                      </kbd>
-                    ) : null}
-                    <span className={STYLES.typeBadge}>
-                      {getClipTypeLabel(item)}
-                    </span>
+                  <div
+                    className={`flex w-full items-center gap-2 text-[10px] leading-none transition-colors ${
+                      isSelected
+                        ? "text-[color:var(--pg-accent-fg)]/80"
+                        : "text-[color:var(--pg-fg-subtle)]"
+                    }`}
+                  >
+                    {index < 9 ? <kbd className={STYLES.kbdBadge(isSelected)}>{index + 1}</kbd> : null}
+                    <span className={STYLES.typeBadge}>{getClipTypeLabel(item)}</span>
                     <span className="min-w-0 flex-1 truncate font-medium opacity-80">
                       {item.sourceApp ?? "未知来源"}
                     </span>
@@ -378,7 +399,7 @@ export function PickerShell() {
                         {formatDateTime(item.lastUsedAt ?? item.createdAt)}
                       </span>
                       {item.isFavorited ? (
-                        <span className="text-[10px] text-[color:var(--cp-favorite)]">★</span>
+                        <span className="text-[10px] text-[color:var(--pg-favorite)]">★</span>
                       ) : null}
                     </span>
                   </div>
@@ -391,3 +412,4 @@ export function PickerShell() {
     </div>
   );
 }
+

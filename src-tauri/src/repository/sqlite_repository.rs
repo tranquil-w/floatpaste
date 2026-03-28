@@ -114,7 +114,10 @@ impl SqliteRepository {
         Ok(())
     }
 
-    pub fn save_picker_window_state(&self, position: &StoredWindowPosition) -> Result<(), AppError> {
+    pub fn save_picker_window_state(
+        &self,
+        position: &StoredWindowPosition,
+    ) -> Result<(), AppError> {
         let connection = self.connection.lock()?;
         connection.execute(
             "INSERT INTO settings(key, value) VALUES(?1, ?2)
