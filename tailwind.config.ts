@@ -64,7 +64,7 @@ export default {
       },
       fontFamily: {
         display: ["Georgia", "serif"],
-        body: ["'-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Noto Sans', 'Helvetica', 'Arial', 'sans-serif'"],
+        body: ["'-apple-system'", "BlinkMacSystemFont", "'Segoe UI'", "'Noto Sans'", "Helvetica", "Arial", "sans-serif"],
       },
     },
   },

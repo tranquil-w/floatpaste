@@ -25,26 +25,26 @@ import {
 
 const STYLES = {
   container:
-    "flex h-screen w-screen flex-col overflow-hidden rounded-md border border-[color:var(--pg-border-muted)] bg-[color:var(--pg-canvas-default)]",
+    "flex h-screen w-screen flex-col overflow-hidden rounded-md border border-pg-border-muted bg-pg-canvas-default",
   header:
-    "flex shrink-0 items-center justify-between border-b border-[color:var(--pg-border-subtle)] bg-[color:var(--pg-canvas-subtle)] px-2.5 py-1.5",
-  headerDot: "h-2.5 w-2.5 rounded-full bg-[color:var(--pg-neutral-7)]",
+    "flex shrink-0 items-center justify-between border-b border-pg-border-subtle bg-pg-canvas-subtle px-2.5 py-1.5",
+  headerDot: "h-2.5 w-2.5 rounded-full bg-pg-neutral-7",
   headerButton:
-    "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-semibold text-[color:var(--pg-fg-muted)] transition-colors hover:bg-[color:var(--pg-accent-subtle)] hover:text-[color:var(--pg-fg-default)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pg-accent-fg)] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-45",
-  itemButton: (selected: boolean) => `group relative flex w-full flex-col gap-1 rounded-md px-2 py-1.5 text-left transition-colors border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--pg-accent-fg)] focus-visible:ring-offset-2 ${
+    "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-semibold text-pg-fg-muted transition-colors hover:bg-pg-accent-subtle hover:text-pg-fg-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pg-accent-fg focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-45",
+  itemButton: (selected: boolean) => `group relative flex w-full flex-col gap-1 rounded-md px-2 py-1.5 text-left transition-colors border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pg-accent-fg focus-visible:ring-offset-2 ${
     selected
-      ? "bg-[color:var(--pg-accent-subtle)] border-[color:var(--pg-accent-fg)]/30"
-      : "bg-transparent border-transparent hover:bg-[color:var(--pg-canvas-subtle)]"
+      ? "bg-pg-accent-subtle border-pg-accent-fg/30"
+      : "bg-transparent border-transparent hover:bg-pg-canvas-subtle"
   }`,
   itemContent: (selected: boolean) =>
-    `${selected ? "text-[color:var(--pg-fg-default)]" : "text-[color:var(--pg-fg-default)]/90"} line-clamp-5 text-[13px] font-medium leading-[1.6] tracking-tight break-words [overflow-wrap:anywhere] whitespace-pre-wrap transition-colors`,
+    `${selected ? "text-pg-fg-default" : "text-pg-fg-default/90"} line-clamp-5 text-[13px] font-medium leading-[1.6] tracking-tight break-words [overflow-wrap:anywhere] whitespace-pre-wrap transition-colors`,
   kbdBadge: (selected: boolean) => `flex h-[16px] min-w-[16px] px-1 items-center justify-center rounded-[3px] font-mono text-[9px] font-bold transition-colors ${
     selected
-      ? "bg-[color:var(--pg-neutral-7)] text-[color:var(--pg-fg-default)]"
-      : "bg-[color:var(--pg-neutral-3)] text-[color:var(--pg-fg-muted)] group-hover:bg-[color:var(--pg-neutral-6)] group-hover:text-[color:var(--pg-fg-default)]"
+      ? "bg-pg-neutral-7 text-pg-fg-default"
+      : "bg-pg-neutral-3 text-pg-fg-muted group-hover:bg-pg-neutral-6 group-hover:text-pg-fg-default"
   }`,
   typeBadge:
-    "shrink-0 rounded-[2px] bg-[color:var(--pg-neutral-3)] px-1.5 py-0.5 font-medium text-[color:var(--pg-fg-muted)]",
+    "shrink-0 rounded-[2px] bg-pg-neutral-3 px-1.5 py-0.5 font-medium text-pg-fg-muted",
 };
 
 const PICKER_RESIZE_HANDLES: Array<{
@@ -312,7 +312,7 @@ export function PickerShell() {
   }, [tauriRuntime]);
 
   return (
-    <div className="m-0 h-screen w-screen select-none overflow-hidden bg-transparent p-0 text-[color:var(--pg-fg-default)]">
+    <div className="m-0 h-screen w-screen select-none overflow-hidden bg-transparent p-0 text-pg-fg-default">
       <div className={STYLES.container}>
         {tauriRuntime
           ? PICKER_RESIZE_HANDLES.map((handle) => (
@@ -327,12 +327,12 @@ export function PickerShell() {
 
         <div className={STYLES.header}>
           <div className="flex min-w-0 flex-1 items-center gap-2" data-tauri-drag-region>
-            <div className={STYLES.headerDot} />
-            <span className="text-[12px] font-bold tracking-tight text-[color:var(--pg-fg-default)]">
+            <div aria-hidden="true" className={STYLES.headerDot} />
+            <span className="text-[12px] font-bold tracking-tight text-pg-fg-default">
               FloatPaste
             </span>
             {lastMessage ? (
-              <span className="ml-2 animate-pulse text-[10px] font-medium text-[color:var(--pg-favorite)]">
+              <span className="ml-2 animate-pulse text-[10px] font-medium text-pg-favorite">
                 {lastMessage}
               </span>
             ) : null}
@@ -375,18 +375,18 @@ export function PickerShell() {
                   }}
                   type="button"
                 >
-                  <p
+                  <span
                     className={STYLES.itemContent(isSelected)}
                     title={item.tooltipText || item.contentPreview}
                   >
                     {item.contentPreview}
-                  </p>
+                  </span>
 
                   <div
                     className={`flex w-full items-center gap-2 text-[10px] leading-none transition-colors ${
                       isSelected
-                        ? "text-[color:var(--pg-accent-fg)]/80"
-                        : "text-[color:var(--pg-fg-subtle)]"
+                        ? "text-pg-accent-fg/80"
+                        : "text-pg-fg-subtle"
                     }`}
                   >
                     {index < 9 ? <kbd className={STYLES.kbdBadge(isSelected)}>{index + 1}</kbd> : null}
@@ -399,7 +399,7 @@ export function PickerShell() {
                         {formatDateTime(item.lastUsedAt ?? item.createdAt)}
                       </span>
                       {item.isFavorited ? (
-                        <span className="text-[10px] text-[color:var(--pg-favorite)]">★</span>
+                        <span className="text-[10px] text-pg-favorite">★</span>
                       ) : null}
                     </span>
                   </div>

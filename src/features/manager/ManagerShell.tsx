@@ -8,6 +8,7 @@ import { isTauriRuntime } from "../../bridge/runtime";
 import { hideCurrentWindow } from "../../bridge/window";
 import { queryClient } from "../../app/queryClient";
 import type { PickerPositionMode, ThemeMode, UserSetting } from "../../shared/types/settings";
+import { getErrorMessage } from "../../shared/utils/error";
 import { useSettingsQuery, useUpdateSettingsMutation } from "./queries";
 
 const pickerPositionOptions: Array<{
@@ -55,13 +56,13 @@ const themeModeOptions: Array<{
 ];
 
 const FORM_INPUT =
-  "w-full rounded-md border border-[color:var(--pg-border-default)] bg-[color:var(--pg-canvas-inset)] px-4 py-2.5 text-sm outline-none transition-colors placeholder:text-[color:var(--pg-fg-subtle)] focus:border-[color:var(--pg-accent-fg)] focus:ring-1 focus:ring-[color:var(--pg-accent-fg)] focus-visible:outline-none";
+  "w-full rounded-md border border-pg-border-default bg-pg-canvas-inset px-4 py-2.5 text-sm outline-none transition-colors placeholder:text-pg-fg-subtle focus:border-pg-accent-fg focus:ring-1 focus:ring-pg-accent-fg focus-visible:outline-none";
 
-const FORM_LABEL = "mb-1.5 block text-sm font-medium text-[color:var(--pg-fg-default)]";
+const FORM_LABEL = "mb-1.5 block text-sm font-medium text-pg-fg-default";
 
-const FORM_HINT = "mt-1.5 text-xs leading-relaxed text-[color:var(--pg-fg-subtle)]";
+const FORM_HINT = "mt-1.5 text-xs leading-relaxed text-pg-fg-subtle";
 
-const SECTION_HEADING = "text-sm font-semibold text-[color:var(--pg-fg-default)] border-b border-[color:var(--pg-border-subtle)] pb-2";
+const SECTION_HEADING = "text-sm font-semibold text-pg-fg-default border-b border-pg-border-subtle pb-2";
 
 export function ManagerShell() {
   const settings = useSettingsQuery();
@@ -136,12 +137,12 @@ export function ManagerShell() {
   }, []);
 
   const saveError = updateSettingsMutation.error
-    ? getErrorMessage(updateSettingsMutation.error)
+    ? getErrorMessage(updateSettingsMutation.error, "保存设置失败，请稍后重试。")
     : null;
 
   if (settings.isLoading && !data) {
     return (
-      <div className="flex h-screen items-center justify-center text-sm text-[color:var(--pg-fg-subtle)]">
+      <div className="flex h-screen items-center justify-center text-sm text-pg-fg-subtle">
         正在加载设置...
       </div>
     );
@@ -152,16 +153,16 @@ export function ManagerShell() {
       <div className="mx-auto w-full max-w-[680px] px-6 py-8">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-xl font-semibold text-[color:var(--pg-fg-default)]">
+          <h1 className="text-xl font-semibold text-pg-fg-default">
             FloatPaste
           </h1>
-          <p className="mt-1 text-sm text-[color:var(--pg-fg-muted)]">
+          <p className="mt-1 text-sm text-pg-fg-muted">
             偏好设置会自动保存。
           </p>
         </div>
 
         {saveError ? (
-          <div className="mb-6 flex items-start justify-between gap-3 rounded-md border border-[color:var(--pg-danger-fg)] bg-[color:var(--pg-danger-subtle)] px-4 py-3 text-sm text-[color:var(--pg-danger-fg)]">
+          <div className="mb-6 flex items-start justify-between gap-3 rounded-md border border-pg-danger-fg bg-pg-danger-subtle px-4 py-3 text-sm text-pg-danger-fg">
             <p>{saveError}</p>
             <button
               className="shrink-0 text-xs font-semibold uppercase tracking-wider transition-opacity hover:opacity-80"
@@ -189,14 +190,15 @@ export function ManagerShell() {
             <div className="block">
               <div className="mb-1.5 flex items-center justify-between">
                 <span className={FORM_LABEL}>搜索窗口快捷键</span>
-                <label className="flex cursor-pointer items-center gap-2">
+                <label className="flex cursor-pointer items-center gap-2" htmlFor="workbench-shortcut-enabled">
                   <input
+                    id="workbench-shortcut-enabled"
                     checked={workbenchShortcutEnabled}
-                    className="h-4 w-4 rounded border-[color:var(--pg-border-default)] accent-[color:var(--pg-accent-fg)]"
+                    className="h-4 w-4 rounded border-pg-border-default accent-pg-accent-fg"
                     onChange={(e) => setWorkbenchShortcutEnabled(e.target.checked)}
                     type="checkbox"
                   />
-                  <span className="text-xs text-[color:var(--pg-fg-subtle)]">启用</span>
+                  <span className="text-xs text-pg-fg-subtle">启用</span>
                 </label>
               </div>
               <input
@@ -255,23 +257,23 @@ export function ManagerShell() {
                   <label
                     className={`flex cursor-pointer items-start gap-3 rounded-md border px-4 py-3 transition-colors ${
                       themeMode === option.value
-                        ? "border-[color:var(--pg-accent-fg)] bg-[color:var(--pg-accent-subtle)]"
-                        : "border-[color:var(--pg-border-muted)] hover:border-[color:var(--pg-border-default)]"
+                        ? "border-pg-accent-fg bg-pg-accent-subtle"
+                        : "border-pg-border-muted hover:border-pg-border-default"
                     }`}
                     key={option.value}
                   >
                     <input
                       checked={themeMode === option.value}
-                      className="mt-0.5 h-4 w-4 accent-[color:var(--pg-accent-fg)]"
+                      className="mt-0.5 h-4 w-4 accent-pg-accent-fg"
                       name="theme-mode"
                       onChange={() => setThemeMode(option.value)}
                       type="radio"
                     />
                     <span className="min-w-0">
-                      <span className={`block text-sm font-medium ${themeMode === option.value ? "text-[color:var(--pg-fg-default)]" : "text-[color:var(--pg-fg-muted)]"}`}>
+                      <span className={`block text-sm font-medium ${themeMode === option.value ? "text-pg-fg-default" : "text-pg-fg-muted"}`}>
                         {option.label}
                       </span>
-                      <span className="mt-0.5 block text-xs text-[color:var(--pg-fg-subtle)]">
+                      <span className="mt-0.5 block text-xs text-pg-fg-subtle">
                         {option.description}
                       </span>
                     </span>
@@ -287,23 +289,23 @@ export function ManagerShell() {
                   <label
                     className={`flex cursor-pointer items-start gap-3 rounded-md border px-4 py-3 transition-colors ${
                       pickerPositionMode === option.value
-                        ? "border-[color:var(--pg-accent-fg)] bg-[color:var(--pg-accent-subtle)]"
-                        : "border-[color:var(--pg-border-muted)] hover:border-[color:var(--pg-border-default)]"
+                        ? "border-pg-accent-fg bg-pg-accent-subtle"
+                        : "border-pg-border-muted hover:border-pg-border-default"
                     }`}
                     key={option.value}
                   >
                     <input
                       checked={pickerPositionMode === option.value}
-                      className="mt-0.5 h-4 w-4 accent-[color:var(--pg-accent-fg)]"
+                      className="mt-0.5 h-4 w-4 accent-pg-accent-fg"
                       name="picker-position-mode"
                       onChange={() => setPickerPositionMode(option.value)}
                       type="radio"
                     />
                     <span className="min-w-0">
-                      <span className={`block text-sm font-medium ${pickerPositionMode === option.value ? "text-[color:var(--pg-fg-default)]" : "text-[color:var(--pg-fg-muted)]"}`}>
+                      <span className={`block text-sm font-medium ${pickerPositionMode === option.value ? "text-pg-fg-default" : "text-pg-fg-muted"}`}>
                         {option.label}
                       </span>
-                      <span className="mt-0.5 block text-xs text-[color:var(--pg-fg-subtle)]">
+                      <span className="mt-0.5 block text-xs text-pg-fg-subtle">
                         {option.description}
                       </span>
                     </span>
@@ -318,9 +320,10 @@ export function ManagerShell() {
         <section className="mb-8">
           <h2 className={SECTION_HEADING}>行为</h2>
           <div className="mt-4 space-y-2">
-            <label className="flex cursor-pointer items-center gap-3 rounded-md border border-[color:var(--pg-border-muted)] px-4 py-3 transition-colors hover:border-[color:var(--pg-border-default)]">
+            <label className="flex cursor-pointer items-center gap-3 rounded-md border border-pg-border-muted px-4 py-3 transition-colors hover:border-pg-border-default" htmlFor="launch-on-startup">
               <input
-                className="h-4 w-4 accent-[color:var(--pg-accent-fg)]"
+                className="h-4 w-4 accent-pg-accent-fg"
+                id="launch-on-startup"
                 checked={launchOnStartup}
                 onChange={(e) => {
                   const checked = e.target.checked;
@@ -329,46 +332,50 @@ export function ManagerShell() {
                 }}
                 type="checkbox"
               />
-              <span className="text-sm font-medium text-[color:var(--pg-fg-default)]">开机自启</span>
+              <span className="text-sm font-medium text-pg-fg-default">开机自启</span>
             </label>
 
             <label
               className={`flex items-center gap-3 rounded-md border px-4 py-3 transition-colors ${
                 launchOnStartup
-                  ? "cursor-pointer border-[color:var(--pg-border-muted)] hover:border-[color:var(--pg-border-default)]"
-                  : "cursor-not-allowed border-[color:var(--pg-border-subtle)]"
+                  ? "cursor-pointer border-pg-border-muted hover:border-pg-border-default"
+                  : "cursor-not-allowed border-pg-border-subtle"
               }`}
+              htmlFor="silent-on-startup"
             >
               <input
-                className="h-4 w-4 accent-[color:var(--pg-accent-fg)]"
+                className="h-4 w-4 accent-pg-accent-fg"
+                id="silent-on-startup"
                 checked={silentOnStartup}
                 disabled={!launchOnStartup}
                 onChange={(e) => setSilentOnStartup(e.target.checked)}
                 type="checkbox"
               />
-              <span className={`text-sm font-medium ${launchOnStartup ? "text-[color:var(--pg-fg-default)]" : "text-[color:var(--pg-fg-subtle)]"}`}>
+              <span className={`text-sm font-medium ${launchOnStartup ? "text-pg-fg-default" : "text-pg-fg-subtle"}`}>
                 开机时静默启动
               </span>
             </label>
 
-            <label className="flex cursor-pointer items-center gap-3 rounded-md border border-[color:var(--pg-border-muted)] px-4 py-3 transition-colors hover:border-[color:var(--pg-border-default)]">
+            <label className="flex cursor-pointer items-center gap-3 rounded-md border border-pg-border-muted px-4 py-3 transition-colors hover:border-pg-border-default" htmlFor="restore-clipboard">
               <input
-                className="h-4 w-4 accent-[color:var(--pg-accent-fg)]"
+                className="h-4 w-4 accent-pg-accent-fg"
+                id="restore-clipboard"
                 checked={restoreClipboardAfterPaste}
                 onChange={(e) => setRestoreClipboardAfterPaste(e.target.checked)}
                 type="checkbox"
               />
-              <span className="text-sm font-medium text-[color:var(--pg-fg-default)]">回贴后恢复剪贴板</span>
+              <span className="text-sm font-medium text-pg-fg-default">回贴后恢复剪贴板</span>
             </label>
 
-            <label className="flex cursor-pointer items-center gap-3 rounded-md border border-[color:var(--pg-border-muted)] px-4 py-3 transition-colors hover:border-[color:var(--pg-border-default)]">
+            <label className="flex cursor-pointer items-center gap-3 rounded-md border border-pg-border-muted px-4 py-3 transition-colors hover:border-pg-border-default" htmlFor="pause-monitoring">
               <input
-                className="h-4 w-4 accent-[color:var(--pg-accent-fg)]"
+                className="h-4 w-4 accent-pg-accent-fg"
+                id="pause-monitoring"
                 checked={pauseMonitoring}
                 onChange={(e) => setPauseMonitoring(e.target.checked)}
                 type="checkbox"
               />
-              <span className="text-sm font-medium text-[color:var(--pg-fg-default)]">暂停监听</span>
+              <span className="text-sm font-medium text-pg-fg-default">暂停监听</span>
             </label>
           </div>
         </section>
@@ -391,7 +398,7 @@ export function ManagerShell() {
         {/* Save Button */}
         <div className="pt-2 pb-8">
           <button
-            className="rounded-md bg-[color:var(--pg-accent-emphasis)] px-6 py-2.5 text-sm font-semibold text-[color:var(--pg-fg-on-emphasis)] transition-colors hover:bg-[color:var(--pg-accent-hover)] disabled:opacity-50"
+            className="rounded-md bg-pg-accent-emphasis px-6 py-2.5 text-sm font-semibold text-pg-fg-on-emphasis transition-colors hover:bg-pg-accent-hover disabled:opacity-50"
             disabled={updateSettingsMutation.isPending}
             onClick={() => {
               updateSettingsMutation.reset();
@@ -423,12 +430,3 @@ export function ManagerShell() {
   );
 }
 
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message;
-  }
-  if (typeof error === "string" && error.trim()) {
-    return error;
-  }
-  return "保存设置失败，请稍后重试。";
-}

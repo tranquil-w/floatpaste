@@ -20,6 +20,9 @@
   --pg-neutral-12: #25292E;
   --pg-neutral-13: #1f2328;
 
+  /* Shadow color (rgb channels for rgba usage) */
+  --pg-shadow-color: 31, 35, 40;
+
   /* Blue (accent) */
   --pg-blue-0: #ddf4ff;
   --pg-blue-1: #b6e3ff;
@@ -89,6 +92,9 @@ html.dark {
   --pg-neutral-11: #D1D7E0;
   --pg-neutral-12: #F0F6FC;
   --pg-neutral-13: #ffffff;
+
+  /* Shadow color (rgb channels for rgba usage) */
+  --pg-shadow-color: 0, 0, 0;
 
   --pg-blue-0: #cae8ff;
   --pg-blue-1: #a5d6ff;
@@ -180,9 +186,9 @@ html.dark {
 
   /* Shadow */
   --pg-shadow-sm: 0 1px 0 var(--pg-border-default);
-  --pg-shadow-md: 0 3px 6px rgba(31, 35, 40, 0.04);
-  --pg-shadow-lg: 0 8px 24px rgba(31, 35, 40, 0.12);
-  --pg-shadow-xl: 0 12px 28px rgba(31, 35, 40, 0.12), 0 2px 4px rgba(31, 35, 40, 0.08);
+  --pg-shadow-md: 0 3px 6px rgba(var(--pg-shadow-color), 0.04);
+  --pg-shadow-lg: 0 8px 24px rgba(var(--pg-shadow-color), 0.12);
+  --pg-shadow-xl: 0 12px 28px rgba(var(--pg-shadow-color), 0.12), 0 2px 4px rgba(var(--pg-shadow-color), 0.08);
 }
 
 /* ── Scrollbar ── */

@@ -3,22 +3,11 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { hideEditor as hideEditorWindow } from "../../bridge/commands";
 import { EDITOR_SESSION_END_EVENT, EDITOR_SESSION_START_EVENT } from "../../bridge/events";
+import { getErrorMessage } from "../../shared/utils/error";
 import { isTauriRuntime } from "../../bridge/runtime";
 import { useItemDetailQuery, useUpdateTextMutation } from "../../shared/queries/clipQueries";
 import { useEditorStore, type EditorSession } from "./store";
 import { getEditorKeyboardAction, moveFocusInDialog } from "./keyboard";
-
-function getErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message;
-  }
-
-  if (typeof error === "string" && error.trim()) {
-    return error;
-  }
-
-  return fallback;
-}
 
 function getSourceLabel(session: EditorSession | null) {
   if (!session) {
@@ -52,6 +41,8 @@ export function EditorShell() {
   const dialogRef = useRef<HTMLDivElement>(null);
   const saveAndCloseButtonRef = useRef<HTMLButtonElement>(null);
   const requestCloseRef = useRef<() => Promise<void>>(async () => {});
+  const saveCurrentTextRef = useRef<() => Promise<boolean>>(async () => false);
+  const closeConfirmOpenRef = useRef(closeConfirmOpen);
 
   useEffect(() => {
     if (!isTauriRuntime()) {
@@ -100,7 +91,7 @@ export function EditorShell() {
         key: event.key,
         ctrlKey: event.ctrlKey,
         metaKey: event.metaKey,
-        closeConfirmOpen,
+        closeConfirmOpen: closeConfirmOpenRef.current,
       });
 
       if (!action) {
@@ -115,7 +106,7 @@ export function EditorShell() {
       }
 
       if (action === "save") {
-        void saveCurrentText();
+        void saveCurrentTextRef.current();
         return;
       }
 
@@ -206,6 +197,8 @@ export function EditorShell() {
   }
 
   requestCloseRef.current = requestClose;
+  saveCurrentTextRef.current = saveCurrentText;
+  closeConfirmOpenRef.current = closeConfirmOpen;
 
   async function handleSaveAndClose() {
     const success = await saveCurrentText();
@@ -219,18 +212,18 @@ export function EditorShell() {
   const isTextItem = detailQuery.data?.type === "text";
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-[color:var(--pg-canvas-default)] text-[color:var(--pg-fg-default)]">
-      <header className="flex shrink-0 items-center justify-between border-b border-[color:var(--pg-border-muted)] px-5 py-3">
+    <div className="flex h-screen w-screen flex-col overflow-hidden bg-pg-canvas-default text-pg-fg-default">
+      <header className="flex shrink-0 items-center justify-between border-b border-pg-border-muted px-5 py-3">
         <div className="min-w-0">
-          <p className="text-xs font-medium uppercase tracking-[0.16em] text-[color:var(--pg-fg-subtle)]">
+          <p className="text-xs font-medium uppercase tracking-[0.16em] text-pg-fg-subtle">
             {getSourceLabel(session)}
           </p>
-          <h1 className="mt-1 text-lg font-semibold text-[color:var(--pg-fg-default)]">
+          <h1 className="mt-1 text-lg font-semibold text-pg-fg-default">
             独立编辑窗口
           </h1>
         </div>
         <button
-          className="rounded-md border border-[color:var(--pg-border-default)] px-3 py-1.5 text-sm hover:bg-[color:var(--pg-canvas-subtle)]"
+          className="rounded-md border border-pg-border-default px-3 py-1.5 text-sm hover:bg-pg-canvas-subtle"
           onClick={() => void requestClose()}
           type="button"
         >
@@ -239,63 +232,63 @@ export function EditorShell() {
       </header>
 
       {noticeMessage ? (
-        <div className="border-b border-[color:var(--pg-success-fg)]/20 bg-[color:var(--pg-success-subtle)] px-5 py-2 text-sm text-[color:var(--pg-success-fg)]">
+        <div className="border-b border-pg-success-fg/20 bg-pg-success-subtle px-5 py-2 text-sm text-pg-success-fg">
           {noticeMessage}
         </div>
       ) : null}
       {errorMessage ? (
-        <div className="border-b border-[color:var(--pg-danger-fg)]/20 bg-[color:var(--pg-danger-subtle)] px-5 py-2 text-sm text-[color:var(--pg-danger-fg)]">
+        <div className="border-b border-pg-danger-fg/20 bg-pg-danger-subtle px-5 py-2 text-sm text-pg-danger-fg">
           {errorMessage}
         </div>
       ) : null}
 
       <main className="flex min-h-0 flex-1 flex-col px-5 py-4">
         {!session ? (
-          <div className="flex h-full items-center justify-center text-sm text-[color:var(--pg-fg-subtle)]">
+          <div className="flex h-full items-center justify-center text-sm text-pg-fg-subtle">
             等待编辑会话启动
           </div>
         ) : detailQuery.isLoading ? (
-          <div className="flex h-full items-center justify-center text-sm text-[color:var(--pg-fg-subtle)]">
+          <div className="flex h-full items-center justify-center text-sm text-pg-fg-subtle">
             正在加载条目内容...
           </div>
         ) : !detailQuery.data ? (
-          <div className="flex h-full items-center justify-center text-sm text-[color:var(--pg-fg-subtle)]">
+          <div className="flex h-full items-center justify-center text-sm text-pg-fg-subtle">
             未找到对应条目
           </div>
         ) : isTextItem ? (
           <textarea
             ref={textareaRef}
-            className="h-full w-full resize-none rounded-md border border-[color:var(--pg-border-default)] bg-[color:var(--pg-canvas-subtle)] px-5 py-5 text-[14px] leading-relaxed text-[color:var(--pg-fg-default)] outline-none transition-colors focus:border-[color:var(--pg-accent-fg)] focus:bg-[color:var(--pg-canvas-inset)] focus-visible:outline-none"
+            className="h-full w-full resize-none rounded-md border border-pg-border-default bg-pg-canvas-subtle px-5 py-5 text-[14px] leading-relaxed text-pg-fg-default outline-none transition-colors focus:border-pg-accent-fg focus:bg-pg-canvas-inset focus-visible:outline-none"
             onChange={(event) => setDraftText(event.target.value)}
             placeholder="输入或编辑文本内容..."
             value={draftText}
           />
         ) : (
-          <div className="rounded-lg border border-[color:var(--pg-border-default)] bg-[color:var(--pg-canvas-subtle)] p-5">
-            <h2 className="text-base font-semibold text-[color:var(--pg-fg-default)]">
+          <div className="rounded-lg border border-pg-border-default bg-pg-canvas-subtle p-5">
+            <h2 className="text-base font-semibold text-pg-fg-default">
               当前条目不支持文本编辑
             </h2>
-            <p className="mt-2 text-sm leading-6 text-[color:var(--pg-fg-muted)]">
+            <p className="mt-2 text-sm leading-6 text-pg-fg-muted">
               仅文本条目可以进入独立编辑窗口。你可以关闭当前窗口并返回来源界面继续操作。
             </p>
           </div>
         )}
       </main>
 
-      <footer className="flex shrink-0 items-center justify-between border-t border-[color:var(--pg-border-muted)] px-5 py-3">
-        <div className="text-sm text-[color:var(--pg-fg-subtle)]">
+      <footer className="flex shrink-0 items-center justify-between border-t border-pg-border-muted px-5 py-3">
+        <div className="text-sm text-pg-fg-subtle">
           Enter 和方向键保留文本编辑语义，Ctrl+S 保存，Esc 请求关闭
         </div>
         <div className="flex items-center gap-2">
           <button
-            className="rounded-md border border-[color:var(--pg-border-default)] px-4 py-2 text-sm hover:bg-[color:var(--pg-canvas-subtle)]"
+            className="rounded-md border border-pg-border-default px-4 py-2 text-sm hover:bg-pg-canvas-subtle"
             onClick={() => void requestClose()}
             type="button"
           >
             关闭
           </button>
           <button
-            className="rounded-md bg-[color:var(--pg-accent-emphasis)] px-4 py-2 text-sm font-semibold text-[color:var(--pg-fg-on-emphasis)] disabled:opacity-50"
+            className="rounded-md bg-pg-accent-emphasis px-4 py-2 text-sm font-semibold text-pg-fg-on-emphasis disabled:opacity-50"
             disabled={!isTextItem || !isDirty || updateTextMutation.isPending}
             onClick={() => void saveCurrentText()}
             type="button"
@@ -311,28 +304,28 @@ export function EditorShell() {
             ref={dialogRef}
             aria-labelledby="editor-close-confirm-title"
             aria-modal="true"
-            className="w-full max-w-sm rounded-2xl bg-[color:var(--pg-canvas-default)] p-6 shadow-pg-xl"
+            className="w-full max-w-sm rounded-2xl bg-pg-canvas-default p-6 shadow-pg-xl"
             role="dialog"
           >
             <h2
-              className="text-lg font-semibold text-[color:var(--pg-fg-default)]"
+              className="text-lg font-semibold text-pg-fg-default"
               id="editor-close-confirm-title"
             >
               发现未保存修改
             </h2>
-            <p className="mt-2 text-sm leading-6 text-[color:var(--pg-fg-muted)]">
+            <p className="mt-2 text-sm leading-6 text-pg-fg-muted">
               你可以先保存当前内容再关闭，也可以放弃这次修改并直接返回来源窗口。
             </p>
             <div className="mt-6 flex justify-end gap-2">
               <button
-                className="rounded-md border border-[color:var(--pg-border-default)] px-4 py-2 text-sm"
+                className="rounded-md border border-pg-border-default px-4 py-2 text-sm"
                 onClick={() => setCloseConfirmOpen(false)}
                 type="button"
               >
                 取消
               </button>
               <button
-                className="rounded-md border border-[color:var(--pg-border-default)] px-4 py-2 text-sm text-[color:var(--pg-danger-fg)]"
+                className="rounded-md border border-pg-border-default px-4 py-2 text-sm text-pg-danger-fg"
                 onClick={() => void closeEditor()}
                 type="button"
               >
@@ -340,7 +333,7 @@ export function EditorShell() {
               </button>
               <button
                 ref={saveAndCloseButtonRef}
-                className="rounded-md bg-[color:var(--pg-accent-emphasis)] px-4 py-2 text-sm font-semibold text-[color:var(--pg-fg-on-emphasis)] disabled:opacity-50"
+                className="rounded-md bg-pg-accent-emphasis px-4 py-2 text-sm font-semibold text-pg-fg-on-emphasis disabled:opacity-50"
                 disabled={updateTextMutation.isPending}
                 onClick={() => void handleSaveAndClose()}
                 type="button"
