@@ -149,19 +149,23 @@ impl ShortcutManager {
             }
         }
 
-        let settings_shortcut = match state.current_settings() {
-            Ok(settings) => match normalize_shortcut(&settings.shortcut) {
-                Ok(value) => value,
-                Err(error) => {
-                    error!("规范化当前快捷键失败: {error}");
-                    return;
-                }
-            },
+        let settings = match state.current_settings() {
+            Ok(settings) => settings,
             Err(error) => {
                 error!("读取当前快捷键设置失败: {error}");
                 return;
             }
         };
+
+        let settings_shortcut = match normalize_shortcut(&settings.shortcut) {
+            Ok(value) => value,
+            Err(error) => {
+                error!("规范化当前快捷键失败: {error}");
+                return;
+            }
+        };
+        let normalized_search_shortcut =
+            normalize_enabled_search_shortcut(settings.search_shortcut_enabled, &settings.search_shortcut);
 
         if normalized == settings_shortcut {
             if event.state != ShortcutState::Pressed {
@@ -185,12 +189,23 @@ impl ShortcutManager {
                         ) {
                             error!("关闭 Picker 失败: {error}");
                         }
-                    } else if let Err(error) =
-                        WindowCoordinator::show_picker(&app_clone, &state_clone)
-                    {
-                        error!("显示 Picker 失败: {error}");
-                    } else if let Err(error) = Self::register_picker_session_shortcuts(&app_clone) {
-                        warn!("打开 Picker 后注册会话快捷键失败: {error}");
+                    } else {
+                        // 如果搜索窗口活跃，先隐藏它以避免焦点竞争导致闪烁
+                        if state_clone.is_search_active() {
+                            if let Err(error) = WindowCoordinator::hide_search_without_restore_target(
+                                &app_clone,
+                                &state_clone,
+                            ) {
+                                error!("隐藏搜索窗口失败: {error}");
+                            }
+                        }
+                        if let Err(error) =
+                            WindowCoordinator::show_picker(&app_clone, &state_clone)
+                        {
+                            error!("显示 Picker 失败: {error}");
+                        } else if let Err(error) = Self::register_picker_session_shortcuts(&app_clone) {
+                            warn!("打开 Picker 后注册会话快捷键失败: {error}");
+                        }
                     }
                 });
             });
@@ -216,6 +231,28 @@ impl ShortcutManager {
             }
 
             Self::stop_picker_navigation_repeat(None);
+
+            // 在 picker 活跃状态下也检查搜索快捷键
+            if normalized_search_shortcut.as_deref() == Some(normalized.as_str()) {
+                info!("在 Picker 活跃时命中搜索快捷键: {normalized}");
+                let app_handle = app.clone();
+                let state_clone = state.clone();
+                defer_shortcut_main_thread_action(app_handle, move |app_clone| {
+                    // 先隐藏 picker，再打开搜索窗口
+                    if let Err(error) = WindowCoordinator::hide_picker_and_restore_target(
+                        &app_clone,
+                        &state_clone,
+                    ) {
+                        error!("关闭 Picker 失败: {error}");
+                    }
+                    if let Err(error) =
+                        WindowCoordinator::open_search_global(&app_clone, &state_clone)
+                    {
+                        error!("打开 Search 失败: {error}");
+                    }
+                });
+                return;
+            }
 
             let emit_result = match normalized.as_str() {
                 "enter" => app.emit(PICKER_CONFIRM_EVENT, ()),
@@ -257,51 +294,35 @@ impl ShortcutManager {
             return;
         }
 
-        let search_shortcut = state
-            .current_settings()
-            .ok()
-            .filter(|settings| settings.search_shortcut_enabled)
-            .map(|settings| settings.search_shortcut);
-
-        if let Some(ref shortcut_value) = search_shortcut {
-            let normalized_search = match normalize_shortcut(shortcut_value) {
-                Ok(value) => value,
-                Err(_) => {
-                    warn!("搜索快捷键 '{shortcut_value}' 解析失败，跳过匹配");
-                    String::new()
-                }
-            };
-
-            if normalized == normalized_search {
-                if event.state != ShortcutState::Pressed {
-                    return;
-                }
-
-                let should_toggle = should_toggle_active_search_window(app, &state);
-                info!("命中搜索快捷键: {normalized}");
-                let app_handle = app.clone();
-                let state_clone = state.clone();
-
-                if should_toggle {
-                    defer_shortcut_main_thread_action(app_handle, move |app_clone| {
-                        if let Err(error) = WindowCoordinator::hide_search_and_restore_target(
-                            &app_clone,
-                            &state_clone,
-                        ) {
-                            error!("关闭 Search 失败: {error}");
-                        }
-                    });
-                } else {
-                    defer_shortcut_main_thread_action(app_handle, move |app_clone| {
-                        if let Err(error) =
-                            WindowCoordinator::open_search_global(&app_clone, &state_clone)
-                        {
-                            error!("打开 Search 失败: {error}");
-                        }
-                    });
-                }
+        if normalized_search_shortcut.as_deref() == Some(normalized.as_str()) {
+            if event.state != ShortcutState::Pressed {
                 return;
             }
+
+            let should_toggle = should_toggle_active_search_window(app, &state);
+            info!("命中搜索快捷键: {normalized}");
+            let app_handle = app.clone();
+            let state_clone = state.clone();
+
+            if should_toggle {
+                defer_shortcut_main_thread_action(app_handle, move |app_clone| {
+                    if let Err(error) = WindowCoordinator::hide_search_and_restore_target(
+                        &app_clone,
+                        &state_clone,
+                    ) {
+                        error!("关闭 Search 失败: {error}");
+                    }
+                });
+            } else {
+                defer_shortcut_main_thread_action(app_handle, move |app_clone| {
+                    if let Err(error) =
+                        WindowCoordinator::open_search_global(&app_clone, &state_clone)
+                    {
+                        error!("打开 Search 失败: {error}");
+                    }
+                });
+            }
+            return;
         }
 
         if event.state == ShortcutState::Pressed
@@ -502,10 +523,26 @@ fn normalize_shortcut(shortcut: &str) -> Result<String, AppError> {
         .map_err(|error| AppError::Message(format!("无效快捷键格式: {error}")))
 }
 
+fn normalize_enabled_search_shortcut(enabled: bool, shortcut: &str) -> Option<String> {
+    if !enabled {
+        return None;
+    }
+
+    match normalize_shortcut(shortcut) {
+        Ok(value) if !value.is_empty() => Some(value),
+        Ok(_) => None,
+        Err(error) => {
+            warn!("搜索快捷键 '{shortcut}' 解析失败，跳过匹配: {error}");
+            None
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        is_picker_session_shortcut, is_search_session_shortcut, normalize_shortcut,
+        is_picker_session_shortcut, is_search_session_shortcut,
+        normalize_enabled_search_shortcut, normalize_shortcut,
         should_release_stale_picker_shortcuts,
     };
 
@@ -543,6 +580,19 @@ mod tests {
         assert_eq!(
             normalize_shortcut("Win+F").unwrap(),
             normalize_shortcut("Super+F").unwrap()
+        );
+    }
+
+    #[test]
+    fn normalize_enabled_search_shortcut_skips_invalid_value() {
+        assert_eq!(normalize_enabled_search_shortcut(true, "not-a-shortcut"), None);
+    }
+
+    #[test]
+    fn normalize_enabled_search_shortcut_returns_normalized_value() {
+        assert_eq!(
+            normalize_enabled_search_shortcut(true, "Win+F"),
+            Some(normalize_shortcut("Super+F").unwrap())
         );
     }
 }

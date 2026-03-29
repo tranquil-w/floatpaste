@@ -566,6 +566,17 @@ fn configure_search_window(window: &WebviewWindow) {
                 }
 
                 if let Some(state) = app.try_state::<AppState>() {
+                    #[cfg(target_os = "windows")]
+                    {
+                        if let Some(window) = app.get_webview_window(SEARCH_WINDOW_LABEL) {
+                            if crate::platform::windows::window_utils::is_cursor_inside_window(&window)
+                                .unwrap_or(false)
+                            {
+                                return;
+                            }
+                        }
+                    }
+
                     if state.should_ignore_search_focus_loss().unwrap_or(false) {
                         return;
                     }

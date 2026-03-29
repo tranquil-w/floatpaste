@@ -25,12 +25,16 @@ import {
 } from "../../bridge/events";
 import { isTauriRuntime } from "../../bridge/runtime";
 import { startCurrentWindowDragging } from "../../bridge/window";
+import { useItemDetailQuery } from "../../shared/queries/clipQueries";
 import type { ClipItemSummary } from "../../shared/types/clips";
 import { getClipTypeLabel } from "../../shared/utils/clipDisplay";
 import { getErrorMessage } from "../../shared/utils/error";
 import { formatDateTime } from "../../shared/utils/time";
-import { useItemDetailQuery } from "../../shared/queries/clipQueries";
 import { LoadingSpinner } from "../../shared/ui/LoadingSpinner";
+import {
+  WindowResizeHandles,
+  type WindowResizeHandle,
+} from "../../shared/ui/WindowResizeHandles";
 import { getSearchKeyboardAction } from "./keyboard";
 import { useSearchRecentQuery, useSearchSearchQuery } from "./queries";
 import { getNextSearchNavigationIndex } from "./state";
@@ -39,7 +43,7 @@ import type { SearchSession } from "./store";
 
 const STYLES = {
   shell:
-    "flex h-screen w-screen flex-col overflow-hidden bg-pg-canvas-default text-pg-fg-default",
+    "relative flex h-screen w-screen flex-col overflow-hidden bg-pg-canvas-default text-pg-fg-default",
   panel:
     "flex h-full w-full flex-col overflow-hidden border border-pg-border-default bg-pg-canvas-default shadow-[0_20px_60px_rgba(var(--pg-shadow-color),0.18)]",
   searchHeader:
@@ -63,6 +67,56 @@ const STYLES = {
   actionButtonSecondary:
     "rounded-md border border-pg-border-default px-3 py-1.5 text-xs font-medium text-pg-fg-default transition-colors hover:bg-pg-canvas-subtle",
 };
+
+const SEARCH_RESIZE_HANDLES: WindowResizeHandle[] = [
+  {
+    key: "north-left",
+    direction: "North",
+    className:
+      "absolute left-4 right-[calc(50%+2.5rem)] top-0 z-30 h-2 cursor-ns-resize",
+  },
+  {
+    key: "north-right",
+    direction: "North",
+    className:
+      "absolute left-[calc(50%+2.5rem)] right-4 top-0 z-30 h-2 cursor-ns-resize",
+  },
+  {
+    key: "south",
+    direction: "South",
+    className: "absolute inset-x-4 bottom-0 z-30 h-2 cursor-ns-resize",
+  },
+  {
+    key: "west",
+    direction: "West",
+    className: "absolute inset-y-4 left-0 z-30 w-2 cursor-ew-resize",
+  },
+  {
+    key: "east",
+    direction: "East",
+    className: "absolute inset-y-4 right-0 z-30 w-2 cursor-ew-resize",
+  },
+  {
+    key: "north-west",
+    direction: "NorthWest",
+    className: "absolute left-0 top-0 z-40 h-4 w-4 cursor-nwse-resize",
+  },
+  {
+    key: "north-east",
+    direction: "NorthEast",
+    className: "absolute right-0 top-0 z-40 h-4 w-4 cursor-nesw-resize",
+  },
+  {
+    key: "south-west",
+    direction: "SouthWest",
+    className: "absolute bottom-0 left-0 z-40 h-4 w-4 cursor-nesw-resize",
+  },
+  {
+    key: "south-east",
+    direction: "SouthEast",
+    className: "absolute bottom-0 right-0 z-40 h-4 w-4 cursor-nwse-resize",
+  },
+];
 
 async function refreshSearchQueries() {
   await Promise.all([
@@ -491,6 +545,12 @@ export function SearchShell() {
 
   return (
     <div className={STYLES.shell}>
+      <WindowResizeHandles
+        handles={SEARCH_RESIZE_HANDLES}
+        errorLabel="搜索"
+        beforeResizeStart={prepareSearchWindowDrag}
+      />
+
       <div className={STYLES.panel}>
         <div
           className="h-[3px] w-full shrink-0 bg-gradient-to-r from-pg-blue-5 to-pg-blue-4"
@@ -571,7 +631,7 @@ export function SearchShell() {
                       itemRefs.current[index] = el;
                     }}
                     className={STYLES.listItem(isSelected)}
-                  key={item.id}
+                    key={item.id}
                     onClick={() => {
                       selectedItemIdRef.current = item.id;
                       setSelectedItemId(item.id);

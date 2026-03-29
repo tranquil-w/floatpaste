@@ -1,4 +1,4 @@
-import { type MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { queryClient } from "../../app/queryClient";
 import { hidePicker, openEditorFromPicker, pasteItem, setItemFavorited } from "../../bridge/commands";
@@ -12,11 +12,14 @@ import {
   SETTINGS_CHANGED_EVENT,
 } from "../../bridge/events";
 import { isTauriRuntime } from "../../bridge/runtime";
-import { startCurrentWindowResize, type WindowResizeDirection } from "../../bridge/window";
 import type { ClipItemSummary } from "../../shared/types/clips";
 import { getClipTypeLabel } from "../../shared/utils/clipDisplay";
 import { formatDateTime } from "../../shared/utils/time";
 import { LoadingSpinner } from "../../shared/ui/LoadingSpinner";
+import {
+  WindowResizeHandles,
+  type WindowResizeHandle,
+} from "../../shared/ui/WindowResizeHandles";
 import {
   DEFAULT_PICKER_RECORD_LIMIT,
   normalizePickerRecordLimit,
@@ -50,18 +53,54 @@ const STYLES = {
     "shrink-0 rounded-[2px] bg-pg-neutral-3 px-1.5 py-0.5 font-medium text-pg-fg-muted",
 };
 
-const PICKER_RESIZE_HANDLES: Array<{
-  direction: WindowResizeDirection;
-  className: string;
-}> = [
-  { direction: "North", className: "absolute inset-x-3 top-0 z-20 h-2 cursor-ns-resize" },
-  { direction: "South", className: "absolute inset-x-3 bottom-0 z-20 h-2 cursor-ns-resize" },
-  { direction: "West", className: "absolute inset-y-3 left-0 z-20 w-2 cursor-ew-resize" },
-  { direction: "East", className: "absolute inset-y-3 right-0 z-20 w-2 cursor-ew-resize" },
-  { direction: "NorthWest", className: "absolute left-0 top-0 z-30 h-4 w-4 cursor-nwse-resize" },
-  { direction: "NorthEast", className: "absolute right-0 top-0 z-30 h-4 w-4 cursor-nesw-resize" },
-  { direction: "SouthWest", className: "absolute bottom-0 left-0 z-30 h-4 w-4 cursor-nesw-resize" },
-  { direction: "SouthEast", className: "absolute bottom-0 right-0 z-30 h-4 w-4 cursor-nwse-resize" },
+const PICKER_RESIZE_HANDLES: WindowResizeHandle[] = [
+  {
+    key: "north-left",
+    direction: "North",
+    className:
+      "absolute left-3 right-[calc(50%+2.25rem)] top-0 z-20 h-2 cursor-ns-resize",
+  },
+  {
+    key: "north-right",
+    direction: "North",
+    className:
+      "absolute left-[calc(50%+2.25rem)] right-3 top-0 z-20 h-2 cursor-ns-resize",
+  },
+  {
+    key: "south",
+    direction: "South",
+    className: "absolute inset-x-3 bottom-0 z-20 h-2 cursor-ns-resize",
+  },
+  {
+    key: "west",
+    direction: "West",
+    className: "absolute inset-y-3 left-0 z-20 w-2 cursor-ew-resize",
+  },
+  {
+    key: "east",
+    direction: "East",
+    className: "absolute inset-y-3 right-0 z-20 w-2 cursor-ew-resize",
+  },
+  {
+    key: "north-west",
+    direction: "NorthWest",
+    className: "absolute left-0 top-0 z-30 h-4 w-4 cursor-nwse-resize",
+  },
+  {
+    key: "north-east",
+    direction: "NorthEast",
+    className: "absolute right-0 top-0 z-30 h-4 w-4 cursor-nesw-resize",
+  },
+  {
+    key: "south-west",
+    direction: "SouthWest",
+    className: "absolute bottom-0 left-0 z-30 h-4 w-4 cursor-nesw-resize",
+  },
+  {
+    key: "south-east",
+    direction: "SouthEast",
+    className: "absolute bottom-0 right-0 z-30 h-4 w-4 cursor-nwse-resize",
+  },
 ];
 
 export function PickerShell() {
@@ -80,16 +119,6 @@ export function PickerShell() {
   const items = useMemo(() => recent.data ?? [], [recent.data]);
   const selectedItem = items[selectedIndex] ?? null;
   const canEditSelected = selectedItem?.type === "text";
-
-  const handleResizeMouseDown =
-    (direction: WindowResizeDirection) =>
-    (event: ReactMouseEvent<HTMLDivElement>) => {
-      event.preventDefault();
-      event.stopPropagation();
-      void startCurrentWindowResize(direction).catch((error) => {
-        console.warn("启动 picker 窗口拉伸失败", error);
-      });
-    };
 
   const confirmSelection = async (index: number) => {
     const item = itemsRef.current[index];
@@ -330,14 +359,9 @@ export function PickerShell() {
       <div className={STYLES.container}>
         <div className="h-[3px] w-full bg-gradient-to-r from-pg-blue-5 to-pg-blue-4 shrink-0 rounded-t-md" />
         {tauriRuntime
-          ? PICKER_RESIZE_HANDLES.map((handle) => (
-              <div
-                aria-hidden="true"
-                className={handle.className}
-                key={handle.direction}
-                onMouseDown={handleResizeMouseDown(handle.direction)}
-              />
-            ))
+          ? (
+            <WindowResizeHandles handles={PICKER_RESIZE_HANDLES} errorLabel="速贴" />
+            )
           : null}
 
         <div className={STYLES.header}>
