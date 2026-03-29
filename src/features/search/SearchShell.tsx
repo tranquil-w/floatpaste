@@ -28,7 +28,6 @@ import { startCurrentWindowDragging } from "../../bridge/window";
 import { useItemDetailQuery } from "../../shared/queries/clipQueries";
 import type { ClipItemSummary } from "../../shared/types/clips";
 import { getClipTypeLabel } from "../../shared/utils/clipDisplay";
-import { getErrorMessage } from "../../shared/utils/error";
 import { formatDateTime } from "../../shared/utils/time";
 import { LoadingSpinner } from "../../shared/ui/LoadingSpinner";
 import {
@@ -168,12 +167,10 @@ async function handleSearchWindowDragStart(
 export function SearchShell() {
   const {
     keyword,
-    noticeMessage,
     reset,
     selectedItemId,
     session,
     setKeyword,
-    setNoticeMessage,
     setSelectedItemId,
     setSession,
   } = useSearchStore();
@@ -181,6 +178,8 @@ export function SearchShell() {
   const selectedItemIdRef = useRef<string | null>(selectedItemId);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [inputSuspended, setInputSuspended] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasKeyword = keyword.trim().length > 0;
   const recentQuery = useSearchRecentQuery(!hasKeyword);
   const searchQuery = useSearchSearchQuery(keyword, hasKeyword);
@@ -190,6 +189,26 @@ export function SearchShell() {
   );
   const itemsRef = useRef<ClipItemSummary[]>(items);
   const detailQuery = useItemDetailQuery(selectedItemId);
+
+  // 清理错误定时器
+  useEffect(() => {
+    return () => {
+      if (errorTimerRef.current) {
+        clearTimeout(errorTimerRef.current);
+      }
+    };
+  }, []);
+
+  // 显示临时错误消息（3秒后自动消失）
+  const showError = (message: string) => {
+    if (errorTimerRef.current) {
+      clearTimeout(errorTimerRef.current);
+    }
+    setErrorMessage(message);
+    errorTimerRef.current = setTimeout(() => {
+      setErrorMessage(null);
+    }, 3000);
+  };
 
   useEffect(() => {
     itemsRef.current = items;
@@ -257,45 +276,40 @@ export function SearchShell() {
   async function forwardPickerNavigate(direction: "up" | "down") {
     try {
       await emitTo("picker", PICKER_NAVIGATE_EVENT, direction);
-      setNoticeMessage(null);
     } catch (error) {
-      setNoticeMessage(`控制速贴面板失败：${getErrorMessage(error, "请稍后重试。")}`);
+      console.error("控制速贴面板失败", error);
     }
   }
 
   async function forwardPickerConfirm() {
     try {
       await emitTo("picker", PICKER_CONFIRM_EVENT);
-      setNoticeMessage(null);
     } catch (error) {
-      setNoticeMessage(`控制速贴面板失败：${getErrorMessage(error, "请稍后重试。")}`);
+      console.error("控制速贴面板失败", error);
     }
   }
 
   async function forwardPickerOpenEditor() {
     try {
       await emitTo("picker", PICKER_OPEN_EDITOR_EVENT);
-      setNoticeMessage(null);
     } catch (error) {
-      setNoticeMessage(`控制速贴面板失败：${getErrorMessage(error, "请稍后重试。")}`);
+      console.error("控制速贴面板失败", error);
     }
   }
 
   async function forwardPickerSelectIndex(index: number) {
     try {
       await emitTo("picker", PICKER_SELECT_INDEX_EVENT, index);
-      setNoticeMessage(null);
     } catch (error) {
-      setNoticeMessage(`控制速贴面板失败：${getErrorMessage(error, "请稍后重试。")}`);
+      console.error("控制速贴面板失败", error);
     }
   }
 
   async function closePickerFromSearch() {
     try {
       await hidePicker();
-      setNoticeMessage(null);
     } catch (error) {
-      setNoticeMessage(`关闭速贴面板失败：${getErrorMessage(error, "请稍后重试。")}`);
+      console.error("关闭速贴面板失败", error);
     }
   }
 
@@ -325,7 +339,6 @@ export function SearchShell() {
       } as SearchSession);
       setKeyword(event.payload.initialKeyword ?? "");
       setSelectedItemId(event.payload.itemId ?? null);
-      setNoticeMessage(null);
       setInputSuspended(false);
     }).then((cleanup) => {
       offStart = cleanup;
@@ -399,7 +412,7 @@ export function SearchShell() {
       offSuspend?.();
       offResume?.();
     };
-  }, [reset, setKeyword, setNoticeMessage, setSelectedItemId, setSession]);
+  }, [reset, setKeyword, setSelectedItemId, setSession]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -481,9 +494,8 @@ export function SearchShell() {
   async function handleClose() {
     try {
       await hideSearch();
-      setNoticeMessage(null);
     } catch (error) {
-      setNoticeMessage(`关闭搜索窗口失败：${getErrorMessage(error, "请稍后重试。")}`);
+      console.error("关闭搜索窗口失败", error);
     }
   }
 
@@ -494,15 +506,15 @@ export function SearchShell() {
     }
 
     if (currentItem.type !== "text") {
-      setNoticeMessage("当前只支持从文本条目进入独立编辑窗口。");
+      showError("当前只支持从文本条目进入独立编辑窗口");
       return;
     }
 
     try {
       await openEditorFromSearch(currentItem.id);
-      setNoticeMessage(null);
     } catch (error) {
-      setNoticeMessage(`打开编辑窗口失败：${getErrorMessage(error, "请稍后重试。")}`);
+      showError("打开编辑窗口失败，请稍后重试");
+      console.error("打开编辑窗口失败", error);
     }
   }
 
@@ -513,13 +525,13 @@ export function SearchShell() {
     }
 
     try {
-      const result = await pasteItem(currentItem.id, {
+      await pasteItem(currentItem.id, {
         restoreClipboardAfterPaste: true,
         pasteToTarget: true,
       });
-      setNoticeMessage(result.message);
     } catch (error) {
-      setNoticeMessage(`执行粘贴失败：${getErrorMessage(error, "请稍后重试。")}`);
+      showError("执行粘贴失败，请稍后重试");
+      console.error("执行粘贴失败", error);
     }
   }
 
@@ -533,9 +545,9 @@ export function SearchShell() {
       const favored = detailQuery.data?.isFavorited ?? false;
       await setItemFavorited(id, !favored);
       await refreshSearchQueries();
-      setNoticeMessage(null);
     } catch (error) {
-      setNoticeMessage(`更新收藏状态失败：${getErrorMessage(error, "请稍后重试。")}`);
+      showError("更新收藏状态失败，请稍后重试");
+      console.error("更新收藏状态失败", error);
     }
   }
 
@@ -591,9 +603,9 @@ export function SearchShell() {
           />
         </header>
 
-        {noticeMessage ? (
+        {errorMessage ? (
           <div className="border-b border-pg-danger-fg/20 bg-pg-danger-subtle px-5 py-2 text-sm text-pg-danger-fg">
-            {noticeMessage}
+            {errorMessage}
           </div>
         ) : null}
 
