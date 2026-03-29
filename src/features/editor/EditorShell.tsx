@@ -207,26 +207,14 @@ export function EditorShell() {
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-pg-canvas-default text-pg-fg-default">
       <div className="h-[3px] w-full bg-gradient-to-r from-pg-blue-5 to-pg-blue-4 shrink-0" />
-      <header className="flex shrink-0 items-center justify-between border-b border-pg-border-muted px-5 py-3">
-        <h1 className="text-lg font-semibold text-pg-fg-default">
-          编辑器
-        </h1>
-        <button
-          className="rounded-md border border-pg-border-default px-3 py-1.5 text-sm hover:bg-pg-canvas-subtle"
-          onClick={() => void requestClose()}
-          type="button"
-        >
-          关闭
-        </button>
-      </header>
 
       {noticeMessage ? (
-        <div className="border-b border-pg-success-fg/20 bg-pg-success-subtle px-5 py-2 text-sm text-pg-success-fg">
+        <div className="bg-pg-success-subtle px-5 py-2 text-sm text-pg-success-fg">
           {noticeMessage}
         </div>
       ) : null}
       {errorMessage ? (
-        <div className="border-b border-pg-danger-fg/20 bg-pg-danger-subtle px-5 py-2 text-sm text-pg-danger-fg">
+        <div className="bg-pg-danger-subtle px-5 py-2 text-sm text-pg-danger-fg">
           {errorMessage}
         </div>
       ) : null}
@@ -234,8 +222,8 @@ export function EditorShell() {
       <main className="flex min-h-0 flex-1 flex-col px-5 py-4">
         {!session ? (
           <div className="flex h-full flex-col items-center justify-center gap-1">
-            <p className="text-sm text-pg-fg-muted">等待编辑会话启动</p>
-            <p className="text-xs text-pg-fg-subtle">在速贴面板或搜索窗口中选中文本条目后按 Ctrl+Enter 进入编辑</p>
+            <p className="text-sm text-pg-fg-muted">选择一个文本条目开始编辑</p>
+            <p className="text-xs text-pg-fg-subtle">在速贴面板或搜索结果中，选中文本后按 Ctrl+Enter</p>
           </div>
         ) : detailQuery.isLoading ? (
           <div className="flex h-full items-center justify-center">
@@ -250,16 +238,16 @@ export function EditorShell() {
             ref={textareaRef}
             className="h-full w-full resize-none rounded-md border border-pg-border-default bg-pg-canvas-subtle px-5 py-5 text-[14px] leading-relaxed text-pg-fg-default outline-none transition-colors focus:border-pg-accent-fg focus:bg-pg-canvas-inset focus-visible:outline-none"
             onChange={(event) => setDraftText(event.target.value)}
-            placeholder="输入或编辑文本内容..."
+            placeholder="在此输入或修改文本..."
             value={draftText}
           />
         ) : (
           <div className="rounded-lg border border-pg-border-default bg-pg-canvas-subtle p-5">
             <h2 className="text-base font-semibold text-pg-fg-muted">
-              当前条目不支持文本编辑
+              此条目无法编辑
             </h2>
             <p className="mt-2 text-sm leading-6 text-pg-fg-muted">
-              仅文本条目可以进入独立编辑窗口。你可以关闭当前窗口并返回来源界面继续操作。
+              只有文本类型的条目可以在这里编辑。你可以关闭当前窗口并返回来源界面继续操作。
             </p>
           </div>
         )}
@@ -267,7 +255,7 @@ export function EditorShell() {
 
       <footer className="flex shrink-0 items-center justify-between border-t border-pg-border-muted px-5 py-3">
         <div className="text-sm text-pg-fg-subtle">
-          Enter 和方向键保留文本编辑语义，Ctrl+S 保存，Esc 请求关闭
+          Ctrl+S 保存 · Esc 关闭
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -301,10 +289,10 @@ export function EditorShell() {
               className="text-lg font-semibold text-pg-fg-default"
               id="editor-close-confirm-title"
             >
-              发现未保存修改
+              有未保存的修改
             </h2>
             <p className="mt-2 text-sm leading-6 text-pg-fg-muted">
-              你可以先保存当前内容再关闭，也可以放弃这次修改并直接返回来源窗口。
+              保存修改还是放弃并关闭？
             </p>
             <div className="mt-6 flex justify-end gap-2">
               <button
