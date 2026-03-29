@@ -513,11 +513,11 @@ export function SearchShell() {
     }
 
     try {
-      const result = await pasteItem(currentItem.id, {
+      setNoticeMessage(null);
+      await pasteItem(currentItem.id, {
         restoreClipboardAfterPaste: true,
         pasteToTarget: true,
       });
-      setNoticeMessage(result.message);
     } catch (error) {
       setNoticeMessage(`执行粘贴失败：${getErrorMessage(error, "请稍后重试。")}`);
     }
