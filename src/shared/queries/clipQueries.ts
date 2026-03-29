@@ -17,8 +17,8 @@ function invalidateClipQueries() {
     queryClient.invalidateQueries({ queryKey: ["search"] }),
     queryClient.invalidateQueries({ queryKey: ["detail"] }),
     queryClient.invalidateQueries({ queryKey: ["picker-recent"] }),
-    queryClient.invalidateQueries({ queryKey: ["workbench-recent"] }),
-    queryClient.invalidateQueries({ queryKey: ["workbench-search"] }),
+    queryClient.invalidateQueries({ queryKey: ["search-recent"] }),
+    queryClient.invalidateQueries({ queryKey: ["search-search"] }),
   ]);
 }
 

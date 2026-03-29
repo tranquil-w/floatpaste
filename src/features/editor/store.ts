@@ -2,8 +2,8 @@ import { create } from "zustand";
 
 export type EditorSession = {
   itemId: string;
-  source: "picker" | "workbench";
-  returnTo: "picker" | "workbench";
+  source: "picker" | "search";
+  returnTo: "picker" | "search";
 };
 
 type EditorStore = {

@@ -1,18 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { emitTo, listen } from "@tauri-apps/api/event";
-import { hidePicker, hideWorkbench, openEditorFromWorkbench, pasteItem } from "../../bridge/commands";
+import { hidePicker, hideSearch, openEditorFromSearch, pasteItem } from "../../bridge/commands";
 import {
   PICKER_CONFIRM_EVENT,
   PICKER_NAVIGATE_EVENT,
   PICKER_OPEN_EDITOR_EVENT,
   PICKER_SELECT_INDEX_EVENT,
-  WORKBENCH_EDIT_ITEM_EVENT,
-  WORKBENCH_INPUT_RESUME_EVENT,
-  WORKBENCH_INPUT_SUSPEND_EVENT,
-  WORKBENCH_NAVIGATE_EVENT,
-  WORKBENCH_PASTE_EVENT,
-  WORKBENCH_SESSION_END_EVENT,
-  WORKBENCH_SESSION_START_EVENT,
+  SEARCH_EDIT_ITEM_EVENT,
+  SEARCH_INPUT_RESUME_EVENT,
+  SEARCH_INPUT_SUSPEND_EVENT,
+  SEARCH_NAVIGATE_EVENT,
+  SEARCH_PASTE_EVENT,
+  SEARCH_SESSION_END_EVENT,
+  SEARCH_SESSION_START_EVENT,
 } from "../../bridge/events";
 import { isTauriRuntime } from "../../bridge/runtime";
 import type { ClipItemSummary } from "../../shared/types/clips";
@@ -20,10 +20,11 @@ import { getClipTypeLabel } from "../../shared/utils/clipDisplay";
 import { getErrorMessage } from "../../shared/utils/error";
 import { formatDateTime } from "../../shared/utils/time";
 import { useItemDetailQuery } from "../../shared/queries/clipQueries";
-import { getWorkbenchKeyboardAction } from "./keyboard";
-import { useWorkbenchRecentQuery, useWorkbenchSearchQuery } from "./queries";
-import { getNextWorkbenchNavigationIndex } from "./state";
-import { useWorkbenchStore } from "./store";
+import { getSearchKeyboardAction } from "./keyboard";
+import { useSearchRecentQuery, useSearchSearchQuery } from "./queries";
+import { getNextSearchNavigationIndex } from "./state";
+import { useSearchStore } from "./store";
+import type { SearchSession } from "./store";
 
 const STYLES = {
   shell:
@@ -51,7 +52,7 @@ const STYLES = {
     "rounded-lg border border-pg-border-default bg-pg-canvas-subtle p-4 text-sm leading-6 text-pg-fg-muted",
 };
 
-export function WorkbenchShell() {
+export function SearchShell() {
   const {
     keyword,
     noticeMessage,
@@ -62,14 +63,14 @@ export function WorkbenchShell() {
     setNoticeMessage,
     setSelectedItemId,
     setSession,
-  } = useWorkbenchStore();
+  } = useSearchStore();
   const searchInputRef = useRef<HTMLInputElement>(null);
   const selectedItemIdRef = useRef<string | null>(selectedItemId);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [inputSuspended, setInputSuspended] = useState(false);
   const hasKeyword = keyword.trim().length > 0;
-  const recentQuery = useWorkbenchRecentQuery(!hasKeyword);
-  const searchQuery = useWorkbenchSearchQuery(keyword, hasKeyword);
+  const recentQuery = useSearchRecentQuery(!hasKeyword);
+  const searchQuery = useSearchSearchQuery(keyword, hasKeyword);
   const items = useMemo<ClipItemSummary[]>(
     () => (hasKeyword ? (searchQuery.data?.items ?? []) : (recentQuery.data ?? [])),
     [hasKeyword, recentQuery.data, searchQuery.data?.items],
@@ -127,7 +128,7 @@ export function WorkbenchShell() {
       return;
     }
 
-    const nextIndex = getNextWorkbenchNavigationIndex(
+    const nextIndex = getNextSearchNavigationIndex(
       currentItems,
       selectedItemIdRef.current,
       direction,
@@ -176,7 +177,7 @@ export function WorkbenchShell() {
     }
   }
 
-  async function closePickerFromWorkbench() {
+  async function closePickerFromSearch() {
     try {
       await hidePicker();
       setNoticeMessage(null);
@@ -202,12 +203,12 @@ export function WorkbenchShell() {
       source: string;
       itemId?: string;
       initialKeyword?: string;
-    }>(WORKBENCH_SESSION_START_EVENT, (event) => {
+    }>(SEARCH_SESSION_START_EVENT, (event) => {
       setSession({
         source: "global" as const,
         initialItemId: event.payload.itemId,
         initialKeyword: event.payload.initialKeyword,
-      });
+      } as SearchSession);
       setKeyword(event.payload.initialKeyword ?? "");
       setSelectedItemId(event.payload.itemId ?? null);
       setNoticeMessage(null);
@@ -216,20 +217,20 @@ export function WorkbenchShell() {
       offStart = cleanup;
     });
 
-    void listen(WORKBENCH_SESSION_END_EVENT, () => {
+    void listen(SEARCH_SESSION_END_EVENT, () => {
       setInputSuspended(false);
       reset();
     }).then((cleanup) => {
       offEnd = cleanup;
     });
 
-    void listen<string>(WORKBENCH_NAVIGATE_EVENT, (event) => {
+    void listen<string>(SEARCH_NAVIGATE_EVENT, (event) => {
       const currentItems = itemsRef.current;
       if (!currentItems.length) {
         return;
       }
 
-      const nextIndex = getNextWorkbenchNavigationIndex(
+      const nextIndex = getNextSearchNavigationIndex(
         currentItems,
         selectedItemIdRef.current,
         event.payload === "up" ? "up" : "down",
@@ -242,26 +243,26 @@ export function WorkbenchShell() {
       offNavigate = cleanup;
     });
 
-    void listen(WORKBENCH_EDIT_ITEM_EVENT, () => {
+    void listen(SEARCH_EDIT_ITEM_EVENT, () => {
       void handleOpenEditor();
     }).then((cleanup) => {
       offEdit = cleanup;
     });
 
-    void listen(WORKBENCH_PASTE_EVENT, () => {
+    void listen(SEARCH_PASTE_EVENT, () => {
       void handlePasteSelected();
     }).then((cleanup) => {
       offPaste = cleanup;
     });
 
-    void listen(WORKBENCH_INPUT_SUSPEND_EVENT, () => {
+    void listen(SEARCH_INPUT_SUSPEND_EVENT, () => {
       setInputSuspended(true);
       searchInputRef.current?.blur();
     }).then((cleanup) => {
       offSuspend = cleanup;
     });
 
-    void listen(WORKBENCH_INPUT_RESUME_EVENT, () => {
+    void listen(SEARCH_INPUT_RESUME_EVENT, () => {
       setInputSuspended(false);
       searchInputRef.current?.focus();
     }).then((cleanup) => {
@@ -284,7 +285,7 @@ export function WorkbenchShell() {
       if (inputSuspended && !event.isComposing) {
         if (event.key === "Escape") {
           event.preventDefault();
-          void closePickerFromWorkbench();
+          void closePickerFromSearch();
           return;
         }
 
@@ -319,7 +320,7 @@ export function WorkbenchShell() {
         }
       }
 
-      const action = getWorkbenchKeyboardAction({
+      const action = getSearchKeyboardAction({
         key: event.key,
         ctrlKey: event.ctrlKey,
         metaKey: event.metaKey,
@@ -358,7 +359,7 @@ export function WorkbenchShell() {
 
   async function handleClose() {
     try {
-      await hideWorkbench();
+      await hideSearch();
       setNoticeMessage(null);
     } catch (error) {
       setNoticeMessage(`关闭搜索窗口失败：${getErrorMessage(error, "请稍后重试。")}`);
@@ -377,7 +378,7 @@ export function WorkbenchShell() {
     }
 
     try {
-      await openEditorFromWorkbench(currentItem.id);
+      await openEditorFromSearch(currentItem.id);
       setNoticeMessage(null);
     } catch (error) {
       setNoticeMessage(`打开编辑窗口失败：${getErrorMessage(error, "请稍后重试。")}`);

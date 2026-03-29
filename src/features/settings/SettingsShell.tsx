@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
   SETTINGS_CHANGED_EVENT,
-  MANAGER_OPEN_SETTINGS_EVENT,
+  SETTINGS_OPEN_SETTINGS_EVENT,
 } from "../../bridge/events";
 import { isTauriRuntime } from "../../bridge/runtime";
 import { hideCurrentWindow } from "../../bridge/window";
@@ -64,7 +64,7 @@ const FORM_HINT = "mt-1.5 text-xs leading-relaxed text-pg-fg-subtle";
 
 const SECTION_HEADING = "text-sm font-semibold text-pg-fg-default border-b border-pg-border-subtle pb-2";
 
-export function ManagerShell() {
+export function SettingsShell() {
   const settings = useSettingsQuery();
   const updateSettingsMutation = useUpdateSettingsMutation();
 
@@ -80,8 +80,8 @@ export function ManagerShell() {
   const [pauseMonitoring, setPauseMonitoring] = useState(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>("system");
   const [excludedAppsText, setExcludedAppsText] = useState("");
-  const [workbenchShortcut, setWorkbenchShortcut] = useState("Alt+S");
-  const [workbenchShortcutEnabled, setWorkbenchShortcutEnabled] = useState(true);
+  const [searchShortcut, setSearchShortcut] = useState("Alt+S");
+  const [searchShortcutEnabled, setSearchShortcutEnabled] = useState(true);
 
   useEffect(() => {
     if (!data) return;
@@ -95,8 +95,8 @@ export function ManagerShell() {
     setPauseMonitoring(data.pauseMonitoring);
     setThemeMode(data.themeMode);
     setExcludedAppsText(data.excludedApps.join("\n"));
-    setWorkbenchShortcut(data.workbenchShortcut);
-    setWorkbenchShortcutEnabled(data.workbenchShortcutEnabled);
+    setSearchShortcut(data.searchShortcut);
+    setSearchShortcutEnabled(data.searchShortcutEnabled);
   }, [data]);
 
   useEffect(() => {
@@ -111,7 +111,7 @@ export function ManagerShell() {
       offSettings = cleanup;
     });
 
-    void listen(MANAGER_OPEN_SETTINGS_EVENT, async () => {
+    void listen(SETTINGS_OPEN_SETTINGS_EVENT, async () => {
       await queryClient.invalidateQueries({ queryKey: ["settings"] });
     }).then((cleanup) => {
       offOpenSettings = cleanup;
@@ -190,12 +190,12 @@ export function ManagerShell() {
             <div className="block">
               <div className="mb-1.5 flex items-center justify-between">
                 <span className={FORM_LABEL}>搜索窗口快捷键</span>
-                <label className="flex cursor-pointer items-center gap-2" htmlFor="workbench-shortcut-enabled">
+                <label className="flex cursor-pointer items-center gap-2" htmlFor="search-shortcut-enabled">
                   <input
-                    id="workbench-shortcut-enabled"
-                    checked={workbenchShortcutEnabled}
+                    id="search-shortcut-enabled"
+                    checked={searchShortcutEnabled}
                     className="h-4 w-4 rounded border-pg-border-default accent-pg-accent-fg"
-                    onChange={(e) => setWorkbenchShortcutEnabled(e.target.checked)}
+                    onChange={(e) => setSearchShortcutEnabled(e.target.checked)}
                     type="checkbox"
                   />
                   <span className="text-xs text-pg-fg-subtle">启用</span>
@@ -203,10 +203,10 @@ export function ManagerShell() {
               </div>
               <input
                 className={FORM_INPUT}
-                disabled={!workbenchShortcutEnabled}
-                onChange={(e) => setWorkbenchShortcut(e.target.value)}
+                disabled={!searchShortcutEnabled}
+                onChange={(e) => setSearchShortcut(e.target.value)}
                 placeholder="Alt+S"
-                value={workbenchShortcut}
+                value={searchShortcut}
               />
               <p className={FORM_HINT}>全局快捷键，直接打开搜索窗口。</p>
             </div>
@@ -416,8 +416,8 @@ export function ManagerShell() {
                   .filter(Boolean),
                 restoreClipboardAfterPaste,
                 pauseMonitoring,
-                workbenchShortcut,
-                workbenchShortcutEnabled,
+                searchShortcut,
+                searchShortcutEnabled,
               });
             }}
             type="button"

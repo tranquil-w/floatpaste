@@ -1,17 +1,17 @@
 import { create } from "zustand";
 
-export interface WorkbenchSession {
+export interface SearchSession {
   source: "global";
   initialItemId?: string;
   initialKeyword?: string;
 }
 
-type WorkbenchStore = {
-  session: WorkbenchSession | null;
+type SearchStore = {
+  session: SearchSession | null;
   noticeMessage: string | null;
   keyword: string;
   selectedItemId: string | null;
-  setSession: (session: WorkbenchSession | null) => void;
+  setSession: (session: SearchSession | null) => void;
   setNoticeMessage: (message: string | null) => void;
   setKeyword: (keyword: string) => void;
   setSelectedItemId: (id: string | null) => void;
@@ -25,7 +25,7 @@ const initialState = {
   selectedItemId: null,
 };
 
-export const useWorkbenchStore = create<WorkbenchStore>((set) => ({
+export const useSearchStore = create<SearchStore>((set) => ({
   ...initialState,
   setSession: (session) => set({ session }),
   setNoticeMessage: (noticeMessage) => set({ noticeMessage }),

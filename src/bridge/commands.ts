@@ -112,7 +112,7 @@ export async function showPicker(): Promise<void> {
   if (!isTauriRuntime()) {
     return;
   }
-  return invoke("show_picker_from_manager");
+  return invoke("show_picker_from_settings");
 }
 
 export async function hidePicker(): Promise<void> {
@@ -122,11 +122,11 @@ export async function hidePicker(): Promise<void> {
   return invoke("hide_picker");
 }
 
-export async function openManager(): Promise<void> {
+export async function openSettings(): Promise<void> {
   if (!isTauriRuntime()) {
     return;
   }
-  return invoke("open_manager");
+  return invoke("open_settings");
 }
 
 export async function openEditorFromPicker(itemId: string): Promise<void> {
@@ -136,11 +136,11 @@ export async function openEditorFromPicker(itemId: string): Promise<void> {
   return invoke("open_editor_from_picker", { itemId });
 }
 
-export async function openEditorFromWorkbench(itemId: string): Promise<void> {
+export async function openEditorFromSearch(itemId: string): Promise<void> {
   if (!isTauriRuntime()) {
     return;
   }
-  return invoke("open_editor_from_workbench", { itemId });
+  return invoke("open_editor_from_search", { itemId });
 }
 
 export async function hideEditor(): Promise<void> {
@@ -150,16 +150,16 @@ export async function hideEditor(): Promise<void> {
   return invoke("hide_editor");
 }
 
-export async function openWorkbenchGlobal(): Promise<void> {
+export async function openSearchGlobal(): Promise<void> {
   if (!isTauriRuntime()) {
     return;
   }
-  return invoke("open_workbench_global");
+  return invoke("open_search_global");
 }
 
-export async function hideWorkbench(): Promise<void> {
+export async function hideSearch(): Promise<void> {
   if (!isTauriRuntime()) {
     return;
   }
-  return invoke("hide_workbench");
+  return invoke("hide_search");
 }

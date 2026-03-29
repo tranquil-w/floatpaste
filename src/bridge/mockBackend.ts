@@ -12,9 +12,9 @@ const now = Date.now();
 const pickerPositionModes = new Set(["mouse", "lastPosition", "caret"]);
 const themeModes = new Set(["system", "light", "dark"]);
 const DEFAULT_MAIN_SHORTCUT = "Alt+Q";
-const DEFAULT_WORKBENCH_SHORTCUT = "Alt+S";
+const DEFAULT_SEARCH_SHORTCUT = "Alt+S";
 const LEGACY_MAIN_SHORTCUT = "Ctrl+`";
-const LEGACY_WORKBENCH_SHORTCUTS = new Set(["win+f", "windows+f", "super+f"]);
+const LEGACY_SEARCH_SHORTCUTS = new Set(["win+f", "windows+f", "super+f"]);
 
 function normalizeMainShortcut(shortcut: string): string {
   const trimmed = shortcut.trim();
@@ -24,14 +24,14 @@ function normalizeMainShortcut(shortcut: string): string {
   return trimmed;
 }
 
-function normalizeWorkbenchShortcut(shortcut: string): string {
+function normalizeSearchShortcut(shortcut: string): string {
   const trimmed = shortcut.trim();
   if (!trimmed) {
-    return DEFAULT_WORKBENCH_SHORTCUT;
+    return DEFAULT_SEARCH_SHORTCUT;
   }
 
-  if (LEGACY_WORKBENCH_SHORTCUTS.has(trimmed.toLowerCase())) {
-    return DEFAULT_WORKBENCH_SHORTCUT;
+  if (LEGACY_SEARCH_SHORTCUTS.has(trimmed.toLowerCase())) {
+    return DEFAULT_SEARCH_SHORTCUT;
   }
 
   return trimmed;
@@ -50,7 +50,8 @@ function sanitizeSettings(payload: UserSetting): UserSetting {
     pickerRecordLimit: Math.min(1000, Math.max(9, Math.trunc(payload.pickerRecordLimit || 50))),
     pickerPositionMode,
     themeMode,
-    workbenchShortcut: normalizeWorkbenchShortcut(payload.workbenchShortcut),
+    searchShortcut: normalizeSearchShortcut(payload.searchShortcut),
+    searchShortcutEnabled: payload.searchShortcutEnabled,
   };
 }
 
@@ -359,7 +360,7 @@ let settings: UserSetting = {
   restoreClipboardAfterPaste: true,
   pauseMonitoring: false,
   themeMode: "system",
-  workbenchShortcut: DEFAULT_WORKBENCH_SHORTCUT,
-  workbenchShortcutEnabled: true,
+  searchShortcut: DEFAULT_SEARCH_SHORTCUT,
+  searchShortcutEnabled: true,
 };
 

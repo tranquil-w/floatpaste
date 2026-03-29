@@ -2,18 +2,18 @@ import { useQuery } from "@tanstack/react-query";
 import { listRecentItems, searchItems } from "../../bridge/commands";
 import type { SearchQuery } from "../../shared/types/clips";
 
-const WORKBENCH_RECENT_LIMIT = 30;
+const SEARCH_RECENT_LIMIT = 30;
 
-export function useWorkbenchRecentQuery(enabled: boolean) {
+export function useSearchRecentQuery(enabled: boolean) {
   return useQuery({
-    queryKey: ["workbench-recent", WORKBENCH_RECENT_LIMIT],
-    queryFn: () => listRecentItems(WORKBENCH_RECENT_LIMIT),
+    queryKey: ["search-recent", SEARCH_RECENT_LIMIT],
+    queryFn: () => listRecentItems(SEARCH_RECENT_LIMIT),
     enabled,
     staleTime: 0,
   });
 }
 
-export function useWorkbenchSearchQuery(keyword: string, enabled: boolean) {
+export function useSearchSearchQuery(keyword: string, enabled: boolean) {
   const query: SearchQuery = {
     keyword,
     filters: {},
@@ -23,7 +23,7 @@ export function useWorkbenchSearchQuery(keyword: string, enabled: boolean) {
   };
 
   return useQuery({
-    queryKey: ["workbench-search", query],
+    queryKey: ["search-query", query],
     queryFn: () => searchItems(query),
     enabled,
     staleTime: 0,
