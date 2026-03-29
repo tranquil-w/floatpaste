@@ -153,10 +153,11 @@ html.dark {
   --pg-accent-subtle: var(--pg-blue-0);
   --pg-accent-hover: var(--pg-blue-4);
 
-  /* Canvas */
-  --pg-canvas-default: var(--pg-neutral-0);
-  --pg-canvas-subtle: var(--pg-neutral-1);
-  --pg-canvas-inset: var(--pg-neutral-0);
+  /* Canvas — light uses neutral-2 (#EFF2F5, warm gray-white, Catppuccin Latte base);
+   * dark mode overrides these to lighter neutral levels (see dark dimmed overrides below) */
+  --pg-canvas-default: var(--pg-neutral-2);
+  --pg-canvas-subtle: var(--pg-neutral-3);
+  --pg-canvas-inset: var(--pg-neutral-2);
 
   /* Border */
   --pg-border-default: var(--pg-neutral-6);
