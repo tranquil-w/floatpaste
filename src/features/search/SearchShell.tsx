@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { emitTo, listen } from "@tauri-apps/api/event";
-import { hidePicker, hideSearch, openEditorFromSearch, pasteItem } from "../../bridge/commands";
+import { hidePicker, hideSearch, openEditorFromSearch, pasteItem, setItemFavorited } from "../../bridge/commands";
 import {
   PICKER_CONFIRM_EVENT,
   PICKER_NAVIGATE_EVENT,
@@ -510,6 +510,20 @@ export function SearchShell() {
                             编辑
                           </button>
                         )}
+                        <button
+                          className={STYLES.actionButtonSecondary}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => {
+                            const id = selectedItemIdRef.current;
+                            if (id) {
+                              const fav = detailQuery.data?.isFavorited ?? false;
+                              void setItemFavorited(id, !fav);
+                            }
+                          }}
+                          type="button"
+                        >
+                          {detailQuery.data.isFavorited ? "取消收藏" : "收藏"}
+                        </button>
                       </div>
                     </div>
                   )}
