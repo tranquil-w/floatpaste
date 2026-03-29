@@ -20,6 +20,7 @@ import { getClipTypeLabel } from "../../shared/utils/clipDisplay";
 import { getErrorMessage } from "../../shared/utils/error";
 import { formatDateTime } from "../../shared/utils/time";
 import { useItemDetailQuery } from "../../shared/queries/clipQueries";
+import { LoadingSpinner } from "../../shared/ui/LoadingSpinner";
 import { getSearchKeyboardAction } from "./keyboard";
 import { useSearchRecentQuery, useSearchSearchQuery } from "./queries";
 import { getNextSearchNavigationIndex } from "./state";
@@ -29,27 +30,20 @@ import type { SearchSession } from "./store";
 const STYLES = {
   shell:
     "flex h-screen w-screen flex-col overflow-hidden bg-pg-canvas-default text-pg-fg-default",
-  header:
-    "flex shrink-0 items-center gap-4 border-b border-pg-border-subtle bg-pg-canvas-subtle px-4 py-3",
   searchInput:
-    "flex-1 rounded-lg border border-pg-border-default bg-pg-canvas-inset px-3 py-2 text-sm outline-none transition-colors placeholder:text-pg-fg-subtle focus:border-pg-accent-fg focus:ring-1 focus:ring-pg-accent-fg",
-  closeButton:
-    "rounded-md border border-pg-border-default px-3 py-2 text-sm transition-colors hover:bg-pg-canvas-subtle",
-  sidebar:
-    "w-[360px] shrink-0 border-r border-pg-border-muted bg-pg-canvas-subtle",
-  listItem: (selected: boolean) =>
+    "w-full rounded-lg border border-pg-border-default bg-pg-canvas-inset px-3 py-2 text-sm outline-none transition-all placeholder:text-pg-fg-subtle focus:border-pg-accent-fg focus:ring-2 focus:ring-pg-accent-fg/30",
+  listItem: (selected: boolean, favorited: boolean) =>
     `w-full border-b border-pg-border-muted px-4 py-3 text-left transition-colors hover:bg-pg-accent-subtle ${
       selected
-        ? "bg-pg-accent-subtle"
-        : ""
+        ? "bg-pg-accent-subtle border-pg-accent-fg/30"
+        : favorited
+          ? "border-l-[3px] border-l-pg-accent-fg"
+          : ""
     }`,
-  detailPanel: "min-w-0 flex-1 px-5 py-4 bg-pg-canvas-default",
-  detailCard:
-    "rounded-lg border border-pg-border-default bg-pg-canvas-subtle p-4",
-  textPreview:
-    "min-h-0 flex-1 rounded-lg border border-pg-border-default bg-pg-canvas-subtle p-4",
-  nonTextNotice:
-    "rounded-lg border border-pg-border-default bg-pg-canvas-subtle p-4 text-sm leading-6 text-pg-fg-muted",
+  actionButton:
+    "rounded-md bg-pg-accent-emphasis px-3 py-1.5 text-xs font-medium text-pg-fg-on-emphasis transition-colors hover:opacity-90",
+  actionButtonSecondary:
+    "rounded-md border border-pg-border-default px-3 py-1.5 text-xs font-medium text-pg-fg-default transition-colors hover:bg-pg-canvas-subtle",
 };
 
 export function SearchShell() {
@@ -406,56 +400,58 @@ export function SearchShell() {
 
   return (
     <div className={STYLES.shell}>
-      <header className={STYLES.header}>
-        <div className="min-w-0" data-tauri-drag-region>
-          <p className="text-xs font-medium uppercase tracking-[0.16em] text-pg-fg-subtle">
-            搜索与定位
-          </p>
-          <h1 className="mt-1 text-base font-semibold text-pg-fg-default">
-            搜索窗口
-          </h1>
-        </div>
+      {/* 蓝色渐变条 */}
+      <div className="h-[3px] w-full shrink-0 bg-gradient-to-r from-pg-blue-5 to-pg-blue-4" />
+
+      {/* 搜索区域 */}
+      <div className="max-w-[460px] mx-auto w-full px-4 py-3">
         <input
           ref={searchInputRef}
           className={STYLES.searchInput}
           onChange={(event) => setKeyword(event.target.value)}
-          placeholder="搜索记录..."
-          aria-label="搜索记录"
+          placeholder="搜索剪贴板记录..."
+          aria-label="搜索剪贴板记录"
           value={keyword}
         />
-        <button
-          className={STYLES.closeButton}
-          onClick={() => void handleClose()}
-          type="button"
-        >
-          关闭
-        </button>
-      </header>
+      </div>
 
+      {/* 通知消息 */}
       {noticeMessage ? (
         <div className="border-b border-pg-danger-fg/20 bg-pg-danger-subtle px-4 py-2 text-sm text-pg-danger-fg">
           {noticeMessage}
         </div>
       ) : null}
 
-      <main className="flex min-h-0 flex-1">
-        <aside className={STYLES.sidebar}>
-          {isLoading ? (
-            <div className="flex h-full items-center justify-center text-sm text-pg-fg-subtle">
-              加载中...
-            </div>
-          ) : items.length === 0 ? (
-            <div className="flex h-full items-center justify-center text-sm text-pg-fg-subtle">
-              {hasKeyword ? "未找到匹配记录" : "暂无记录"}
-            </div>
-          ) : (
-            <div className="h-full overflow-y-auto">
-              {items.map((item, index) => (
+      {/* 列表区域 - 单栏布局 */}
+      <main className="min-h-0 flex-1 overflow-y-auto">
+        {isLoading ? (
+          <div className="flex h-full items-center justify-center py-12">
+            <LoadingSpinner size="sm" text="加载中..." />
+          </div>
+        ) : items.length === 0 ? (
+          <div className="flex h-full flex-col items-center justify-center gap-1 px-4 py-12 text-center text-sm text-pg-fg-subtle">
+            {hasKeyword ? (
+              <>
+                <span>未找到匹配记录</span>
+                <span>尝试调整搜索关键词</span>
+              </>
+            ) : (
+              <>
+                <span>暂无剪贴板记录</span>
+                <span>复制内容后使用 Alt+S 打开此窗口</span>
+              </>
+            )}
+          </div>
+        ) : (
+          <div>
+            {items.map((item, index) => {
+              const isSelected = selectedItemId === item.id;
+              return (
                 <button
                   ref={(el) => {
                     itemRefs.current[index] = el;
                   }}
-                  className={STYLES.listItem(selectedItemId === item.id)}
+                  className={STYLES.listItem(isSelected, item.isFavorited)}
                   key={item.id}
                   onClick={() => setSelectedItemId(item.id)}
                   onDoubleClick={() => {
@@ -465,88 +461,80 @@ export function SearchShell() {
                   }}
                   type="button"
                 >
-                  <p className="line-clamp-2 text-sm text-pg-fg-default">
-                    {item.contentPreview}
-                  </p>
-                  <div className="mt-2 flex items-center gap-2 text-xs text-pg-fg-subtle">
-                    <span>{getClipTypeLabel(item)}</span>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="min-w-0 flex-1 line-clamp-2 text-sm text-pg-fg-default">
+                      {item.contentPreview}
+                    </p>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <span className="text-xs text-pg-fg-subtle">
+                        {getClipTypeLabel(item)}
+                      </span>
+                      {item.isFavorited && (
+                        <span className="text-[12px] text-pg-favorite">★</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="mt-1 flex items-center gap-2 text-xs text-pg-fg-subtle">
                     <span>{item.sourceApp ?? "未知来源"}</span>
                     <span>{formatDateTime(item.lastUsedAt ?? item.createdAt)}</span>
                   </div>
+
+                  {/* 选中项内联展开 */}
+                  {isSelected && detailQuery.data && (
+                    <div className="mt-2 border-t border-pg-accent-fg/12 pt-2">
+                      {detailQuery.data.type === "text" ? (
+                        <pre className="text-xs leading-relaxed text-pg-fg-muted line-clamp-5">
+                          {detailQuery.data.fullText || detailQuery.data.contentPreview}
+                        </pre>
+                      ) : (
+                        <p className="text-xs text-pg-fg-subtle">
+                          当前条目不是文本类型，搜索窗口只负责搜索与定位
+                        </p>
+                      )}
+                      <div className="mt-2 flex gap-2">
+                        <button
+                          className={STYLES.actionButton}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => void handlePasteSelected()}
+                          type="button"
+                        >
+                          粘贴
+                        </button>
+                        {detailQuery.data.type === "text" && (
+                          <button
+                            className={STYLES.actionButtonSecondary}
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => void handleOpenEditor()}
+                            type="button"
+                          >
+                            编辑
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </button>
-              ))}
-            </div>
-          )}
-        </aside>
-
-        <section className={STYLES.detailPanel}>
-          {!selectedItemId ? (
-            <div className="flex h-full items-center justify-center text-sm text-pg-fg-subtle">
-              选择一条记录查看详情，按 Enter 或双击可粘贴，Ctrl+Enter 可进入编辑器
-            </div>
-          ) : detailQuery.isLoading ? (
-            <div className="flex h-full items-center justify-center text-sm text-pg-fg-subtle">
-              正在加载详情...
-            </div>
-          ) : !detailQuery.data ? (
-            <div className="flex h-full items-center justify-center text-sm text-pg-fg-subtle">
-              未找到对应详情
-            </div>
-          ) : (
-            <div className="flex h-full flex-col gap-4">
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <p className="text-xs font-medium uppercase tracking-[0.16em] text-pg-fg-subtle">
-                    当前选中
-                  </p>
-                  <h2 className="mt-1 text-lg font-semibold text-pg-fg-default">
-                    {getClipTypeLabel(detailQuery.data)}
-                  </h2>
-                </div>
-                <button
-                  className="rounded-md bg-pg-accent-emphasis px-4 py-2 text-sm font-semibold text-pg-fg-on-emphasis disabled:opacity-50"
-                  disabled={detailQuery.data.type !== "text"}
-                  onClick={() => void handleOpenEditor()}
-                  type="button"
-                >
-                  编辑当前项
-                </button>
-              </div>
-
-              <div className="grid gap-3 text-sm text-pg-fg-muted sm:grid-cols-2">
-                <div className={STYLES.detailCard}>
-                  <div className="text-xs uppercase tracking-[0.14em] text-pg-fg-subtle">
-                    来源
-                  </div>
-                  <div className="mt-2 text-pg-fg-default">
-                    {detailQuery.data.sourceApp ?? "未知来源"}
-                  </div>
-                </div>
-                <div className={STYLES.detailCard}>
-                  <div className="text-xs uppercase tracking-[0.14em] text-pg-fg-subtle">
-                    更新时间
-                  </div>
-                  <div className="mt-2 text-pg-fg-default">
-                    {formatDateTime(detailQuery.data.updatedAt)}
-                  </div>
-                </div>
-              </div>
-
-              {detailQuery.data.type === "text" ? (
-                <div className={STYLES.textPreview}>
-                  <pre className="h-full overflow-auto whitespace-pre-wrap break-words text-sm leading-7 text-pg-fg-default">
-                    {detailQuery.data.fullText || detailQuery.data.contentPreview}
-                  </pre>
-                </div>
-              ) : (
-                <div className={STYLES.nonTextNotice}>
-                  当前条目不是文本类型，搜索窗口只负责搜索与定位；如需编辑，请选择文本条目后再进入独立编辑窗口。
-                </div>
-              )}
-            </div>
-          )}
-        </section>
+              );
+            })}
+          </div>
+        )}
       </main>
+
+      {/* 底部快捷键提示栏 */}
+      <footer className="flex shrink-0 items-center justify-center gap-3 border-t border-pg-border-subtle px-4 py-2 text-xs text-pg-fg-subtle">
+        <span>
+          <kbd className="rounded border border-pg-border-default bg-pg-canvas-subtle px-1.5 py-0.5 font-mono text-[10px]">Enter</kbd>
+          {" "}粘贴
+        </span>
+        <span>
+          <kbd className="rounded border border-pg-border-default bg-pg-canvas-subtle px-1.5 py-0.5 font-mono text-[10px]">Ctrl+Enter</kbd>
+          {" "}编辑
+        </span>
+        <span>
+          <kbd className="rounded border border-pg-border-default bg-pg-canvas-subtle px-1.5 py-0.5 font-mono text-[10px]">Esc</kbd>
+          {" "}关闭
+        </span>
+      </footer>
     </div>
   );
 }
