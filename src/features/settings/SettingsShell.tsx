@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
   SETTINGS_CHANGED_EVENT,
@@ -9,6 +9,7 @@ import { hideCurrentWindow } from "../../bridge/window";
 import { queryClient } from "../../app/queryClient";
 import type { PickerPositionMode, ThemeMode, UserSetting } from "../../shared/types/settings";
 import { getErrorMessage } from "../../shared/utils/error";
+import { LoadingSpinner } from "../../shared/ui/LoadingSpinner";
 import { useSettingsQuery, useUpdateSettingsMutation } from "./queries";
 
 const pickerPositionOptions: Array<{
@@ -62,7 +63,7 @@ const FORM_LABEL = "mb-1.5 block text-sm font-medium text-pg-fg-default";
 
 const FORM_HINT = "mt-1.5 text-xs leading-relaxed text-pg-fg-subtle";
 
-const SECTION_HEADING = "text-sm font-semibold text-pg-fg-default border-b border-pg-border-subtle pb-2";
+const SECTION_HEADING = "text-base font-semibold text-pg-fg-default border-b border-pg-border-subtle pb-2";
 
 export function SettingsShell() {
   const settings = useSettingsQuery();
@@ -82,9 +83,12 @@ export function SettingsShell() {
   const [excludedAppsText, setExcludedAppsText] = useState("");
   const [searchShortcut, setSearchShortcut] = useState("Alt+S");
   const [searchShortcutEnabled, setSearchShortcutEnabled] = useState(true);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const isInitializingRef = useRef(true);
 
   useEffect(() => {
     if (!data) return;
+    isInitializingRef.current = true;
     setShortcut(data.shortcut);
     setLaunchOnStartup(data.launchOnStartup);
     setSilentOnStartup(data.silentOnStartup);
@@ -97,7 +101,42 @@ export function SettingsShell() {
     setExcludedAppsText(data.excludedApps.join("\n"));
     setSearchShortcut(data.searchShortcut);
     setSearchShortcutEnabled(data.searchShortcutEnabled);
+    // 延迟标记初始化完成，避免初始同步触发自动保存
+    const t = setTimeout(() => { isInitializingRef.current = false; }, 100);
+    return () => clearTimeout(t);
   }, [data]);
+
+  // 自动保存 debounce（800ms）
+  useEffect(() => {
+    if (!data) return;
+    if (isInitializingRef.current) return;
+
+    const timer = setTimeout(() => {
+      setSaveStatus("saving");
+      updateSettingsMutation.mutate({
+        shortcut,
+        launchOnStartup,
+        silentOnStartup: launchOnStartup ? silentOnStartup : false,
+        historyLimit,
+        pickerRecordLimit,
+        pickerPositionMode,
+        themeMode,
+        excludedApps: excludedAppsText
+          .split(/\r?\n/)
+          .map((v) => v.trim())
+          .filter(Boolean),
+        restoreClipboardAfterPaste,
+        pauseMonitoring,
+        searchShortcut,
+        searchShortcutEnabled,
+      }, {
+        onSuccess: () => setSaveStatus("saved"),
+        onError: () => setSaveStatus("error"),
+      });
+    }, 800);
+
+    return () => clearTimeout(timer);
+  }, [shortcut, launchOnStartup, silentOnStartup, historyLimit, pickerRecordLimit, pickerPositionMode, restoreClipboardAfterPaste, pauseMonitoring, themeMode, excludedAppsText, searchShortcut, searchShortcutEnabled, data, updateSettingsMutation]);
 
   useEffect(() => {
     if (!isTauriRuntime()) return;
@@ -142,20 +181,26 @@ export function SettingsShell() {
 
   if (settings.isLoading && !data) {
     return (
-      <div className="flex h-screen items-center justify-center text-sm text-pg-fg-subtle">
-        正在加载设置...
+      <div className="flex h-screen items-center justify-center">
+        <LoadingSpinner size="sm" text="正在加载设置..." />
       </div>
     );
   }
 
   return (
     <main className="flex min-h-screen flex-col">
+      <div className="h-[3px] w-full bg-gradient-to-r from-pg-blue-5 to-pg-blue-4 shrink-0" />
       <div className="mx-auto w-full max-w-[680px] px-6 py-8">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-xl font-semibold text-pg-fg-default">
-            FloatPaste
-          </h1>
+          <div className="flex items-center justify-between">
+            <h1 className="text-xl font-semibold text-pg-fg-default">
+              FloatPaste
+            </h1>
+            {saveStatus === "saved" && (
+              <span className="text-xs text-pg-fg-subtle">已保存</span>
+            )}
+          </div>
           <p className="mt-1 text-sm text-pg-fg-muted">
             偏好设置会自动保存。
           </p>
@@ -175,9 +220,9 @@ export function SettingsShell() {
         ) : null}
 
         {/* ── 快捷键 ── */}
-        <section className="mb-8">
+        <section className="mb-10">
           <h2 className={SECTION_HEADING}>快捷键</h2>
-          <div className="mt-4 space-y-4">
+          <div className="mt-5 space-y-4">
             <label className="block">
               <span className={FORM_LABEL}>全局快捷键</span>
               <input
@@ -214,9 +259,9 @@ export function SettingsShell() {
         </section>
 
         {/* ── 通用 ── */}
-        <section className="mb-8">
+        <section className="mb-6">
           <h2 className={SECTION_HEADING}>通用</h2>
-          <div className="mt-4 space-y-4">
+          <div className="mt-5 space-y-4">
             <label className="block">
               <span className={FORM_LABEL}>历史记录上限</span>
               <input
@@ -247,9 +292,9 @@ export function SettingsShell() {
         </section>
 
         {/* ── 外观 ── */}
-        <section className="mb-8">
+        <section className="mb-10">
           <h2 className={SECTION_HEADING}>外观</h2>
-          <div className="mt-4 space-y-4">
+          <div className="mt-5 space-y-4">
             <fieldset className="border-0 p-0 m-0">
               <legend className={FORM_LABEL}>界面主题</legend>
               <div className="space-y-2">
@@ -317,9 +362,9 @@ export function SettingsShell() {
         </section>
 
         {/* ── 行为 ── */}
-        <section className="mb-8">
+        <section className="mb-6">
           <h2 className={SECTION_HEADING}>行为</h2>
-          <div className="mt-4 space-y-2">
+          <div className="mt-5 space-y-2">
             <label className="flex cursor-pointer items-center gap-3 rounded-md border border-pg-border-muted px-4 py-3 transition-colors hover:border-pg-border-default" htmlFor="launch-on-startup">
               <input
                 className="h-4 w-4 accent-pg-accent-fg"
@@ -381,9 +426,9 @@ export function SettingsShell() {
         </section>
 
         {/* ── 排除应用 ── */}
-        <section className="mb-8">
+        <section className="mb-10">
           <h2 className={SECTION_HEADING}>排除应用</h2>
-          <div className="mt-4">
+          <div className="mt-5">
             <label className="block">
               <textarea
                 className={`${FORM_INPUT} min-h-[100px] leading-relaxed`}
@@ -394,37 +439,6 @@ export function SettingsShell() {
             </label>
           </div>
         </section>
-
-        {/* Save Button */}
-        <div className="pt-2 pb-8">
-          <button
-            className="rounded-md bg-pg-accent-emphasis px-6 py-2.5 text-sm font-semibold text-pg-fg-on-emphasis transition-colors hover:bg-pg-accent-hover disabled:opacity-50"
-            disabled={updateSettingsMutation.isPending}
-            onClick={() => {
-              updateSettingsMutation.reset();
-              updateSettingsMutation.mutate({
-                shortcut,
-                launchOnStartup,
-                silentOnStartup: launchOnStartup ? silentOnStartup : false,
-                historyLimit,
-                pickerRecordLimit,
-                pickerPositionMode,
-                themeMode,
-                excludedApps: excludedAppsText
-                  .split(/\r?\n/)
-                  .map((v) => v.trim())
-                  .filter(Boolean),
-                restoreClipboardAfterPaste,
-                pauseMonitoring,
-                searchShortcut,
-                searchShortcutEnabled,
-              });
-            }}
-            type="button"
-          >
-            保存设置
-          </button>
-        </div>
       </div>
     </main>
   );
