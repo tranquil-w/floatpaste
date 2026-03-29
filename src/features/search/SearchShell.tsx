@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { emitTo, listen } from "@tauri-apps/api/event";
+import { queryClient } from "../../app/queryClient";
 import { hidePicker, hideSearch, openEditorFromSearch, pasteItem, setItemFavorited } from "../../bridge/commands";
 import {
+  CLIPS_CHANGED_EVENT,
   PICKER_CONFIRM_EVENT,
   PICKER_NAVIGATE_EVENT,
   PICKER_OPEN_EDITOR_EVENT,
@@ -45,6 +47,14 @@ const STYLES = {
   actionButtonSecondary:
     "rounded-md border border-pg-border-default px-3 py-1.5 text-xs font-medium text-pg-fg-default transition-colors hover:bg-pg-canvas-subtle",
 };
+
+async function refreshSearchQueries() {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: ["detail"] }),
+    queryClient.invalidateQueries({ queryKey: ["search-recent"] }),
+    queryClient.invalidateQueries({ queryKey: ["search-query"] }),
+  ]);
+}
 
 export function SearchShell() {
   const {
@@ -186,6 +196,7 @@ export function SearchShell() {
     }
 
     let offStart: (() => void) | undefined;
+    let offClipsChanged: (() => void) | undefined;
     let offEnd: (() => void) | undefined;
     let offNavigate: (() => void) | undefined;
     let offEdit: (() => void) | undefined;
@@ -209,6 +220,12 @@ export function SearchShell() {
       setInputSuspended(false);
     }).then((cleanup) => {
       offStart = cleanup;
+    });
+
+    void listen(CLIPS_CHANGED_EVENT, async () => {
+      await refreshSearchQueries();
+    }).then((cleanup) => {
+      offClipsChanged = cleanup;
     });
 
     void listen(SEARCH_SESSION_END_EVENT, () => {
@@ -265,6 +282,7 @@ export function SearchShell() {
 
     return () => {
       offStart?.();
+      offClipsChanged?.();
       offEnd?.();
       offNavigate?.();
       offEdit?.();
@@ -396,6 +414,22 @@ export function SearchShell() {
     }
   }
 
+  async function handleToggleFavorited() {
+    const id = selectedItemIdRef.current;
+    if (!id) {
+      return;
+    }
+
+    try {
+      const favored = detailQuery.data?.isFavorited ?? false;
+      await setItemFavorited(id, !favored);
+      await refreshSearchQueries();
+      setNoticeMessage(null);
+    } catch (error) {
+      setNoticeMessage(`更新收藏状态失败：${getErrorMessage(error, "请稍后重试。")}`);
+    }
+  }
+
   const isLoading = hasKeyword ? searchQuery.isLoading : recentQuery.isLoading;
 
   return (
@@ -513,13 +547,7 @@ export function SearchShell() {
                         <button
                           className={STYLES.actionButtonSecondary}
                           onMouseDown={(e) => e.preventDefault()}
-                          onClick={() => {
-                            const id = selectedItemIdRef.current;
-                            if (id) {
-                              const fav = detailQuery.data?.isFavorited ?? false;
-                              void setItemFavorited(id, !fav);
-                            }
-                          }}
+                          onClick={() => void handleToggleFavorited()}
                           type="button"
                         >
                           {detailQuery.data.isFavorited ? "取消收藏" : "收藏"}

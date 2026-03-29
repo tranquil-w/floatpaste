@@ -764,7 +764,7 @@ mod tests {
         let windows = config["app"]["windows"].as_array().unwrap();
         let search = windows
             .iter()
-            .find(|window| window["label"] == "search")
+            .find(|window| window["label"] == "workbench")
             .unwrap();
 
         assert_eq!(search["decorations"], Value::Bool(false));

@@ -12,6 +12,21 @@ import { getErrorMessage } from "../../shared/utils/error";
 import { LoadingSpinner } from "../../shared/ui/LoadingSpinner";
 import { useSettingsQuery, useUpdateSettingsMutation } from "./queries";
 
+type EditableSettings = {
+  shortcut: string;
+  launchOnStartup: boolean;
+  silentOnStartup: boolean;
+  historyLimit: number;
+  pickerRecordLimit: number;
+  pickerPositionMode: PickerPositionMode;
+  restoreClipboardAfterPaste: boolean;
+  pauseMonitoring: boolean;
+  themeMode: ThemeMode;
+  excludedAppsText: string;
+  searchShortcut: string;
+  searchShortcutEnabled: boolean;
+};
+
 const pickerPositionOptions: Array<{
   value: PickerPositionMode;
   label: string;
@@ -65,6 +80,47 @@ const FORM_HINT = "mt-1.5 text-xs leading-relaxed text-pg-fg-subtle";
 
 const SECTION_HEADING = "text-base font-semibold text-pg-fg-default border-b border-pg-border-subtle pb-2";
 
+function toEditableSettings(settings: UserSetting): EditableSettings {
+  return {
+    shortcut: settings.shortcut,
+    launchOnStartup: settings.launchOnStartup,
+    silentOnStartup: settings.silentOnStartup,
+    historyLimit: settings.historyLimit,
+    pickerRecordLimit: settings.pickerRecordLimit,
+    pickerPositionMode: settings.pickerPositionMode,
+    restoreClipboardAfterPaste: settings.restoreClipboardAfterPaste,
+    pauseMonitoring: settings.pauseMonitoring,
+    themeMode: settings.themeMode,
+    excludedAppsText: settings.excludedApps.join("\n"),
+    searchShortcut: settings.searchShortcut,
+    searchShortcutEnabled: settings.searchShortcutEnabled,
+  };
+}
+
+function toSettingsPayload(editable: EditableSettings): UserSetting {
+  return {
+    shortcut: editable.shortcut,
+    launchOnStartup: editable.launchOnStartup,
+    silentOnStartup: editable.launchOnStartup ? editable.silentOnStartup : false,
+    historyLimit: editable.historyLimit,
+    pickerRecordLimit: editable.pickerRecordLimit,
+    pickerPositionMode: editable.pickerPositionMode,
+    restoreClipboardAfterPaste: editable.restoreClipboardAfterPaste,
+    pauseMonitoring: editable.pauseMonitoring,
+    themeMode: editable.themeMode,
+    excludedApps: editable.excludedAppsText
+      .split(/\r?\n/)
+      .map((value) => value.trim())
+      .filter(Boolean),
+    searchShortcut: editable.searchShortcut,
+    searchShortcutEnabled: editable.searchShortcutEnabled,
+  };
+}
+
+function isSameSettings(left: UserSetting, right: UserSetting) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 export function SettingsShell() {
   const settings = useSettingsQuery();
   const updateSettingsMutation = useUpdateSettingsMutation();
@@ -85,22 +141,66 @@ export function SettingsShell() {
   const [searchShortcutEnabled, setSearchShortcutEnabled] = useState(true);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const isInitializingRef = useRef(true);
+  const hasHydratedFromServerRef = useRef(false);
+  const latestLocalPayloadRef = useRef<UserSetting | null>(null);
+  const latestSaveRequestIdRef = useRef(0);
+
+  useEffect(() => {
+    latestLocalPayloadRef.current = toSettingsPayload({
+      shortcut,
+      launchOnStartup,
+      silentOnStartup,
+      historyLimit,
+      pickerRecordLimit,
+      pickerPositionMode,
+      restoreClipboardAfterPaste,
+      pauseMonitoring,
+      themeMode,
+      excludedAppsText,
+      searchShortcut,
+      searchShortcutEnabled,
+    });
+  }, [
+    shortcut,
+    launchOnStartup,
+    silentOnStartup,
+    historyLimit,
+    pickerRecordLimit,
+    pickerPositionMode,
+    restoreClipboardAfterPaste,
+    pauseMonitoring,
+    themeMode,
+    excludedAppsText,
+    searchShortcut,
+    searchShortcutEnabled,
+  ]);
 
   useEffect(() => {
     if (!data) return;
+    const currentLocalPayload = latestLocalPayloadRef.current;
+    if (
+      hasHydratedFromServerRef.current &&
+      currentLocalPayload &&
+      !isSameSettings(currentLocalPayload, data)
+    ) {
+      return;
+    }
+
+    const nextEditable = toEditableSettings(data);
+    hasHydratedFromServerRef.current = true;
     isInitializingRef.current = true;
-    setShortcut(data.shortcut);
-    setLaunchOnStartup(data.launchOnStartup);
-    setSilentOnStartup(data.silentOnStartup);
-    setHistoryLimit(data.historyLimit);
-    setPickerRecordLimit(data.pickerRecordLimit);
-    setPickerPositionMode(data.pickerPositionMode);
-    setRestoreClipboardAfterPaste(data.restoreClipboardAfterPaste);
-    setPauseMonitoring(data.pauseMonitoring);
-    setThemeMode(data.themeMode);
-    setExcludedAppsText(data.excludedApps.join("\n"));
-    setSearchShortcut(data.searchShortcut);
-    setSearchShortcutEnabled(data.searchShortcutEnabled);
+    setShortcut(nextEditable.shortcut);
+    setLaunchOnStartup(nextEditable.launchOnStartup);
+    setSilentOnStartup(nextEditable.silentOnStartup);
+    setHistoryLimit(nextEditable.historyLimit);
+    setPickerRecordLimit(nextEditable.pickerRecordLimit);
+    setPickerPositionMode(nextEditable.pickerPositionMode);
+    setRestoreClipboardAfterPaste(nextEditable.restoreClipboardAfterPaste);
+    setPauseMonitoring(nextEditable.pauseMonitoring);
+    setThemeMode(nextEditable.themeMode);
+    setExcludedAppsText(nextEditable.excludedAppsText);
+    setSearchShortcut(nextEditable.searchShortcut);
+    setSearchShortcutEnabled(nextEditable.searchShortcutEnabled);
     // 延迟标记初始化完成，避免初始同步触发自动保存
     const t = setTimeout(() => { isInitializingRef.current = false; }, 100);
     return () => clearTimeout(t);
@@ -110,33 +210,49 @@ export function SettingsShell() {
   useEffect(() => {
     if (!data) return;
     if (isInitializingRef.current) return;
+    const payload = latestLocalPayloadRef.current;
+    if (!payload) return;
+    if (isSameSettings(payload, data)) return;
 
     const timer = setTimeout(() => {
+      const requestId = latestSaveRequestIdRef.current + 1;
+      latestSaveRequestIdRef.current = requestId;
       setSaveStatus("saving");
-      updateSettingsMutation.mutate({
-        shortcut,
-        launchOnStartup,
-        silentOnStartup: launchOnStartup ? silentOnStartup : false,
-        historyLimit,
-        pickerRecordLimit,
-        pickerPositionMode,
-        themeMode,
-        excludedApps: excludedAppsText
-          .split(/\r?\n/)
-          .map((v) => v.trim())
-          .filter(Boolean),
-        restoreClipboardAfterPaste,
-        pauseMonitoring,
-        searchShortcut,
-        searchShortcutEnabled,
-      }, {
-        onSuccess: () => setSaveStatus("saved"),
-        onError: () => setSaveStatus("error"),
+      updateSettingsMutation.mutate(payload, {
+        onSuccess: (_, variables) => {
+          if (requestId !== latestSaveRequestIdRef.current) {
+            return;
+          }
+
+          if (latestLocalPayloadRef.current && isSameSettings(latestLocalPayloadRef.current, variables)) {
+            setSaveStatus("saved");
+          }
+        },
+        onError: () => {
+          if (requestId === latestSaveRequestIdRef.current) {
+            setSaveStatus("error");
+          }
+        },
       });
     }, 800);
 
     return () => clearTimeout(timer);
-  }, [shortcut, launchOnStartup, silentOnStartup, historyLimit, pickerRecordLimit, pickerPositionMode, restoreClipboardAfterPaste, pauseMonitoring, themeMode, excludedAppsText, searchShortcut, searchShortcutEnabled, data, updateSettingsMutation]);
+  }, [
+    shortcut,
+    launchOnStartup,
+    silentOnStartup,
+    historyLimit,
+    pickerRecordLimit,
+    pickerPositionMode,
+    restoreClipboardAfterPaste,
+    pauseMonitoring,
+    themeMode,
+    excludedAppsText,
+    searchShortcut,
+    searchShortcutEnabled,
+    data,
+    updateSettingsMutation,
+  ]);
 
   useEffect(() => {
     if (!isTauriRuntime()) return;
