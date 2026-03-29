@@ -20,7 +20,7 @@ if (-not $cargoCommand) {
     $cargoPath = $defaultCargoPath
   }
   else {
-    throw "未找到 Windows cargo.exe，请先在 Windows 环境安装 Rust 工具链。"
+    throw "Windows cargo.exe not found. Install Rust toolchain first."
   }
 }
 else {
