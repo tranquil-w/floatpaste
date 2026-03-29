@@ -98,20 +98,12 @@ impl WindowCoordinator {
 
         restore_picker_window_size(app, &window);
 
-        let manager_visible = app
-            .get_webview_window(SETTINGS_WINDOW_LABEL)
-            .and_then(|window| window.is_visible().ok())
-            .unwrap_or(false);
-        let target_window = if manager_visible {
-            None
-        } else {
-            ActiveAppResolver::current_foreground_window_handle()
-        };
-        state.set_picker_session(target_window, manager_visible)?;
+        let target_window = ActiveAppResolver::current_foreground_window_handle();
+        state.set_picker_session(target_window)?;
         let _ = window.unminimize();
         apply_picker_window_position(&window, state, &settings, target_window);
         notify_search_input_state(app, target_window, true);
-        info!("显示 Picker，settings_visible={manager_visible}, target_window={target_window:?}");
+        info!("显示 Picker，target_window={target_window:?}");
 
         #[cfg(target_os = "windows")]
         {
@@ -135,12 +127,6 @@ impl WindowCoordinator {
             crate::platform::windows::picker_mouse_monitor::PickerMouseMonitor::begin_session(
                 app.clone(),
             );
-        }
-
-        if manager_visible {
-            if let Some(settings) = app.get_webview_window(SETTINGS_WINDOW_LABEL) {
-                let _ = settings.hide();
-            }
         }
 
         window
@@ -206,8 +192,6 @@ impl WindowCoordinator {
             let _ = app_handle.run_on_main_thread(move || {
                 if let Some(hwnd) = session.target_window_hwnd {
                     let _ = ActiveAppResolver::restore_foreground_window(hwnd);
-                } else if session.reopen_manager_on_close {
-                    let _ = Self::open_settings(&app_clone);
                 }
                 notify_search_input_state(&app_clone, session.target_window_hwnd, false);
             });
@@ -236,7 +220,6 @@ impl WindowCoordinator {
             source: EditorSource::Picker,
             return_to: EditorReturnTarget::Picker,
             target_window_hwnd: picker_session.target_window_hwnd,
-            reopen_manager_on_close: picker_session.reopen_manager_on_close,
         };
 
         Self::show_editor(app, state, session)
@@ -305,7 +288,6 @@ impl WindowCoordinator {
             source: EditorSource::Search,
             return_to: EditorReturnTarget::Search,
             target_window_hwnd,
-            reopen_manager_on_close: false,
         };
 
         Self::show_editor(app, state, session)
@@ -624,7 +606,7 @@ fn restore_picker_after_editor(
     state: &AppState,
     session: &EditorSession,
 ) -> Result<(), AppError> {
-    state.set_picker_session(session.target_window_hwnd, session.reopen_manager_on_close)?;
+    state.set_picker_session(session.target_window_hwnd)?;
     notify_search_input_state(app, session.target_window_hwnd, true);
     let window = ensure_picker_window(app)?;
 

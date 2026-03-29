@@ -60,7 +60,6 @@ pub fn run() {
             commands::settings::pause_monitoring,
             commands::settings::resume_monitoring,
             commands::windows::show_picker,
-            commands::windows::show_picker_from_manager,
             commands::windows::hide_picker,
             commands::windows::open_settings,
             commands::windows::open_editor_from_picker,

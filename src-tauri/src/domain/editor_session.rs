@@ -7,7 +7,6 @@ pub struct EditorSession {
     pub source: EditorSource,
     pub return_to: EditorReturnTarget,
     pub target_window_hwnd: Option<isize>,
-    pub reopen_manager_on_close: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -35,7 +34,6 @@ mod tests {
             source: EditorSource::Picker,
             return_to: EditorReturnTarget::Picker,
             target_window_hwnd: None,
-            reopen_manager_on_close: false,
         };
 
         let json = serde_json::to_string(&session).unwrap();

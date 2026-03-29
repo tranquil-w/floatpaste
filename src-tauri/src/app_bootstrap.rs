@@ -41,7 +41,6 @@ pub struct AppState {
 #[derive(Debug, Default, Clone)]
 pub struct PickerSession {
     pub target_window_hwnd: Option<isize>,
-    pub reopen_manager_on_close: bool,
 }
 
 impl AppState {
@@ -84,11 +83,9 @@ impl AppState {
     pub fn set_picker_session(
         &self,
         hwnd: Option<isize>,
-        reopen_manager_on_close: bool,
     ) -> Result<(), AppError> {
         let mut session = self.picker_session.lock()?;
         session.target_window_hwnd = hwnd;
-        session.reopen_manager_on_close = reopen_manager_on_close;
         Ok(())
     }
 
