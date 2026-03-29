@@ -351,7 +351,14 @@ textarea {
   top: 0;
 }
 
+/* Selection colors - light theme default */
 ::selection {
-  color: var(--pg-fg-on-emphasis);
-  background: var(--pg-accent-subtle);
+  color: var(--pg-neutral-0);
+  background: var(--pg-blue-5);
+}
+
+/* Selection colors - dark theme */
+html.dark ::selection {
+  color: var(--pg-neutral-0);
+  background: var(--pg-blue-3);
 }
