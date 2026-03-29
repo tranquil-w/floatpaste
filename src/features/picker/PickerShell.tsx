@@ -1,7 +1,7 @@
 import { type MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { queryClient } from "../../app/queryClient";
-import { hidePicker, openEditorFromPicker, pasteItem } from "../../bridge/commands";
+import { hidePicker, openEditorFromPicker, pasteItem, setItemFavorited } from "../../bridge/commands";
 import {
   CLIPS_CHANGED_EVENT,
   PICKER_CONFIRM_EVENT,
@@ -16,6 +16,7 @@ import { startCurrentWindowResize, type WindowResizeDirection } from "../../brid
 import type { ClipItemSummary } from "../../shared/types/clips";
 import { getClipTypeLabel } from "../../shared/utils/clipDisplay";
 import { formatDateTime } from "../../shared/utils/time";
+import { LoadingSpinner } from "../../shared/ui/LoadingSpinner";
 import {
   DEFAULT_PICKER_RECORD_LIMIT,
   normalizePickerRecordLimit,
@@ -28,19 +29,21 @@ const STYLES = {
     "flex h-screen w-screen flex-col overflow-hidden rounded-md border border-pg-border-muted bg-pg-canvas-default",
   header:
     "flex shrink-0 items-center justify-between border-b border-pg-border-subtle bg-pg-canvas-subtle px-2.5 py-1.5",
-  headerDot: "h-2.5 w-2.5 rounded-full bg-pg-neutral-7",
+  headerDot: "h-2.5 w-2.5 rounded-full bg-pg-accent-fg",
   headerButton:
     "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-semibold text-pg-fg-muted transition-colors hover:bg-pg-accent-subtle hover:text-pg-fg-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pg-accent-fg focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-45",
-  itemButton: (selected: boolean) => `group relative flex w-full flex-col gap-1 rounded-md px-2 py-1.5 text-left transition-colors border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pg-accent-fg focus-visible:ring-offset-2 ${
+  itemButton: (selected: boolean, favorited: boolean) => `group relative flex w-full flex-col gap-1 rounded-md px-2 py-1.5 text-left transition-colors border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pg-accent-fg focus-visible:ring-offset-2 ${
     selected
       ? "bg-pg-accent-subtle border-pg-accent-fg/30"
-      : "bg-transparent border-transparent hover:bg-pg-canvas-subtle"
+      : favorited
+        ? "border-l-[3px] border-l-pg-accent-fg bg-transparent hover:bg-pg-canvas-subtle"
+        : "bg-transparent border-transparent hover:bg-pg-canvas-subtle"
   }`,
-  itemContent: (selected: boolean) =>
-    `${selected ? "text-pg-fg-default" : "text-pg-fg-default/90"} line-clamp-5 text-[13px] font-medium leading-[1.6] tracking-tight break-words [overflow-wrap:anywhere] whitespace-pre-wrap transition-colors`,
+  itemContent: (selected: boolean, favorited: boolean) =>
+    `${selected ? "text-pg-fg-default" : "text-pg-fg-default/90"} line-clamp-5 text-[13px] ${favorited ? "font-medium" : ""} leading-[1.6] tracking-tight break-words [overflow-wrap:anywhere] whitespace-pre-wrap transition-colors`,
   kbdBadge: (selected: boolean) => `flex h-[16px] min-w-[16px] px-1 items-center justify-center rounded-[3px] font-mono text-[9px] font-bold transition-colors ${
     selected
-      ? "bg-pg-neutral-7 text-pg-fg-default"
+      ? "bg-pg-accent-fg text-pg-fg-on-emphasis"
       : "bg-pg-neutral-3 text-pg-fg-muted group-hover:bg-pg-neutral-6 group-hover:text-pg-fg-default"
   }`,
   typeBadge:
@@ -290,6 +293,17 @@ export function PickerShell() {
         return;
       }
 
+      if ((event.ctrlKey || event.metaKey) && event.key === "f") {
+        event.preventDefault();
+        const item = itemsRef.current[selectedIndexRef.current];
+        if (item) {
+          void setItemFavorited(item.id, !item.isFavorited).then(() => {
+            setLastMessage(item.isFavorited ? "已取消收藏" : "已收藏");
+          });
+        }
+        return;
+      }
+
       if (event.key === "Enter") {
         event.preventDefault();
         void confirmSelection(selectedIndexRef.current);
@@ -314,6 +328,7 @@ export function PickerShell() {
   return (
     <div className="m-0 h-screen w-screen select-none overflow-hidden bg-transparent p-0 text-pg-fg-default">
       <div className={STYLES.container}>
+        <div className="h-[3px] w-full bg-gradient-to-r from-pg-blue-5 to-pg-blue-4 shrink-0 rounded-t-md" />
         {tauriRuntime
           ? PICKER_RESIZE_HANDLES.map((handle) => (
               <div
@@ -328,7 +343,7 @@ export function PickerShell() {
         <div className={STYLES.header}>
           <div className="flex min-w-0 flex-1 items-center gap-2" data-tauri-drag-region>
             <div aria-hidden="true" className={STYLES.headerDot} />
-            <span className="text-[12px] font-bold tracking-tight text-pg-fg-default">
+            <span className="text-[12px] font-extrabold tracking-tight text-pg-fg-default">
               FloatPaste
             </span>
             {lastMessage ? (
@@ -337,25 +352,19 @@ export function PickerShell() {
               </span>
             ) : null}
           </div>
-          <button
-            className={STYLES.headerButton}
-            disabled={!canEditSelected}
-            onClick={() => void handleOpenEditor()}
-            title="编辑当前项 (Ctrl+Enter)"
-            type="button"
-          >
-            <svg className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-              <path
-                d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-            编辑
-          </button>
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col px-1 py-1.5">
+          {recent.isLoading ? (
+            <div className="flex h-full items-center justify-center">
+              <LoadingSpinner size="sm" text="正在加载记录..." />
+            </div>
+          ) : !recent.isLoading && items.length === 0 ? (
+            <div className="flex flex-col items-center justify-center flex-1 gap-1 py-8">
+              <p className="text-sm text-pg-fg-muted">暂无剪贴板记录</p>
+              <p className="text-xs text-pg-fg-subtle">复制内容后按 Alt+Q 打开此面板</p>
+            </div>
+          ) : (
           <div className="grid flex-1 gap-1 overflow-y-auto overflow-x-hidden px-0.5 transition-colors">
             {items.map((item, index) => {
               const isSelected = index === selectedIndex;
@@ -364,7 +373,7 @@ export function PickerShell() {
                   ref={(el) => {
                     itemRefs.current[index] = el;
                   }}
-                  className={STYLES.itemButton(isSelected)}
+                  className={STYLES.itemButton(isSelected, item.isFavorited)}
                   key={item.id}
                   onClick={() => {
                     selectedIndexRef.current = index;
@@ -376,7 +385,7 @@ export function PickerShell() {
                   type="button"
                 >
                   <span
-                    className={STYLES.itemContent(isSelected)}
+                    className={STYLES.itemContent(isSelected, item.isFavorited)}
                     title={item.tooltipText || item.contentPreview}
                   >
                     {item.contentPreview}
@@ -391,15 +400,15 @@ export function PickerShell() {
                   >
                     {index < 9 ? <kbd className={STYLES.kbdBadge(isSelected)}>{index + 1}</kbd> : null}
                     <span className={STYLES.typeBadge}>{getClipTypeLabel(item)}</span>
-                    <span className="min-w-0 flex-1 truncate font-medium opacity-80">
+                    <span className="min-w-0 flex-1 truncate font-medium">
                       {item.sourceApp ?? "未知来源"}
                     </span>
-                    <span className="flex shrink-0 items-center gap-1 font-medium opacity-80">
+                    <span className="flex shrink-0 items-center gap-1 font-medium">
                       <span className="tabular-nums">
                         {formatDateTime(item.lastUsedAt ?? item.createdAt)}
                       </span>
                       {item.isFavorited ? (
-                        <span className="text-[10px] text-pg-favorite">★</span>
+                        <span className="text-[12px] text-pg-favorite">★</span>
                       ) : null}
                     </span>
                   </div>
@@ -407,6 +416,7 @@ export function PickerShell() {
               );
             })}
           </div>
+          )}
         </div>
       </div>
     </div>
