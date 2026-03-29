@@ -7,6 +7,7 @@ pub struct EditorSession {
     pub source: EditorSource,
     pub return_to: EditorReturnTarget,
     pub target_window_hwnd: Option<isize>,
+    pub target_focus_hwnd: Option<isize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -34,6 +35,7 @@ mod tests {
             source: EditorSource::Picker,
             return_to: EditorReturnTarget::Picker,
             target_window_hwnd: None,
+            target_focus_hwnd: None,
         };
 
         let json = serde_json::to_string(&session).unwrap();
