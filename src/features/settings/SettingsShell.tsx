@@ -144,6 +144,38 @@ export function SettingsShell() {
   const hasHydratedFromServerRef = useRef(false);
   const latestLocalPayloadRef = useRef<UserSetting | null>(null);
   const latestSaveRequestIdRef = useRef(0);
+  const hydrationTimerRef = useRef<number | null>(null);
+
+  const applyServerSettings = (nextSettings: UserSetting) => {
+    const nextEditable = toEditableSettings(nextSettings);
+
+    latestLocalPayloadRef.current = nextSettings;
+    hasHydratedFromServerRef.current = true;
+    isInitializingRef.current = true;
+
+    if (hydrationTimerRef.current !== null) {
+      window.clearTimeout(hydrationTimerRef.current);
+    }
+
+    setShortcut(nextEditable.shortcut);
+    setLaunchOnStartup(nextEditable.launchOnStartup);
+    setSilentOnStartup(nextEditable.silentOnStartup);
+    setHistoryLimit(nextEditable.historyLimit);
+    setPickerRecordLimit(nextEditable.pickerRecordLimit);
+    setPickerPositionMode(nextEditable.pickerPositionMode);
+    setRestoreClipboardAfterPaste(nextEditable.restoreClipboardAfterPaste);
+    setPauseMonitoring(nextEditable.pauseMonitoring);
+    setThemeMode(nextEditable.themeMode);
+    setExcludedAppsText(nextEditable.excludedAppsText);
+    setSearchShortcut(nextEditable.searchShortcut);
+    setSearchShortcutEnabled(nextEditable.searchShortcutEnabled);
+
+    // 延迟标记初始化完成，避免同步服务端值时再次触发自动保存
+    hydrationTimerRef.current = window.setTimeout(() => {
+      isInitializingRef.current = false;
+      hydrationTimerRef.current = null;
+    }, 100);
+  };
 
   useEffect(() => {
     latestLocalPayloadRef.current = toSettingsPayload({
@@ -186,25 +218,16 @@ export function SettingsShell() {
       return;
     }
 
-    const nextEditable = toEditableSettings(data);
-    hasHydratedFromServerRef.current = true;
-    isInitializingRef.current = true;
-    setShortcut(nextEditable.shortcut);
-    setLaunchOnStartup(nextEditable.launchOnStartup);
-    setSilentOnStartup(nextEditable.silentOnStartup);
-    setHistoryLimit(nextEditable.historyLimit);
-    setPickerRecordLimit(nextEditable.pickerRecordLimit);
-    setPickerPositionMode(nextEditable.pickerPositionMode);
-    setRestoreClipboardAfterPaste(nextEditable.restoreClipboardAfterPaste);
-    setPauseMonitoring(nextEditable.pauseMonitoring);
-    setThemeMode(nextEditable.themeMode);
-    setExcludedAppsText(nextEditable.excludedAppsText);
-    setSearchShortcut(nextEditable.searchShortcut);
-    setSearchShortcutEnabled(nextEditable.searchShortcutEnabled);
-    // 延迟标记初始化完成，避免初始同步触发自动保存
-    const t = setTimeout(() => { isInitializingRef.current = false; }, 100);
-    return () => clearTimeout(t);
+    applyServerSettings(data);
   }, [data]);
+
+  useEffect(() => {
+    return () => {
+      if (hydrationTimerRef.current !== null) {
+        window.clearTimeout(hydrationTimerRef.current);
+      }
+    };
+  }, []);
 
   // 自动保存 debounce（800ms）
   useEffect(() => {
@@ -219,12 +242,15 @@ export function SettingsShell() {
       latestSaveRequestIdRef.current = requestId;
       setSaveStatus("saving");
       updateSettingsMutation.mutate(payload, {
-        onSuccess: (_, variables) => {
+        onSuccess: (nextValue, variables) => {
+          queryClient.setQueryData(["settings"], nextValue);
+
           if (requestId !== latestSaveRequestIdRef.current) {
             return;
           }
 
           if (latestLocalPayloadRef.current && isSameSettings(latestLocalPayloadRef.current, variables)) {
+            applyServerSettings(nextValue);
             setSaveStatus("saved");
           }
         },
