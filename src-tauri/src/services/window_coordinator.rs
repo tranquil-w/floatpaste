@@ -179,6 +179,12 @@ impl WindowCoordinator {
             .map_err(|error| AppError::Message(error.to_string()))?
         {
             persist_picker_window_position(app, &window);
+            #[cfg(target_os = "windows")]
+            {
+                crate::platform::windows::window_utils::hide_window(&window)
+                    .map_err(AppError::Message)?;
+            }
+            #[cfg(not(target_os = "windows"))]
             window
                 .hide()
                 .map_err(|error| AppError::Message(error.to_string()))?;

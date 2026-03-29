@@ -6,8 +6,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     BringWindowToTop, GetCursorPos, GetWindowLongPtrW, GetWindowRect, HWND_TOPMOST, IsIconic,
     SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow, GWL_EXSTYLE, GWL_STYLE,
     SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW,
-    SW_RESTORE, SW_SHOW, SW_SHOWNOACTIVATE, WM_SYSCOMMAND, WS_EX_NOACTIVATE, WS_MAXIMIZEBOX,
-    WS_MINIMIZEBOX, WS_SYSMENU, SC_KEYMENU,
+    SW_HIDE, SW_RESTORE, SW_SHOW, SW_SHOWNOACTIVATE, WM_SYSCOMMAND, WS_EX_NOACTIVATE,
+    WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_SYSMENU, SC_KEYMENU,
 };
 
 fn strip_system_menu_style(style: isize) -> isize {
@@ -68,11 +68,13 @@ pub fn show_window_no_activate(window: &WebviewWindow) -> Result<(), String> {
     let hwnd = HWND(hwnd_isize as *mut _);
 
     unsafe {
-        let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_NOACTIVATE.0 as isize);
+        let original_ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        SetWindowLongPtrW(
+            hwnd,
+            GWL_EXSTYLE,
+            original_ex_style | WS_EX_NOACTIVATE.0 as isize,
+        );
     }
-
-    window.show().map_err(|e| e.to_string())?;
 
     unsafe {
         let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
@@ -96,6 +98,18 @@ pub fn is_window_minimized(window: &WebviewWindow) -> Result<bool, String> {
     let hwnd = HWND(hwnd_isize as *mut _);
 
     Ok(unsafe { IsIconic(hwnd).as_bool() })
+}
+
+pub fn hide_window(window: &WebviewWindow) -> Result<(), String> {
+    let tauri_hwnd = window.hwnd().map_err(|e| e.to_string())?;
+    let hwnd_isize = tauri_hwnd.0 as isize;
+    let hwnd = HWND(hwnd_isize as *mut _);
+
+    unsafe {
+        let _ = ShowWindow(hwnd, SW_HIDE);
+    }
+
+    Ok(())
 }
 
 pub fn is_cursor_inside_window(window: &WebviewWindow) -> Result<bool, String> {
@@ -183,6 +197,29 @@ mod tests {
         assert_eq!(stripped & WS_SYSMENU.0 as isize, 0);
         assert_eq!(stripped & WS_MINIMIZEBOX.0 as isize, 0);
         assert_eq!(stripped & WS_MAXIMIZEBOX.0 as isize, 0);
+    }
+
+    #[test]
+    fn show_window_no_activate_should_not_use_tauri_show_before_native_no_activate_show() {
+        let source = include_str!("window_utils.rs");
+        let start = source.find("pub fn show_window_no_activate").unwrap();
+        let end = source.find("pub fn is_window_minimized").unwrap();
+        let function_source = &source[start..end];
+
+        assert!(function_source.contains("ShowWindow(hwnd, SW_SHOWNOACTIVATE)"));
+        assert!(!function_source.contains("window.show()"));
+        assert!(function_source.contains("WS_EX_NOACTIVATE"));
+        assert!(!function_source.contains("SetWindowLongPtrW(hwnd, GWL_EXSTYLE, original_ex_style)"));
+    }
+
+    #[test]
+    fn hide_window_should_use_native_sw_hide() {
+        let source = include_str!("window_utils.rs");
+        let start = source.find("pub fn hide_window").unwrap();
+        let end = source.find("pub fn is_cursor_inside_window").unwrap();
+        let function_source = &source[start..end];
+
+        assert!(function_source.contains("ShowWindow(hwnd, SW_HIDE)"));
     }
 
     #[test]
