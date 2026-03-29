@@ -1,6 +1,6 @@
 import type { ClipItemSummary } from "../../shared/types/clips";
 
-export function getNextWorkbenchNavigationIndex(
+export function getNextSearchNavigationIndex(
   items: ClipItemSummary[],
   selectedItemId: string | null,
   direction: "up" | "down",

@@ -1,13 +1,13 @@
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager,
+    AppHandle, Manager,
 };
 use tracing::warn;
 
 use crate::{
     app_bootstrap::AppState,
-    domain::{error::AppError, events::MANAGER_OPEN_SETTINGS_EVENT},
+    domain::error::AppError,
     services::{settings_service::SettingsService, window_coordinator::WindowCoordinator},
 };
 
@@ -15,7 +15,7 @@ pub struct TrayService;
 
 impl TrayService {
     pub fn setup(app: &AppHandle) -> Result<(), AppError> {
-        let open_manager = MenuItemBuilder::with_id("open-manager", "打开资料库")
+        let open_settings = MenuItemBuilder::with_id("open-settings", "打开设置")
             .build(app)
             .map_err(|error| AppError::Message(error.to_string()))?;
         let open_picker = MenuItemBuilder::with_id("open-picker", "打开速贴面板")
@@ -24,19 +24,15 @@ impl TrayService {
         let toggle_monitoring = MenuItemBuilder::with_id("toggle-monitoring", "暂停 / 恢复监听")
             .build(app)
             .map_err(|error| AppError::Message(error.to_string()))?;
-        let open_settings = MenuItemBuilder::with_id("open-settings", "打开设置")
-            .build(app)
-            .map_err(|error| AppError::Message(error.to_string()))?;
         let quit = MenuItemBuilder::with_id("quit", "退出")
             .build(app)
             .map_err(|error| AppError::Message(error.to_string()))?;
 
         let menu = MenuBuilder::new(app)
             .items(&[
-                &open_manager,
+                &open_settings,
                 &open_picker,
                 &toggle_monitoring,
-                &open_settings,
                 &quit,
             ])
             .build()
@@ -52,9 +48,9 @@ impl TrayService {
             .menu(&menu)
             .show_menu_on_left_click(false)
             .on_menu_event(|app, event| match event.id().as_ref() {
-                "open-manager" => {
-                    if let Err(error) = WindowCoordinator::open_manager(app) {
-                        warn!("托盘打开资料库失败: {error}");
+                "open-settings" => {
+                    if let Err(error) = WindowCoordinator::open_settings(app) {
+                        warn!("托盘打开设置失败: {error}");
                     }
                 }
                 "open-picker" => {
@@ -91,13 +87,6 @@ impl TrayService {
                         Err(error) => warn!("托盘读取设置失败: {error}"),
                     }
                 }
-                "open-settings" => {
-                    if let Err(error) = WindowCoordinator::open_manager(app) {
-                        warn!("托盘打开设置失败: {error}");
-                        return;
-                    }
-                    let _ = app.emit(MANAGER_OPEN_SETTINGS_EVENT, ());
-                }
                 "quit" => {
                     if let Some(state) = app.try_state::<AppState>() {
                         state.begin_quit();
@@ -114,8 +103,8 @@ impl TrayService {
                 } = event
                 {
                     let app = tray.app_handle();
-                    if let Err(error) = WindowCoordinator::open_manager(&app) {
-                        warn!("托盘左键打开资料库失败: {error}");
+                    if let Err(error) = WindowCoordinator::open_settings(&app) {
+                        warn!("托盘左键打开设置失败: {error}");
                     }
                 }
             })

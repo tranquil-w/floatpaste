@@ -5,17 +5,10 @@ import { hideEditor as hideEditorWindow } from "../../bridge/commands";
 import { EDITOR_SESSION_END_EVENT, EDITOR_SESSION_START_EVENT } from "../../bridge/events";
 import { getErrorMessage } from "../../shared/utils/error";
 import { isTauriRuntime } from "../../bridge/runtime";
+import { LoadingSpinner } from "../../shared/ui/LoadingSpinner";
 import { useItemDetailQuery, useUpdateTextMutation } from "../../shared/queries/clipQueries";
 import { useEditorStore, type EditorSession } from "./store";
 import { getEditorKeyboardAction, moveFocusInDialog } from "./keyboard";
-
-function getSourceLabel(session: EditorSession | null) {
-  if (!session) {
-    return "等待编辑会话";
-  }
-
-  return session.source === "picker" ? "来自 Picker" : "来自搜索窗口";
-}
 
 export function EditorShell() {
   const {
@@ -213,15 +206,11 @@ export function EditorShell() {
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-pg-canvas-default text-pg-fg-default">
+      <div className="h-[3px] w-full bg-gradient-to-r from-pg-blue-5 to-pg-blue-4 shrink-0" />
       <header className="flex shrink-0 items-center justify-between border-b border-pg-border-muted px-5 py-3">
-        <div className="min-w-0">
-          <p className="text-xs font-medium uppercase tracking-[0.16em] text-pg-fg-subtle">
-            {getSourceLabel(session)}
-          </p>
-          <h1 className="mt-1 text-lg font-semibold text-pg-fg-default">
-            独立编辑窗口
-          </h1>
-        </div>
+        <h1 className="text-lg font-semibold text-pg-fg-default">
+          编辑器
+        </h1>
         <button
           className="rounded-md border border-pg-border-default px-3 py-1.5 text-sm hover:bg-pg-canvas-subtle"
           onClick={() => void requestClose()}
@@ -244,15 +233,16 @@ export function EditorShell() {
 
       <main className="flex min-h-0 flex-1 flex-col px-5 py-4">
         {!session ? (
-          <div className="flex h-full items-center justify-center text-sm text-pg-fg-subtle">
-            等待编辑会话启动
+          <div className="flex h-full flex-col items-center justify-center gap-1">
+            <p className="text-sm text-pg-fg-muted">等待编辑会话启动</p>
+            <p className="text-xs text-pg-fg-subtle">在速贴面板或搜索窗口中选中文本条目后按 Ctrl+Enter 进入编辑</p>
           </div>
         ) : detailQuery.isLoading ? (
-          <div className="flex h-full items-center justify-center text-sm text-pg-fg-subtle">
-            正在加载条目内容...
+          <div className="flex h-full items-center justify-center">
+            <LoadingSpinner size="sm" text="正在加载条目内容..." />
           </div>
         ) : !detailQuery.data ? (
-          <div className="flex h-full items-center justify-center text-sm text-pg-fg-subtle">
+          <div className="flex h-full items-center justify-center text-sm text-pg-fg-muted">
             未找到对应条目
           </div>
         ) : isTextItem ? (
@@ -265,7 +255,7 @@ export function EditorShell() {
           />
         ) : (
           <div className="rounded-lg border border-pg-border-default bg-pg-canvas-subtle p-5">
-            <h2 className="text-base font-semibold text-pg-fg-default">
+            <h2 className="text-base font-semibold text-pg-fg-muted">
               当前条目不支持文本编辑
             </h2>
             <p className="mt-2 text-sm leading-6 text-pg-fg-muted">

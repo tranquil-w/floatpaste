@@ -1,7 +1,8 @@
 use std::{
     path::PathBuf,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::atomic::{AtomicBool, AtomicU64, Ordering},
     sync::{Arc, Mutex, RwLock},
+    time::{Duration, Instant},
 };
 
 use tauri::{App, AppHandle, Emitter, Manager};
@@ -10,7 +11,7 @@ use tracing::{info, warn};
 use crate::{
     domain::{
         editor_session::EditorSession, error::AppError, events::CLIPS_CHANGED_EVENT,
-        settings::UserSetting, workbench_session::WorkbenchSession,
+        settings::UserSetting, search_session::SearchSession,
     },
     launch_mode::LaunchMode,
     platform::windows::clipboard_monitor::ClipboardMonitor,
@@ -32,8 +33,10 @@ pub struct AppState {
     picker_active: Arc<AtomicBool>,
     picker_session_shortcuts_registered: Arc<AtomicBool>,
     quitting: Arc<AtomicBool>,
-    workbench_session: Arc<Mutex<Option<WorkbenchSession>>>,
-    workbench_active: Arc<AtomicBool>,
+    search_session: Arc<Mutex<Option<SearchSession>>>,
+    search_active: Arc<AtomicBool>,
+    search_session_monitor_token: Arc<AtomicU64>,
+    search_focus_loss_ignore_deadline: Arc<Mutex<Option<Instant>>>,
     editor_session: Arc<Mutex<Option<EditorSession>>>,
     editor_active: Arc<AtomicBool>,
 }
@@ -41,7 +44,6 @@ pub struct AppState {
 #[derive(Debug, Default, Clone)]
 pub struct PickerSession {
     pub target_window_hwnd: Option<isize>,
-    pub reopen_manager_on_close: bool,
 }
 
 impl AppState {
@@ -59,8 +61,10 @@ impl AppState {
             picker_active: Arc::new(AtomicBool::new(false)),
             picker_session_shortcuts_registered: Arc::new(AtomicBool::new(false)),
             quitting: Arc::new(AtomicBool::new(false)),
-            workbench_session: Arc::new(Mutex::new(None)),
-            workbench_active: Arc::new(AtomicBool::new(false)),
+            search_session: Arc::new(Mutex::new(None)),
+            search_active: Arc::new(AtomicBool::new(false)),
+            search_session_monitor_token: Arc::new(AtomicU64::new(0)),
+            search_focus_loss_ignore_deadline: Arc::new(Mutex::new(None)),
             editor_session: Arc::new(Mutex::new(None)),
             editor_active: Arc::new(AtomicBool::new(false)),
         }
@@ -84,11 +88,9 @@ impl AppState {
     pub fn set_picker_session(
         &self,
         hwnd: Option<isize>,
-        reopen_manager_on_close: bool,
     ) -> Result<(), AppError> {
         let mut session = self.picker_session.lock()?;
         session.target_window_hwnd = hwnd;
-        session.reopen_manager_on_close = reopen_manager_on_close;
         Ok(())
     }
 
@@ -126,32 +128,64 @@ impl AppState {
         self.quitting.load(Ordering::SeqCst)
     }
 
-    pub fn set_workbench_session(&self, session: WorkbenchSession) -> Result<(), AppError> {
-        let mut current = self.workbench_session.lock()?;
+    pub fn set_search_session(&self, session: SearchSession) -> Result<(), AppError> {
+        let mut current = self.search_session.lock()?;
         *current = Some(session);
         Ok(())
     }
 
-    pub fn workbench_session(&self) -> Result<Option<WorkbenchSession>, AppError> {
-        Ok(self.workbench_session.lock()?.clone())
+    pub fn search_session(&self) -> Result<Option<SearchSession>, AppError> {
+        Ok(self.search_session.lock()?.clone())
     }
 
-    pub fn clear_workbench_session(&self) -> Result<(), AppError> {
-        let mut current = self.workbench_session.lock()?;
+    pub fn clear_search_session(&self) -> Result<(), AppError> {
+        let mut current = self.search_session.lock()?;
         *current = None;
         Ok(())
     }
 
-    pub fn begin_workbench_activation(&self) {
-        self.workbench_active.store(true, Ordering::SeqCst);
+    pub fn begin_search_activation(&self) {
+        self.search_active.store(true, Ordering::SeqCst);
     }
 
-    pub fn end_workbench_activation(&self) {
-        self.workbench_active.store(false, Ordering::SeqCst);
+    pub fn end_search_activation(&self) {
+        self.search_active.store(false, Ordering::SeqCst);
     }
 
-    pub fn is_workbench_active(&self) -> bool {
-        self.workbench_active.load(Ordering::SeqCst)
+    pub fn is_search_active(&self) -> bool {
+        self.search_active.load(Ordering::SeqCst)
+    }
+
+    pub fn next_search_session_monitor_token(&self) -> u64 {
+        self.search_session_monitor_token.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    pub fn current_search_session_monitor_token(&self) -> u64 {
+        self.search_session_monitor_token.load(Ordering::SeqCst)
+    }
+
+    pub fn mark_search_focus_loss_ignored_for(
+        &self,
+        duration: Duration,
+    ) -> Result<(), AppError> {
+        let mut deadline = self.search_focus_loss_ignore_deadline.lock()?;
+        *deadline = Some(Instant::now() + duration);
+        Ok(())
+    }
+
+    pub fn should_ignore_search_focus_loss(&self) -> Result<bool, AppError> {
+        let mut deadline = self.search_focus_loss_ignore_deadline.lock()?;
+        let Some(current_deadline) = *deadline else {
+            return Ok(false);
+        };
+
+        if Instant::now() <= current_deadline {
+            *deadline = None;
+            return Ok(true);
+        }
+
+        *deadline = None;
+        Ok(false)
     }
 
     pub fn set_editor_session(&self, session: EditorSession) -> Result<(), AppError> {
@@ -202,7 +236,7 @@ pub fn bootstrap(app: &mut App, launch_mode: LaunchMode) -> Result<(), AppError>
     }
 
     if !launch_mode.is_silent() {
-        WindowCoordinator::open_manager(&app.handle())?;
+        WindowCoordinator::open_settings(&app.handle())?;
     }
 
     info!("FloatPaste MVP 已初始化，数据库路径: {}", db_path.display());

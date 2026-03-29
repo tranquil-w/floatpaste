@@ -10,11 +10,31 @@ Set-StrictMode -Version Latest
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 Set-Location $repoRoot
+$rtkCommand = Get-Command "rtk.exe" -ErrorAction SilentlyContinue
 
 function Write-Step {
   param([string]$Message)
   Write-Host ""
   Write-Host "==> $Message" -ForegroundColor Cyan
+}
+
+function Invoke-ExternalCommand {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$FilePath,
+    [string[]]$Arguments = @()
+  )
+
+  $global:LASTEXITCODE = 0
+
+  if ($rtkCommand) {
+    & $rtkCommand.Source $FilePath @Arguments
+  }
+  else {
+    & $FilePath @Arguments
+  }
+
+  return $global:LASTEXITCODE
 }
 
 function Get-JsonVersion {
@@ -126,21 +146,18 @@ if ($Version -ne $packageVersion) {
 
 if (-not $SkipChecks) {
   Write-Step "执行前端构建检查"
-  & pnpm build
-  if ($LASTEXITCODE -ne 0) {
+  if ((Invoke-ExternalCommand -FilePath "pnpm" -Arguments @("build")) -ne 0) {
     throw "pnpm build 执行失败。"
   }
 
   Write-Step "执行 Rust 编译检查"
-  & cargo check --manifest-path "src-tauri/Cargo.toml"
-  if ($LASTEXITCODE -ne 0) {
+  if ((Invoke-ExternalCommand -FilePath "cargo" -Arguments @("check", "--manifest-path", "src-tauri/Cargo.toml")) -ne 0) {
     throw "cargo check 执行失败。"
   }
 }
 
 Write-Step "生成 Tauri release 可执行文件"
-& pnpm tauri build --no-bundle --ci
-if ($LASTEXITCODE -ne 0) {
+if ((Invoke-ExternalCommand -FilePath "pnpm" -Arguments @("tauri", "build", "--no-bundle", "--ci")) -ne 0) {
   throw "pnpm tauri build --no-bundle --ci 执行失败。"
 }
 

@@ -11,9 +11,9 @@ export type WindowResizeDirection =
   | "SouthWest"
   | "West";
 
-export function getCurrentWindowLabel(): "picker" | "workbench" | "editor" | "manager" {
+export function getCurrentWindowLabel(): "picker" | "search" | "editor" | "settings" {
   if (!isTauriRuntime()) {
-    return "manager";
+    return "settings";
   }
 
   const label = getCurrentWebviewWindow().label;
@@ -21,12 +21,12 @@ export function getCurrentWindowLabel(): "picker" | "workbench" | "editor" | "ma
     return "picker";
   }
   if (label === "workbench") {
-    return "workbench";
+    return "search";
   }
   if (label === "editor") {
     return "editor";
   }
-  return "manager";
+  return "settings";
 }
 
 export async function hideCurrentWindow(): Promise<void> {
@@ -35,6 +35,14 @@ export async function hideCurrentWindow(): Promise<void> {
   }
 
   await getCurrentWebviewWindow().hide();
+}
+
+export async function startCurrentWindowDragging(): Promise<void> {
+  if (!isTauriRuntime()) {
+    return;
+  }
+
+  await getCurrentWebviewWindow().startDragging();
 }
 
 export async function startCurrentWindowResize(

@@ -4,9 +4,9 @@ use serde::{Deserialize, Deserializer, Serialize};
 use tauri_plugin_global_shortcut::Shortcut;
 
 const DEFAULT_MAIN_SHORTCUT: &str = "Alt+Q";
-const DEFAULT_WORKBENCH_SHORTCUT: &str = "Alt+S";
+const DEFAULT_SEARCH_SHORTCUT: &str = "Alt+S";
 const LEGACY_MAIN_SHORTCUT: &str = "Ctrl+`";
-const LEGACY_WORKBENCH_SHORTCUTS: [&str; 2] = ["Win+F", "Super+F"];
+const LEGACY_SEARCH_SHORTCUTS: [&str; 2] = ["Win+F", "Super+F"];
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -89,7 +89,7 @@ pub struct StoredWindowPosition {
 ///
 /// let settings = UserSetting::default();
 /// assert_eq!(settings.shortcut, "Alt+Q");
-/// assert_eq!(settings.workbench_shortcut, "Alt+S");
+/// assert_eq!(settings.search_shortcut, "Alt+S");
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -105,8 +105,10 @@ pub struct UserSetting {
     pub restore_clipboard_after_paste: bool,
     pub pause_monitoring: bool,
     pub theme_mode: ThemeMode,
-    pub workbench_shortcut: String,
-    pub workbench_shortcut_enabled: bool,
+    #[serde(alias = "workbench_shortcut")]
+    pub search_shortcut: String,
+    #[serde(alias = "workbench_shortcut_enabled")]
+    pub search_shortcut_enabled: bool,
 }
 
 impl Default for UserSetting {
@@ -126,8 +128,8 @@ impl Default for UserSetting {
             restore_clipboard_after_paste: true,
             pause_monitoring: false,
             theme_mode: ThemeMode::System,
-            workbench_shortcut: DEFAULT_WORKBENCH_SHORTCUT.to_string(),
-            workbench_shortcut_enabled: true,
+            search_shortcut: DEFAULT_SEARCH_SHORTCUT.to_string(),
+            search_shortcut_enabled: true,
         }
     }
 }
@@ -156,33 +158,33 @@ impl UserSetting {
             .filter(|value| !value.is_empty())
             .collect();
 
-        self.workbench_shortcut = self.workbench_shortcut.trim().to_string();
-        if self.workbench_shortcut.is_empty() {
-            self.workbench_shortcut = DEFAULT_WORKBENCH_SHORTCUT.to_string();
-        } else if LEGACY_WORKBENCH_SHORTCUTS.iter().any(|legacy| {
-            normalize_shortcut_for_compare(&self.workbench_shortcut)
+        self.search_shortcut = self.search_shortcut.trim().to_string();
+        if self.search_shortcut.is_empty() {
+            self.search_shortcut = DEFAULT_SEARCH_SHORTCUT.to_string();
+        } else if LEGACY_SEARCH_SHORTCUTS.iter().any(|legacy| {
+            normalize_shortcut_for_compare(&self.search_shortcut)
                 == normalize_shortcut_for_compare(legacy)
         }) {
-            self.workbench_shortcut = DEFAULT_WORKBENCH_SHORTCUT.to_string();
+            self.search_shortcut = DEFAULT_SEARCH_SHORTCUT.to_string();
         }
 
-        self.resolve_workbench_shortcut_conflict();
+        self.resolve_search_shortcut_conflict();
         self
     }
 
-    fn resolve_workbench_shortcut_conflict(&mut self) {
-        if !self.workbench_shortcut_enabled
-            || normalize_shortcut_for_compare(&self.workbench_shortcut)
+    fn resolve_search_shortcut_conflict(&mut self) {
+        if !self.search_shortcut_enabled
+            || normalize_shortcut_for_compare(&self.search_shortcut)
                 != normalize_shortcut_for_compare(&self.shortcut)
         {
             return;
         }
 
-        self.workbench_shortcut = DEFAULT_WORKBENCH_SHORTCUT.to_string();
-        if normalize_shortcut_for_compare(&self.workbench_shortcut)
+        self.search_shortcut = DEFAULT_SEARCH_SHORTCUT.to_string();
+        if normalize_shortcut_for_compare(&self.search_shortcut)
             == normalize_shortcut_for_compare(&self.shortcut)
         {
-            self.workbench_shortcut_enabled = false;
+            self.search_shortcut_enabled = false;
         }
     }
 }
@@ -342,10 +344,10 @@ mod tests {
     }
 
     #[test]
-    fn workbench_shortcut_defaults_to_alt_s() {
+    fn search_shortcut_defaults_to_alt_s() {
         let settings = UserSetting::default();
-        assert_eq!(settings.workbench_shortcut, "Alt+S");
-        assert!(settings.workbench_shortcut_enabled);
+        assert_eq!(settings.search_shortcut, "Alt+S");
+        assert!(settings.search_shortcut_enabled);
     }
 
     #[test]
@@ -373,34 +375,34 @@ mod tests {
     #[test]
     fn sanitized_preserves_alt_s_as_display_value() {
         let settings = UserSetting {
-            workbench_shortcut: "Alt+S".to_string(),
+            search_shortcut: "Alt+S".to_string(),
             ..UserSetting::default()
         }
         .sanitized();
 
-        assert_eq!(settings.workbench_shortcut, "Alt+S");
+        assert_eq!(settings.search_shortcut, "Alt+S");
     }
 
     #[test]
     fn sanitized_migrates_legacy_win_f_to_alt_s() {
         let settings = UserSetting {
-            workbench_shortcut: "Win+F".to_string(),
+            search_shortcut: "Win+F".to_string(),
             ..UserSetting::default()
         }
         .sanitized();
 
-        assert_eq!(settings.workbench_shortcut, "Alt+S");
+        assert_eq!(settings.search_shortcut, "Alt+S");
     }
 
     #[test]
     fn sanitized_migrates_legacy_super_f_to_alt_s() {
         let settings = UserSetting {
-            workbench_shortcut: "Super+F".to_string(),
+            search_shortcut: "Super+F".to_string(),
             ..UserSetting::default()
         }
         .sanitized();
 
-        assert_eq!(settings.workbench_shortcut, "Alt+S");
+        assert_eq!(settings.search_shortcut, "Alt+S");
     }
 
     #[test]
@@ -413,7 +415,7 @@ mod tests {
 
 
     #[test]
-    fn deserialize_old_settings_without_workbench_shortcut_uses_defaults() {
+    fn deserialize_old_settings_without_search_shortcut_uses_defaults() {
         let settings: UserSetting = serde_json::from_str(
             r#"{
                 "shortcut":"Alt+Q",
@@ -427,46 +429,46 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(settings.workbench_shortcut, "Alt+S");
-        assert!(settings.workbench_shortcut_enabled);
+        assert_eq!(settings.search_shortcut, "Alt+S");
+        assert!(settings.search_shortcut_enabled);
     }
 
     #[test]
-    fn workbench_shortcut_resets_to_default_when_conflicts_with_main_shortcut() {
+    fn search_shortcut_resets_to_default_when_conflicts_with_main_shortcut() {
         let settings = UserSetting {
             shortcut: "Alt+Q".to_string(),
-            workbench_shortcut: "Alt+Q".to_string(),
-            workbench_shortcut_enabled: true,
+            search_shortcut: "Alt+Q".to_string(),
+            search_shortcut_enabled: true,
             ..UserSetting::default()
         }
         .sanitized();
 
-        assert_eq!(settings.workbench_shortcut, "Alt+S");
+        assert_eq!(settings.search_shortcut, "Alt+S");
     }
 
     #[test]
-    fn workbench_shortcut_gets_disabled_when_default_value_also_conflicts_with_main_shortcut() {
+    fn search_shortcut_gets_disabled_when_default_value_also_conflicts_with_main_shortcut() {
         let settings = UserSetting {
             shortcut: "Alt+S".to_string(),
-            workbench_shortcut: "Alt+S".to_string(),
-            workbench_shortcut_enabled: true,
+            search_shortcut: "Alt+S".to_string(),
+            search_shortcut_enabled: true,
             ..UserSetting::default()
         }
         .sanitized();
 
-        assert!(!settings.workbench_shortcut_enabled);
+        assert!(!settings.search_shortcut_enabled);
     }
 
     #[test]
-    fn workbench_shortcut_conflict_detection_uses_normalized_shortcuts() {
+    fn search_shortcut_conflict_detection_uses_normalized_shortcuts() {
         let settings = UserSetting {
             shortcut: "ALT+S".to_string(),
-            workbench_shortcut: "alt+s".to_string(),
-            workbench_shortcut_enabled: true,
+            search_shortcut: "alt+s".to_string(),
+            search_shortcut_enabled: true,
             ..UserSetting::default()
         }
         .sanitized();
 
-        assert!(!settings.workbench_shortcut_enabled);
+        assert!(!settings.search_shortcut_enabled);
     }
 }

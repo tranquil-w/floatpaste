@@ -76,7 +76,7 @@
   background-color: var(--pg-canvas-default);
 }
 
-/* ── Primer Dark Theme ── */
+/* ── Primer Dark Dimmed Theme ── */
 html.dark {
   --pg-neutral-0: #010409;
   --pg-neutral-1: #0D1117;
@@ -91,51 +91,51 @@ html.dark {
   --pg-neutral-10: #B7BDC8;
   --pg-neutral-11: #D1D7E0;
   --pg-neutral-12: #F0F6FC;
-  --pg-neutral-13: #ffffff;
+  --pg-neutral-13: #cdd9e5;
 
   /* Shadow color (rgb channels for rgba usage) */
-  --pg-shadow-color: 0, 0, 0;
+  --pg-shadow-color: 33, 38, 45;
 
-  --pg-blue-0: #cae8ff;
-  --pg-blue-1: #a5d6ff;
-  --pg-blue-2: #79c0ff;
-  --pg-blue-3: #58a6ff;
-  --pg-blue-4: #388bfd;
-  --pg-blue-5: #1f6feb;
-  --pg-blue-6: #1158c7;
-  --pg-blue-7: #0d419d;
-  --pg-blue-8: #0c2d6b;
-  --pg-blue-9: #051d4d;
+  --pg-blue-0: #c6e6ff;
+  --pg-blue-1: #96d0ff;
+  --pg-blue-2: #6cb6ff;
+  --pg-blue-3: #539bf5;
+  --pg-blue-4: #4184e4;
+  --pg-blue-5: #316dca;
+  --pg-blue-6: #255ab2;
+  --pg-blue-7: #1b4b91;
+  --pg-blue-8: #143d79;
+  --pg-blue-9: #0f2d5c;
 
-  --pg-green-0: #aff5b4;
-  --pg-green-3: #3fb950;
-  --pg-green-4: #2ea043;
-  --pg-green-5: #238636;
-  --pg-green-7: #0f5323;
+  --pg-green-0: #b4f1b4;
+  --pg-green-3: #57ab5a;
+  --pg-green-4: #46954a;
+  --pg-green-5: #347d39;
+  --pg-green-7: #245829;
 
-  --pg-yellow-0: #f8e3a1;
-  --pg-yellow-3: #d29922;
-  --pg-yellow-4: #bb8009;
-  --pg-yellow-5: #9e6a03;
-  --pg-yellow-7: #693e00;
+  --pg-yellow-0: #fbe090;
+  --pg-yellow-3: #c69026;
+  --pg-yellow-4: #ae7c14;
+  --pg-yellow-5: #966600;
+  --pg-yellow-7: #6c4400;
 
-  --pg-orange-0: #ffdfb6;
-  --pg-orange-3: #f0883e;
-  --pg-orange-4: #db6d28;
-  --pg-orange-5: #bd561d;
-  --pg-orange-7: #762d0a;
+  --pg-orange-0: #ffddb0;
+  --pg-orange-3: #e0823d;
+  --pg-orange-4: #cc6b2c;
+  --pg-orange-5: #ae5622;
+  --pg-orange-7: #7f3913;
 
-  --pg-red-0: #ffdcd7;
-  --pg-red-3: #ff7b72;
-  --pg-red-4: #f85149;
-  --pg-red-5: #da3633;
-  --pg-red-7: #8e1519;
+  --pg-red-0: #ffd8d3;
+  --pg-red-3: #f47067;
+  --pg-red-4: #e5534b;
+  --pg-red-5: #c93c37;
+  --pg-red-7: #922323;
 
-  --pg-purple-0: #eddeff;
-  --pg-purple-3: #BE8FFF;
-  --pg-purple-4: #AB7DF8;
-  --pg-purple-5: #8957e5;
-  --pg-purple-7: #553098;
+  --pg-purple-0: #eedcff;
+  --pg-purple-3: #b083f0;
+  --pg-purple-4: #986ee2;
+  --pg-purple-5: #8256d0;
+  --pg-purple-7: #5936a2;
 }
 
 /* ── Semantic Mapping (both themes) ── */
@@ -153,10 +153,11 @@ html.dark {
   --pg-accent-subtle: var(--pg-blue-0);
   --pg-accent-hover: var(--pg-blue-4);
 
-  /* Canvas */
-  --pg-canvas-default: var(--pg-neutral-0);
-  --pg-canvas-subtle: var(--pg-neutral-1);
-  --pg-canvas-inset: var(--pg-neutral-0);
+  /* Canvas — light uses neutral-2 (#EFF2F5, warm gray-white, Catppuccin Latte base);
+   * dark mode overrides these to lighter neutral levels (see dark dimmed overrides below) */
+  --pg-canvas-default: var(--pg-neutral-2);
+  --pg-canvas-subtle: var(--pg-neutral-3);
+  --pg-canvas-inset: var(--pg-neutral-2);
 
   /* Border */
   --pg-border-default: var(--pg-neutral-6);
@@ -185,6 +186,37 @@ html.dark {
   --pg-favorite: var(--pg-yellow-5);
 
   /* Shadow */
+}
+
+/* ── Dark dimmed overrides ── */
+/* Remap semantic tokens to lighter neutral levels (Primer dark_dimmed strategy):
+ * canvas-default: neutral-0 → neutral-3  (#010409 → #212830)
+ * canvas-subtle:  neutral-1 → neutral-4  (#0D1117 → #262C36)
+ * canvas-inset:   neutral-0 → neutral-2  (#010409 → #151B23)
+ * fg-default:     neutral-13 → neutral-11 (#ffffff → #D1D7E0)
+ * fg-on-emphasis: #ffffff → neutral-12    (#F0F6FC)
+ * border-default: neutral-6 → neutral-7  (#2F3742 → #3D444D)
+ */
+html.dark {
+  --pg-canvas-default: var(--pg-neutral-3);
+  --pg-canvas-subtle: var(--pg-neutral-4);
+  --pg-canvas-inset: var(--pg-neutral-2);
+  --pg-fg-default: var(--pg-neutral-11);
+  --pg-fg-on-emphasis: var(--pg-neutral-12);
+  --pg-border-default: var(--pg-neutral-7);
+  --pg-border-muted: var(--pg-neutral-7);
+  --pg-accent-fg: #478be6;
+
+  --pg-accent-subtle: rgba(56, 139, 253, 0.15);
+  --pg-success-subtle: rgba(46, 160, 67, 0.15);
+  --pg-danger-subtle: rgba(248, 81, 73, 0.15);
+  --pg-warning-subtle: rgba(187, 128, 9, 0.15);
+  --pg-done-subtle: rgba(171, 125, 248, 0.15);
+}
+
+/* ── Shadow ── */
+:root,
+html.dark {
   --pg-shadow-sm: 0 1px 0 var(--pg-border-default);
   --pg-shadow-md: 0 3px 6px rgba(var(--pg-shadow-color), 0.04);
   --pg-shadow-lg: 0 8px 24px rgba(var(--pg-shadow-color), 0.12);
@@ -250,15 +282,12 @@ body.theme-picker {
   transition: none !important;
 }
 
-body.theme-manager {
+body.theme-settings {
   background-color: var(--pg-canvas-default);
 }
 
-body.theme-workbench {
-  background:
-    radial-gradient(circle at top right, rgba(9, 105, 218, 0.06), transparent 45%),
-    radial-gradient(circle at bottom left, rgba(31, 35, 40, 0.08), transparent 50%),
-    var(--pg-canvas-default);
+body.theme-search {
+  background-color: var(--pg-canvas-default);
 }
 
 button,
@@ -322,7 +351,14 @@ textarea {
   top: 0;
 }
 
+/* Selection colors - light theme default */
 ::selection {
-  color: var(--pg-fg-on-emphasis);
-  background: var(--pg-accent-subtle);
+  color: var(--pg-neutral-0);
+  background: var(--pg-blue-5);
+}
+
+/* Selection colors - dark theme */
+html.dark ::selection {
+  color: var(--pg-neutral-0);
+  background: var(--pg-blue-3);
 }

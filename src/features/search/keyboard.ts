@@ -1,4 +1,4 @@
-export type WorkbenchKeyboardAction =
+export type SearchKeyboardAction =
   | "navigate-up"
   | "navigate-down"
   | "paste"
@@ -6,7 +6,7 @@ export type WorkbenchKeyboardAction =
   | "close"
   | null;
 
-export function getWorkbenchKeyboardAction({
+export function getSearchKeyboardAction({
   key,
   ctrlKey,
   metaKey,
@@ -18,7 +18,7 @@ export function getWorkbenchKeyboardAction({
   metaKey: boolean;
   inputSuspended: boolean;
   isComposing?: boolean;
-}): WorkbenchKeyboardAction {
+}): SearchKeyboardAction {
   if (inputSuspended || isComposing) {
     return null;
   }

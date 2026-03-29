@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "manager",
-        "title": "FloatPaste / 浮贴",
+        "title": "FloatPaste · 设置",
         "width": 1200,
         "height": 760,
         "resizable": true,
@@ -22,7 +22,7 @@
       },
       {
         "label": "picker",
-        "title": "FloatPaste Picker",
+        "title": "FloatPaste · 速贴",
         "width": 360,
         "height": 420,
         "minWidth": 256,
@@ -37,7 +37,7 @@
       },
       {
         "label": "workbench",
-        "title": "FloatPaste 搜索",
+        "title": "FloatPaste · 搜索",
         "width": 900,
         "height": 600,
         "minWidth": 600,
@@ -46,12 +46,12 @@
         "center": true,
         "visible": false,
         "decorations": false,
-        "alwaysOnTop": false,
+        "alwaysOnTop": true,
         "skipTaskbar": false
       },
       {
         "label": "editor",
-        "title": "FloatPaste Editor",
+        "title": "FloatPaste · 编辑",
         "width": 800,
         "height": 600,
         "minWidth": 400,
@@ -67,9 +67,9 @@
     "security": {
       "capabilities": [
         "background-capability",
-        "manager-capability",
+        "settings-capability",
         "picker-capability",
-        "workbench-capability",
+        "search-capability",
         "editor-capability"
       ]
     }

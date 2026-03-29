@@ -12,6 +12,6 @@ export interface UserSetting {
   restoreClipboardAfterPaste: boolean;
   pauseMonitoring: boolean;
   themeMode: ThemeMode;
-  workbenchShortcut: string;
-  workbenchShortcutEnabled: boolean;
+  searchShortcut: string;
+  searchShortcutEnabled: boolean;
 }

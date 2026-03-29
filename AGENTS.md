@@ -33,6 +33,35 @@
 | `pnpm tauri build` | 桌面应用打包 |
 | `cargo test` | 运行 Rust 测试（在 `src-tauri/` 下执行） |
 
+### 环境限制（WSL）
+
+本项目为 Tauri 桌面应用，后端依赖 Windows 原生 API（剪贴板、系统托盘、全局快捷键）。
+在 WSL 中开发时，默认不要直接依赖 WSL/Linux 工具链，统一优先使用仓库内脚本转发到 Windows 工具链执行。
+若 Windows 环境已安装 `rtk.exe`，这些脚本会自动通过 `rtk` 包裹底层命令，以压缩终端输出。
+
+| 推荐命令 | 说明 |
+|------|------|
+| `./scripts/win-pnpm install` | 使用 Windows `pnpm` 安装依赖 |
+| `./scripts/win-pnpm dev` | 使用 Windows `pnpm dev` 启动浏览器预览 |
+| `./scripts/win-pnpm build` | 使用 Windows 前端工具链执行构建检查 |
+| `./scripts/win-pnpm tauri dev` | 使用 Windows Tauri 工具链启动桌面应用 |
+| `./scripts/win-pnpm tauri build` | 使用 Windows Tauri 工具链执行桌面构建 |
+| `./scripts/win-cargo test` | 使用 Windows `cargo.exe` 执行 Rust 测试 |
+
+如需在 Windows 命令行中执行，也可以使用等价的 npm scripts：
+
+| 命令 | 说明 |
+|------|------|
+| `pnpm install:win` | Windows 侧安装依赖 |
+| `pnpm dev:win` | Windows 侧启动前端预览 |
+| `pnpm build:win` | Windows 侧前端构建 |
+| `pnpm tauri:dev:win` | Windows 侧桌面调试 |
+| `pnpm tauri:build:win` | Windows 侧桌面构建 |
+| `pnpm test:rust:win` | Windows 侧 Rust 测试 |
+
+前端改动后，至少执行一次 `./scripts/win-pnpm build`。
+涉及 Rust 或 Tauri 改动时，优先执行 `./scripts/win-cargo test`，并按需要补充 `./scripts/win-pnpm tauri dev` 或 `./scripts/win-pnpm tauri build`。
+
 ---
 
 ## 代码风格与命名约定
