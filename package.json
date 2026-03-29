@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json && vite build",
+    "preflight": "pnpm build && pnpm test:rust:win",
     "install:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/win-pnpm.ps1 install",
     "dev:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/win-pnpm.ps1 dev",
     "build:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/win-pnpm.ps1 build",

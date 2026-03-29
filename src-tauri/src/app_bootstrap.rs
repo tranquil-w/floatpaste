@@ -11,7 +11,7 @@ use tracing::{info, warn};
 use crate::{
     domain::{
         editor_session::EditorSession, error::AppError, events::CLIPS_CHANGED_EVENT,
-        settings::UserSetting, search_session::SearchSession,
+        search_session::SearchSession, settings::UserSetting,
     },
     launch_mode::LaunchMode,
     platform::windows::clipboard_monitor::ClipboardMonitor,
@@ -44,6 +44,7 @@ pub struct AppState {
 #[derive(Debug, Default, Clone)]
 pub struct PickerSession {
     pub target_window_hwnd: Option<isize>,
+    pub target_focus_hwnd: Option<isize>,
 }
 
 impl AppState {
@@ -88,9 +89,11 @@ impl AppState {
     pub fn set_picker_session(
         &self,
         hwnd: Option<isize>,
+        focus_hwnd: Option<isize>,
     ) -> Result<(), AppError> {
         let mut session = self.picker_session.lock()?;
         session.target_window_hwnd = hwnd;
+        session.target_focus_hwnd = focus_hwnd;
         Ok(())
     }
 
@@ -157,17 +160,16 @@ impl AppState {
     }
 
     pub fn next_search_session_monitor_token(&self) -> u64 {
-        self.search_session_monitor_token.fetch_add(1, Ordering::SeqCst) + 1
+        self.search_session_monitor_token
+            .fetch_add(1, Ordering::SeqCst)
+            + 1
     }
 
     pub fn current_search_session_monitor_token(&self) -> u64 {
         self.search_session_monitor_token.load(Ordering::SeqCst)
     }
 
-    pub fn mark_search_focus_loss_ignored_for(
-        &self,
-        duration: Duration,
-    ) -> Result<(), AppError> {
+    pub fn mark_search_focus_loss_ignored_for(&self, duration: Duration) -> Result<(), AppError> {
         let mut deadline = self.search_focus_loss_ignore_deadline.lock()?;
         *deadline = Some(Instant::now() + duration);
         Ok(())
@@ -211,7 +213,6 @@ impl AppState {
     pub fn end_editor_activation(&self) {
         self.editor_active.store(false, Ordering::SeqCst);
     }
-
 }
 
 pub fn bootstrap(app: &mut App, launch_mode: LaunchMode) -> Result<(), AppError> {
