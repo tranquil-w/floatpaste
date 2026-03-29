@@ -178,6 +178,8 @@ export function SearchShell() {
   const selectedItemIdRef = useRef<string | null>(selectedItemId);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [inputSuspended, setInputSuspended] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasKeyword = keyword.trim().length > 0;
   const recentQuery = useSearchRecentQuery(!hasKeyword);
   const searchQuery = useSearchSearchQuery(keyword, hasKeyword);
@@ -187,6 +189,26 @@ export function SearchShell() {
   );
   const itemsRef = useRef<ClipItemSummary[]>(items);
   const detailQuery = useItemDetailQuery(selectedItemId);
+
+  // 清理错误定时器
+  useEffect(() => {
+    return () => {
+      if (errorTimerRef.current) {
+        clearTimeout(errorTimerRef.current);
+      }
+    };
+  }, []);
+
+  // 显示临时错误消息（3秒后自动消失）
+  const showError = (message: string) => {
+    if (errorTimerRef.current) {
+      clearTimeout(errorTimerRef.current);
+    }
+    setErrorMessage(message);
+    errorTimerRef.current = setTimeout(() => {
+      setErrorMessage(null);
+    }, 3000);
+  };
 
   useEffect(() => {
     itemsRef.current = items;
@@ -484,13 +506,14 @@ export function SearchShell() {
     }
 
     if (currentItem.type !== "text") {
-      console.warn("搜索窗口仅支持文本条目进入独立编辑窗口", currentItem);
+      showError("当前只支持从文本条目进入独立编辑窗口");
       return;
     }
 
     try {
       await openEditorFromSearch(currentItem.id);
     } catch (error) {
+      showError("打开编辑窗口失败，请稍后重试");
       console.error("打开编辑窗口失败", error);
     }
   }
@@ -507,6 +530,7 @@ export function SearchShell() {
         pasteToTarget: true,
       });
     } catch (error) {
+      showError("执行粘贴失败，请稍后重试");
       console.error("执行粘贴失败", error);
     }
   }
@@ -522,6 +546,7 @@ export function SearchShell() {
       await setItemFavorited(id, !favored);
       await refreshSearchQueries();
     } catch (error) {
+      showError("更新收藏状态失败，请稍后重试");
       console.error("更新收藏状态失败", error);
     }
   }
@@ -577,6 +602,12 @@ export function SearchShell() {
             value={keyword}
           />
         </header>
+
+        {errorMessage ? (
+          <div className="border-b border-pg-danger-fg/20 bg-pg-danger-subtle px-5 py-2 text-sm text-pg-danger-fg">
+            {errorMessage}
+          </div>
+        ) : null}
 
         <div className="flex items-center justify-between border-b border-pg-border-subtle px-5 py-3 text-xs font-medium text-pg-fg-muted">
           <span>{getSectionLabel(hasKeyword)}</span>
