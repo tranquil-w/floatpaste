@@ -238,11 +238,8 @@ impl ShortcutManager {
                 let app_handle = app.clone();
                 let state_clone = state.clone();
                 defer_shortcut_main_thread_action(app_handle, move |app_clone| {
-                    // 先隐藏 picker，再打开搜索窗口
-                    if let Err(error) = WindowCoordinator::hide_picker_and_restore_target(
-                        &app_clone,
-                        &state_clone,
-                    ) {
+                    // 只隐藏 picker，不恢复目标窗口焦点（焦点将交给 search）
+                    if let Err(error) = WindowCoordinator::hide_picker(&app_clone) {
                         error!("关闭 Picker 失败: {error}");
                     }
                     if let Err(error) =
