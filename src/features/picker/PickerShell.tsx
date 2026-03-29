@@ -8,6 +8,7 @@ import {
   PICKER_NAVIGATE_EVENT,
   PICKER_OPEN_EDITOR_EVENT,
   PICKER_SELECT_INDEX_EVENT,
+  PICKER_SESSION_END_EVENT,
   PICKER_SESSION_START_EVENT,
   SETTINGS_CHANGED_EVENT,
 } from "../../bridge/events";
@@ -127,10 +128,11 @@ export function PickerShell() {
     }
 
     const result = await pasteItem(item.id, {
-      restoreClipboardAfterPaste: true,
+      restoreClipboardAfterPaste: settings.data?.restoreClipboardAfterPaste ?? true,
       pasteToTarget: true,
     });
-    setLastMessage(result.message);
+    // picker 紧接着会被隐藏，不清空的话下次打开时会闪过旧消息
+    setLastMessage("");
   };
 
   const handleOpenEditor = async () => {
@@ -179,12 +181,22 @@ export function PickerShell() {
 
     let disposed = false;
     let unlistenStart: (() => void) | undefined;
+    let unlistenEnd: (() => void) | undefined;
     let unlistenClips: (() => void) | undefined;
     let unlistenSettings: (() => void) | undefined;
     let unlistenNavigate: (() => void) | undefined;
     let unlistenConfirm: (() => void) | undefined;
     let unlistenSelectIndex: (() => void) | undefined;
     let unlistenOpenEditor: (() => void) | undefined;
+
+    void listen(PICKER_SESSION_END_EVENT, () => {
+      if (!disposed) {
+        selectedIndexRef.current = 0;
+        setSelectedIndex(0);
+      }
+    }).then((cleanup) => {
+      unlistenEnd = cleanup;
+    });
 
     void listen(PICKER_SESSION_START_EVENT, async () => {
       await queryClient.invalidateQueries({ queryKey: ["settings"] });
@@ -269,6 +281,7 @@ export function PickerShell() {
 
     return () => {
       disposed = true;
+      unlistenEnd?.();
       unlistenStart?.();
       unlistenClips?.();
       unlistenSettings?.();

@@ -25,6 +25,7 @@ import {
 } from "../../bridge/events";
 import { isTauriRuntime } from "../../bridge/runtime";
 import { startCurrentWindowDragging } from "../../bridge/window";
+import { getSettings } from "../../bridge/commands";
 import { useItemDetailQuery } from "../../shared/queries/clipQueries";
 import type { ClipItemSummary } from "../../shared/types/clips";
 import { getClipTypeLabel } from "../../shared/utils/clipDisplay";
@@ -35,6 +36,7 @@ import {
   type WindowResizeHandle,
 } from "../../shared/ui/WindowResizeHandles";
 import { getSearchKeyboardAction } from "./keyboard";
+import { useQuery } from "@tanstack/react-query";
 import { useSearchRecentQuery, useSearchSearchQuery } from "./queries";
 import { getNextSearchNavigationIndex } from "./state";
 import { useSearchStore } from "./store";
@@ -183,6 +185,12 @@ export function SearchShell() {
   const hasKeyword = keyword.trim().length > 0;
   const recentQuery = useSearchRecentQuery(!hasKeyword);
   const searchQuery = useSearchSearchQuery(keyword, hasKeyword);
+  const settingsQuery = useQuery({
+    queryKey: ["settings"],
+    queryFn: getSettings,
+    staleTime: 0,
+    refetchOnWindowFocus: false,
+  });
   const items = useMemo<ClipItemSummary[]>(
     () => (hasKeyword ? (searchQuery.data?.items ?? []) : (recentQuery.data ?? [])),
     [hasKeyword, recentQuery.data, searchQuery.data?.items],
@@ -526,7 +534,7 @@ export function SearchShell() {
 
     try {
       await pasteItem(currentItem.id, {
-        restoreClipboardAfterPaste: true,
+        restoreClipboardAfterPaste: settingsQuery.data?.restoreClipboardAfterPaste ?? true,
         pasteToTarget: true,
       });
     } catch (error) {

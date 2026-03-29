@@ -112,6 +112,15 @@ impl WindowCoordinator {
             target.window_hwnd, target.focus_hwnd
         );
 
+        state.begin_picker_activation();
+
+        #[cfg(target_os = "windows")]
+        {
+            crate::platform::windows::picker_mouse_monitor::PickerMouseMonitor::begin_session(
+                app.clone(),
+            );
+        }
+
         #[cfg(target_os = "windows")]
         {
             crate::platform::windows::window_utils::show_window_no_activate(&window)
@@ -130,15 +139,6 @@ impl WindowCoordinator {
                 .map_err(|error| AppError::Message(error.to_string()))?;
         }
 
-        state.begin_picker_activation();
-
-        #[cfg(target_os = "windows")]
-        {
-            crate::platform::windows::picker_mouse_monitor::PickerMouseMonitor::begin_session(
-                app.clone(),
-            );
-        }
-
         window
             .emit(
                 PICKER_SESSION_START_EVENT,
@@ -148,6 +148,7 @@ impl WindowCoordinator {
                 },
             )
             .map_err(|error| AppError::Message(error.to_string()))?;
+
         Ok(())
     }
 
