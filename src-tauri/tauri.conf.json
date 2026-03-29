@@ -46,7 +46,7 @@
         "center": true,
         "visible": false,
         "decorations": false,
-        "alwaysOnTop": false,
+        "alwaysOnTop": true,
         "skipTaskbar": false
       },
       {

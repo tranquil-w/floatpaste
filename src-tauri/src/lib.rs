@@ -66,7 +66,8 @@ pub fn run() {
             commands::windows::open_editor_from_search,
             commands::windows::hide_editor,
             commands::windows::open_search_global,
-            commands::windows::hide_search
+            commands::windows::hide_search,
+            commands::windows::prepare_search_window_drag
         ])
         .run(tauri::generate_context!())
         .expect("运行 Tauri 应用失败");

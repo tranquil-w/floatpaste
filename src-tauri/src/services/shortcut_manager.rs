@@ -22,7 +22,7 @@ use crate::{
         },
         settings::normalize_shortcut_for_registration,
     },
-    services::window_coordinator::WindowCoordinator,
+    services::window_coordinator::{WindowCoordinator, SEARCH_WINDOW_LABEL},
 };
 
 pub struct ShortcutManager;
@@ -277,11 +277,12 @@ impl ShortcutManager {
                     return;
                 }
 
+                let should_toggle = should_toggle_active_search_window(app, &state);
                 info!("命中搜索快捷键: {normalized}");
                 let app_handle = app.clone();
                 let state_clone = state.clone();
 
-                if state.is_search_active() {
+                if should_toggle {
                     defer_shortcut_main_thread_action(app_handle, move |app_clone| {
                         if let Err(error) = WindowCoordinator::hide_search_and_restore_target(
                             &app_clone,
@@ -387,6 +388,25 @@ impl ShortcutManager {
     }
 }
 
+fn should_toggle_active_search_window(app: &AppHandle, state: &AppState) -> bool {
+    if !state.is_search_active() {
+        return false;
+    }
+
+    let Some(window) = app.get_webview_window(SEARCH_WINDOW_LABEL) else {
+        return false;
+    };
+
+    let is_visible = window.is_visible().unwrap_or(false);
+    #[cfg(target_os = "windows")]
+    let is_minimized =
+        crate::platform::windows::window_utils::is_window_minimized(&window).unwrap_or(false);
+
+    #[cfg(not(target_os = "windows"))]
+    let is_minimized = window.is_minimized().unwrap_or(false);
+
+    is_visible && !is_minimized
+}
 fn picker_is_active(app: &AppHandle) -> bool {
     app.try_state::<AppState>()
         .map(|state| state.is_picker_active())

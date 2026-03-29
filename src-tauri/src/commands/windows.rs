@@ -1,5 +1,6 @@
 use tauri::{AppHandle, State};
 use tracing::warn;
+use std::time::Duration;
 
 use crate::{
     app_bootstrap::AppState,
@@ -61,5 +62,12 @@ pub fn open_search_global(state: State<'_, AppState>, app: AppHandle) -> Result<
 #[tauri::command]
 pub fn hide_search(state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
     WindowCoordinator::hide_search_and_restore_target(&app, &state).map_err(map_error)
+}
+
+#[tauri::command]
+pub fn prepare_search_window_drag(state: State<'_, AppState>) -> Result<(), String> {
+    state
+        .mark_search_focus_loss_ignored_for(Duration::from_millis(1500))
+        .map_err(map_error)
 }
 

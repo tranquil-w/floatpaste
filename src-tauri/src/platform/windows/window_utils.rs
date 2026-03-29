@@ -1,10 +1,12 @@
 use tauri::WebviewWindow;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
+use windows::Win32::UI::Input::KeyboardAndMouse::SetActiveWindow;
 use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, ShowWindow, GWL_EXSTYLE, GWL_STYLE,
-    SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW,
+    BringWindowToTop, GetWindowLongPtrW, HWND_TOPMOST, IsIconic, SetForegroundWindow,
+    SetWindowLongPtrW, SetWindowPos, ShowWindow, GWL_EXSTYLE, GWL_STYLE, SWP_FRAMECHANGED,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SW_RESTORE, SW_SHOW,
     SW_SHOWNOACTIVATE, WM_SYSCOMMAND, WS_EX_NOACTIVATE, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
     WS_SYSMENU, SC_KEYMENU,
 };
@@ -84,6 +86,44 @@ pub fn show_window_no_activate(window: &WebviewWindow) -> Result<(), String> {
             0,
             SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW,
         );
+    }
+
+    Ok(())
+}
+
+pub fn is_window_minimized(window: &WebviewWindow) -> Result<bool, String> {
+    let tauri_hwnd = window.hwnd().map_err(|e| e.to_string())?;
+    let hwnd_isize = tauri_hwnd.0 as isize;
+    let hwnd = HWND(hwnd_isize as *mut _);
+
+    Ok(unsafe { IsIconic(hwnd).as_bool() })
+}
+
+pub fn restore_window_and_focus(window: &WebviewWindow) -> Result<(), String> {
+    let tauri_hwnd = window.hwnd().map_err(|e| e.to_string())?;
+    let hwnd_isize = tauri_hwnd.0 as isize;
+    let hwnd = HWND(hwnd_isize as *mut _);
+
+    unsafe {
+        let _ = SetWindowPos(
+            hwnd,
+            Some(HWND_TOPMOST),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+        );
+        let _ = BringWindowToTop(hwnd);
+
+        if IsIconic(hwnd).as_bool() {
+            let _ = ShowWindow(hwnd, SW_RESTORE);
+        } else {
+            let _ = ShowWindow(hwnd, SW_SHOW);
+        }
+
+        let _ = SetActiveWindow(hwnd);
+        let _ = SetForegroundWindow(hwnd);
     }
 
     Ok(())

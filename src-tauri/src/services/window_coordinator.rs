@@ -1,5 +1,6 @@
 use chrono::Utc;
 use serde::Serialize;
+use std::time::Duration;
 use tauri::{
     AppHandle, Emitter, Manager, PhysicalSize, Position, Size, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder, WindowEvent,
@@ -38,6 +39,10 @@ pub const PICKER_WINDOW_LABEL: &str = "picker";
 pub const PICKER_WINDOW_TITLE: &str = "FloatPaste · 速贴";
 pub const SEARCH_WINDOW_LABEL: &str = "workbench";
 pub const SEARCH_WINDOW_TITLE: &str = "FloatPaste · 搜索";
+pub const SEARCH_WINDOW_DEFAULT_WIDTH: u32 = 900;
+pub const SEARCH_WINDOW_DEFAULT_HEIGHT: u32 = 600;
+pub const SEARCH_WINDOW_MIN_WIDTH: u32 = 600;
+pub const SEARCH_WINDOW_MIN_HEIGHT: u32 = 400;
 pub const EDITOR_WINDOW_LABEL: &str = "editor";
 pub const EDITOR_WINDOW_TITLE: &str = "FloatPaste · 编辑";
 
@@ -228,11 +233,16 @@ impl WindowCoordinator {
     pub fn open_search_global(app: &AppHandle, state: &AppState) -> Result<(), AppError> {
         let window = ensure_search_window(app)?;
 
-        if state.is_search_active() {
-            window
-                .set_focus()
-                .map_err(|error| AppError::Message(error.to_string()))?;
+        if state.is_search_active() && is_window_ready_for_reuse(&window)? {
+            show_and_focus_window(&window)?;
+            if restore_search_window_geometry(&window) {
+                show_and_focus_window(&window)?;
+            }
             return Ok(());
+        }
+
+        if state.is_search_active() {
+            state.end_search_activation();
         }
 
         if state.is_picker_active() {
@@ -248,14 +258,13 @@ impl WindowCoordinator {
 
         state.set_search_session(search_session)?;
 
-        window
-            .show()
-            .map_err(|error| AppError::Message(error.to_string()))?;
-        window
-            .set_focus()
-            .map_err(|error| AppError::Message(error.to_string()))?;
+        show_and_focus_window(&window)?;
+        if restore_search_window_geometry(&window) {
+            show_and_focus_window(&window)?;
+        }
 
         state.begin_search_activation();
+        begin_search_window_minimize_monitor(app.clone(), state.clone());
 
         window
             .emit(
@@ -297,30 +306,14 @@ impl WindowCoordinator {
         app: &AppHandle,
         state: &AppState,
     ) -> Result<(), AppError> {
-        state.end_search_activation();
-        let session = state.search_session()?;
+        hide_search_window(app, state, true)
+    }
 
-        let Some(window) = app.get_webview_window(SEARCH_WINDOW_LABEL) else {
-            return Ok(());
-        };
-
-        window
-            .hide()
-            .map_err(|error| AppError::Message(error.to_string()))?;
-
-        if let Err(err) = window.emit(SEARCH_SESSION_END_EVENT, ()) {
-            error!("发送 SEARCH_SESSION_END_EVENT 失败: {err}");
-        }
-
-        if let Some(ref session) = session {
-            if let Some(hwnd) = session.target_window_hwnd {
-                let _ = ActiveAppResolver::restore_foreground_window(hwnd);
-            }
-        }
-
-        state.clear_search_session()?;
-        info!("隐藏 Search");
-        Ok(())
+    pub fn hide_search_without_restore_target(
+        app: &AppHandle,
+        state: &AppState,
+    ) -> Result<(), AppError> {
+        hide_search_window(app, state, false)
     }
 
     pub fn hide_editor_and_restore_source(
@@ -403,6 +396,42 @@ impl WindowCoordinator {
     }
 }
 
+fn hide_search_window(
+    app: &AppHandle,
+    state: &AppState,
+    restore_target: bool,
+) -> Result<(), AppError> {
+    state.end_search_activation();
+    let session = state.search_session()?;
+
+    if let Some(window) = app.get_webview_window(SEARCH_WINDOW_LABEL) {
+        if window
+            .is_visible()
+            .map_err(|error| AppError::Message(error.to_string()))?
+        {
+            window
+                .hide()
+                .map_err(|error| AppError::Message(error.to_string()))?;
+        }
+
+        if let Err(err) = window.emit(SEARCH_SESSION_END_EVENT, ()) {
+            error!("发送 SEARCH_SESSION_END_EVENT 失败: {err}");
+        }
+    }
+
+    if restore_target {
+        if let Some(ref session) = session {
+            if let Some(hwnd) = session.target_window_hwnd {
+                let _ = ActiveAppResolver::restore_foreground_window(hwnd);
+            }
+        }
+    }
+
+    state.clear_search_session()?;
+    info!("隐藏 Search，会话已清理");
+    Ok(())
+}
+
 fn ensure_settings_window(app: &AppHandle) -> Result<WebviewWindow, AppError> {
     if let Some(window) = app.get_webview_window(SETTINGS_WINDOW_LABEL) {
         return Ok(window);
@@ -451,12 +480,12 @@ fn ensure_search_window(app: &AppHandle) -> Result<WebviewWindow, AppError> {
 
     let window = WebviewWindowBuilder::new(app, SEARCH_WINDOW_LABEL, WebviewUrl::default())
         .title(SEARCH_WINDOW_TITLE)
-        .inner_size(900.0, 600.0)
-        .min_inner_size(600.0, 400.0)
+        .inner_size(SEARCH_WINDOW_DEFAULT_WIDTH as f64, SEARCH_WINDOW_DEFAULT_HEIGHT as f64)
+        .min_inner_size(SEARCH_WINDOW_MIN_WIDTH as f64, SEARCH_WINDOW_MIN_HEIGHT as f64)
         .resizable(true)
         .visible(false)
         .decorations(false)
-        .always_on_top(false)
+        .always_on_top(true)
         .skip_taskbar(false)
         .center()
         .build()
@@ -489,6 +518,10 @@ fn ensure_editor_window(app: &AppHandle) -> Result<WebviewWindow, AppError> {
 }
 
 fn configure_search_window(window: &WebviewWindow) {
+    if let Err(error) = window.set_always_on_top(true) {
+        warn!("设置搜索窗口置顶失败: {error}");
+    }
+
     #[cfg(target_os = "windows")]
     if let Err(error) =
         crate::platform::windows::window_utils::remove_window_system_menu(window)
@@ -505,21 +538,48 @@ fn configure_search_window(window: &WebviewWindow) {
 
     let app = window.app_handle().clone();
     window.on_window_event(move |event| {
-        if let WindowEvent::CloseRequested { api, .. } = event {
-            if app
-                .try_state::<AppState>()
-                .map(|state| state.is_quitting())
-                .unwrap_or(false)
-            {
-                return;
-            }
-            api.prevent_close();
-            if let Some(state) = app.try_state::<AppState>() {
-                if let Err(err) = WindowCoordinator::hide_search_and_restore_target(&app, &state)
+        match event {
+            WindowEvent::CloseRequested { api, .. } => {
+                if app
+                    .try_state::<AppState>()
+                    .map(|state| state.is_quitting())
+                    .unwrap_or(false)
                 {
-                    error!("Search CloseRequested 处理失败: {err}");
+                    return;
+                }
+                api.prevent_close();
+                if let Some(state) = app.try_state::<AppState>() {
+                    if let Err(err) =
+                        WindowCoordinator::hide_search_and_restore_target(&app, &state)
+                    {
+                        error!("Search CloseRequested 处理失败: {err}");
+                    }
                 }
             }
+            WindowEvent::Focused(false) => {
+                if app
+                    .try_state::<AppState>()
+                    .map(|state| state.is_quitting())
+                    .unwrap_or(false)
+                {
+                    return;
+                }
+
+                if let Some(state) = app.try_state::<AppState>() {
+                    if state.should_ignore_search_focus_loss().unwrap_or(false) {
+                        return;
+                    }
+
+                    if state.is_search_active() {
+                        if let Err(err) =
+                            WindowCoordinator::hide_search_without_restore_target(&app, &state)
+                        {
+                            error!("Search Focused(false) 处理失败: {err}");
+                        }
+                    }
+                }
+            }
+            _ => {}
         }
     });
 }
@@ -640,16 +700,126 @@ fn restore_picker_after_editor(
 
 fn restore_search_after_editor(app: &AppHandle, state: &AppState) -> Result<(), AppError> {
     let window = ensure_search_window(app)?;
+    show_and_focus_window(&window)?;
+    if restore_search_window_geometry(&window) {
+        show_and_focus_window(&window)?;
+    }
+
+    state.begin_search_activation();
+    begin_search_window_minimize_monitor(app.clone(), state.clone());
+    info!("从 Editor 返回 Search");
+    Ok(())
+}
+
+fn is_window_ready_for_reuse(window: &WebviewWindow) -> Result<bool, AppError> {
+    let is_visible = window
+        .is_visible()
+        .map_err(|error| AppError::Message(error.to_string()))?;
+    #[cfg(target_os = "windows")]
+    let is_minimized = crate::platform::windows::window_utils::is_window_minimized(window)
+        .map_err(AppError::Message)?;
+
+    #[cfg(not(target_os = "windows"))]
+    let is_minimized = window
+        .is_minimized()
+        .map_err(|error| AppError::Message(error.to_string()))?;
+
+    Ok(is_visible && !is_minimized)
+}
+
+fn show_and_focus_window(window: &WebviewWindow) -> Result<(), AppError> {
     window
         .show()
         .map_err(|error| AppError::Message(error.to_string()))?;
-    window
-        .set_focus()
-        .map_err(|error| AppError::Message(error.to_string()))?;
 
-    state.begin_search_activation();
-    info!("从 Editor 返回 Search");
-    Ok(())
+    #[cfg(target_os = "windows")]
+    {
+        crate::platform::windows::window_utils::restore_window_and_focus(window)
+            .map_err(AppError::Message)?;
+        return Ok(());
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        window
+            .set_focus()
+            .map_err(|error| AppError::Message(error.to_string()))?;
+        Ok(())
+    }
+}
+
+fn restore_search_window_geometry(window: &WebviewWindow) -> bool {
+    let _ = window.set_min_size(Some(Size::Physical(PhysicalSize::new(
+        SEARCH_WINDOW_MIN_WIDTH,
+        SEARCH_WINDOW_MIN_HEIGHT,
+    ))));
+
+    let outer_position = window.outer_position().ok();
+    let outer_size = window.outer_size().ok();
+    let has_offscreen_position = outer_position
+        .map(|position| position.x <= -30_000 || position.y <= -30_000)
+        .unwrap_or(false);
+    let has_shell_placeholder_size = outer_size
+        .map(|size| size.width <= 240 || size.height <= 80)
+        .unwrap_or(false);
+
+    if !has_offscreen_position && !has_shell_placeholder_size {
+        return false;
+    }
+
+    let _ = window.set_size(Size::Physical(PhysicalSize::new(
+        SEARCH_WINDOW_DEFAULT_WIDTH,
+        SEARCH_WINDOW_DEFAULT_HEIGHT,
+    )));
+    let _ = window.center();
+    true
+}
+
+fn begin_search_window_minimize_monitor(app: AppHandle, state: AppState) {
+    #[cfg(target_os = "windows")]
+    {
+        let token = state.next_search_session_monitor_token();
+        std::thread::spawn(move || {
+            loop {
+                std::thread::sleep(Duration::from_millis(120));
+
+                if !state.is_search_active() {
+                    break;
+                }
+
+                if state.current_search_session_monitor_token() != token {
+                    break;
+                }
+
+                let Some(window) = app.get_webview_window(SEARCH_WINDOW_LABEL) else {
+                    break;
+                };
+
+                let is_minimized =
+                    crate::platform::windows::window_utils::is_window_minimized(&window)
+                        .unwrap_or(false);
+                if !is_minimized {
+                    continue;
+                }
+
+                let app_handle = app.clone();
+                let state_clone = state.clone();
+                let _ = app.run_on_main_thread(move || {
+                    if state_clone.is_search_active() {
+                        if let Err(error) =
+                            WindowCoordinator::hide_search_without_restore_target(
+                                &app_handle,
+                                &state_clone,
+                            )
+                        {
+                            error!("搜索窗口最小化后自动结束会话失败: {error}");
+                        }
+                    }
+                });
+                break;
+            }
+        });
+    }
 }
 
 fn notify_search_input_state(

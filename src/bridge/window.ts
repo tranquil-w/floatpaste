@@ -37,6 +37,14 @@ export async function hideCurrentWindow(): Promise<void> {
   await getCurrentWebviewWindow().hide();
 }
 
+export async function startCurrentWindowDragging(): Promise<void> {
+  if (!isTauriRuntime()) {
+    return;
+  }
+
+  await getCurrentWebviewWindow().startDragging();
+}
+
 export async function startCurrentWindowResize(
   direction: WindowResizeDirection,
 ): Promise<void> {

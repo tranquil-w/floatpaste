@@ -1,7 +1,8 @@
 use std::{
     path::PathBuf,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::atomic::{AtomicBool, AtomicU64, Ordering},
     sync::{Arc, Mutex, RwLock},
+    time::{Duration, Instant},
 };
 
 use tauri::{App, AppHandle, Emitter, Manager};
@@ -34,6 +35,8 @@ pub struct AppState {
     quitting: Arc<AtomicBool>,
     search_session: Arc<Mutex<Option<SearchSession>>>,
     search_active: Arc<AtomicBool>,
+    search_session_monitor_token: Arc<AtomicU64>,
+    search_focus_loss_ignore_deadline: Arc<Mutex<Option<Instant>>>,
     editor_session: Arc<Mutex<Option<EditorSession>>>,
     editor_active: Arc<AtomicBool>,
 }
@@ -60,6 +63,8 @@ impl AppState {
             quitting: Arc::new(AtomicBool::new(false)),
             search_session: Arc::new(Mutex::new(None)),
             search_active: Arc::new(AtomicBool::new(false)),
+            search_session_monitor_token: Arc::new(AtomicU64::new(0)),
+            search_focus_loss_ignore_deadline: Arc::new(Mutex::new(None)),
             editor_session: Arc::new(Mutex::new(None)),
             editor_active: Arc::new(AtomicBool::new(false)),
         }
@@ -149,6 +154,38 @@ impl AppState {
 
     pub fn is_search_active(&self) -> bool {
         self.search_active.load(Ordering::SeqCst)
+    }
+
+    pub fn next_search_session_monitor_token(&self) -> u64 {
+        self.search_session_monitor_token.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    pub fn current_search_session_monitor_token(&self) -> u64 {
+        self.search_session_monitor_token.load(Ordering::SeqCst)
+    }
+
+    pub fn mark_search_focus_loss_ignored_for(
+        &self,
+        duration: Duration,
+    ) -> Result<(), AppError> {
+        let mut deadline = self.search_focus_loss_ignore_deadline.lock()?;
+        *deadline = Some(Instant::now() + duration);
+        Ok(())
+    }
+
+    pub fn should_ignore_search_focus_loss(&self) -> Result<bool, AppError> {
+        let mut deadline = self.search_focus_loss_ignore_deadline.lock()?;
+        let Some(current_deadline) = *deadline else {
+            return Ok(false);
+        };
+
+        if Instant::now() <= current_deadline {
+            *deadline = None;
+            return Ok(true);
+        }
+
+        *deadline = None;
+        Ok(false)
     }
 
     pub fn set_editor_session(&self, session: EditorSession) -> Result<(), AppError> {

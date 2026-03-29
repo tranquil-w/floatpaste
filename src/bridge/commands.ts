@@ -163,3 +163,10 @@ export async function hideSearch(): Promise<void> {
   }
   return invoke("hide_search");
 }
+
+export async function prepareSearchWindowDrag(): Promise<void> {
+  if (!isTauriRuntime()) {
+    return;
+  }
+  return invoke("prepare_search_window_drag");
+}
