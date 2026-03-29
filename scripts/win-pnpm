@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+pwsh_path="/mnt/c/Program Files/PowerShell/7/pwsh.exe"
+if [[ ! -x "$pwsh_path" ]]; then
+  pwsh_path="/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+fi
+
+if [[ ! -x "$pwsh_path" ]]; then
+  echo "未找到 Windows PowerShell，可执行脚本失败。" >&2
+  exit 1
+fi
+
+script_path="$(wslpath -w "$script_dir/win-pnpm.ps1")"
+exec "$pwsh_path" -NoProfile -ExecutionPolicy Bypass -File "$script_path" "$@"

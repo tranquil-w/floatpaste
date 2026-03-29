@@ -6,6 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json && vite build",
+    "install:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/win-pnpm.ps1 install",
+    "dev:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/win-pnpm.ps1 dev",
+    "build:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/win-pnpm.ps1 build",
+    "tauri:dev:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/win-pnpm.ps1 tauri dev",
+    "tauri:build:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/win-pnpm.ps1 tauri build",
+    "test:rust:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/win-cargo.ps1 test",
     "preview": "vite preview",
     "tauri": "tauri",
     "release:portable": "powershell -ExecutionPolicy Bypass -File scripts/build-portable.ps1"
