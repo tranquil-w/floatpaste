@@ -185,6 +185,21 @@ html.dark {
   --pg-favorite: var(--pg-yellow-5);
 
   /* Shadow */
+}
+
+/* ── Dark mode subtle overrides ── */
+/* In dark mode, "subtle" = low-opacity accent on dark canvas, not light tint */
+html.dark {
+  --pg-accent-subtle: rgba(56, 139, 253, 0.15);
+  --pg-success-subtle: rgba(46, 160, 67, 0.15);
+  --pg-danger-subtle: rgba(248, 81, 73, 0.15);
+  --pg-warning-subtle: rgba(187, 128, 9, 0.15);
+  --pg-done-subtle: rgba(171, 125, 248, 0.15);
+}
+
+/* ── Shadow ── */
+:root,
+html.dark {
   --pg-shadow-sm: 0 1px 0 var(--pg-border-default);
   --pg-shadow-md: 0 3px 6px rgba(var(--pg-shadow-color), 0.04);
   --pg-shadow-lg: 0 8px 24px rgba(var(--pg-shadow-color), 0.12);
