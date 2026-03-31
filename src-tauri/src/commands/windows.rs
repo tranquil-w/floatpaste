@@ -4,7 +4,11 @@ use std::time::Duration;
 
 use crate::{
     app_bootstrap::AppState,
-    services::{shortcut_manager::ShortcutManager, window_coordinator::WindowCoordinator},
+    services::{
+        shortcut_manager::ShortcutManager,
+        tooltip_window::TooltipWindow,
+        window_coordinator::WindowCoordinator,
+    },
 };
 
 fn map_error(error: impl ToString) -> String {
@@ -69,5 +73,20 @@ pub fn prepare_search_window_drag(state: State<'_, AppState>) -> Result<(), Stri
     state
         .mark_search_focus_loss_ignored_for(Duration::from_millis(1500))
         .map_err(map_error)
+}
+
+#[tauri::command]
+pub async fn show_tooltip(app: AppHandle, x: f64, y: f64, html: String, theme: String) -> Result<(), String> {
+    TooltipWindow::show_tooltip(&app, x, y, html, &theme)
+}
+
+#[tauri::command]
+pub fn tooltip_ready(app: AppHandle, width: u32, height: u32) -> Result<(), String> {
+    TooltipWindow::on_tooltip_ready(&app, width, height)
+}
+
+#[tauri::command]
+pub fn hide_tooltip(app: AppHandle) -> Result<(), String> {
+    TooltipWindow::hide_tooltip(&app)
 }
 

@@ -77,6 +77,10 @@ impl WindowCoordinator {
         if let Some(window) = app.get_webview_window(EDITOR_WINDOW_LABEL) {
             configure_editor_window(&window);
         }
+
+        if let Some(window) = app.get_webview_window(crate::services::tooltip_window::TOOLTIP_WINDOW_LABEL) {
+            crate::services::tooltip_window::configure_tooltip_window(&window);
+        }
     }
 
     pub fn open_settings(app: &AppHandle) -> Result<(), AppError> {
@@ -192,6 +196,7 @@ impl WindowCoordinator {
 
         info!("隐藏 Picker");
         let _ = window.emit(PICKER_SESSION_END_EVENT, ());
+        let _ = crate::services::tooltip_window::TooltipWindow::hide_tooltip(app);
         Ok(())
     }
 

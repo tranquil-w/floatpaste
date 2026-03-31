@@ -9,5 +9,6 @@ pub mod search_service;
 pub mod settings_service;
 pub mod shortcut_manager;
 pub mod startup_service;
+pub mod tooltip_window;
 pub mod tray_service;
 pub mod window_coordinator;

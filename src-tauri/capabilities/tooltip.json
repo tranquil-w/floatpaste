@@ -1,0 +1,9 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "tooltip-capability",
+  "description": "Tooltip 提示窗口权限",
+  "windows": ["tooltip"],
+  "permissions": [
+    "core:default"
+  ]
+}

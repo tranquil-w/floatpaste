@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { queryClient } from "../../app/queryClient";
-import { hidePicker, openEditorFromPicker, pasteItem, setItemFavorited } from "../../bridge/commands";
+import { hidePicker, hideTooltip, openEditorFromPicker, pasteItem, setItemFavorited, showTooltip } from "../../bridge/commands";
 import {
   CLIPS_CHANGED_EVENT,
   PICKER_CONFIRM_EVENT,
@@ -27,6 +28,7 @@ import {
   usePickerRecentQuery,
   usePickerSettingsQuery,
 } from "./queries";
+import { resolveTooltipShowPosition } from "./tooltipState";
 
 const STYLES = {
   container:
@@ -104,6 +106,29 @@ const PICKER_RESIZE_HANDLES: WindowResizeHandle[] = [
   },
 ];
 
+function buildTooltipHtml(item: ClipItemSummary): string {
+  const escapedContent = item.tooltipText || item.contentPreview || "";
+  const metaParts: string[] = [];
+
+  metaParts.push(`<span class="meta-badge">${escapeHtml(getClipTypeLabel(item))}</span>`);
+  metaParts.push(
+    `<span class="meta-source">${escapeHtml(item.sourceApp ?? "未知来源")}</span>`
+  );
+  metaParts.push(
+    `<span class="meta-time">${escapeHtml(formatDateTime(item.lastUsedAt ?? item.createdAt))}</span>`
+  );
+
+  return `<div class="tooltip-content">${escapeHtml(escapedContent)}</div><div class="tooltip-meta">${metaParts.join("")}</div>`;
+}
+
+export function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 export function PickerShell() {
   const tauriRuntime = isTauriRuntime();
   const settings = usePickerSettingsQuery();
@@ -116,10 +141,33 @@ export function PickerShell() {
   const itemsRef = useRef<ClipItemSummary[]>([]);
   const selectedIndexRef = useRef(0);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tooltipRequestIdRef = useRef(0);
 
   const items = useMemo(() => recent.data ?? [], [recent.data]);
   const selectedItem = items[selectedIndex] ?? null;
   const canEditSelected = selectedItem?.type === "text";
+
+  const clearTooltipTimer = () => {
+    if (tooltipTimerRef.current) {
+      clearTimeout(tooltipTimerRef.current);
+      tooltipTimerRef.current = null;
+    }
+  };
+
+  const invalidateTooltipRequest = () => {
+    tooltipRequestIdRef.current += 1;
+    return tooltipRequestIdRef.current;
+  };
+
+  const cancelTooltip = () => {
+    clearTooltipTimer();
+    invalidateTooltipRequest();
+
+    if (tauriRuntime) {
+      void hideTooltip();
+    }
+  };
 
   const confirmSelection = async (index: number) => {
     const item = itemsRef.current[index];
@@ -127,7 +175,9 @@ export function PickerShell() {
       return;
     }
 
-    const result = await pasteItem(item.id, {
+    cancelTooltip();
+
+    await pasteItem(item.id, {
       restoreClipboardAfterPaste: settings.data?.restoreClipboardAfterPaste ?? true,
       pasteToTarget: true,
     });
@@ -146,6 +196,7 @@ export function PickerShell() {
       return;
     }
 
+    cancelTooltip();
     await openEditorFromPicker(item.id);
   };
 
@@ -191,6 +242,7 @@ export function PickerShell() {
 
     void listen(PICKER_SESSION_END_EVENT, () => {
       if (!disposed) {
+        cancelTooltip();
         selectedIndexRef.current = 0;
         setSelectedIndex(0);
       }
@@ -203,6 +255,7 @@ export function PickerShell() {
       await queryClient.invalidateQueries({ queryKey: ["picker-recent"] });
 
       if (!disposed) {
+        cancelTooltip();
         selectedIndexRef.current = 0;
         setSelectedIndex(0);
         setLastMessage("");
@@ -305,6 +358,7 @@ export function PickerShell() {
 
       if (event.key === "Escape") {
         event.preventDefault();
+        cancelTooltip();
         void hidePicker();
         return;
       }
@@ -367,6 +421,50 @@ export function PickerShell() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [tauriRuntime]);
 
+  const handleItemMouseMove = (event: React.MouseEvent, item: ClipItemSummary) => {
+    if (!tauriRuntime) return;
+    const requestId = invalidateTooltipRequest();
+    const clientPosition = { x: event.clientX, y: event.clientY };
+    const tooltipHtml = buildTooltipHtml(item);
+    clearTooltipTimer();
+    tooltipTimerRef.current = setTimeout(() => {
+      tooltipTimerRef.current = null;
+      const currentWindow = getCurrentWebviewWindow();
+
+      Promise.all([
+        currentWindow.outerPosition(),
+        currentWindow.scaleFactor(),
+      ]).then(([outerPosition, scaleFactor]) => {
+        const position = resolveTooltipShowPosition({
+          activeRequestId: tooltipRequestIdRef.current,
+          requestId,
+          outerPosition,
+          scaleFactor,
+          clientPosition,
+        });
+
+        if (!position) {
+          return;
+        }
+
+        return showTooltip(position.x, position.y, tooltipHtml, (document.documentElement.dataset.theme as "dark" | "light") ?? "dark");
+      }).catch((error) => {
+        console.warn("[FloatPaste] tooltip 定位或显示失败:", error);
+      });
+    }, 100);
+  };
+
+  const handleItemMouseLeave = () => {
+    if (!tauriRuntime) return;
+    cancelTooltip();
+  };
+
+  useEffect(() => {
+    return () => {
+      cancelTooltip();
+    };
+  }, []);
+
   return (
     <div className="m-0 h-screen w-screen select-none overflow-hidden bg-transparent p-0 text-pg-fg-default">
       <div className={STYLES.container}>
@@ -419,11 +517,12 @@ export function PickerShell() {
                   onDoubleClick={() => {
                     void confirmSelection(index);
                   }}
+                  onMouseMove={(e) => handleItemMouseMove(e, item)}
+                  onMouseLeave={handleItemMouseLeave}
                   type="button"
                 >
                   <span
                     className={STYLES.itemContent(isSelected, item.isFavorited)}
-                    title={item.tooltipText || item.contentPreview}
                   >
                     {item.contentPreview}
                   </span>

@@ -7,7 +7,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow, GWL_EXSTYLE, GWL_STYLE,
     SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW,
     SW_HIDE, SW_RESTORE, SW_SHOW, SW_SHOWNOACTIVATE, WM_SYSCOMMAND, WS_EX_NOACTIVATE,
-    WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_SYSMENU, SC_KEYMENU,
+    WS_EX_TRANSPARENT, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_SYSMENU, SC_KEYMENU,
 };
 
 fn strip_system_menu_style(style: isize) -> isize {
@@ -107,6 +107,23 @@ pub fn hide_window(window: &WebviewWindow) -> Result<(), String> {
 
     unsafe {
         let _ = ShowWindow(hwnd, SW_HIDE);
+    }
+
+    Ok(())
+}
+
+pub fn set_window_click_through(window: &WebviewWindow) -> Result<(), String> {
+    let tauri_hwnd = window.hwnd().map_err(|e| e.to_string())?;
+    let hwnd_isize = tauri_hwnd.0 as isize;
+    let hwnd = HWND(hwnd_isize as *mut _);
+
+    unsafe {
+        let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        SetWindowLongPtrW(
+            hwnd,
+            GWL_EXSTYLE,
+            ex_style | WS_EX_TRANSPARENT.0 as isize | WS_EX_NOACTIVATE.0 as isize,
+        );
     }
 
     Ok(())

@@ -170,3 +170,19 @@ export async function prepareSearchWindowDrag(): Promise<void> {
   }
   return invoke("prepare_search_window_drag");
 }
+
+export type TooltipTheme = "dark" | "light";
+
+export async function showTooltip(x: number, y: number, html: string, theme: TooltipTheme = "dark"): Promise<void> {
+  if (!isTauriRuntime()) {
+    return;
+  }
+  return invoke("show_tooltip", { x, y, html, theme });
+}
+
+export async function hideTooltip(): Promise<void> {
+  if (!isTauriRuntime()) {
+    return;
+  }
+  return invoke("hide_tooltip");
+}

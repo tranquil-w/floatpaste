@@ -70,7 +70,8 @@
         "settings-capability",
         "picker-capability",
         "search-capability",
-        "editor-capability"
+        "editor-capability",
+        "tooltip-capability"
       ]
     }
   },
