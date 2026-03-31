@@ -42,8 +42,8 @@ const STYLES = {
     selected
       ? "bg-pg-accent-subtle border-pg-accent-fg/30"
       : favorited
-        ? "border-l-[3px] border-l-pg-accent-fg bg-transparent hover:bg-pg-canvas-subtle"
-        : "bg-transparent border-transparent hover:bg-pg-canvas-subtle"
+        ? "border-pg-border-subtle border-l-[3px] border-l-pg-accent-fg bg-pg-canvas-default hover:bg-pg-canvas-subtle"
+        : "bg-pg-canvas-default border-pg-border-subtle hover:bg-pg-canvas-subtle"
   }`,
   itemContent: (selected: boolean, favorited: boolean) =>
     `${selected ? "text-pg-fg-default" : "text-pg-fg-default/90"} line-clamp-5 text-[13px] ${favorited ? "font-medium" : ""} leading-[1.6] tracking-tight break-words [overflow-wrap:anywhere] whitespace-pre-wrap transition-colors`,
@@ -489,7 +489,7 @@ export function PickerShell() {
           </div>
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col px-1 py-1.5">
+        <div className="flex min-h-0 flex-1 flex-col rounded-b-md bg-pg-canvas-subtle px-1 py-1.5">
           {recent.isLoading ? (
             <div className="flex h-full items-center justify-center">
               <LoadingSpinner size="sm" text="正在加载记录..." />
