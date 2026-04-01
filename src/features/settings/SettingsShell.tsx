@@ -62,12 +62,12 @@ const themeModeOptions: Array<{
   {
     value: "light",
     label: "浅色",
-    description: "中性冷色调浅色主题，适合日常办公。",
+    description: "暖调纸质底色，适合日常办公。",
   },
   {
     value: "dark",
     label: "深色",
-    description: "中性深色主题，适合夜间使用。",
+    description: "冷调深色主题，适合夜间使用。",
   },
 ];
 

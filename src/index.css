@@ -4,24 +4,24 @@
 
 /* ── Primer Light Theme ── */
 :root {
-  /* Neutral */
-  --pg-neutral-0: #ffffff;
-  --pg-neutral-1: #F6F8FA;
-  --pg-neutral-2: #EFF2F5;
-  --pg-neutral-3: #E6EAEF;
-  --pg-neutral-4: #E0E6EB;
-  --pg-neutral-5: #DAE0E7;
-  --pg-neutral-6: #D1D9E0;
-  --pg-neutral-7: #C8D1DA;
-  --pg-neutral-8: #818B98;
-  --pg-neutral-9: #59636E;
-  --pg-neutral-10: #454C54;
-  --pg-neutral-11: #393F46;
-  --pg-neutral-12: #25292E;
-  --pg-neutral-13: #1f2328;
+  /* Neutral — warm gray (paper-like warmth) */
+  --pg-neutral-0: #FFFEFA;
+  --pg-neutral-1: #FAF8F4;
+  --pg-neutral-2: #F3F0EB;
+  --pg-neutral-3: #EBE7E1;
+  --pg-neutral-4: #E4DFD8;
+  --pg-neutral-5: #DFD9D1;
+  --pg-neutral-6: #D5CFC6;
+  --pg-neutral-7: #CCC5BB;
+  --pg-neutral-8: #868078;
+  --pg-neutral-9: #5D574F;
+  --pg-neutral-10: #49433B;
+  --pg-neutral-11: #3D3730;
+  --pg-neutral-12: #2A241D;
+  --pg-neutral-13: #241E17;
 
   /* Shadow color (rgb channels for rgba usage) */
-  --pg-shadow-color: 31, 35, 40;
+  --pg-shadow-color: 36, 30, 23;
 
   /* Blue (accent) */
   --pg-blue-0: #ddf4ff;
@@ -70,6 +70,9 @@
   --pg-purple-5: #8250df;
   --pg-purple-7: #512a97;
 
+  /* Light-theme accent-subtle: warm tone to harmonize with warm neutrals */
+  --pg-accent-subtle: #f5eddc;
+
   color: var(--pg-fg-default);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;
   color-scheme: light;
@@ -78,23 +81,23 @@
 
 /* ── Primer Dark Dimmed Theme ── */
 html.dark {
-  --pg-neutral-0: #010409;
-  --pg-neutral-1: #0D1117;
-  --pg-neutral-2: #151B23;
-  --pg-neutral-3: #212830;
-  --pg-neutral-4: #262C36;
-  --pg-neutral-5: #2A313C;
-  --pg-neutral-6: #2F3742;
-  --pg-neutral-7: #3D444D;
-  --pg-neutral-8: #656C76;
-  --pg-neutral-9: #9198A1;
-  --pg-neutral-10: #B7BDC8;
-  --pg-neutral-11: #D1D7E0;
-  --pg-neutral-12: #F0F6FC;
-  --pg-neutral-13: #cdd9e5;
+  --pg-neutral-0: #0e1015;
+  --pg-neutral-1: #181c22;
+  --pg-neutral-2: #1f232b;
+  --pg-neutral-3: #282c34;
+  --pg-neutral-4: #2e333c;
+  --pg-neutral-5: #333842;
+  --pg-neutral-6: #3a3f49;
+  --pg-neutral-7: #4b5260;
+  --pg-neutral-8: #636d7b;
+  --pg-neutral-9: #8a919c;
+  --pg-neutral-10: #adb4bf;
+  --pg-neutral-11: #c9ced7;
+  --pg-neutral-12: #e8ecf2;
+  --pg-neutral-13: #bcc2cc;
 
   /* Shadow color (rgb channels for rgba usage) */
-  --pg-shadow-color: 33, 38, 45;
+  --pg-shadow-color: 40, 44, 52;
 
   --pg-blue-0: #c6e6ff;
   --pg-blue-1: #96d0ff;
@@ -150,7 +153,6 @@ html.dark {
   /* Accent */
   --pg-accent-fg: var(--pg-blue-5);
   --pg-accent-emphasis: var(--pg-blue-5);
-  --pg-accent-subtle: var(--pg-blue-0);
   --pg-accent-hover: var(--pg-blue-4);
 
   /* Canvas — light uses neutral-2 (#EFF2F5, warm gray-white, Catppuccin Latte base);
@@ -190,12 +192,12 @@ html.dark {
 
 /* ── Dark dimmed overrides ── */
 /* Remap semantic tokens to lighter neutral levels (Primer dark_dimmed strategy):
- * canvas-default: neutral-0 → neutral-3  (#010409 → #212830)
- * canvas-subtle:  neutral-1 → neutral-4  (#0D1117 → #262C36)
- * canvas-inset:   neutral-0 → neutral-2  (#010409 → #151B23)
- * fg-default:     neutral-13 → neutral-11 (#ffffff → #D1D7E0)
- * fg-on-emphasis: #ffffff → neutral-12    (#F0F6FC)
- * border-default: neutral-6 → neutral-7  (#2F3742 → #3D444D)
+ * canvas-default: neutral-0 → neutral-3  (#0e1015 → #282c34)
+ * canvas-subtle:  neutral-1 → neutral-4  (#181c22 → #2e333c)
+ * canvas-inset:   neutral-0 → neutral-2  (#0e1015 → #1f232b)
+ * fg-default:     neutral-13 → neutral-11 (#bcc2cc → #c9ced7)
+ * fg-on-emphasis: #ffffff → neutral-12    (#F0F6FC → #e8ecf2)
+ * border-default: neutral-6 → neutral-7  (#3a3f49 → #4b5260)
  */
 html.dark {
   --pg-canvas-default: var(--pg-neutral-3);
