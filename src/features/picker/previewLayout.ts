@@ -1,0 +1,6 @@
+export const PICKER_IMAGE_THUMBNAIL_SIZE = 72;
+
+export const PICKER_IMAGE_THUMBNAIL_STYLE = {
+  width: `${PICKER_IMAGE_THUMBNAIL_SIZE}px`,
+  height: `${PICKER_IMAGE_THUMBNAIL_SIZE}px`,
+} as const;

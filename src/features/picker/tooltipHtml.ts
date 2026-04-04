@@ -1,5 +1,14 @@
 import type { ClipItemSummary } from "../../shared/types/clips";
 
+export const TOOLTIP_IMAGE_PREVIEW_MAX_WIDTH = 560;
+export const TOOLTIP_IMAGE_PREVIEW_MAX_HEIGHT = 420;
+
+const TOOLTIP_CONTAINER_MAX_WIDTH = TOOLTIP_IMAGE_PREVIEW_MAX_WIDTH + 40;
+
+export function buildTooltipImagePreviewStyle(): string {
+  return `--tooltip-image-max-width: ${TOOLTIP_IMAGE_PREVIEW_MAX_WIDTH}px; --tooltip-image-max-height: ${TOOLTIP_IMAGE_PREVIEW_MAX_HEIGHT}px;`;
+}
+
 type BuildTooltipHtmlOptions = {
   imageUrl?: string | null;
   requestId?: number;
@@ -113,7 +122,8 @@ export function buildTooltipHtml(item: ClipItemSummary, options: BuildTooltipHtm
     const requestId = options.requestId ?? 0;
     const fallbackContent = item.tooltipText || item.contentPreview || "";
     return [
-      `<div class="tooltip-image-preview"><img src="${escapeHtmlAttribute(options.imageUrl)}" alt="" data-request-id="${requestId}" data-fallback-content="${escapeHtmlAttribute(fallbackContent)}" /></div>`,
+      `<style>#tooltip{max-width:${TOOLTIP_CONTAINER_MAX_WIDTH}px !important}</style>`,
+      `<div class="tooltip-image-preview" style="${escapeHtmlAttribute(buildTooltipImagePreviewStyle())}"><img src="${escapeHtmlAttribute(options.imageUrl)}" alt="" data-request-id="${requestId}" data-fallback-content="${escapeHtmlAttribute(fallbackContent)}" /></div>`,
       `<div class="tooltip-meta">${metaParts.join("")}</div>`,
     ].join("");
   }

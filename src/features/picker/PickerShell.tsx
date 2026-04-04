@@ -29,6 +29,7 @@ import {
   usePickerRecentQuery,
   usePickerSettingsQuery,
 } from "./queries";
+import { PICKER_IMAGE_THUMBNAIL_STYLE } from "./previewLayout";
 import { buildTooltipHtml } from "./tooltipHtml";
 import { resolveTooltipShowPosition } from "./tooltipState";
 
@@ -579,9 +580,10 @@ export function PickerShell() {
                     {imageUrl ? (
                       <img
                         alt=""
-                        className="mt-0.5 h-8 w-8 shrink-0 rounded-[6px] border border-pg-border-subtle object-cover"
+                        className="mt-0.5 shrink-0 rounded-[8px] border border-pg-border-subtle bg-pg-canvas-subtle object-contain"
                         onError={() => handleThumbnailError(item.id)}
                         src={imageUrl}
+                        style={PICKER_IMAGE_THUMBNAIL_STYLE}
                       />
                     ) : null}
                     <span

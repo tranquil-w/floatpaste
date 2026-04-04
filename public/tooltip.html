@@ -42,8 +42,8 @@ html, body {
 
 #tooltip {
   display: none;
-  max-width: 360px;
-  min-width: 80px;
+  max-width: 600px;
+  min-width: 120px;
   background: var(--pg-canvas-subtle);
   color: var(--pg-fg-default);
   border: 1px solid var(--pg-border-muted);
@@ -62,15 +62,17 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  max-width: 320px;
-  max-height: 240px;
+  max-width: var(--tooltip-image-max-width, 480px);
+  max-height: var(--tooltip-image-max-height, 360px);
   margin-bottom: 8px;
+  overflow: hidden;
+  border-radius: 8px;
 }
 
 #tooltip .tooltip-image-preview img {
   display: block;
-  max-width: 320px;
-  max-height: 240px;
+  max-width: min(100%, var(--tooltip-image-max-width, 480px));
+  max-height: min(100%, var(--tooltip-image-max-height, 360px));
   width: auto;
   height: auto;
   border-radius: 6px;

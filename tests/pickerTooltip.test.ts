@@ -1,7 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { resolveTooltipShowPosition } from "../src/features/picker/tooltipState.ts";
-import { buildTooltipHtml, escapeHtml, escapeHtmlAttribute } from "../src/features/picker/tooltipHtml.ts";
+import {
+  buildTooltipHtml,
+  escapeHtml,
+  escapeHtmlAttribute,
+  TOOLTIP_IMAGE_PREVIEW_MAX_HEIGHT,
+  TOOLTIP_IMAGE_PREVIEW_MAX_WIDTH,
+} from "../src/features/picker/tooltipHtml.ts";
+import {
+  PICKER_IMAGE_THUMBNAIL_SIZE,
+} from "../src/features/picker/previewLayout.ts";
 
 test("tooltip 坐标会把 CSS 像素换算为桌面物理像素", () => {
   const position = resolveTooltipShowPosition({
@@ -63,7 +72,10 @@ test("图片 tooltip 会转义属性值并携带 requestId", () => {
 
   assert.match(html, /<img[^>]+src="asset:\/\/&quot;demo&quot;&amp;preview=&lt;bad&gt;"/);
   assert.match(html, /data-request-id="7"/);
+  assert.match(html, /#tooltip\{max-width:\d+px !important}/);
   assert.match(html, /meta-size">1920 × 1080</);
+  assert.match(html, /--tooltip-image-max-width:\s*560px/);
+  assert.match(html, /--tooltip-image-max-height:\s*420px/);
 });
 
 test("图片 tooltip 在没有图片 URL 时回退为纯文本内容", () => {
@@ -98,4 +110,10 @@ test("图片 tooltip 在没有图片 URL 时回退为纯文本内容", () => {
 
 test("escapeHtmlAttribute 会转义属性敏感字符", () => {
   assert.equal(escapeHtmlAttribute('"quoted"&<tag>'), "&quot;quoted&quot;&amp;&lt;tag&gt;");
+});
+
+test("picker 图片预览使用更大的缩略图与 tooltip 上限", () => {
+  assert.equal(PICKER_IMAGE_THUMBNAIL_SIZE, 72);
+  assert.equal(TOOLTIP_IMAGE_PREVIEW_MAX_WIDTH, 560);
+  assert.equal(TOOLTIP_IMAGE_PREVIEW_MAX_HEIGHT, 420);
 });
