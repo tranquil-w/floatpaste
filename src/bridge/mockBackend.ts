@@ -233,6 +233,11 @@ function toSummary(item: ClipItemDetail): ClipItemSummary {
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
     lastUsedAt: item.lastUsedAt,
+    imagePath: item.imagePath,
+    imageWidth: item.imageWidth,
+    imageHeight: item.imageHeight,
+    imageFormat: item.imageFormat,
+    fileSize: item.fileSize,
   };
 }
 

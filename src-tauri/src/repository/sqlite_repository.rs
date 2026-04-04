@@ -239,7 +239,10 @@ impl SqliteRepository {
     pub fn list_recent(&self, limit: u32) -> Result<Vec<ClipItemSummary>, AppError> {
         let connection = self.connection.lock()?;
         let sql = format!(
-            "SELECT id, type, preview_text, source_app, is_favorited, file_paths, file_count, total_size, directory_count, created_at, updated_at, last_used_at, substr(full_text, 1, 3000)
+            "SELECT id, type, preview_text, source_app, is_favorited,
+                    image_path, image_width, image_height, image_format, file_size,
+                    file_paths, file_count, total_size, directory_count,
+                    created_at, updated_at, last_used_at, substr(full_text, 1, 3000)
              FROM clip_items
              WHERE deleted_at IS NULL
              ORDER BY {}
@@ -254,7 +257,10 @@ impl SqliteRepository {
     pub fn list_favorites(&self, limit: u32) -> Result<Vec<ClipItemSummary>, AppError> {
         let connection = self.connection.lock()?;
         let sql = format!(
-            "SELECT id, type, preview_text, source_app, is_favorited, file_paths, file_count, total_size, directory_count, created_at, updated_at, last_used_at, substr(full_text, 1, 3000)
+            "SELECT id, type, preview_text, source_app, is_favorited,
+                    image_path, image_width, image_height, image_format, file_size,
+                    file_paths, file_count, total_size, directory_count,
+                    created_at, updated_at, last_used_at, substr(full_text, 1, 3000)
              FROM clip_items
              WHERE deleted_at IS NULL AND is_favorited = 1
              ORDER BY {}
@@ -421,7 +427,10 @@ impl SqliteRepository {
         values.push(Value::Integer(i64::from(query.limit)));
         values.push(Value::Integer(i64::from(query.offset)));
         let sql = format!(
-            "SELECT id, type, preview_text, source_app, is_favorited, file_paths, file_count, total_size, directory_count, created_at, updated_at, last_used_at, substr(full_text, 1, 3000)
+            "SELECT id, type, preview_text, source_app, is_favorited,
+                    image_path, image_width, image_height, image_format, file_size,
+                    file_paths, file_count, total_size, directory_count,
+                    created_at, updated_at, last_used_at, substr(full_text, 1, 3000)
              FROM clip_items
              WHERE {where_clause}
              ORDER BY {}
@@ -476,6 +485,7 @@ impl SqliteRepository {
 
         let sql = format!(
             "SELECT ci.id, ci.type, ci.preview_text, ci.source_app, ci.is_favorited,
+                    ci.image_path, ci.image_width, ci.image_height, ci.image_format, ci.file_size,
                     ci.file_paths, ci.file_count, ci.total_size, ci.directory_count,
                     ci.created_at, ci.updated_at, ci.last_used_at, substr(ci.full_text, 1, 3000)
              FROM clip_items_fts
@@ -650,10 +660,10 @@ fn build_fts_query(keyword: &str) -> String {
 fn map_summary_row(row: &Row<'_>) -> rusqlite::Result<ClipItemSummary> {
     let r#type: String = row.get(1)?;
     let preview_text: String = row.get(2)?;
-    let file_paths = parse_file_paths(row.get::<_, String>(5)?);
-    let file_count: i32 = row.get(6)?;
-    let stored_total_size: Option<i64> = row.get(7)?;
-    let stored_directory_count: i32 = row.get(8)?;
+    let file_paths = parse_file_paths(row.get::<_, String>(10)?);
+    let file_count: i32 = row.get(11)?;
+    let stored_total_size: Option<i64> = row.get(12)?;
+    let stored_directory_count: i32 = row.get(13)?;
     let resolved_file_fields = resolve_file_clip_fields(
         &r#type,
         &file_paths,
@@ -663,7 +673,7 @@ fn map_summary_row(row: &Row<'_>) -> rusqlite::Result<ClipItemSummary> {
     );
 
     let tooltip_text: Option<String> = row
-        .get::<_, Option<String>>(12)
+        .get::<_, Option<String>>(17)
         .unwrap_or_default()
         .filter(|s| !s.is_empty());
 
@@ -676,9 +686,14 @@ fn map_summary_row(row: &Row<'_>) -> rusqlite::Result<ClipItemSummary> {
         is_favorited: row.get::<_, i64>(4)? == 1,
         file_count: resolved_file_fields.file_count,
         directory_count: resolved_file_fields.directory_count,
-        created_at: timestamp_to_iso(row.get_ref(9)?),
-        updated_at: timestamp_to_iso(row.get_ref(10)?),
-        last_used_at: optional_timestamp_to_iso(row.get_ref(11)?),
+        created_at: timestamp_to_iso(row.get_ref(14)?),
+        updated_at: timestamp_to_iso(row.get_ref(15)?),
+        last_used_at: optional_timestamp_to_iso(row.get_ref(16)?),
+        image_path: row.get(5)?,
+        image_width: row.get(6)?,
+        image_height: row.get(7)?,
+        image_format: row.get(8)?,
+        file_size: row.get(9)?,
     })
 }
 
@@ -1098,6 +1113,62 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
         assert_eq!(detail.image_height, Some(16));
         assert_eq!(detail.image_format.as_deref(), Some("png"));
         assert_eq!(detail.file_size, Some(92));
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn summary_includes_image_metadata_for_recent_and_search_results() {
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+        let item = crate::domain::clip_item::NewClipImageItem {
+            normalized: crate::domain::clip_item::NormalizedClipImage {
+                preview_text: "图片 (16 x 16, 92 B)".to_string(),
+                search_text: "diagram preview png".to_string(),
+                hash: "image-hash-summary".to_string(),
+                image_path: Some("images/test-summary.png".to_string()),
+                image_width: Some(16),
+                image_height: Some(16),
+                image_format: Some("png".to_string()),
+                file_size: Some(92),
+            },
+            source_app: Some("画图".to_string()),
+        };
+
+        let detail = repository.save_image_item(&item).unwrap();
+        let recent_items = repository.list_recent(10).unwrap();
+        let recent_summary = recent_items
+            .iter()
+            .find(|summary| summary.id == detail.id)
+            .expect("recent summary should contain saved image item");
+
+        assert_eq!(recent_summary.image_path.as_deref(), Some("images/test-summary.png"));
+        assert_eq!(recent_summary.image_width, Some(16));
+        assert_eq!(recent_summary.image_height, Some(16));
+        assert_eq!(recent_summary.image_format.as_deref(), Some("png"));
+        assert_eq!(recent_summary.file_size, Some(92));
+
+        let search_result = repository
+            .search(SearchQuery {
+                keyword: "diagram".to_string(),
+                filters: SearchFilters::default(),
+                offset: 0,
+                limit: 10,
+                sort: SearchSort::RelevanceDesc,
+            })
+            .unwrap();
+        let search_summary = search_result
+            .items
+            .iter()
+            .find(|summary| summary.id == detail.id)
+            .expect("search summary should contain saved image item");
+
+        assert_eq!(search_summary.image_path.as_deref(), Some("images/test-summary.png"));
+        assert_eq!(search_summary.image_width, Some(16));
+        assert_eq!(search_summary.image_height, Some(16));
+        assert_eq!(search_summary.image_format.as_deref(), Some("png"));
+        assert_eq!(search_summary.file_size, Some(92));
 
         drop(repository);
         fs::remove_file(path).unwrap();
