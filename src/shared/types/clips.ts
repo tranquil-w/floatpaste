@@ -1,8 +1,10 @@
 export type SearchSort = "relevance_desc" | "recent_desc";
 export type ClipType = "text" | "image" | "file";
+export type SearchQuickFilter = "all" | "favorite" | ClipType;
 
 export interface SearchFilters {
   favoritedOnly?: boolean;
+  clipType?: ClipType;
   sourceApp?: string | null;
   includeDeleted?: false;
 }

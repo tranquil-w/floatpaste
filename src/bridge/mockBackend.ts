@@ -184,6 +184,10 @@ function rankItems(query: SearchQuery): ClipItemDetail[] {
     result = result.filter((item) => item.isFavorited);
   }
 
+  if (query.filters.clipType) {
+    result = result.filter((item) => item.type === query.filters.clipType);
+  }
+
   if (query.filters.sourceApp) {
     result = result.filter((item) => item.sourceApp === query.filters.sourceApp);
   }

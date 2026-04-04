@@ -90,10 +90,29 @@ pub enum SearchSort {
     RecentDesc,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ClipType {
+    Text,
+    Image,
+    File,
+}
+
+impl ClipType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Text => "text",
+            Self::Image => "image",
+            Self::File => "file",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchFilters {
     pub favorited_only: Option<bool>,
+    pub clip_type: Option<ClipType>,
     pub source_app: Option<String>,
     pub include_deleted: Option<bool>,
 }
@@ -160,4 +179,26 @@ pub struct NormalizedClipText {
 pub struct NewClipTextItem {
     pub normalized: NormalizedClipText,
     pub source_app: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SearchQuery;
+
+    #[test]
+    fn search_query_rejects_invalid_clip_type() {
+        let result = serde_json::from_str::<SearchQuery>(
+            r#"{
+                "keyword": "",
+                "filters": {
+                    "clipType": "video"
+                },
+                "offset": 0,
+                "limit": 30,
+                "sort": "recent_desc"
+            }"#,
+        );
+
+        assert!(result.is_err());
+    }
 }

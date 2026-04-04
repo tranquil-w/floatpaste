@@ -1,22 +1,52 @@
 import { useQuery } from "@tanstack/react-query";
-import { listRecentItems, searchItems } from "../../bridge/commands";
-import type { SearchQuery } from "../../shared/types/clips";
+import { searchItems } from "../../bridge/commands";
+import type {
+  SearchFilters,
+  SearchQuery,
+  SearchQuickFilter,
+  SearchResult,
+} from "../../shared/types/clips";
 
 const SEARCH_RECENT_LIMIT = 30;
 
-export function useSearchRecentQuery(enabled: boolean) {
+function buildFilters(filter: SearchQuickFilter): Partial<SearchFilters> {
+  if (filter === "favorite") {
+    return { favoritedOnly: true } as const;
+  }
+
+  if (filter === "all") {
+    return {};
+  }
+
+  return { clipType: filter } as const;
+}
+
+export function useSearchRecentQuery(filter: SearchQuickFilter, enabled: boolean) {
+  const query: SearchQuery = {
+    keyword: "",
+    filters: buildFilters(filter),
+    offset: 0,
+    limit: SEARCH_RECENT_LIMIT,
+    sort: "recent_desc",
+  };
+
   return useQuery({
-    queryKey: ["search-recent", SEARCH_RECENT_LIMIT],
-    queryFn: () => listRecentItems(SEARCH_RECENT_LIMIT),
+    queryKey: ["search-recent", query],
+    // 空关键字时后端会回落到 search_recent 分支，这样最近记录与关键词搜索共用同一套筛选语义。
+    queryFn: (): Promise<SearchResult> => searchItems(query),
     enabled,
     staleTime: 0,
   });
 }
 
-export function useSearchSearchQuery(keyword: string, enabled: boolean) {
+export function useSearchSearchQuery(
+  keyword: string,
+  filter: SearchQuickFilter,
+  enabled: boolean,
+) {
   const query: SearchQuery = {
     keyword,
-    filters: {},
+    filters: buildFilters(filter),
     offset: 0,
     limit: 50,
     sort: keyword.trim() ? "relevance_desc" : "recent_desc",

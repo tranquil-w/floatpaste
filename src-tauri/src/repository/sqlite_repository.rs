@@ -517,6 +517,11 @@ fn build_filters_clause_with_alias(query: &SearchQuery, alias: &str) -> (String,
         clauses.push(format!("{}is_favorited = 1", prefix(alias)));
     }
 
+    if let Some(clip_type) = query.filters.clip_type.as_ref() {
+        clauses.push(format!("{}type = ?", prefix(alias)));
+        values.push(Value::Text(clip_type.as_str().to_string()));
+    }
+
     if let Some(source_app) = query
         .filters
         .source_app
@@ -887,7 +892,7 @@ mod tests {
 
     use super::{bool_to_i64, SqliteRepository, PICKER_WINDOW_STATE_KEY};
     use crate::domain::{
-        clip_item::{SearchFilters, SearchQuery, SearchSort},
+        clip_item::{ClipType, SearchFilters, SearchQuery, SearchSort},
         settings::StoredWindowPosition,
     };
 
@@ -1008,6 +1013,42 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
                 "INSERT INTO clip_items_fts(item_id, full_text, search_text, source_app)
                  VALUES(?1, ?2, ?2, NULL)",
                 rusqlite::params![id, preview],
+            )
+            .unwrap();
+    }
+
+    fn seed_typed_item(
+        repository: &SqliteRepository,
+        id: &str,
+        clip_type: &str,
+        preview: &str,
+        created_at: i64,
+        last_used_at: Option<i64>,
+        is_favorited: bool,
+    ) {
+        let connection = repository.connection.lock().unwrap();
+        connection
+            .execute(
+                "INSERT INTO clip_items(
+                    id, type, full_text, preview_text, search_text, source_app,
+                    is_favorited, hash, created_at, updated_at, last_used_at, deleted_at
+                ) VALUES(?1, ?2, ?3, ?3, ?3, NULL, ?4, ?5, ?6, ?6, ?7, NULL)",
+                rusqlite::params![
+                    id,
+                    clip_type,
+                    if clip_type == "text" { preview } else { "" },
+                    bool_to_i64(is_favorited),
+                    format!("hash-{id}"),
+                    created_at,
+                    last_used_at
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO clip_items_fts(item_id, full_text, search_text, source_app)
+                 VALUES(?1, ?2, ?3, NULL)",
+                rusqlite::params![id, if clip_type == "text" { preview } else { "" }, preview],
             )
             .unwrap();
     }
@@ -1208,6 +1249,82 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
             .unwrap();
 
         assert_eq!(result.items[0].id, "newer-normal");
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn search_filters_by_clip_type_for_recent_and_keyword_results() {
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+        let now = Utc::now();
+
+        seed_typed_item(
+            &repository,
+            "text-item",
+            "text",
+            "shared text keyword",
+            (now - Duration::minutes(3)).timestamp_millis(),
+            None,
+            false,
+        );
+        seed_typed_item(
+            &repository,
+            "image-item",
+            "image",
+            "shared image keyword",
+            (now - Duration::minutes(2)).timestamp_millis(),
+            None,
+            false,
+        );
+        seed_typed_item(
+            &repository,
+            "file-item",
+            "file",
+            "shared file keyword",
+            (now - Duration::minutes(1)).timestamp_millis(),
+            None,
+            false,
+        );
+
+        let recent_result = repository
+            .search(SearchQuery {
+                keyword: String::new(),
+                filters: SearchFilters {
+                    favorited_only: None,
+                    clip_type: Some(ClipType::Image),
+                    source_app: None,
+                    include_deleted: None,
+                },
+                offset: 0,
+                limit: 10,
+                sort: SearchSort::RecentDesc,
+            })
+            .unwrap();
+
+        assert_eq!(recent_result.total, 1);
+        assert_eq!(recent_result.items.len(), 1);
+        assert_eq!(recent_result.items[0].id, "image-item");
+
+        let keyword_result = repository
+            .search(SearchQuery {
+                keyword: "shared".to_string(),
+                filters: SearchFilters {
+                    favorited_only: None,
+                    clip_type: Some(ClipType::File),
+                    source_app: None,
+                    include_deleted: None,
+                },
+                offset: 0,
+                limit: 10,
+                sort: SearchSort::RelevanceDesc,
+            })
+            .unwrap();
+
+        assert_eq!(keyword_result.total, 1);
+        assert_eq!(keyword_result.items.len(), 1);
+        assert_eq!(keyword_result.items[0].id, "file-item");
 
         drop(repository);
         fs::remove_file(path).unwrap();
