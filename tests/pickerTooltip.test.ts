@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { resolveTooltipShowPosition } from "../src/features/picker/tooltipState.ts";
-import { escapeHtml } from "../src/features/picker/PickerShell.tsx";
+import { escapeHtml } from "../src/features/picker/tooltipHtml.ts";
 
 test("tooltip 坐标会把 CSS 像素换算为桌面物理像素", () => {
   const position = resolveTooltipShowPosition({

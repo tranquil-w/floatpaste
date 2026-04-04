@@ -13,6 +13,7 @@ import {
   PICKER_SESSION_START_EVENT,
   SETTINGS_CHANGED_EVENT,
 } from "../../bridge/events";
+import { getImageUrl } from "../../bridge/imageUrl";
 import { isTauriRuntime } from "../../bridge/runtime";
 import type { ClipItemSummary } from "../../shared/types/clips";
 import { getClipTypeLabel } from "../../shared/utils/clipDisplay";
@@ -28,6 +29,7 @@ import {
   usePickerRecentQuery,
   usePickerSettingsQuery,
 } from "./queries";
+import { escapeHtml } from "./tooltipHtml";
 import { resolveTooltipShowPosition } from "./tooltipState";
 
 const STYLES = {
@@ -121,14 +123,6 @@ function buildTooltipHtml(item: ClipItemSummary): string {
   return `<div class="tooltip-content">${escapeHtml(escapedContent)}</div><div class="tooltip-meta">${metaParts.join("")}</div>`;
 }
 
-export function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
 export function PickerShell() {
   const tauriRuntime = isTauriRuntime();
   const settings = usePickerSettingsQuery();
@@ -143,6 +137,9 @@ export function PickerShell() {
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tooltipRequestIdRef = useRef(0);
+  const imageUrlCacheRef = useRef(new Map<string, string | null>());
+  const imageUrlPendingRef = useRef(new Set<string>());
+  const [, setImageUrlVersion] = useState(0);
 
   const items = useMemo(() => recent.data ?? [], [recent.data]);
   const selectedItem = items[selectedIndex] ?? null;
@@ -224,6 +221,34 @@ export function PickerShell() {
       });
     }
   }, [selectedIndex]);
+
+  useEffect(() => {
+    let disposed = false;
+    const imageItems = items.filter((item) =>
+      item.type === "image"
+      && Boolean(item.imagePath)
+      && !imageUrlCacheRef.current.has(item.id)
+      && !imageUrlPendingRef.current.has(item.id)
+    );
+
+    for (const item of imageItems) {
+      imageUrlPendingRef.current.add(item.id);
+      void getImageUrl(item.imagePath).then((imageUrl) => {
+        imageUrlCacheRef.current.set(item.id, imageUrl);
+      }).catch(() => {
+        imageUrlCacheRef.current.set(item.id, null);
+      }).finally(() => {
+        imageUrlPendingRef.current.delete(item.id);
+        if (!disposed) {
+          setImageUrlVersion((current) => current + 1);
+        }
+      });
+    }
+
+    return () => {
+      disposed = true;
+    };
+  }, [items]);
 
   useEffect(() => {
     if (!tauriRuntime) {
@@ -459,6 +484,15 @@ export function PickerShell() {
     cancelTooltip();
   };
 
+  const handleThumbnailError = (itemId: string) => {
+    if (imageUrlCacheRef.current.get(itemId) === null) {
+      return;
+    }
+
+    imageUrlCacheRef.current.set(itemId, null);
+    setImageUrlVersion((current) => current + 1);
+  };
+
   useEffect(() => {
     return () => {
       cancelTooltip();
@@ -502,6 +536,9 @@ export function PickerShell() {
           <div className="grid flex-1 gap-1 overflow-y-auto overflow-x-hidden px-0.5 transition-colors">
             {items.map((item, index) => {
               const isSelected = index === selectedIndex;
+              const imageUrl = item.type === "image"
+                ? (imageUrlCacheRef.current.get(item.id) ?? null)
+                : null;
               return (
                 <button
                   ref={(el) => {
@@ -520,11 +557,21 @@ export function PickerShell() {
                   onMouseLeave={handleItemMouseLeave}
                   type="button"
                 >
-                  <span
-                    className={STYLES.itemContent(isSelected, item.isFavorited)}
-                  >
-                    {item.contentPreview}
-                  </span>
+                  <div className="flex items-start gap-2">
+                    {imageUrl ? (
+                      <img
+                        alt=""
+                        className="mt-0.5 h-8 w-8 shrink-0 rounded-[6px] border border-pg-border-subtle object-cover"
+                        onError={() => handleThumbnailError(item.id)}
+                        src={imageUrl}
+                      />
+                    ) : null}
+                    <span
+                      className={STYLES.itemContent(isSelected, item.isFavorited)}
+                    >
+                      {item.contentPreview}
+                    </span>
+                  </div>
 
                   <div
                     className={`flex w-full items-center gap-2 text-[10px] leading-none transition-colors ${
