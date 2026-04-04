@@ -8,6 +8,7 @@ export const PICKER_NAVIGATE_EVENT = "picker://navigate";
 export const PICKER_CONFIRM_EVENT = "picker://confirm";
 export const PICKER_SELECT_INDEX_EVENT = "picker://select-index";
 export const PICKER_OPEN_EDITOR_EVENT = "picker://open-editor";
+export const PICKER_FAVORITE_EVENT = "picker://favorite";
 
 export const SEARCH_SESSION_START_EVENT = "search://session-start";
 export const SEARCH_SESSION_END_EVENT = "search://session-end";

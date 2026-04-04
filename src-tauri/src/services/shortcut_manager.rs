@@ -17,8 +17,8 @@ use crate::{
     domain::{
         error::AppError,
         events::{
-            PICKER_CONFIRM_EVENT, PICKER_NAVIGATE_EVENT, PICKER_OPEN_EDITOR_EVENT,
-            PICKER_SELECT_INDEX_EVENT,
+            PICKER_CONFIRM_EVENT, PICKER_FAVORITE_EVENT, PICKER_NAVIGATE_EVENT,
+            PICKER_OPEN_EDITOR_EVENT, PICKER_SELECT_INDEX_EVENT,
         },
         settings::normalize_shortcut_for_registration,
     },
@@ -27,11 +27,12 @@ use crate::{
 
 pub struct ShortcutManager;
 
-const PICKER_SESSION_SHORTCUTS: [&str; 14] = [
+const PICKER_SESSION_SHORTCUTS: [&str; 15] = [
     "Up",
     "Down",
     "Enter",
     "Escape",
+    "Space",
     "Digit1",
     "Digit2",
     "Digit3",
@@ -282,6 +283,7 @@ impl ShortcutManager {
                 "digit8" => app.emit(PICKER_SELECT_INDEX_EVENT, 7),
                 "digit9" => app.emit(PICKER_SELECT_INDEX_EVENT, 8),
                 "ctrl+enter" | "control+enter" => app.emit(PICKER_OPEN_EDITOR_EVENT, ()),
+                "space" => app.emit(PICKER_FAVORITE_EVENT, ()),
                 _ => return,
             };
 
@@ -452,6 +454,7 @@ fn is_picker_session_shortcut(shortcut: &str) -> bool {
             | "enter"
             | "escape"
             | "esc"
+            | "space"
             | "digit1"
             | "digit2"
             | "digit3"
@@ -570,6 +573,7 @@ mod tests {
         assert!(!is_picker_session_shortcut("control+keyf"));
         assert!(!is_picker_session_shortcut("control+keye"));
         assert!(is_picker_session_shortcut("control+enter"));
+        assert!(is_picker_session_shortcut("space"));
     }
 
     #[test]

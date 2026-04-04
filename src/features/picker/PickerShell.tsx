@@ -6,6 +6,7 @@ import { hidePicker, hideTooltip, openEditorFromPicker, pasteItem, setItemFavori
 import {
   CLIPS_CHANGED_EVENT,
   PICKER_CONFIRM_EVENT,
+  PICKER_FAVORITE_EVENT,
   PICKER_NAVIGATE_EVENT,
   PICKER_OPEN_EDITOR_EVENT,
   PICKER_SELECT_INDEX_EVENT,
@@ -29,6 +30,7 @@ import {
   usePickerRecentQuery,
   usePickerSettingsQuery,
 } from "./queries";
+import { toggleFavoriteSelection } from "./favoriteToggle";
 import { PICKER_IMAGE_THUMBNAIL_STYLE } from "./previewLayout";
 import { buildTooltipHtml } from "./tooltipHtml";
 import { resolveTooltipShowPosition } from "./tooltipState";
@@ -120,6 +122,7 @@ export function PickerShell() {
   const [lastMessage, setLastMessage] = useState("");
   const itemsRef = useRef<ClipItemSummary[]>([]);
   const selectedIndexRef = useRef(0);
+  const favoriteTogglePendingRef = useRef(false);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tooltipRequestIdRef = useRef(0);
@@ -181,6 +184,24 @@ export function PickerShell() {
 
     cancelTooltip();
     await openEditorFromPicker(item.id);
+  };
+
+  const handleToggleFavorite = async () => {
+    await toggleFavoriteSelection({
+      item: itemsRef.current[selectedIndexRef.current],
+      isPending: () => favoriteTogglePendingRef.current,
+      setPending: (pending) => {
+        favoriteTogglePendingRef.current = pending;
+      },
+      setItemFavorited,
+      refreshItems: async () => {
+        await queryClient.invalidateQueries({ queryKey: ["picker-recent"] });
+      },
+      setLastMessage,
+      onError: (error) => {
+        console.error("更新收藏状态失败", error);
+      },
+    });
   };
 
   useEffect(() => {
@@ -250,6 +271,7 @@ export function PickerShell() {
     let unlistenConfirm: (() => void) | undefined;
     let unlistenSelectIndex: (() => void) | undefined;
     let unlistenOpenEditor: (() => void) | undefined;
+    let unlistenFavorite: (() => void) | undefined;
 
     void listen(PICKER_SESSION_END_EVENT, () => {
       if (!disposed) {
@@ -343,6 +365,15 @@ export function PickerShell() {
       unlistenOpenEditor = cleanup;
     });
 
+    void listen(PICKER_FAVORITE_EVENT, async () => {
+      if (disposed) {
+        return;
+      }
+      await handleToggleFavorite();
+    }).then((cleanup) => {
+      unlistenFavorite = cleanup;
+    });
+
     return () => {
       disposed = true;
       unlistenEnd?.();
@@ -353,6 +384,7 @@ export function PickerShell() {
       unlistenConfirm?.();
       unlistenSelectIndex?.();
       unlistenOpenEditor?.();
+      unlistenFavorite?.();
     };
   }, [tauriRuntime]);
 
@@ -400,14 +432,9 @@ export function PickerShell() {
         return;
       }
 
-      if ((event.ctrlKey || event.metaKey) && event.key === "f") {
+      if (event.key === " ") {
         event.preventDefault();
-        const item = itemsRef.current[selectedIndexRef.current];
-        if (item) {
-          void setItemFavorited(item.id, !item.isFavorited).then(() => {
-            setLastMessage(item.isFavorited ? "已取消收藏" : "已收藏");
-          });
-        }
+        void handleToggleFavorite();
         return;
       }
 

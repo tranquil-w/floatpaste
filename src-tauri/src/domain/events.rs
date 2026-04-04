@@ -6,6 +6,7 @@ pub const PICKER_NAVIGATE_EVENT: &str = "picker://navigate";
 pub const PICKER_CONFIRM_EVENT: &str = "picker://confirm";
 pub const PICKER_SELECT_INDEX_EVENT: &str = "picker://select-index";
 pub const PICKER_OPEN_EDITOR_EVENT: &str = "picker://open-editor";
+pub const PICKER_FAVORITE_EVENT: &str = "picker://favorite";
 
 // Search 相关事件
 pub const SEARCH_SESSION_START_EVENT: &str = "search://session-start";
