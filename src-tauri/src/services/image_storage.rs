@@ -100,7 +100,15 @@ impl ImageStorage {
         }
     }
 
-    fn resolve_image_path(&self, image_path: &str) -> Result<PathBuf, AppError> {
+    pub(crate) fn resolve_existing_image_path(&self, image_path: &str) -> Result<PathBuf, AppError> {
+        let absolute_path = self.resolve_image_path(image_path)?;
+        if !absolute_path.is_file() {
+            return Err(AppError::Message("图片文件不存在".to_string()));
+        }
+        Ok(absolute_path)
+    }
+
+    pub(crate) fn resolve_image_path(&self, image_path: &str) -> Result<PathBuf, AppError> {
         let relative_path = Path::new(image_path);
         if relative_path.components().any(|component| {
             matches!(
@@ -210,6 +218,28 @@ mod tests {
 
         storage.delete_image(&stored.image_path).unwrap();
         assert!(!base_dir.join(&stored.image_path).exists());
+
+        fs::remove_dir_all(base_dir).unwrap();
+    }
+
+    #[test]
+    fn image_storage_rejects_invalid_paths_and_resolves_existing_files() {
+        let base_dir = temp_dir();
+        let storage = ImageStorage::new(base_dir.clone()).unwrap();
+        let existing_relative_path = "images/existing.png";
+        let existing_absolute_path = base_dir.join(existing_relative_path);
+        fs::write(&existing_absolute_path, b"png").unwrap();
+
+        let resolved = storage
+            .resolve_existing_image_path(existing_relative_path)
+            .unwrap();
+        assert_eq!(resolved, existing_absolute_path);
+
+        let invalid = storage.resolve_existing_image_path("../secret.png");
+        assert!(invalid.is_err());
+
+        let missing = storage.resolve_existing_image_path("images/missing.png");
+        assert!(missing.is_err());
 
         fs::remove_dir_all(base_dir).unwrap();
     }
