@@ -29,7 +29,7 @@ import {
   usePickerRecentQuery,
   usePickerSettingsQuery,
 } from "./queries";
-import { escapeHtml } from "./tooltipHtml";
+import { buildTooltipHtml } from "./tooltipHtml";
 import { resolveTooltipShowPosition } from "./tooltipState";
 
 const STYLES = {
@@ -107,21 +107,6 @@ const PICKER_RESIZE_HANDLES: WindowResizeHandle[] = [
     className: "absolute bottom-0 right-0 z-30 h-4 w-4 cursor-nwse-resize",
   },
 ];
-
-function buildTooltipHtml(item: ClipItemSummary): string {
-  const escapedContent = item.tooltipText || item.contentPreview || "";
-  const metaParts: string[] = [];
-
-  metaParts.push(`<span class="meta-badge">${escapeHtml(getClipTypeLabel(item))}</span>`);
-  metaParts.push(
-    `<span class="meta-source">${escapeHtml(item.sourceApp ?? "未知来源")}</span>`
-  );
-  metaParts.push(
-    `<span class="meta-time">${escapeHtml(formatDateTime(item.lastUsedAt ?? item.createdAt))}</span>`
-  );
-
-  return `<div class="tooltip-content">${escapeHtml(escapedContent)}</div><div class="tooltip-meta">${metaParts.join("")}</div>`;
-}
 
 export function PickerShell() {
   const tauriRuntime = isTauriRuntime();
@@ -450,16 +435,21 @@ export function PickerShell() {
     if (!tauriRuntime) return;
     const requestId = invalidateTooltipRequest();
     const clientPosition = { x: event.clientX, y: event.clientY };
-    const tooltipHtml = buildTooltipHtml(item);
     clearTooltipTimer();
     tooltipTimerRef.current = setTimeout(() => {
       tooltipTimerRef.current = null;
-      const currentWindow = getCurrentWebviewWindow();
+      void (async () => {
+        const imageUrl = await resolveItemImageUrl(item);
+        if (tooltipRequestIdRef.current !== requestId) {
+          return;
+        }
 
-      Promise.all([
-        currentWindow.outerPosition(),
-        currentWindow.scaleFactor(),
-      ]).then(([outerPosition, scaleFactor]) => {
+        const tooltipHtml = buildTooltipHtml(item, { imageUrl, requestId });
+        const currentWindow = getCurrentWebviewWindow();
+        const [outerPosition, scaleFactor] = await Promise.all([
+          currentWindow.outerPosition(),
+          currentWindow.scaleFactor(),
+        ]);
         const position = resolveTooltipShowPosition({
           activeRequestId: tooltipRequestIdRef.current,
           requestId,
@@ -472,8 +462,14 @@ export function PickerShell() {
           return;
         }
 
-        return showTooltip(position.x, position.y, tooltipHtml, (document.documentElement.dataset.theme as "dark" | "light") ?? "dark");
-      }).catch((error) => {
+        await showTooltip(
+          requestId,
+          position.x,
+          position.y,
+          tooltipHtml,
+          (document.documentElement.dataset.theme as "dark" | "light") ?? "dark",
+        );
+      })().catch((error) => {
         console.warn("[FloatPaste] tooltip 定位或显示失败:", error);
       });
     }, 100);
@@ -491,6 +487,28 @@ export function PickerShell() {
 
     imageUrlCacheRef.current.set(itemId, null);
     setImageUrlVersion((current) => current + 1);
+  };
+
+  const resolveItemImageUrl = async (item: ClipItemSummary): Promise<string | null> => {
+    if (item.type !== "image" || !item.imagePath) {
+      return null;
+    }
+
+    const cachedImageUrl = imageUrlCacheRef.current.get(item.id);
+    if (cachedImageUrl !== undefined) {
+      return cachedImageUrl;
+    }
+
+    try {
+      const imageUrl = await getImageUrl(item.imagePath);
+      imageUrlCacheRef.current.set(item.id, imageUrl);
+      setImageUrlVersion((current) => current + 1);
+      return imageUrl;
+    } catch {
+      imageUrlCacheRef.current.set(item.id, null);
+      setImageUrlVersion((current) => current + 1);
+      return null;
+    }
   };
 
   useEffect(() => {

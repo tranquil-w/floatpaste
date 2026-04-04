@@ -180,11 +180,17 @@ export async function prepareSearchWindowDrag(): Promise<void> {
 
 export type TooltipTheme = "dark" | "light";
 
-export async function showTooltip(x: number, y: number, html: string, theme: TooltipTheme = "dark"): Promise<void> {
+export async function showTooltip(
+  requestId: number,
+  x: number,
+  y: number,
+  html: string,
+  theme: TooltipTheme = "dark",
+): Promise<void> {
   if (!isTauriRuntime()) {
     return;
   }
-  return invoke("show_tooltip", { x, y, html, theme });
+  return invoke("show_tooltip", { requestId, x, y, html, theme });
 }
 
 export async function hideTooltip(): Promise<void> {
