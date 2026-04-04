@@ -76,13 +76,20 @@ pub fn prepare_search_window_drag(state: State<'_, AppState>) -> Result<(), Stri
 }
 
 #[tauri::command]
-pub async fn show_tooltip(app: AppHandle, x: f64, y: f64, html: String, theme: String) -> Result<(), String> {
-    TooltipWindow::show_tooltip(&app, x, y, html, &theme)
+pub async fn show_tooltip(
+    app: AppHandle,
+    request_id: u32,
+    x: f64,
+    y: f64,
+    html: String,
+    theme: String,
+) -> Result<(), String> {
+    TooltipWindow::show_tooltip(&app, request_id, x, y, html, &theme)
 }
 
 #[tauri::command]
-pub fn tooltip_ready(app: AppHandle, width: u32, height: u32) -> Result<(), String> {
-    TooltipWindow::on_tooltip_ready(&app, width, height)
+pub fn tooltip_ready(app: AppHandle, request_id: u32, width: u32, height: u32) -> Result<(), String> {
+    TooltipWindow::on_tooltip_ready(&app, request_id, width, height)
 }
 
 #[tauri::command]

@@ -27,6 +27,11 @@ export interface ClipItemSummary {
   createdAt: string;
   updatedAt: string;
   lastUsedAt: string | null;
+  imagePath: string | null;
+  imageWidth: number | null;
+  imageHeight: number | null;
+  imageFormat: string | null;
+  fileSize: number | null;
 }
 
 // 所有字段都放在一个基础接口上，通过 type 区分行为

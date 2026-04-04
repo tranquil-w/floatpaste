@@ -52,6 +52,13 @@ export async function getItemDetail(id: string): Promise<ClipItemDetail> {
   return invoke("get_item_detail", { id });
 }
 
+export async function resolveImagePath(imagePath: string): Promise<string> {
+  if (!isTauriRuntime()) {
+    throw new Error("浏览器预览模式不支持解析本地图片路径");
+  }
+  return invoke("resolve_image_path", { imagePath });
+}
+
 export async function updateTextItem(id: string, text: string): Promise<ClipItemDetail> {
   if (!isTauriRuntime()) {
     return mockUpdateTextItem(id, text);
@@ -173,11 +180,17 @@ export async function prepareSearchWindowDrag(): Promise<void> {
 
 export type TooltipTheme = "dark" | "light";
 
-export async function showTooltip(x: number, y: number, html: string, theme: TooltipTheme = "dark"): Promise<void> {
+export async function showTooltip(
+  requestId: number,
+  x: number,
+  y: number,
+  html: string,
+  theme: TooltipTheme = "dark",
+): Promise<void> {
   if (!isTauriRuntime()) {
     return;
   }
-  return invoke("show_tooltip", { x, y, html, theme });
+  return invoke("show_tooltip", { requestId, x, y, html, theme });
 }
 
 export async function hideTooltip(): Promise<void> {

@@ -2,6 +2,7 @@ export type EditorKeyboardAction =
   | "request-close"
   | "save"
   | "confirm-cancel"
+  | "confirm-primary"
   | "trap-confirm-focus"
   | null;
 
@@ -28,6 +29,10 @@ export function getEditorKeyboardAction({
   if (closeConfirmOpen) {
     if (key === "Escape") {
       return "confirm-cancel";
+    }
+
+    if (key === "Enter") {
+      return "confirm-primary";
     }
 
     if (key === "Tab") {

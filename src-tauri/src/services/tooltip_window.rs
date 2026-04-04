@@ -8,19 +8,37 @@ use windows::Win32::UI::WindowsAndMessaging::{HWND_TOPMOST, SetWindowPos, SWP_NO
 
 pub const TOOLTIP_WINDOW_LABEL: &str = "tooltip";
 
-static PENDING_TOOLTIP_POS: Mutex<Option<(f64, f64)>> = Mutex::new(None);
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct PendingTooltipRequest {
+    pub request_id: u32,
+    pub x: f64,
+    pub y: f64,
+}
 
-fn set_pending_tooltip_pos(pos: Option<(f64, f64)>) {
-    *PENDING_TOOLTIP_POS.lock().unwrap() = pos;
+static PENDING_TOOLTIP_REQUEST: Mutex<Option<PendingTooltipRequest>> = Mutex::new(None);
+
+fn set_pending_tooltip_request(request: Option<PendingTooltipRequest>) {
+    *PENDING_TOOLTIP_REQUEST.lock().unwrap() = request;
 }
 
 #[cfg(test)]
-fn take_pending_tooltip_pos() -> Option<(f64, f64)> {
-    PENDING_TOOLTIP_POS.lock().unwrap().take()
+fn take_pending_tooltip_request() -> Option<PendingTooltipRequest> {
+    PENDING_TOOLTIP_REQUEST.lock().unwrap().take()
 }
 
-fn clear_pending_tooltip_pos() {
-    set_pending_tooltip_pos(None);
+fn take_matching_pending_tooltip_request(request_id: u32) -> Option<PendingTooltipRequest> {
+    let mut pending_request = PENDING_TOOLTIP_REQUEST.lock().unwrap();
+    match *pending_request {
+        Some(request) if request.request_id == request_id => {
+            *pending_request = None;
+            Some(request)
+        }
+        _ => None,
+    }
+}
+
+fn clear_pending_tooltip_request() {
+    set_pending_tooltip_request(None);
 }
 
 pub struct TooltipWindow;
@@ -56,18 +74,30 @@ impl TooltipWindow {
         Ok(window)
     }
 
-    pub fn show_tooltip(app: &AppHandle, x: f64, y: f64, html: String, theme: &str) -> Result<(), String> {
+    pub fn show_tooltip(
+        app: &AppHandle,
+        request_id: u32,
+        x: f64,
+        y: f64,
+        html: String,
+        theme: &str,
+    ) -> Result<(), String> {
         let window = Self::ensure_window(app)?;
 
-        set_pending_tooltip_pos(Some((x, y)));
+        set_pending_tooltip_request(Some(PendingTooltipRequest { request_id, x, y }));
 
+        let json_request_id = serde_json::to_string(&request_id)
+            .map_err(|e| format!("Tooltip requestId 序列化失败: {e}"))?;
         let json_html = serde_json::to_string(&html)
             .map_err(|e| format!("Tooltip HTML 序列化失败: {e}"))?;
         let json_theme = serde_json::to_string(theme)
             .map_err(|e| format!("Tooltip theme 序列化失败: {e}"))?;
-        window.eval(&format!("window.showTooltip({}, {})", json_html, json_theme))
+        window.eval(&format!(
+            "window.showTooltip({}, {}, {})",
+            json_request_id, json_html, json_theme
+        ))
             .map_err(|e| {
-                clear_pending_tooltip_pos();
+                clear_pending_tooltip_request();
                 warn!("tooltip JS eval 失败: {e}");
                 e.to_string()
             })?;
@@ -75,12 +105,15 @@ impl TooltipWindow {
         Ok(())
     }
 
-    pub fn on_tooltip_ready(app: &AppHandle, width: u32, height: u32) -> Result<(), String> {
-        let pos = PENDING_TOOLTIP_POS
-            .lock()
-            .unwrap()
-            .take()
-            .ok_or("tooltip_ready: 无待处理的位置")?;
+    pub fn on_tooltip_ready(
+        app: &AppHandle,
+        request_id: u32,
+        width: u32,
+        height: u32,
+    ) -> Result<(), String> {
+        let Some(request) = take_matching_pending_tooltip_request(request_id) else {
+            return Ok(());
+        };
 
         let Some(window) = app.get_webview_window(TOOLTIP_WINDOW_LABEL) else {
             return Ok(());
@@ -93,8 +126,8 @@ impl TooltipWindow {
             warn!("tooltip 窗口设置大小失败: {e}");
         }
         if let Err(e) = window.set_position(Position::Physical(PhysicalPosition::new(
-            pos.0 as i32,
-            pos.1 as i32,
+            request.x as i32,
+            request.y as i32,
         ))) {
             warn!("tooltip 窗口设置位置失败: {e}");
         }
@@ -127,7 +160,7 @@ impl TooltipWindow {
     }
 
     pub fn hide_tooltip(app: &AppHandle) -> Result<(), String> {
-        clear_pending_tooltip_pos();
+        clear_pending_tooltip_request();
 
         let Some(window) = app.get_webview_window(TOOLTIP_WINDOW_LABEL) else {
             return Ok(());
@@ -160,14 +193,41 @@ pub(crate) fn configure_tooltip_window(window: &WebviewWindow) {
 
 #[cfg(test)]
 mod tests {
-    use super::{clear_pending_tooltip_pos, set_pending_tooltip_pos, take_pending_tooltip_pos};
+    use super::{
+        clear_pending_tooltip_request, set_pending_tooltip_request,
+        take_matching_pending_tooltip_request, take_pending_tooltip_request,
+        PendingTooltipRequest,
+    };
 
     #[test]
-    fn hide_clears_pending_tooltip_position_for_late_ready_callbacks() {
-        set_pending_tooltip_pos(Some((320.0, 240.0)));
+    fn hide_clears_pending_tooltip_request_for_late_ready_callbacks() {
+        set_pending_tooltip_request(Some(PendingTooltipRequest {
+            request_id: 7,
+            x: 320.0,
+            y: 240.0,
+        }));
 
-        clear_pending_tooltip_pos();
+        clear_pending_tooltip_request();
 
-        assert_eq!(take_pending_tooltip_pos(), None);
+        assert_eq!(take_pending_tooltip_request(), None);
+    }
+
+    #[test]
+    fn stale_request_id_does_not_consume_newer_pending_tooltip_request() {
+        set_pending_tooltip_request(Some(PendingTooltipRequest {
+            request_id: 9,
+            x: 512.0,
+            y: 288.0,
+        }));
+
+        assert_eq!(take_matching_pending_tooltip_request(8), None);
+        assert_eq!(
+            take_pending_tooltip_request(),
+            Some(PendingTooltipRequest {
+                request_id: 9,
+                x: 512.0,
+                y: 288.0,
+            })
+        );
     }
 }

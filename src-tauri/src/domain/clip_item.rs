@@ -14,6 +14,11 @@ pub struct ClipItemSummary {
     pub created_at: String,
     pub updated_at: String,
     pub last_used_at: Option<String>,
+    pub image_path: Option<String>,
+    pub image_width: Option<i32>,
+    pub image_height: Option<i32>,
+    pub image_format: Option<String>,
+    pub file_size: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

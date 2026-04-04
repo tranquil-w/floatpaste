@@ -50,6 +50,7 @@ pub fn run() {
             commands::clips::list_recent_items,
             commands::clips::list_favorite_items,
             commands::clips::get_item_detail,
+            commands::clips::resolve_image_path,
             commands::clips::search_items,
             commands::clips::update_text_item,
             commands::clips::delete_item,

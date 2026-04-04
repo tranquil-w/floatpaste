@@ -44,6 +44,8 @@ pub const SEARCH_WINDOW_MIN_WIDTH: u32 = 600;
 pub const SEARCH_WINDOW_MIN_HEIGHT: u32 = 400;
 pub const EDITOR_WINDOW_LABEL: &str = "editor";
 pub const EDITOR_WINDOW_TITLE: &str = "FloatPaste · 编辑";
+const WINDOW_FOCUS_RETRY_DELAY_MS: u64 = 20;
+const WINDOW_FOCUS_MAX_RETRIES: u32 = 3;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -762,9 +764,22 @@ fn show_and_focus_window(window: &WebviewWindow) -> Result<(), AppError> {
 
     #[cfg(target_os = "windows")]
     {
-        crate::platform::windows::window_utils::restore_window_and_focus(window)
-            .map_err(AppError::Message)?;
-        return Ok(());
+        let mut last_error: Option<String> = None;
+
+        for attempt in 0..=WINDOW_FOCUS_MAX_RETRIES {
+            match crate::platform::windows::window_utils::restore_window_and_focus(window) {
+                Ok(()) => return Ok(()),
+                Err(error) if should_retry_window_focus(&error) && attempt < WINDOW_FOCUS_MAX_RETRIES => {
+                    last_error = Some(error);
+                    std::thread::sleep(Duration::from_millis(WINDOW_FOCUS_RETRY_DELAY_MS));
+                }
+                Err(error) => return Err(AppError::Message(error)),
+            }
+        }
+
+        return Err(AppError::Message(
+            last_error.unwrap_or_else(|| "搜索窗口聚焦失败".to_string()),
+        ));
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -865,6 +880,12 @@ fn notify_search_input_state(app: &AppHandle, target_window_hwnd: Option<isize>,
     let _ = search.emit(event_name, ());
 }
 
+fn should_retry_window_focus(error: &str) -> bool {
+    error
+        .to_ascii_lowercase()
+        .contains("underlying handle is not available")
+}
+
 #[cfg(test)]
 fn should_restore_picker_after_search_close(_session: &SearchSession) -> bool {
     false
@@ -913,7 +934,7 @@ fn configure_picker_window(window: &WebviewWindow) {
 
 #[cfg(test)]
 mod tests {
-    use super::should_restore_picker_after_search_close;
+    use super::{should_restore_picker_after_search_close, should_retry_window_focus};
     use crate::domain::search_session::{SearchSession, SearchSource};
     use serde_json::Value;
 
@@ -937,5 +958,43 @@ mod tests {
             .unwrap();
 
         assert_eq!(search["decorations"], Value::Bool(false));
+    }
+
+    #[test]
+    fn tauri_config_should_enable_asset_protocol_for_picker_image_previews() {
+        let config: Value = serde_json::from_str(include_str!("../../tauri.conf.json")).unwrap();
+        let security = &config["app"]["security"];
+
+        assert_eq!(security["assetProtocol"]["enable"], Value::Bool(true));
+        assert!(
+            security["assetProtocol"]["scope"]
+                .as_array()
+                .map(|scope| !scope.is_empty())
+                .unwrap_or(false)
+        );
+    }
+
+    #[test]
+    fn tauri_config_csp_should_allow_asset_images() {
+        let config: Value = serde_json::from_str(include_str!("../../tauri.conf.json")).unwrap();
+        let csp = config["app"]["security"]["csp"]
+            .as_str()
+            .expect("csp should be configured");
+
+        assert!(csp.contains("img-src"));
+        assert!(csp.contains("asset:"));
+        assert!(csp.contains("http://asset.localhost"));
+    }
+
+    #[test]
+    fn should_retry_window_focus_when_underlying_handle_is_not_available() {
+        assert!(should_retry_window_focus(
+            "the underlying handle is not available"
+        ));
+    }
+
+    #[test]
+    fn should_not_retry_window_focus_for_other_errors() {
+        assert!(!should_retry_window_focus("permission denied"));
     }
 }

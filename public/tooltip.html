@@ -42,8 +42,8 @@ html, body {
 
 #tooltip {
   display: none;
-  max-width: 360px;
-  min-width: 80px;
+  max-width: 600px;
+  min-width: 120px;
   background: var(--pg-canvas-subtle);
   color: var(--pg-fg-default);
   border: 1px solid var(--pg-border-muted);
@@ -56,6 +56,27 @@ html, body {
   white-space: pre-wrap;
   word-break: break-word;
   overflow-wrap: break-word;
+}
+
+#tooltip .tooltip-image-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  max-width: var(--tooltip-image-max-width, 480px);
+  max-height: var(--tooltip-image-max-height, 360px);
+  margin-bottom: 8px;
+  overflow: hidden;
+  border-radius: 8px;
+}
+
+#tooltip .tooltip-image-preview img {
+  display: block;
+  max-width: min(100%, var(--tooltip-image-max-width, 480px));
+  max-height: min(100%, var(--tooltip-image-max-height, 360px));
+  width: auto;
+  height: auto;
+  border-radius: 6px;
+  object-fit: contain;
 }
 
 #tooltip .tooltip-meta {
@@ -100,24 +121,134 @@ html, body {
 <body>
 <div id="tooltip" role="tooltip"></div>
 <script>
-window.showTooltip = function showTooltip(html, theme) {
-  document.documentElement.classList.toggle('dark', theme === 'dark');
-  const el = document.getElementById('tooltip');
-  el.innerHTML = html;
-  el.style.display = 'block';
+const tooltipState = {
+  requestId: 0,
+  image: null,
+  imageLoadHandler: null,
+  imageErrorHandler: null,
+  timeoutId: null,
+};
+
+function cleanupPendingImage() {
+  if (tooltipState.image && tooltipState.imageLoadHandler) {
+    tooltipState.image.removeEventListener('load', tooltipState.imageLoadHandler);
+  }
+  if (tooltipState.image && tooltipState.imageErrorHandler) {
+    tooltipState.image.removeEventListener('error', tooltipState.imageErrorHandler);
+  }
+  if (tooltipState.timeoutId) {
+    clearTimeout(tooltipState.timeoutId);
+  }
+
+  tooltipState.image = null;
+  tooltipState.imageLoadHandler = null;
+  tooltipState.imageErrorHandler = null;
+  tooltipState.timeoutId = null;
+}
+
+function invokeTooltipReady(requestId, el) {
+  if (!window.__TAURI_INTERNALS__) {
+    return;
+  }
+
+  window.__TAURI_INTERNALS__.invoke('tooltip_ready', {
+    requestId,
+    width: el.offsetWidth,
+    height: el.offsetHeight,
+  }).catch(function() {});
+}
+
+function measureTooltip(requestId, el) {
   requestAnimationFrame(function() {
     requestAnimationFrame(function() {
-      var w = el.offsetWidth;
-      var h = el.offsetHeight;
-      if (window.__TAURI_INTERNALS__) {
-        window.__TAURI_INTERNALS__.invoke('tooltip_ready', { width: w, height: h });
+      if (tooltipState.requestId !== requestId) {
+        return;
       }
+      invokeTooltipReady(requestId, el);
     });
   });
+}
+
+function fallbackToText(el, image) {
+  const preview = el.querySelector('.tooltip-image-preview');
+  if (preview) {
+    preview.remove();
+  }
+
+  const fallbackContent = image.dataset.fallbackContent || '';
+  if (!fallbackContent) {
+    return;
+  }
+
+  const existingContent = el.querySelector('.tooltip-content');
+  if (existingContent) {
+    existingContent.textContent = fallbackContent;
+    return;
+  }
+
+  const content = document.createElement('div');
+  content.className = 'tooltip-content';
+  content.textContent = fallbackContent;
+  const meta = el.querySelector('.tooltip-meta');
+  el.insertBefore(content, meta || null);
+}
+
+window.showTooltip = function showTooltip(requestId, html, theme) {
+  document.documentElement.classList.toggle('dark', theme === 'dark');
+  const el = document.getElementById('tooltip');
+
+  cleanupPendingImage();
+  tooltipState.requestId = requestId;
+  el.innerHTML = html;
+  el.style.display = 'block';
+
+  const image = el.querySelector('img[data-request-id]');
+  if (!image) {
+    measureTooltip(requestId, el);
+    return;
+  }
+
+  tooltipState.image = image;
+  tooltipState.imageLoadHandler = function() {
+    if (tooltipState.requestId !== requestId) {
+      return;
+    }
+    cleanupPendingImage();
+    measureTooltip(requestId, el);
+  };
+  tooltipState.imageErrorHandler = function() {
+    if (tooltipState.requestId !== requestId) {
+      return;
+    }
+    cleanupPendingImage();
+    fallbackToText(el, image);
+    measureTooltip(requestId, el);
+  };
+  tooltipState.timeoutId = setTimeout(function() {
+    if (tooltipState.requestId !== requestId) {
+      return;
+    }
+    cleanupPendingImage();
+    fallbackToText(el, image);
+    measureTooltip(requestId, el);
+  }, 2000);
+
+  image.addEventListener('load', tooltipState.imageLoadHandler);
+  image.addEventListener('error', tooltipState.imageErrorHandler);
+  if (image.complete) {
+    if (image.naturalWidth > 0) {
+      tooltipState.imageLoadHandler();
+    }
+    else {
+      tooltipState.imageErrorHandler();
+    }
+  }
 };
 
 window.hideTooltip = function hideTooltip() {
   const el = document.getElementById('tooltip');
+  tooltipState.requestId = 0;
+  cleanupPendingImage();
   el.style.display = 'none';
   el.innerHTML = '';
 };

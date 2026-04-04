@@ -41,6 +41,15 @@ pub fn get_item_detail(state: State<'_, AppState>, id: String) -> Result<ClipIte
 }
 
 #[tauri::command]
+pub fn resolve_image_path(state: State<'_, AppState>, image_path: String) -> Result<String, String> {
+    state
+        .image_storage
+        .resolve_existing_image_path(&image_path)
+        .map(|path| path.to_string_lossy().to_string())
+        .map_err(map_error)
+}
+
+#[tauri::command]
 pub fn search_items(
     state: State<'_, AppState>,
     query: SearchQuery,
