@@ -35,6 +35,7 @@ export function EditorShell() {
   const saveAndCloseButtonRef = useRef<HTMLButtonElement>(null);
   const requestCloseRef = useRef<() => Promise<void>>(async () => {});
   const saveCurrentTextRef = useRef<() => Promise<boolean>>(async () => false);
+  const handleSaveAndCloseRef = useRef<() => Promise<void>>(async () => {});
   const closeConfirmOpenRef = useRef(closeConfirmOpen);
 
   useEffect(() => {
@@ -105,6 +106,11 @@ export function EditorShell() {
 
       if (action === "confirm-cancel") {
         setCloseConfirmOpen(false);
+        return;
+      }
+
+      if (action === "confirm-primary") {
+        void handleSaveAndCloseRef.current();
         return;
       }
 
@@ -191,8 +197,6 @@ export function EditorShell() {
 
   requestCloseRef.current = requestClose;
   saveCurrentTextRef.current = saveCurrentText;
-  closeConfirmOpenRef.current = closeConfirmOpen;
-
   async function handleSaveAndClose() {
     const success = await saveCurrentText();
     if (!success) {
@@ -201,6 +205,9 @@ export function EditorShell() {
 
     await closeEditor();
   }
+
+  handleSaveAndCloseRef.current = handleSaveAndClose;
+  closeConfirmOpenRef.current = closeConfirmOpen;
 
   const isTextItem = detailQuery.data?.type === "text";
 
