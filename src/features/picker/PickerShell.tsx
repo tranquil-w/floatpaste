@@ -39,26 +39,32 @@ const STYLES = {
   container:
     "flex h-screen w-screen flex-col overflow-hidden rounded-md border border-pg-border-muted bg-pg-canvas-default",
   header:
-    "flex shrink-0 items-center justify-between border-b border-pg-border-subtle bg-pg-canvas-subtle px-2.5 py-0.5",
-  headerDot: "h-2.5 w-2.5 rounded-full bg-pg-accent-fg",
+    "flex shrink-0 items-center justify-between border-b border-pg-border-subtle bg-pg-canvas-default px-3 py-1.5",
+  headerDot: "h-2 w-2 rounded-full bg-pg-accent-fg shadow-[0_0_0_3px_rgba(var(--pg-blue-5-rgb),0.10)]",
+  headerMessage:
+    "ml-2 rounded-[3px] bg-pg-accent-subtle px-1.5 py-0.5 text-[10px] font-medium leading-none text-pg-accent-fg",
   headerButton:
     "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-semibold text-pg-fg-muted transition-colors hover:bg-pg-accent-subtle hover:text-pg-fg-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pg-accent-fg focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-45",
-  itemButton: (selected: boolean, favorited: boolean) => `group relative flex w-full flex-col gap-1 rounded-md px-2 py-1.5 text-left transition-colors border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pg-accent-fg focus-visible:ring-offset-2 ${
+  itemButton: (selected: boolean, favorited: boolean) => `group relative flex w-full flex-col gap-1.5 rounded-[8px] px-2.5 py-2 text-left transition-colors border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pg-accent-fg focus-visible:ring-offset-2 ${
     selected
-      ? "bg-pg-accent-subtle border-pg-accent-fg/30 shadow-[0_2px_6px_rgba(var(--pg-shadow-color),0.25)]"
+      ? "border-[color:rgba(var(--pg-blue-5-rgb),0.35)] bg-pg-accent-subtle shadow-[0_1px_0_rgba(var(--pg-shadow-color),0.14),inset_0_0_0_1px_rgba(var(--pg-blue-5-rgb),0.08)]"
       : favorited
-        ? "border-pg-border-subtle border-l-[3px] border-l-pg-accent-fg bg-pg-canvas-default hover:bg-pg-canvas-subtle"
-        : "bg-pg-canvas-default border-pg-border-subtle hover:bg-pg-canvas-subtle"
+        ? "border-pg-border-subtle border-l-[3px] border-l-pg-accent-fg bg-pg-canvas-default hover:border-pg-border-default hover:bg-pg-canvas-subtle"
+        : "bg-pg-canvas-default border-pg-border-subtle hover:border-pg-border-default hover:bg-pg-canvas-subtle"
   }`,
   itemContent: (selected: boolean, favorited: boolean) =>
-    `${selected ? "text-pg-fg-default" : "text-pg-fg-default/90"} line-clamp-5 text-[13px] ${favorited ? "font-medium" : ""} leading-[1.6] tracking-tight break-words [overflow-wrap:anywhere] whitespace-pre-wrap transition-colors`,
-  kbdBadge: (selected: boolean) => `flex h-[16px] min-w-[16px] px-1 items-center justify-center rounded-[3px] font-mono text-[9px] font-bold transition-colors ${
+    `${selected ? "text-pg-fg-default font-semibold" : favorited ? "text-pg-fg-default font-medium" : "text-pg-fg-muted font-medium"} line-clamp-4 text-[13px] leading-[1.55] tracking-tight break-words [overflow-wrap:anywhere] whitespace-pre-wrap transition-colors`,
+  kbdBadge: (selected: boolean) => `inline-flex h-[18px] min-w-[18px] px-1.5 items-center justify-center rounded-[4px] font-mono text-[9px] font-bold transition-colors ${
     selected
-      ? "bg-pg-accent-fg text-pg-fg-on-emphasis"
-      : "bg-pg-neutral-3 text-pg-fg-muted group-hover:bg-pg-neutral-6 group-hover:text-pg-fg-default"
+      ? "bg-pg-accent-fg text-pg-fg-on-emphasis shadow-[inset_0_0_0_1px_rgba(255,255,255,0.10)]"
+      : "bg-pg-canvas-subtle text-pg-fg-subtle group-hover:bg-pg-neutral-3 group-hover:text-pg-fg-muted"
   }`,
-  typeBadge:
-    "shrink-0 rounded-[2px] bg-pg-neutral-3 px-1.5 py-0.5 font-medium text-pg-fg-muted",
+  typeBadge: (selected: boolean) =>
+    `shrink-0 rounded-[3px] px-1.5 py-0.5 text-[10px] font-medium ${
+      selected
+        ? "bg-pg-canvas-default text-pg-fg-muted"
+        : "bg-pg-neutral-3 text-pg-fg-subtle"
+    }`,
 };
 
 const PICKER_RESIZE_HANDLES: WindowResizeHandle[] = [
@@ -557,11 +563,11 @@ export function PickerShell() {
         <div className={STYLES.header}>
           <div className="flex min-w-0 flex-1 items-center gap-2" data-tauri-drag-region>
             <div aria-hidden="true" className={STYLES.headerDot} />
-            <span className="text-[12px] font-semibold tracking-normal text-pg-fg-default">
+            <span className="text-[11px] font-semibold tracking-[0.02em] text-pg-fg-muted">
               FloatPaste
             </span>
             {lastMessage ? (
-              <span className="ml-2 animate-pulse text-[10px] font-medium text-pg-favorite">
+              <span className={STYLES.headerMessage}>
                 {lastMessage}
               </span>
             ) : null}
@@ -603,33 +609,39 @@ export function PickerShell() {
                   onMouseLeave={handleItemMouseLeave}
                   type="button"
                 >
-                  <div className="flex items-start gap-2">
+                  <div className="flex items-start gap-2.5">
                     {imageUrl ? (
                       <img
                         alt=""
-                        className="mt-0.5 shrink-0 rounded-[8px] border border-pg-border-subtle bg-pg-canvas-subtle object-contain"
+                        className={`mt-0.5 shrink-0 rounded-[6px] border object-contain ${
+                          isSelected
+                            ? "border-pg-border-default bg-pg-canvas-default"
+                            : "border-pg-border-subtle bg-pg-canvas-subtle"
+                        }`}
                         onError={() => handleThumbnailError(item.id)}
                         src={imageUrl}
                         style={PICKER_IMAGE_THUMBNAIL_STYLE}
                       />
                     ) : null}
-                    <span
-                      className={STYLES.itemContent(isSelected, item.isFavorited)}
-                    >
-                      {item.contentPreview}
-                    </span>
+                    <div className="min-w-0 flex-1">
+                      <span
+                        className={STYLES.itemContent(isSelected, item.isFavorited)}
+                      >
+                        {item.contentPreview}
+                      </span>
+                    </div>
                   </div>
 
                   <div
                     className={`flex w-full items-center gap-2 text-[10px] leading-none transition-colors ${
                       isSelected
-                        ? "text-pg-accent-fg/80"
+                        ? "text-pg-fg-muted"
                         : "text-pg-fg-subtle"
                     }`}
                   >
                     {index < 9 ? <kbd className={STYLES.kbdBadge(isSelected)}>{index + 1}</kbd> : null}
-                    <span className={STYLES.typeBadge}>{getClipTypeLabel(item)}</span>
-                    <span className="min-w-0 flex-1 truncate font-medium">
+                    <span className={STYLES.typeBadge(isSelected)}>{getClipTypeLabel(item)}</span>
+                    <span className={`min-w-0 flex-1 truncate ${isSelected ? "font-medium text-pg-fg-muted" : "font-medium"}`}>
                       {item.sourceApp ?? "未知来源"}
                     </span>
                     <span className="flex shrink-0 items-center gap-1 font-medium">
@@ -637,7 +649,7 @@ export function PickerShell() {
                         {formatDateTime(item.lastUsedAt ?? item.createdAt)}
                       </span>
                       {item.isFavorited ? (
-                        <span className="text-[12px] text-pg-favorite">★</span>
+                        <span className={`${isSelected ? "text-[11px]" : "text-[12px]"} text-pg-favorite`}>★</span>
                       ) : null}
                     </span>
                   </div>
