@@ -17,6 +17,7 @@ import {
 import { getImageUrl } from "../../bridge/imageUrl";
 import { isTauriRuntime } from "../../bridge/runtime";
 import type { ClipItemSummary } from "../../shared/types/clips";
+import { TOOLTIP_SHOW_DELAY_MS } from "../../shared/ui/tooltipConfig";
 import { getClipTypeLabel } from "../../shared/utils/clipDisplay";
 import { formatDateTime } from "../../shared/utils/time";
 import { LoadingSpinner } from "../../shared/ui/LoadingSpinner";
@@ -506,7 +507,7 @@ export function PickerShell() {
       })().catch((error) => {
         console.warn("[FloatPaste] tooltip 定位或显示失败:", error);
       });
-    }, 100);
+    }, TOOLTIP_SHOW_DELAY_MS);
   };
 
   const handleItemMouseLeave = () => {

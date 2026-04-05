@@ -1,3 +1,4 @@
+import { LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { isTauriRuntime } from "./runtime";
 
@@ -53,4 +54,30 @@ export async function startCurrentWindowResize(
   }
 
   await getCurrentWebviewWindow().startResizeDragging(direction);
+}
+
+export async function setCurrentWindowLogicalSize(
+  width: number,
+  height: number,
+): Promise<void> {
+  if (!isTauriRuntime()) {
+    return;
+  }
+
+  await getCurrentWebviewWindow().setSize(new LogicalSize(width, height));
+}
+
+export async function setCurrentWindowLogicalSizeBounds(
+  minWidth: number,
+  minHeight: number,
+  maxWidth: number,
+  maxHeight: number,
+): Promise<void> {
+  if (!isTauriRuntime()) {
+    return;
+  }
+
+  const window = getCurrentWebviewWindow();
+  await window.setMinSize(new LogicalSize(minWidth, minHeight));
+  await window.setMaxSize(new LogicalSize(maxWidth, maxHeight));
 }

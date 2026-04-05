@@ -38,10 +38,10 @@ pub const PICKER_WINDOW_LABEL: &str = "picker";
 pub const PICKER_WINDOW_TITLE: &str = "FloatPaste · 速贴";
 pub const SEARCH_WINDOW_LABEL: &str = "workbench";
 pub const SEARCH_WINDOW_TITLE: &str = "FloatPaste · 搜索";
-pub const SEARCH_WINDOW_DEFAULT_WIDTH: u32 = 900;
-pub const SEARCH_WINDOW_DEFAULT_HEIGHT: u32 = 600;
-pub const SEARCH_WINDOW_MIN_WIDTH: u32 = 600;
-pub const SEARCH_WINDOW_MIN_HEIGHT: u32 = 400;
+pub const SEARCH_WINDOW_DEFAULT_WIDTH: u32 = 780;
+pub const SEARCH_WINDOW_DEFAULT_HEIGHT: u32 = 420;
+pub const SEARCH_WINDOW_MIN_WIDTH: u32 = 620;
+pub const SEARCH_WINDOW_MIN_HEIGHT: u32 = 1;
 pub const EDITOR_WINDOW_LABEL: &str = "editor";
 pub const EDITOR_WINDOW_TITLE: &str = "FloatPaste · 编辑";
 const WINDOW_FOCUS_RETRY_DELAY_MS: u64 = 20;
@@ -399,6 +399,7 @@ impl WindowCoordinator {
         state: &AppState,
     ) -> Result<(), AppError> {
         state.end_search_activation();
+        let _ = crate::services::tooltip_window::TooltipWindow::hide_tooltip(app);
 
         let Some(window) = app.get_webview_window(SEARCH_WINDOW_LABEL) else {
             return Ok(());
@@ -423,6 +424,7 @@ fn hide_search_window(
     restore_target: bool,
 ) -> Result<(), AppError> {
     state.end_search_activation();
+    let _ = crate::services::tooltip_window::TooltipWindow::hide_tooltip(app);
     let session = state.search_session()?;
 
     if let Some(window) = app.get_webview_window(SEARCH_WINDOW_LABEL) {
@@ -509,7 +511,7 @@ fn ensure_search_window(app: &AppHandle) -> Result<WebviewWindow, AppError> {
             SEARCH_WINDOW_MIN_WIDTH as f64,
             SEARCH_WINDOW_MIN_HEIGHT as f64,
         )
-        .resizable(true)
+        .resizable(false)
         .visible(false)
         .decorations(false)
         .always_on_top(true)

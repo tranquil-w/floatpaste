@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { emitTo, listen } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { queryClient } from "../../app/queryClient";
 import {
   hidePicker,
   hideSearch,
+  hideTooltip,
   openEditorFromSearch,
   pasteItem,
   prepareSearchWindowDrag,
   setItemFavorited,
+  showTooltip,
 } from "../../bridge/commands";
 import {
   CLIPS_CHANGED_EVENT,
@@ -23,19 +26,27 @@ import {
   SEARCH_SESSION_END_EVENT,
   SEARCH_SESSION_START_EVENT,
 } from "../../bridge/events";
+import { getImageUrl } from "../../bridge/imageUrl";
 import { isTauriRuntime } from "../../bridge/runtime";
-import { startCurrentWindowDragging } from "../../bridge/window";
+import {
+  setCurrentWindowLogicalSizeBounds,
+  setCurrentWindowLogicalSize,
+  startCurrentWindowDragging,
+} from "../../bridge/window";
 import { getSettings } from "../../bridge/commands";
 import { useItemDetailQuery } from "../../shared/queries/clipQueries";
-import type { ClipItemSummary, SearchQuickFilter } from "../../shared/types/clips";
+import type {
+  ClipItemDetail,
+  ClipItemSummary,
+  SearchQuickFilter,
+} from "../../shared/types/clips";
 import { getClipTypeLabel } from "../../shared/utils/clipDisplay";
 import { formatDateTime } from "../../shared/utils/time";
 import { LoadingSpinner } from "../../shared/ui/LoadingSpinner";
-import {
-  WindowResizeHandles,
-  type WindowResizeHandle,
-} from "../../shared/ui/WindowResizeHandles";
+import { TOOLTIP_SHOW_DELAY_MS } from "../../shared/ui/tooltipConfig";
 import { getSearchKeyboardAction } from "./keyboard";
+import { buildTooltipHtml } from "../picker/tooltipHtml";
+import { resolveTooltipShowPosition } from "../picker/tooltipState";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchRecentQuery, useSearchSearchQuery } from "./queries";
 import { getNextSearchNavigationIndex } from "./state";
@@ -48,9 +59,9 @@ const STYLES = {
   panel:
     "flex h-full w-full flex-col overflow-hidden border border-pg-border-default bg-pg-canvas-default shadow-[0_20px_60px_rgba(var(--pg-shadow-color),0.18)]",
   searchHeader:
-    "flex items-center gap-3 border-b border-pg-border-subtle px-5 py-4",
+    "flex items-center gap-3 border-b border-pg-border-subtle px-3 py-3",
   searchControl:
-    "relative flex flex-1 items-center rounded-md border border-pg-border-subtle bg-pg-canvas-default px-2.5",
+    "relative flex flex-1 items-center rounded-md border border-pg-border-subtle bg-pg-canvas-default px-2",
   searchControlIcon:
     "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-pg-fg-muted",
   searchInput:
@@ -66,73 +77,45 @@ const STYLES = {
     `flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-[13px] font-medium leading-5 transition-colors ${
       active ? "bg-pg-canvas-subtle text-pg-fg-default" : "text-pg-fg-muted"
     } ${selected ? "text-pg-accent-fg" : ""}`,
-  listItem: (selected: boolean) =>
-    `group flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition-colors ${
+  listItemShell: (selected: boolean) =>
+    `rounded-[9px] border transition-[border-color,background-color,box-shadow] ${
       selected
-        ? "bg-pg-canvas-subtle shadow-[inset_0_0_0_1px_rgba(var(--pg-shadow-color),0.06)]"
-        : "hover:bg-pg-canvas-subtle"
+        ? "border-pg-border-default bg-pg-canvas-subtle shadow-[inset_0_0_0_1px_rgba(var(--pg-shadow-color),0.04)]"
+        : "border-transparent bg-transparent"
+    }`,
+  listItemLayout: (selected: boolean) =>
+    `group grid w-full items-start gap-2.5 px-2 py-3 text-left transition-colors ${
+      selected
+        ? "grid-cols-[auto,minmax(0,1fr),auto]"
+        : "grid-cols-[auto,minmax(0,1fr)]"
+    } ${
+      selected ? "" : "hover:bg-pg-canvas-subtle"
     }`,
   glyphBox: (selected: boolean) =>
-    `flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-sm font-semibold transition-colors ${
+    `flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] text-sm font-semibold transition-colors ${
       selected
-        ? "bg-pg-neutral-5 text-pg-fg-default dark:bg-pg-neutral-6"
+        ? "bg-pg-neutral-5 text-pg-fg-default shadow-[inset_0_0_0_1px_rgba(var(--pg-shadow-color),0.06)] dark:bg-pg-neutral-6"
         : "bg-pg-canvas-subtle text-pg-fg-muted group-hover:text-pg-fg-default"
     }`,
+  selectedActions:
+    "col-start-3 row-start-1 flex justify-end self-start pt-1",
+  selectedActionStack:
+    "flex items-center gap-1.5",
+  inlineMetaRow:
+    "mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-pg-fg-subtle",
   actionButton:
-    "rounded-md bg-pg-accent-emphasis px-3 py-1.5 text-xs font-medium text-pg-fg-on-emphasis transition-colors hover:opacity-90",
+    "flex h-8 w-8 items-center justify-center rounded-md bg-pg-accent-emphasis text-pg-fg-on-emphasis transition-colors hover:opacity-90",
   actionButtonSecondary:
-    "rounded-md border border-pg-border-default px-3 py-1.5 text-xs font-medium text-pg-fg-default transition-colors hover:bg-pg-canvas-subtle",
+    "flex h-8 w-8 items-center justify-center rounded-md border border-pg-border-default text-pg-fg-default transition-colors hover:bg-pg-canvas-subtle",
 };
 
-const SEARCH_RESIZE_HANDLES: WindowResizeHandle[] = [
-  {
-    key: "north-left",
-    direction: "North",
-    className:
-      "absolute left-4 right-[calc(50%+2.5rem)] top-0 z-30 h-2 cursor-ns-resize",
-  },
-  {
-    key: "north-right",
-    direction: "North",
-    className:
-      "absolute left-[calc(50%+2.5rem)] right-4 top-0 z-30 h-2 cursor-ns-resize",
-  },
-  {
-    key: "south",
-    direction: "South",
-    className: "absolute inset-x-4 bottom-0 z-30 h-2 cursor-ns-resize",
-  },
-  {
-    key: "west",
-    direction: "West",
-    className: "absolute inset-y-4 left-0 z-30 w-2 cursor-ew-resize",
-  },
-  {
-    key: "east",
-    direction: "East",
-    className: "absolute inset-y-4 right-0 z-30 w-2 cursor-ew-resize",
-  },
-  {
-    key: "north-west",
-    direction: "NorthWest",
-    className: "absolute left-0 top-0 z-40 h-4 w-4 cursor-nwse-resize",
-  },
-  {
-    key: "north-east",
-    direction: "NorthEast",
-    className: "absolute right-0 top-0 z-40 h-4 w-4 cursor-nesw-resize",
-  },
-  {
-    key: "south-west",
-    direction: "SouthWest",
-    className: "absolute bottom-0 left-0 z-40 h-4 w-4 cursor-nesw-resize",
-  },
-  {
-    key: "south-east",
-    direction: "SouthEast",
-    className: "absolute bottom-0 right-0 z-40 h-4 w-4 cursor-nwse-resize",
-  },
-];
+const SEARCH_WINDOW_FIXED_WIDTH = 780;
+const SEARCH_WINDOW_MAX_HEIGHT = 620;
+const SEARCH_FILTER_PANEL_WINDOW_MARGIN = 8;
+const SEARCH_IMAGE_THUMBNAIL_STYLE = {
+  width: 36,
+  height: 36,
+} as const;
 
 const FILTER_OPTIONS: Array<{ value: SearchQuickFilter; label: string }> = [
   { value: "all", label: "全部" },
@@ -208,6 +191,52 @@ function getEmptyState(
   };
 }
 
+function formatFileSize(bytes: number | null): string | null {
+  if (!bytes || bytes <= 0) {
+    return null;
+  }
+
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unitIndex = 0;
+
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+
+  const digits = unitIndex === 0 ? 0 : value >= 100 ? 0 : value >= 10 ? 1 : 2;
+  return `${value.toFixed(digits)} ${units[unitIndex]}`;
+}
+
+function getItemDetailMeta(detail: ClipItemDetail | ClipItemSummary): string[] {
+  const meta = [
+    getClipTypeLabel(detail),
+    detail.sourceApp ?? "未知来源",
+    formatDateTime(detail.lastUsedAt ?? detail.createdAt),
+  ];
+
+  if (detail.type === "image" && detail.imageWidth && detail.imageHeight) {
+    meta.push(`${detail.imageWidth} × ${detail.imageHeight}`);
+  }
+
+  const fileSizeLabel = formatFileSize(detail.fileSize);
+  if (fileSizeLabel) {
+    meta.push(fileSizeLabel);
+  }
+
+  if (detail.type === "file") {
+    if (detail.fileCount > 0) {
+      meta.push(`${detail.fileCount} 个文件`);
+    }
+    if (detail.directoryCount > 0) {
+      meta.push(`${detail.directoryCount} 个文件夹`);
+    }
+  }
+
+  return meta;
+}
+
 async function handleSearchWindowDragStart(
   event: MouseEvent<HTMLElement>,
 ) {
@@ -237,22 +266,36 @@ export function SearchShell() {
     setSelectedItemId,
     setSession,
   } = useSearchStore();
+  const tauriRuntime = isTauriRuntime();
+  const shellRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLElement>(null);
+  const errorRef = useRef<HTMLDivElement>(null);
+  const sectionBarRef = useRef<HTMLDivElement>(null);
+  const listContentRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const selectedItemIdRef = useRef<string | null>(selectedItemId);
-  const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const itemRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const imageUrlCacheRef = useRef(new Map<string, string | null>());
+  const imageUrlPendingRef = useRef(new Set<string>());
   const [inputSuspended, setInputSuspended] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [, setImageUrlVersion] = useState(0);
   const [activeFilter, setActiveFilter] = useState<SearchQuickFilter>("all");
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [highlightedFilter, setHighlightedFilter] =
     useState<SearchQuickFilter>("all");
   const filterRootRef = useRef<HTMLDivElement>(null);
+  const filterPanelRef = useRef<HTMLDivElement>(null);
   const filterTriggerRef = useRef<HTMLButtonElement>(null);
   const filterOptionRefs = useRef<
     Partial<Record<SearchQuickFilter, HTMLDivElement | null>>
   >({});
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const filterCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tooltipRequestIdRef = useRef(0);
+  const resizeFrameRef = useRef<number | null>(null);
+  const lastAppliedWindowHeightRef = useRef<number | null>(null);
   const hasKeyword = keyword.trim().length > 0;
   const recentQuery = useSearchRecentQuery(activeFilter, !hasKeyword);
   const searchQuery = useSearchSearchQuery(keyword, activeFilter, hasKeyword);
@@ -269,6 +312,26 @@ export function SearchShell() {
   const itemsRef = useRef<ClipItemSummary[]>(items);
   const detailQuery = useItemDetailQuery(selectedItemId);
 
+  const clearTooltipTimer = () => {
+    if (tooltipTimerRef.current) {
+      clearTimeout(tooltipTimerRef.current);
+      tooltipTimerRef.current = null;
+    }
+  };
+
+  const invalidateTooltipRequest = () => {
+    tooltipRequestIdRef.current += 1;
+    return tooltipRequestIdRef.current;
+  };
+
+  const cancelTooltip = () => {
+    clearTooltipTimer();
+    invalidateTooltipRequest();
+    if (tauriRuntime) {
+      void hideTooltip();
+    }
+  };
+
   // 清理错误定时器
   useEffect(() => {
     return () => {
@@ -277,6 +340,12 @@ export function SearchShell() {
       }
       if (filterCloseTimerRef.current) {
         clearTimeout(filterCloseTimerRef.current);
+      }
+      if (tooltipTimerRef.current) {
+        clearTimeout(tooltipTimerRef.current);
+      }
+      if (resizeFrameRef.current) {
+        cancelAnimationFrame(resizeFrameRef.current);
       }
     };
   }, []);
@@ -332,6 +401,83 @@ export function SearchShell() {
     selectedItemIdRef.current = selectedItemId;
   }, [items, selectedItemId]);
 
+  const handleItemMouseMove = (event: React.MouseEvent, item: ClipItemSummary) => {
+    if (!tauriRuntime || item.type !== "image") {
+      return;
+    }
+
+    const requestId = invalidateTooltipRequest();
+    const clientPosition = { x: event.clientX, y: event.clientY };
+    clearTooltipTimer();
+    tooltipTimerRef.current = setTimeout(() => {
+      tooltipTimerRef.current = null;
+      void (async () => {
+        const imageUrl = imageUrlCacheRef.current.get(item.id) ?? await getImageUrl(item.imagePath);
+        if (tooltipRequestIdRef.current !== requestId) {
+          return;
+        }
+
+        const tooltipHtml = buildTooltipHtml(item, { imageUrl, requestId });
+        const currentWindow = getCurrentWebviewWindow();
+        const [outerPosition, scaleFactor] = await Promise.all([
+          currentWindow.outerPosition(),
+          currentWindow.scaleFactor(),
+        ]);
+        const position = resolveTooltipShowPosition({
+          activeRequestId: tooltipRequestIdRef.current,
+          requestId,
+          outerPosition,
+          scaleFactor,
+          clientPosition,
+        });
+
+        if (!position) {
+          return;
+        }
+
+        await showTooltip(
+          requestId,
+          position.x,
+          position.y,
+          tooltipHtml,
+          (document.documentElement.dataset.theme as "dark" | "light") ?? "dark",
+        );
+      })().catch((error) => {
+        console.warn("[FloatPaste] Search tooltip 定位或显示失败:", error);
+      });
+    }, TOOLTIP_SHOW_DELAY_MS);
+  };
+
+  const handleItemMouseLeave = () => {
+    if (!tauriRuntime) {
+      return;
+    }
+    cancelTooltip();
+  };
+
+  useEffect(() => {
+    items.forEach((item) => {
+      if (
+        item.type !== "image"
+        || !item.imagePath
+        || imageUrlCacheRef.current.has(item.id)
+        || imageUrlPendingRef.current.has(item.id)
+      ) {
+        return;
+      }
+
+      imageUrlPendingRef.current.add(item.id);
+      void getImageUrl(item.imagePath).then((imageUrl) => {
+        imageUrlCacheRef.current.set(item.id, imageUrl);
+        setImageUrlVersion((current) => current + 1);
+      }).catch(() => {
+        imageUrlCacheRef.current.set(item.id, null);
+      }).finally(() => {
+        imageUrlPendingRef.current.delete(item.id);
+      });
+    });
+  }, [items]);
+
   // 当选中项改变时，自动滚动到视图
   useEffect(() => {
     if (!selectedItemId) {
@@ -346,6 +492,116 @@ export function SearchShell() {
       });
     }
   }, [selectedItemId, items]);
+
+  useEffect(() => {
+    cancelTooltip();
+  }, [activeFilter, items, selectedItemId]);
+
+  useEffect(() => {
+    return () => {
+      cancelTooltip();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!tauriRuntime) {
+      return;
+    }
+
+    const scheduleWindowSizeSync = () => {
+      if (resizeFrameRef.current) {
+        cancelAnimationFrame(resizeFrameRef.current);
+      }
+
+      resizeFrameRef.current = requestAnimationFrame(() => {
+        resizeFrameRef.current = null;
+
+        const shellRect = shellRef.current?.getBoundingClientRect();
+        const shellHeight = Math.round(
+          shellRect?.height ?? 0,
+        );
+        const headerHeight = headerRef.current?.offsetHeight ?? 0;
+        const errorHeight = errorRef.current?.offsetHeight ?? 0;
+        const sectionHeight = sectionBarRef.current?.offsetHeight ?? 0;
+        const listContentHeight = Math.ceil(
+          listContentRef.current?.getBoundingClientRect().height ?? 0,
+        );
+        const filterPanelBottom = isFilterOpen && shellRect && filterPanelRef.current
+          ? Math.ceil(
+            filterPanelRef.current.getBoundingClientRect().bottom
+              - shellRect.top
+              + SEARCH_FILTER_PANEL_WINDOW_MARGIN,
+          )
+          : 0;
+
+        if (!headerHeight || !sectionHeight || (!listContentHeight && !filterPanelBottom)) {
+          return;
+        }
+
+        const chromeHeight = 5 + headerHeight + errorHeight + sectionHeight;
+        const contentHeight = chromeHeight + listContentHeight;
+        const targetHeight = Math.min(
+          SEARCH_WINDOW_MAX_HEIGHT,
+          Math.max(contentHeight, filterPanelBottom),
+        );
+
+        if (lastAppliedWindowHeightRef.current === targetHeight && shellHeight === targetHeight) {
+          return;
+        }
+
+        lastAppliedWindowHeightRef.current = targetHeight;
+        const targetWidth = SEARCH_WINDOW_FIXED_WIDTH;
+        void (async () => {
+          await setCurrentWindowLogicalSizeBounds(
+            SEARCH_WINDOW_FIXED_WIDTH,
+            targetHeight,
+            SEARCH_WINDOW_FIXED_WIDTH,
+            targetHeight,
+          );
+          await setCurrentWindowLogicalSize(targetWidth, targetHeight);
+        })().catch((error) => {
+          console.warn("同步搜索窗口尺寸失败", error);
+        });
+      });
+    };
+
+    scheduleWindowSizeSync();
+
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    const observer = new ResizeObserver(() => {
+      scheduleWindowSizeSync();
+    });
+    const observedElements = [
+      shellRef.current,
+      headerRef.current,
+      errorRef.current,
+      sectionBarRef.current,
+      listContentRef.current,
+      filterPanelRef.current,
+    ].filter((node): node is HTMLElement => node !== null);
+
+    observedElements.forEach((node) => observer.observe(node));
+
+    return () => {
+      observer.disconnect();
+      if (resizeFrameRef.current) {
+        cancelAnimationFrame(resizeFrameRef.current);
+        resizeFrameRef.current = null;
+      }
+    };
+  }, [
+    activeFilter,
+    detailQuery.dataUpdatedAt,
+    detailQuery.isLoading,
+    errorMessage,
+    isFilterOpen,
+    items.length,
+    selectedItemId,
+    tauriRuntime,
+  ]);
 
   useEffect(() => {
     if (!items.length) {
@@ -710,6 +966,7 @@ export function SearchShell() {
   }, [inputSuspended, keyword, selectedItemId]);
 
   async function handleClose() {
+    cancelTooltip();
     try {
       await hideSearch();
     } catch (error) {
@@ -728,6 +985,7 @@ export function SearchShell() {
       return;
     }
 
+    cancelTooltip();
     try {
       await openEditorFromSearch(currentItem.id);
     } catch (error) {
@@ -760,7 +1018,8 @@ export function SearchShell() {
     }
 
     try {
-      const favored = detailQuery.data?.isFavorited ?? false;
+      const currentItem = itemsRef.current.find((item) => item.id === id);
+      const favored = detailQuery.data?.isFavorited ?? currentItem?.isFavorited ?? false;
       await setItemFavorited(id, !favored);
       await refreshSearchQueries();
     } catch (error) {
@@ -770,19 +1029,12 @@ export function SearchShell() {
   }
 
   const isLoading = hasKeyword ? searchQuery.isLoading : recentQuery.isLoading;
-  const selectedItem = items.find((item) => item.id === selectedItemId) ?? null;
   const resultCountLabel = `${items.length} 条`;
   const emptyState = getEmptyState(hasKeyword, activeFilter);
   const activeFilterLabel = getFilterLabel(activeFilter);
 
   return (
-    <div className={STYLES.shell}>
-      <WindowResizeHandles
-        handles={SEARCH_RESIZE_HANDLES}
-        errorLabel="搜索"
-        beforeResizeStart={prepareSearchWindowDrag}
-      />
-
+    <div className={STYLES.shell} ref={shellRef}>
       <div className={STYLES.panel}>
         <div
           className="h-[3px] w-full shrink-0 bg-gradient-to-r from-pg-blue-5 to-pg-blue-4"
@@ -792,6 +1044,7 @@ export function SearchShell() {
         />
 
         <header
+          ref={headerRef}
           className={STYLES.searchHeader}
           onMouseDown={(event) => {
             void handleSearchWindowDragStart(event);
@@ -884,6 +1137,7 @@ export function SearchShell() {
                 <div
                   className={STYLES.searchFilterPanel}
                   id="search-filter-listbox"
+                  ref={filterPanelRef}
                   role="listbox"
                 >
                   {FILTER_OPTIONS.map((option) => {
@@ -977,153 +1231,237 @@ export function SearchShell() {
         </header>
 
         {errorMessage ? (
-          <div className="border-b border-pg-danger-fg/20 bg-pg-danger-subtle px-5 py-2 text-sm text-pg-danger-fg">
+          <div
+            ref={errorRef}
+            className="border-b border-pg-danger-fg/20 bg-pg-danger-subtle px-5 py-2 text-sm text-pg-danger-fg"
+          >
             {errorMessage}
           </div>
         ) : null}
 
-        <div className="flex items-center justify-between border-b border-pg-border-subtle px-5 py-3 text-xs font-medium text-pg-fg-muted">
+        <div
+          ref={sectionBarRef}
+          className="flex items-center justify-between border-b border-pg-border-subtle px-5 py-3 text-xs font-medium text-pg-fg-muted"
+        >
           <span>{getSectionLabel(hasKeyword)}</span>
           <span>{resultCountLabel}</span>
         </div>
 
-        <main className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
-          {isLoading ? (
-            <div className="flex h-full items-center justify-center py-12">
-              <LoadingSpinner size="sm" text="加载中..." />
-            </div>
-          ) : items.length === 0 ? (
-            <div className="flex h-full flex-col items-center justify-center gap-1 px-4 py-12 text-center text-sm text-pg-fg-subtle">
-              <span>{emptyState.title}</span>
-              <span>{emptyState.description}</span>
-            </div>
-          ) : (
-            <div className="space-y-1">
-              {items.map((item, index) => {
-                const isSelected = selectedItemId === item.id;
-                return (
-                  <button
-                    ref={(el) => {
-                      itemRefs.current[index] = el;
-                    }}
-                    className={STYLES.listItem(isSelected)}
-                    key={item.id}
-                    onClick={() => {
-                      selectedItemIdRef.current = item.id;
-                      setSelectedItemId(item.id);
-                    }}
-                    onDoubleClick={() => {
-                      setSelectedItemId(item.id);
-                      selectedItemIdRef.current = item.id;
-                      void handlePasteSelected();
-                    }}
-                    type="button"
-                  >
-                    <div className={STYLES.glyphBox(isSelected)}>
-                      {getClipTypeGlyph(item)}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-start justify-between gap-3">
-                        <p className="min-w-0 flex-1 truncate text-[15px] leading-6 text-pg-fg-default">
-                          {item.contentPreview}
-                        </p>
-                        <div className="flex shrink-0 items-center gap-2">
-                          {item.isFavorited ? (
-                            <span className="text-[12px] text-pg-favorite">★</span>
-                          ) : null}
-                          {isSelected ? (
-                            <span className="rounded-md border border-pg-border-default bg-pg-canvas-default px-2 py-0.5 text-[10px] font-medium text-pg-fg-subtle">
-                              Enter
-                            </span>
-                          ) : null}
+        <main className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]">
+          <div ref={listContentRef} className="px-0.5 pb-1 pt-1.5">
+            {isLoading ? (
+              <div className="flex min-h-[160px] items-center justify-center py-12">
+                <LoadingSpinner size="sm" text="加载中..." />
+              </div>
+            ) : items.length === 0 ? (
+              <div className="flex min-h-[160px] flex-col items-center justify-center gap-1 px-4 py-12 text-center text-sm text-pg-fg-subtle">
+                <span>{emptyState.title}</span>
+                <span>{emptyState.description}</span>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                {items.map((item, index) => {
+                  const isSelected = selectedItemId === item.id;
+                  const inlineDetail = isSelected ? detailQuery.data ?? item : null;
+                  const isFavorited = detailQuery.data?.id === item.id
+                    ? detailQuery.data.isFavorited
+                    : item.isFavorited;
+                  const imageUrl = item.type === "image"
+                    ? (imageUrlCacheRef.current.get(item.id) ?? null)
+                    : null;
+                  const itemMeta = getItemDetailMeta(inlineDetail ?? item);
+                  const selectedPreviewText = detailQuery.isLoading
+                    ? "正在载入条目详情..."
+                    : detailQuery.data?.type === "text"
+                      ? (detailQuery.data.fullText || detailQuery.data.contentPreview)
+                      : item.contentPreview;
+                  const previewText = isSelected ? selectedPreviewText : item.contentPreview;
+
+                  return (
+                    <div
+                      ref={(el) => {
+                        itemRefs.current[index] = el;
+                      }}
+                      className={STYLES.listItemShell(isSelected)}
+                      key={item.id}
+                      onMouseLeave={handleItemMouseLeave}
+                      onMouseMove={(event) => {
+                        if (item.type === "image") {
+                          handleItemMouseMove(event, item);
+                          return;
+                        }
+                        handleItemMouseLeave();
+                      }}
+                      onClick={() => {
+                        selectedItemIdRef.current = item.id;
+                        setSelectedItemId(item.id);
+                      }}
+                      onDoubleClick={() => {
+                        setSelectedItemId(item.id);
+                        selectedItemIdRef.current = item.id;
+                        void handlePasteSelected();
+                      }}
+                      role="button"
+                      tabIndex={-1}
+                    >
+                      <div className={STYLES.listItemLayout(isSelected)}>
+                        <div>
+                          {imageUrl ? (
+                            <img
+                              alt=""
+                              className={`shrink-0 rounded-[8px] border object-cover ${
+                                isSelected
+                                  ? "border-pg-border-default bg-pg-canvas-default"
+                                  : "border-pg-border-subtle bg-pg-canvas-subtle"
+                              }`}
+                              onError={() => {
+                                imageUrlCacheRef.current.set(item.id, null);
+                                setImageUrlVersion((current) => current + 1);
+                              }}
+                              src={imageUrl}
+                              style={SEARCH_IMAGE_THUMBNAIL_STYLE}
+                            />
+                          ) : (
+                            <div className={STYLES.glyphBox(isSelected)}>
+                              {getClipTypeGlyph(item)}
+                            </div>
+                          )}
                         </div>
-                      </div>
-                      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-pg-fg-subtle">
-                        <span>{getClipTypeLabel(item)}</span>
-                        <span aria-hidden="true">•</span>
-                        <span>{item.sourceApp ?? "未知来源"}</span>
-                        <span aria-hidden="true">•</span>
-                        <span>{formatDateTime(item.lastUsedAt ?? item.createdAt)}</span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex min-w-0 items-start gap-2">
+                            <p
+                              className={`min-w-0 flex-1 text-[15px] leading-6 ${
+                                isSelected
+                                  ? "line-clamp-3 whitespace-pre-wrap break-words font-medium text-pg-fg-default"
+                                  : "truncate text-pg-fg-default"
+                              }`}
+                            >
+                              {previewText}
+                            </p>
+                            <div className="flex shrink-0 items-center gap-2">
+                              {isFavorited ? (
+                                <span className="text-[12px] text-pg-favorite">★</span>
+                              ) : null}
+                            </div>
+                          </div>
+                          <div className={STYLES.inlineMetaRow}>
+                            {itemMeta.map((meta, metaIndex) => (
+                              <span key={`${item.id}-${meta}`}>
+                                {metaIndex > 0 ? <span aria-hidden="true">• </span> : null}
+                                {meta}
+                              </span>
+                            ))}
+                            {isFavorited ? <span aria-hidden="true">• 已收藏</span> : null}
+                          </div>
+                        </div>
+                        {isSelected ? (
+                          <div className={STYLES.selectedActions}>
+                            <div
+                              className={STYLES.selectedActionStack}
+                              onClick={(event) => event.stopPropagation()}
+                              onDoubleClick={(event) => event.stopPropagation()}
+                            >
+                              <button
+                                aria-label="粘贴当前条目"
+                                className={STYLES.actionButton}
+                                onMouseDown={(event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                }}
+                                onClick={() => void handlePasteSelected()}
+                                title="粘贴"
+                                type="button"
+                              >
+                                <svg
+                                  aria-hidden="true"
+                                  className="h-4 w-4"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth="1.8"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <path d="M9.75 3h4.5A1.75 1.75 0 0 1 16 4.75V6H8V4.75A1.75 1.75 0 0 1 9.75 3Z" />
+                                  <rect x="5" y="6" width="14" height="15" rx="2.75" />
+                                  <path d="M9 11h6" />
+                                  <path d="M9 15h6" />
+                                </svg>
+                              </button>
+                              {(detailQuery.data?.type ?? item.type) === "text" ? (
+                                <button
+                                  aria-label="编辑当前条目"
+                                  className={STYLES.actionButtonSecondary}
+                                  onMouseDown={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                  }}
+                                  onClick={() => void handleOpenEditor()}
+                                  title="编辑"
+                                  type="button"
+                                >
+                                  <svg
+                                    aria-hidden="true"
+                                    className="h-4 w-4"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth="1.8"
+                                    viewBox="0 0 24 24"
+                                  >
+                                    <path d="M4.75 19.25h3.5L18.5 9 15 5.5 4.75 15.75v3.5Z" />
+                                    <path d="m13.75 6.75 3.5 3.5" />
+                                    <path d="M4.75 19.25 8 19.2" />
+                                  </svg>
+                                </button>
+                              ) : null}
+                              <button
+                                aria-label={isFavorited ? "取消收藏当前条目" : "收藏当前条目"}
+                                className={STYLES.actionButtonSecondary}
+                                onMouseDown={(event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                }}
+                                onClick={() => void handleToggleFavorited()}
+                                title={isFavorited ? "取消收藏" : "收藏"}
+                                type="button"
+                              >
+                                {isFavorited ? (
+                                  <svg
+                                    aria-hidden="true"
+                                    className="h-4 w-4 text-pg-favorite"
+                                    fill="currentColor"
+                                    viewBox="0 0 24 24"
+                                  >
+                                    <path d="m12 3.85 2.55 5.17 5.71.83-4.13 4.03.98 5.69L12 16.89 6.89 19.57l.98-5.69-4.13-4.03 5.71-.83L12 3.85Z" />
+                                  </svg>
+                                ) : (
+                                  <svg
+                                    aria-hidden="true"
+                                    className="h-4 w-4"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth="1.8"
+                                    viewBox="0 0 24 24"
+                                  >
+                                    <path d="m12 3.85 2.55 5.17 5.71.83-4.13 4.03.98 5.69L12 16.89 6.89 19.57l.98-5.69-4.13-4.03 5.71-.83L12 3.85Z" />
+                                  </svg>
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
                       </div>
                     </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </main>
-
-        <section className="border-t border-pg-border-subtle bg-pg-canvas-subtle px-5 py-3">
-          {selectedItem ? (
-            <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2 text-xs font-medium text-pg-fg-muted">
-                  <span>{selectedItem.sourceApp ?? "未知来源"}</span>
-                  <span aria-hidden="true">•</span>
-                  <span>{getClipTypeLabel(selectedItem)}</span>
-                </div>
-                {detailQuery.isLoading ? (
-                  <p className="mt-1 text-sm text-pg-fg-subtle">正在载入条目详情...</p>
-                ) : detailQuery.data?.type === "text" ? (
-                  <p className="mt-1 line-clamp-2 text-sm leading-6 text-pg-fg-default">
-                    {detailQuery.data.fullText || detailQuery.data.contentPreview}
-                  </p>
-                ) : detailQuery.data ? (
-                  <p className="mt-1 text-sm text-pg-fg-subtle">
-                    当前条目不是文本类型，搜索窗口会定位并支持快速粘贴。
-                  </p>
-                ) : (
-                  <p className="mt-1 text-sm text-pg-fg-subtle">选中条目后可在这里查看摘要与操作。</p>
-                )}
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <button
-                  className={STYLES.actionButton}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => void handlePasteSelected()}
-                  type="button"
-                >
-                  粘贴
-                </button>
-                {detailQuery.data?.type === "text" ? (
-                  <button
-                    className={STYLES.actionButtonSecondary}
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => void handleOpenEditor()}
-                    type="button"
-                  >
-                    编辑
-                  </button>
-                ) : null}
-                <button
-                  className={STYLES.actionButtonSecondary}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => void handleToggleFavorited()}
-                  type="button"
-                >
-                  {detailQuery.data?.isFavorited ? "取消收藏" : "收藏"}
-                </button>
-              </div>
-            </div>
-          ) : (
-            <p className="text-sm text-pg-fg-subtle">选中条目后可在这里查看摘要与操作。</p>
-          )}
-        </section>
-
-        <footer className="flex shrink-0 items-center justify-center gap-3 border-t border-pg-border-subtle px-4 py-2 text-xs text-pg-fg-subtle">
-          <span>
-            <kbd className="rounded border border-pg-border-default bg-pg-canvas-default px-1.5 py-0.5 font-mono text-[10px]">Enter</kbd>
-            {" "}粘贴
-          </span>
-          <span>
-            <kbd className="rounded border border-pg-border-default bg-pg-canvas-default px-1.5 py-0.5 font-mono text-[10px]">Ctrl+Enter</kbd>
-            {" "}编辑
-          </span>
-          <span>
-            <kbd className="rounded border border-pg-border-default bg-pg-canvas-default px-1.5 py-0.5 font-mono text-[10px]">Esc</kbd>
-            {" "}关闭
-          </span>
-        </footer>
       </div>
     </div>
   );
