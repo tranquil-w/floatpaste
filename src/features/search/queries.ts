@@ -21,7 +21,7 @@ function buildFilters(filter: SearchQuickFilter): Partial<SearchFilters> {
   return { clipType: filter } as const;
 }
 
-export function useSearchRecentQuery(filter: SearchQuickFilter, enabled: boolean) {
+export function createSearchRecentQueryKey(filter: SearchQuickFilter) {
   const query: SearchQuery = {
     keyword: "",
     filters: buildFilters(filter),
@@ -30,8 +30,30 @@ export function useSearchRecentQuery(filter: SearchQuickFilter, enabled: boolean
     sort: "recent_desc",
   };
 
+  return ["search-recent", query] as const;
+}
+
+export function createSearchSearchQueryKey(
+  keyword: string,
+  filter: SearchQuickFilter,
+) {
+  const query: SearchQuery = {
+    keyword,
+    filters: buildFilters(filter),
+    offset: 0,
+    limit: 50,
+    sort: keyword.trim() ? "relevance_desc" : "recent_desc",
+  };
+
+  return ["search-query", query] as const;
+}
+
+export function useSearchRecentQuery(filter: SearchQuickFilter, enabled: boolean) {
+  const queryKey = createSearchRecentQueryKey(filter);
+  const query = queryKey[1];
+
   return useQuery({
-    queryKey: ["search-recent", query],
+    queryKey,
     // 空关键字时后端会回落到 search_recent 分支，这样最近记录与关键词搜索共用同一套筛选语义。
     queryFn: (): Promise<SearchResult> => searchItems(query),
     enabled,
@@ -44,16 +66,11 @@ export function useSearchSearchQuery(
   filter: SearchQuickFilter,
   enabled: boolean,
 ) {
-  const query: SearchQuery = {
-    keyword,
-    filters: buildFilters(filter),
-    offset: 0,
-    limit: 50,
-    sort: keyword.trim() ? "relevance_desc" : "recent_desc",
-  };
+  const queryKey = createSearchSearchQueryKey(keyword, filter);
+  const query = queryKey[1];
 
   return useQuery({
-    queryKey: ["search-query", query],
+    queryKey,
     queryFn: () => searchItems(query),
     enabled,
     staleTime: 0,

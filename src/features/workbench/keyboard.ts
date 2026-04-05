@@ -3,6 +3,7 @@ export type WorkbenchKeyboardAction =
   | "navigate-down"
   | "paste"
   | "edit-item"
+  | "toggle-favorite"
   | "close"
   | null;
 
@@ -25,6 +26,10 @@ export function getWorkbenchKeyboardAction({
 
   if ((ctrlKey || metaKey) && key === "Enter") {
     return "edit-item";
+  }
+
+  if ((ctrlKey || metaKey) && key === " ") {
+    return "toggle-favorite";
   }
 
   switch (key) {

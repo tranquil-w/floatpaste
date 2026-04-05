@@ -439,7 +439,7 @@ export function PickerShell() {
         return;
       }
 
-      if (event.key === " ") {
+      if ((event.ctrlKey || event.metaKey) && event.key === " ") {
         event.preventDefault();
         void handleToggleFavorite();
         return;

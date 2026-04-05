@@ -15,6 +15,7 @@ import {
 import {
   CLIPS_CHANGED_EVENT,
   PICKER_CONFIRM_EVENT,
+  PICKER_FAVORITE_EVENT,
   PICKER_NAVIGATE_EVENT,
   PICKER_OPEN_EDITOR_EVENT,
   PICKER_SELECT_INDEX_EVENT,
@@ -39,16 +40,33 @@ import type {
   ClipItemDetail,
   ClipItemSummary,
   SearchQuickFilter,
+  SearchResult,
 } from "../../shared/types/clips";
 import { getClipTypeLabel } from "../../shared/utils/clipDisplay";
 import { formatDateTime } from "../../shared/utils/time";
 import { LoadingSpinner } from "../../shared/ui/LoadingSpinner";
 import { TOOLTIP_SHOW_DELAY_MS } from "../../shared/ui/tooltipConfig";
 import { getSearchKeyboardAction } from "./keyboard";
+import {
+  getSearchFilterCommitFocusTarget,
+  getSearchFilterOptionAction,
+  getSearchFilterTriggerAction,
+} from "./filterKeyboard";
+import { shouldPreventSearchItemMouseFocus } from "./itemPointer";
+import {
+  getSearchItemFavoritedState,
+  setFavoritedOnDetail,
+  setFavoritedOnSearchResult,
+} from "./favoritedState";
 import { buildTooltipHtml } from "../picker/tooltipHtml";
 import { resolveTooltipShowPosition } from "../picker/tooltipState";
 import { useQuery } from "@tanstack/react-query";
-import { useSearchRecentQuery, useSearchSearchQuery } from "./queries";
+import {
+  createSearchRecentQueryKey,
+  createSearchSearchQueryKey,
+  useSearchRecentQuery,
+  useSearchSearchQuery,
+} from "./queries";
 import { getNextSearchNavigationIndex } from "./state";
 import { useSearchStore } from "./store";
 import type { SearchSession } from "./store";
@@ -296,6 +314,7 @@ export function SearchShell() {
   const tooltipRequestIdRef = useRef(0);
   const resizeFrameRef = useRef<number | null>(null);
   const lastAppliedWindowHeightRef = useRef<number | null>(null);
+  const favoriteTogglePendingRef = useRef(false);
   const hasKeyword = keyword.trim().length > 0;
   const recentQuery = useSearchRecentQuery(activeFilter, !hasKeyword);
   const searchQuery = useSearchSearchQuery(keyword, activeFilter, hasKeyword);
@@ -669,7 +688,9 @@ export function SearchShell() {
     setHighlightedFilter(nextFilter);
     setIsFilterOpen(false);
     requestAnimationFrame(() => {
-      filterTriggerRef.current?.focus();
+      if (getSearchFilterCommitFocusTarget() === "search-input") {
+        searchInputRef.current?.focus();
+      }
     });
   };
 
@@ -700,6 +721,14 @@ export function SearchShell() {
   async function forwardPickerSelectIndex(index: number) {
     try {
       await emitTo("picker", PICKER_SELECT_INDEX_EVENT, index);
+    } catch (error) {
+      console.error("控制速贴面板失败", error);
+    }
+  }
+
+  async function forwardPickerFavorite() {
+    try {
+      await emitTo("picker", PICKER_FAVORITE_EVENT);
     } catch (error) {
       console.error("控制速贴面板失败", error);
     }
@@ -886,7 +915,11 @@ export function SearchShell() {
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       // 下拉菜单自己处理方向键、Tab 和 Enter，避免被全局搜索快捷键抢走。
-      if (target?.closest("[data-search-filter-root='true']")) {
+      if (
+        target?.closest("[data-search-filter-root='true']")
+        && !event.ctrlKey
+        && !event.metaKey
+      ) {
         return;
       }
 
@@ -912,6 +945,12 @@ export function SearchShell() {
         if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
           event.preventDefault();
           void forwardPickerOpenEditor();
+          return;
+        }
+
+        if ((event.ctrlKey || event.metaKey) && event.key === " ") {
+          event.preventDefault();
+          void forwardPickerFavorite();
           return;
         }
 
@@ -954,6 +993,9 @@ export function SearchShell() {
           return;
         case "edit-item":
           void handleOpenEditor();
+          return;
+        case "toggle-favorite":
+          void handleToggleFavorited();
           return;
         case "close":
           void handleClose();
@@ -1013,18 +1055,47 @@ export function SearchShell() {
 
   async function handleToggleFavorited() {
     const id = selectedItemIdRef.current;
-    if (!id) {
+    if (!id || favoriteTogglePendingRef.current) {
       return;
     }
 
+    favoriteTogglePendingRef.current = true;
+
     try {
       const currentItem = itemsRef.current.find((item) => item.id === id);
-      const favored = detailQuery.data?.isFavorited ?? currentItem?.isFavorited ?? false;
-      await setItemFavorited(id, !favored);
+      const currentDetail = detailQuery.data?.id === id ? detailQuery.data : undefined;
+      const favored = getSearchItemFavoritedState(currentItem, currentDetail);
+      const nextFavorited = !favored;
+      await setItemFavorited(id, nextFavorited);
+      queryClient.setQueryData<ClipItemDetail | undefined>(
+        ["detail", id],
+        (detail) => setFavoritedOnDetail(detail, id, nextFavorited),
+      );
+      queryClient.setQueriesData<SearchResult | undefined>(
+        { queryKey: ["search-recent"] },
+        (result) => setFavoritedOnSearchResult(result, id, nextFavorited),
+      );
+      queryClient.setQueriesData<SearchResult | undefined>(
+        { queryKey: ["search-query"] },
+        (result) => setFavoritedOnSearchResult(result, id, nextFavorited),
+      );
+      if (!nextFavorited && activeFilter === "favorite") {
+        const activeQueryKey = hasKeyword
+          ? createSearchSearchQueryKey(keyword, activeFilter)
+          : createSearchRecentQueryKey(activeFilter);
+        queryClient.setQueryData<SearchResult | undefined>(
+          activeQueryKey,
+          (result) => setFavoritedOnSearchResult(result, id, nextFavorited, {
+            removeUnfavoritedItem: true,
+          }),
+        );
+      }
       await refreshSearchQueries();
     } catch (error) {
       showError("更新收藏状态失败，请稍后重试");
       console.error("更新收藏状态失败", error);
+    } finally {
+      favoriteTogglePendingRef.current = false;
     }
   }
 
@@ -1095,26 +1166,34 @@ export function SearchShell() {
                   openFilterMenu(activeFilter);
                 }}
                 onKeyDown={(event) => {
-                  if (event.key === "ArrowDown") {
-                    event.preventDefault();
+                  const action = getSearchFilterTriggerAction({
+                    key: event.key,
+                    ctrlKey: event.ctrlKey,
+                    metaKey: event.metaKey,
+                  });
+
+                  if (!action) {
+                    return;
+                  }
+
+                  event.preventDefault();
+
+                  if (action === "open-next") {
                     openFilterMenu(getAdjacentFilter(activeFilter, 1));
                     return;
                   }
 
-                  if (event.key === "ArrowUp") {
-                    event.preventDefault();
+                  if (action === "open-prev") {
                     openFilterMenu(getAdjacentFilter(activeFilter, -1));
                     return;
                   }
 
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    if (isFilterOpen) {
-                      closeFilterMenu(false);
-                      return;
-                    }
-                    openFilterMenu(activeFilter);
+                  if (isFilterOpen) {
+                    closeFilterMenu(false);
+                    return;
                   }
+
+                  openFilterMenu(activeFilter);
                 }}
                 type="button"
               >
@@ -1155,40 +1234,52 @@ export function SearchShell() {
                         onClick={() => commitFilter(option.value)}
                         onFocus={() => setHighlightedFilter(option.value)}
                         onKeyDown={(event) => {
-                          if (event.key === "ArrowDown") {
-                            event.preventDefault();
+                          const action = getSearchFilterOptionAction({
+                            key: event.key,
+                            ctrlKey: event.ctrlKey,
+                            metaKey: event.metaKey,
+                          });
+
+                          if (action === null) {
+                            if (event.key === "Tab") {
+                              clearFilterCloseTimer();
+                              filterCloseTimerRef.current = globalThis.setTimeout(() => {
+                                setIsFilterOpen(false);
+                              }, 0);
+                            }
+                            return;
+                          }
+
+                          event.preventDefault();
+
+                          if (action === "next") {
                             setHighlightedFilter(getAdjacentFilter(option.value, 1));
                             return;
                           }
 
-                          if (event.key === "ArrowUp") {
-                            event.preventDefault();
+                          if (action === "prev") {
                             setHighlightedFilter(getAdjacentFilter(option.value, -1));
                             return;
                           }
 
-                          if (event.key === "Home") {
-                            event.preventDefault();
+                          if (action === "first") {
                             setHighlightedFilter(FILTER_OPTIONS[0]?.value ?? "all");
                             return;
                           }
 
-                          if (event.key === "End") {
-                            event.preventDefault();
+                          if (action === "last") {
                             setHighlightedFilter(
                               FILTER_OPTIONS[FILTER_OPTIONS.length - 1]?.value ?? "all",
                             );
                             return;
                           }
 
-                          if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
+                          if (action === "commit") {
                             commitFilter(option.value);
                             return;
                           }
 
-                          if (event.key === "Escape") {
-                            event.preventDefault();
+                          if (action === "close") {
                             closeFilterMenu(true);
                             return;
                           }
@@ -1263,9 +1354,10 @@ export function SearchShell() {
                 {items.map((item, index) => {
                   const isSelected = selectedItemId === item.id;
                   const inlineDetail = isSelected ? detailQuery.data ?? item : null;
-                  const isFavorited = detailQuery.data?.id === item.id
-                    ? detailQuery.data.isFavorited
-                    : item.isFavorited;
+                  const isFavorited = getSearchItemFavoritedState(
+                    item,
+                    detailQuery.data?.id === item.id ? detailQuery.data : null,
+                  );
                   const imageUrl = item.type === "image"
                     ? (imageUrlCacheRef.current.get(item.id) ?? null)
                     : null;
@@ -1284,6 +1376,11 @@ export function SearchShell() {
                       }}
                       className={STYLES.listItemShell(isSelected)}
                       key={item.id}
+                      onMouseDown={(event) => {
+                        if (shouldPreventSearchItemMouseFocus(event.button)) {
+                          event.preventDefault();
+                        }
+                      }}
                       onMouseLeave={handleItemMouseLeave}
                       onMouseMove={(event) => {
                         if (item.type === "image") {

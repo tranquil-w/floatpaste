@@ -32,7 +32,7 @@ const PICKER_SESSION_SHORTCUTS: [&str; 15] = [
     "Down",
     "Enter",
     "Escape",
-    "Space",
+    "Ctrl+Space",
     "Digit1",
     "Digit2",
     "Digit3",
@@ -283,7 +283,7 @@ impl ShortcutManager {
                 "digit8" => app.emit(PICKER_SELECT_INDEX_EVENT, 7),
                 "digit9" => app.emit(PICKER_SELECT_INDEX_EVENT, 8),
                 "ctrl+enter" | "control+enter" => app.emit(PICKER_OPEN_EDITOR_EVENT, ()),
-                "space" => app.emit(PICKER_FAVORITE_EVENT, ()),
+                "ctrl+space" | "control+space" => app.emit(PICKER_FAVORITE_EVENT, ()),
                 _ => return,
             };
 
@@ -454,7 +454,8 @@ fn is_picker_session_shortcut(shortcut: &str) -> bool {
             | "enter"
             | "escape"
             | "esc"
-            | "space"
+            | "ctrl+space"
+            | "control+space"
             | "digit1"
             | "digit2"
             | "digit3"
@@ -573,7 +574,8 @@ mod tests {
         assert!(!is_picker_session_shortcut("control+keyf"));
         assert!(!is_picker_session_shortcut("control+keye"));
         assert!(is_picker_session_shortcut("control+enter"));
-        assert!(is_picker_session_shortcut("space"));
+        assert!(is_picker_session_shortcut("control+space"));
+        assert!(!is_picker_session_shortcut("space"));
     }
 
     #[test]
