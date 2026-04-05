@@ -4,24 +4,24 @@
 
 /* ── Primer Light Theme ── */
 :root {
-  /* Neutral — warm gray (paper-like warmth) */
-  --pg-neutral-0: #FFFEFA;
-  --pg-neutral-1: #FAF8F4;
-  --pg-neutral-2: #F3F0EB;
-  --pg-neutral-3: #EBE7E1;
-  --pg-neutral-4: #E4DFD8;
-  --pg-neutral-5: #DFD9D1;
-  --pg-neutral-6: #D5CFC6;
-  --pg-neutral-7: #CCC5BB;
-  --pg-neutral-8: #868078;
-  --pg-neutral-9: #5D574F;
-  --pg-neutral-10: #49433B;
-  --pg-neutral-11: #3D3730;
-  --pg-neutral-12: #2A241D;
-  --pg-neutral-13: #241E17;
+  /* Neutral — near-Primer gray for cross-display consistency */
+  --pg-neutral-0: #ffffff;
+  --pg-neutral-1: #f6f8fa;
+  --pg-neutral-2: #eff2f5;
+  --pg-neutral-3: #e6eaef;
+  --pg-neutral-4: #e0e6eb;
+  --pg-neutral-5: #dae0e7;
+  --pg-neutral-6: #d1d9e0;
+  --pg-neutral-7: #c8d1da;
+  --pg-neutral-8: #818b98;
+  --pg-neutral-9: #59636e;
+  --pg-neutral-10: #454c54;
+  --pg-neutral-11: #393f46;
+  --pg-neutral-12: #25292e;
+  --pg-neutral-13: #1f2328;
 
   /* Shadow color (rgb channels for rgba usage) */
-  --pg-shadow-color: 36, 30, 23;
+  --pg-shadow-color: 31, 35, 40;
 
   /* Blue (accent) */
   --pg-blue-0: #ddf4ff;
@@ -30,6 +30,7 @@
   --pg-blue-3: #54aeff;
   --pg-blue-4: #218bff;
   --pg-blue-5: #0969da;
+  --pg-blue-5-rgb: 9, 105, 218;
   --pg-blue-6: #0550ae;
   --pg-blue-7: #033d8b;
   --pg-blue-8: #0a3069;
@@ -70,8 +71,8 @@
   --pg-purple-5: #8250df;
   --pg-purple-7: #512a97;
 
-  /* Light-theme accent-subtle: warm tone to harmonize with warm neutrals */
-  --pg-accent-subtle: #f5eddc;
+  /* Light-theme accent-subtle: low-intensity blue to keep feedback clear without warming the page */
+  --pg-accent-subtle: rgba(var(--pg-blue-5-rgb), 0.12);
 
   color: var(--pg-fg-default);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;

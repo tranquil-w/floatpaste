@@ -62,7 +62,7 @@ const themeModeOptions: Array<{
   {
     value: "light",
     label: "浅色",
-    description: "暖调纸质底色，适合日常办公。",
+    description: "中性浅色基底，跨设备观感更稳定。",
   },
   {
     value: "dark",

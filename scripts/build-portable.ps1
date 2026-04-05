@@ -10,7 +10,6 @@ Set-StrictMode -Version Latest
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 Set-Location $repoRoot
-$rtkCommand = Get-Command "rtk.exe" -ErrorAction SilentlyContinue
 
 function Write-Step {
   param([string]$Message)
@@ -25,15 +24,7 @@ function Invoke-ExternalCommand {
     [string[]]$Arguments = @()
   )
 
-  $global:LASTEXITCODE = 0
-
-  if ($rtkCommand) {
-    & $rtkCommand.Source $FilePath @Arguments
-  }
-  else {
-    & $FilePath @Arguments
-  }
-
+  & $FilePath @Arguments | Out-Host
   return $global:LASTEXITCODE
 }
 
