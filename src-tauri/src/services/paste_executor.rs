@@ -1,7 +1,7 @@
 use std::{borrow::Cow, fs, thread, time::Duration};
 
 use arboard::{Clipboard, Error as ClipboardError, ImageData};
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tracing::warn;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, VK_CONTROL, VK_V,
@@ -17,11 +17,14 @@ use crate::{
         active_app::ActiveAppResolver,
         file_clipboard::read_file_paths_from_clipboard,
         file_clipboard::write_file_paths_to_clipboard as write_file_paths_to_clipboard_impl,
-        image_clipboard::{read_image_from_clipboard, ClipboardImageData},
+        image_clipboard::{read_image_from_clipboard, write_image_to_clipboard, ClipboardImageData},
     },
     services::{
         normalize_service::NormalizeService, shortcut_manager::ShortcutManager,
-        window_coordinator::WindowCoordinator,
+        window_coordinator::{
+            WindowCoordinator, EDITOR_WINDOW_LABEL, PICKER_WINDOW_LABEL, SEARCH_WINDOW_LABEL,
+            SETTINGS_WINDOW_LABEL,
+        },
     },
 };
 
@@ -43,7 +46,7 @@ impl PasteExecutor {
         let mut clipboard =
             Clipboard::new().map_err(|error| AppError::Clipboard(error.to_string()))?;
 
-        write_item_to_clipboard(state, &mut clipboard, &detail)?;
+        write_item_to_clipboard(app, state, &mut clipboard, &detail)?;
 
         let clip_type_label = clip_type_label(&detail.r#type);
 
@@ -116,7 +119,7 @@ impl PasteExecutor {
         };
 
         if let Some(snapshot) = previous_clipboard {
-            schedule_clipboard_restore(state.clone(), snapshot)?;
+            schedule_clipboard_restore(app.clone(), state.clone(), snapshot)?;
         }
 
         state.repository.mark_used(id)?;
@@ -154,6 +157,7 @@ fn capture_clipboard_snapshot() -> Result<ClipboardSnapshot, AppError> {
 }
 
 fn schedule_clipboard_restore(
+    app: AppHandle,
     state: AppState,
     snapshot: ClipboardSnapshot,
 ) -> Result<(), AppError> {
@@ -161,7 +165,7 @@ fn schedule_clipboard_restore(
 
     thread::spawn(move || {
         thread::sleep(Duration::from_millis(550));
-        if let Err(error) = restore_clipboard_snapshot(snapshot) {
+        if let Err(error) = restore_clipboard_snapshot(&app, snapshot) {
             warn!("恢复剪贴板失败: {error}");
         }
     });
@@ -187,7 +191,7 @@ fn suppress_clipboard_snapshot(
             let prepared =
                 state
                     .image_storage
-                    .prepare_image(&image.rgba, image.width, image.height)?;
+                    .prepare_image(&image.rgba, image.width, image.height, image.png_bytes.as_deref())?;
             if let Some(normalized) = NormalizeService::normalize_image(
                 None,
                 Some(prepared.width),
@@ -220,7 +224,7 @@ fn suppress_clipboard_snapshot(
     }
 }
 
-fn restore_clipboard_snapshot(snapshot: ClipboardSnapshot) -> Result<(), AppError> {
+fn restore_clipboard_snapshot(app: &AppHandle, snapshot: ClipboardSnapshot) -> Result<(), AppError> {
     match snapshot {
         ClipboardSnapshot::Empty => {
             let mut clipboard =
@@ -237,15 +241,20 @@ fn restore_clipboard_snapshot(snapshot: ClipboardSnapshot) -> Result<(), AppErro
                 .map_err(|error| AppError::Clipboard(error.to_string()))
         }
         ClipboardSnapshot::Image(image) => {
-            let mut clipboard =
-                Clipboard::new().map_err(|error| AppError::Clipboard(error.to_string()))?;
-            clipboard
-                .set_image(ImageData {
-                    width: image.width,
-                    height: image.height,
-                    bytes: Cow::Owned(image.rgba),
-                })
-                .map_err(|error| AppError::Clipboard(error.to_string()))
+            if let Some(owner_window) = resolve_clipboard_owner_window(app) {
+                write_image_to_clipboard(owner_window, &image)?;
+            } else {
+                let mut clipboard =
+                    Clipboard::new().map_err(|error| AppError::Clipboard(error.to_string()))?;
+                clipboard
+                    .set_image(ImageData {
+                        width: image.width,
+                        height: image.height,
+                        bytes: Cow::Owned(image.rgba),
+                    })
+                    .map_err(|error| AppError::Clipboard(error.to_string()))?;
+            }
+            Ok(())
         }
         ClipboardSnapshot::Files(file_paths) => write_file_paths_to_clipboard(&file_paths),
     }
@@ -305,6 +314,7 @@ fn should_retry_clipboard_read(error: &ClipboardError) -> bool {
 }
 
 fn write_item_to_clipboard(
+    app: &AppHandle,
     state: &AppState,
     clipboard: &mut Clipboard,
     detail: &ClipItemDetail,
@@ -327,19 +337,39 @@ fn write_item_to_clipboard(
                     "图片记录缺少可恢复的文件引用".to_string(),
                 ));
             };
-            let decoded = state.image_storage.load_image(image_path)?;
+
+            let image = state.image_storage.load_image(image_path)?;
+            if let Some(owner_window) = resolve_clipboard_owner_window(app) {
+                let crate::services::image_storage::DecodedImage {
+                    rgba,
+                    width,
+                    height,
+                    png_bytes,
+                } = image;
+                write_image_to_clipboard(
+                    owner_window,
+                    &ClipboardImageData {
+                        rgba,
+                        width,
+                        height,
+                        png_bytes: Some(png_bytes),
+                    },
+                )?;
+            } else {
+                clipboard
+                    .set_image(ImageData {
+                        width: image.width,
+                        height: image.height,
+                        bytes: Cow::Owned(image.rgba),
+                    })
+                    .map_err(|error| AppError::Clipboard(error.to_string()))?;
+            }
 
             state
                 .self_write_guard()
                 .suppress_hash(detail.hash.clone(), Duration::from_secs(3))?;
 
-            clipboard
-                .set_image(ImageData {
-                    width: decoded.width,
-                    height: decoded.height,
-                    bytes: Cow::Owned(decoded.rgba),
-                })
-                .map_err(|error| AppError::Clipboard(error.to_string()))
+            Ok(())
         }
         "file" => {
             if detail.file_paths.is_empty() {
@@ -365,6 +395,25 @@ fn write_item_to_clipboard(
 
 fn write_file_paths_to_clipboard(file_paths: &[String]) -> Result<(), AppError> {
     write_file_paths_to_clipboard_impl(file_paths)
+}
+
+fn resolve_clipboard_owner_window(app: &AppHandle) -> Option<isize> {
+    for label in [
+        PICKER_WINDOW_LABEL,
+        SEARCH_WINDOW_LABEL,
+        SETTINGS_WINDOW_LABEL,
+        EDITOR_WINDOW_LABEL,
+    ] {
+        let Some(window) = app.get_webview_window(label) else {
+            continue;
+        };
+        let Ok(hwnd) = window.hwnd() else {
+            continue;
+        };
+        return Some(hwnd.0 as isize);
+    }
+
+    None
 }
 
 fn clip_type_label(value: &str) -> &'static str {

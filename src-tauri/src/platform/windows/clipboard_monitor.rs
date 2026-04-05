@@ -85,7 +85,7 @@ fn process_clipboard_change(
     if let Some(image) = read_image_from_clipboard()? {
         let prepared = state
             .image_storage
-            .prepare_image(&image.rgba, image.width, image.height)?;
+            .prepare_image(&image.rgba, image.width, image.height, image.png_bytes.as_deref())?;
         if let Some(detail) = HistoryService::ingest_image(state, prepared, source_app.clone())? {
             if let Err(error) = app.emit(CLIPS_CHANGED_EVENT, &detail.id) {
                 debug!("广播图片剪贴记录变更失败: {error}");

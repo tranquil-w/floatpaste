@@ -34,6 +34,7 @@ pub struct DecodedImage {
     pub rgba: Vec<u8>,
     pub width: usize,
     pub height: usize,
+    pub png_bytes: Vec<u8>,
 }
 
 #[derive(Debug, Clone)]
@@ -52,8 +53,12 @@ impl ImageStorage {
         rgba: &[u8],
         width: usize,
         height: usize,
+        pre_encoded_png: Option<&[u8]>,
     ) -> Result<PreparedImage, AppError> {
-        let png_bytes = encode_png(rgba, width, height)?;
+        let png_bytes = match pre_encoded_png {
+            Some(bytes) => bytes.to_vec(),
+            None => encode_png(rgba, width, height)?,
+        };
         let file_size = i64::try_from(png_bytes.len())
             .map_err(|_| AppError::Message("图片数据过大，无法保存".to_string()))?;
         let width = i32::try_from(width)
@@ -88,7 +93,7 @@ impl ImageStorage {
     }
 
     pub fn load_image(&self, image_path: &str) -> Result<DecodedImage, AppError> {
-        let png_bytes = fs::read(self.resolve_image_path(image_path)?)?;
+        let png_bytes = fs::read(self.resolve_existing_image_path(image_path)?)?;
         decode_png_bytes(&png_bytes)
     }
 
@@ -146,6 +151,7 @@ fn decode_png_bytes(png_bytes: &[u8]) -> Result<DecodedImage, AppError> {
             .map_err(|_| AppError::Message("图片宽度超出支持范围".to_string()))?,
         height: usize::try_from(info.height)
             .map_err(|_| AppError::Message("图片高度超出支持范围".to_string()))?,
+        png_bytes: png_bytes.to_vec(),
     })
 }
 
@@ -203,7 +209,7 @@ mod tests {
             rgba.extend_from_slice(&[255, 0, 0, 255]);
         }
 
-        let prepared = storage.prepare_image(&rgba, 16, 16).unwrap();
+        let prepared = storage.prepare_image(&rgba, 16, 16, None).unwrap();
         assert_eq!(prepared.image_format, "png");
         assert!(prepared.file_size > 0);
         assert_eq!(prepared.width, 16);
@@ -215,6 +221,7 @@ mod tests {
         assert_eq!(decoded.width, 16);
         assert_eq!(decoded.height, 16);
         assert_eq!(decoded.rgba, rgba);
+        assert_eq!(decoded.png_bytes, prepared.png_bytes);
 
         storage.delete_image(&stored.image_path).unwrap();
         assert!(!base_dir.join(&stored.image_path).exists());
