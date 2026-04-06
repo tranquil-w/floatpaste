@@ -34,3 +34,4 @@ tmp/
 # AI/工具临时产物
 .playwright-mcp/
 docs/superpowers/*-comparison.html
+.brv/
