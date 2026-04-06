@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useCallback, type ReactNode } from "react";
 import type { SettingsSectionId } from "./settingsSections";
 
 type SettingsSectionProps = {
@@ -16,11 +16,18 @@ export function SettingsSection({
   registerSection,
   title,
 }: SettingsSectionProps) {
+  const handleRef = useCallback(
+    (node: HTMLElement | null) => {
+      registerSection(id, node);
+    },
+    [id, registerSection],
+  );
+
   return (
     <section
       className="scroll-mt-24 space-y-4"
       id={id}
-      ref={(node) => registerSection(id, node)}
+      ref={handleRef}
     >
       <header className="space-y-1">
         <h2 className="text-lg font-semibold text-pg-fg-default">{title}</h2>

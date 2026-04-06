@@ -1,4 +1,5 @@
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
+import { isTauriRuntime } from "../../bridge/runtime";
 import { SETTINGS_SECTIONS, type SettingsSectionId } from "./settingsSections";
 
 const SIDEBAR_BREAKPOINT = 880;
@@ -16,6 +17,10 @@ type UseSettingsNavigationResult = {
 };
 
 function getLayoutMode(width: number): LayoutMode {
+  if (isTauriRuntime()) {
+    return "sidebar";
+  }
+
   return width >= SIDEBAR_BREAKPOINT ? "sidebar" : "compact";
 }
 
@@ -126,11 +131,16 @@ export function useSettingsNavigation(): UseSettingsNavigationResult {
     };
   }, [containerElement, syncActiveSection, syncLayoutMode]);
 
-  const registerContainer = (element: HTMLElement | null) => {
-    setContainerElement(element);
-  };
+  const registerContainer = useCallback((element: HTMLElement | null) => {
+    setContainerElement((current) => (current === element ? current : element));
+  }, []);
 
-  const registerSection = (id: SettingsSectionId, element: HTMLElement | null) => {
+  const registerSection = useCallback((id: SettingsSectionId, element: HTMLElement | null) => {
+    const current = sectionElementsRef.current.get(id) ?? null;
+    if (current === element) {
+      return;
+    }
+
     if (element) {
       sectionElementsRef.current.set(id, element);
     } else {
@@ -140,7 +150,7 @@ export function useSettingsNavigation(): UseSettingsNavigationResult {
     if (!programmaticScrollTargetRef.current) {
       setActiveSectionId(getActiveSectionId(sectionElementsRef.current));
     }
-  };
+  }, []);
 
   const scrollToSection = (id: SettingsSectionId) => {
     const element = sectionElementsRef.current.get(id);
