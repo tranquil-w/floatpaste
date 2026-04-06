@@ -34,6 +34,9 @@ pub struct WindowCoordinator;
 
 pub const SETTINGS_WINDOW_LABEL: &str = "manager";
 pub const SETTINGS_WINDOW_TITLE: &str = "FloatPaste · 设置";
+pub const SETTINGS_WINDOW_DEFAULT_WIDTH: u32 = 920;
+pub const SETTINGS_WINDOW_DEFAULT_HEIGHT: u32 = 760;
+pub const SETTINGS_WINDOW_MIN_WIDTH: u32 = 880;
 pub const PICKER_WINDOW_LABEL: &str = "picker";
 pub const PICKER_WINDOW_TITLE: &str = "FloatPaste · 速贴";
 pub const SEARCH_WINDOW_LABEL: &str = "workbench";
@@ -462,7 +465,11 @@ fn ensure_settings_window(app: &AppHandle) -> Result<WebviewWindow, AppError> {
 
     let window = WebviewWindowBuilder::new(app, SETTINGS_WINDOW_LABEL, WebviewUrl::default())
         .title(SETTINGS_WINDOW_TITLE)
-        .inner_size(1200.0, 760.0)
+        .inner_size(
+            SETTINGS_WINDOW_DEFAULT_WIDTH as f64,
+            SETTINGS_WINDOW_DEFAULT_HEIGHT as f64,
+        )
+        .min_inner_size(SETTINGS_WINDOW_MIN_WIDTH as f64, 1.0)
         .resizable(true)
         .center()
         .visible(false)
@@ -936,7 +943,10 @@ fn configure_picker_window(window: &WebviewWindow) {
 
 #[cfg(test)]
 mod tests {
-    use super::{should_restore_picker_after_search_close, should_retry_window_focus};
+    use super::{
+        should_restore_picker_after_search_close, should_retry_window_focus,
+        SETTINGS_WINDOW_DEFAULT_HEIGHT, SETTINGS_WINDOW_DEFAULT_WIDTH, SETTINGS_WINDOW_MIN_WIDTH,
+    };
     use crate::domain::search_session::{SearchSession, SearchSource};
     use serde_json::Value;
 
@@ -960,6 +970,27 @@ mod tests {
             .unwrap();
 
         assert_eq!(search["decorations"], Value::Bool(false));
+    }
+
+    #[test]
+    fn tauri_config_should_pin_settings_window_for_two_column_layout() {
+        let config: Value = serde_json::from_str(include_str!("../../tauri.conf.json")).unwrap();
+        let windows = config["app"]["windows"].as_array().unwrap();
+        let settings = windows
+            .iter()
+            .find(|window| window["label"] == "manager")
+            .unwrap();
+
+        assert_eq!(settings["width"], Value::from(920));
+        assert_eq!(settings["height"], Value::from(760));
+        assert_eq!(settings["minWidth"], Value::from(880));
+    }
+
+    #[test]
+    fn settings_window_constants_should_match_two_column_contract() {
+        assert_eq!(SETTINGS_WINDOW_DEFAULT_WIDTH, 920);
+        assert_eq!(SETTINGS_WINDOW_DEFAULT_HEIGHT, 760);
+        assert_eq!(SETTINGS_WINDOW_MIN_WIDTH, 880);
     }
 
     #[test]

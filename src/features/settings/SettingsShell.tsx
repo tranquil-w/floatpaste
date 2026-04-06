@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
   SETTINGS_CHANGED_EVENT,
@@ -8,8 +8,12 @@ import { isTauriRuntime } from "../../bridge/runtime";
 import { hideCurrentWindow } from "../../bridge/window";
 import { queryClient } from "../../app/queryClient";
 import type { PickerPositionMode, ThemeMode, UserSetting } from "../../shared/types/settings";
-import { getErrorMessage } from "../../shared/utils/error";
 import { LoadingSpinner } from "../../shared/ui/LoadingSpinner";
+import { getErrorMessage } from "../../shared/utils/error";
+import { SettingsNav } from "./SettingsNav";
+import { SettingsSection } from "./SettingsSection";
+import { SETTINGS_SECTIONS, type SettingsSectionId } from "./settingsSections";
+import { useSettingsNavigation } from "./useSettingsNavigation";
 import { useSettingsQuery, useUpdateSettingsMutation } from "./queries";
 
 type EditableSettings = {
@@ -71,14 +75,21 @@ const themeModeOptions: Array<{
   },
 ];
 
+const sectionDescriptions: Record<SettingsSectionId, string> = {
+  shortcuts: "配置全局唤起与搜索入口，保持高频操作一眼可见。",
+  general: "调整历史容量与速贴列表承载范围，平衡性能和浏览密度。",
+  appearance: "管理界面主题与速贴窗口出现方式，保证日常使用手感一致。",
+  behavior: "控制开机启动、监听状态与贴回行为，明确主次关系。",
+  excludedApps: "按进程名忽略特定应用，避免敏感内容进入历史记录。",
+};
+
 const FORM_INPUT =
-  "w-full rounded-md border border-pg-border-default bg-pg-canvas-inset px-4 py-2.5 text-sm outline-none transition-colors placeholder:text-pg-fg-subtle focus:border-pg-accent-fg focus:ring-1 focus:ring-pg-accent-fg focus-visible:outline-none";
+  "w-full rounded-xl border border-pg-border-default bg-pg-canvas-default px-4 py-2.5 text-sm outline-none transition-colors placeholder:text-pg-fg-subtle focus:border-pg-accent-fg focus:ring-1 focus:ring-pg-accent-fg focus-visible:outline-none disabled:cursor-not-allowed disabled:border-pg-border-subtle disabled:bg-pg-canvas-subtle disabled:text-pg-fg-subtle";
 
 const FORM_LABEL = "mb-1.5 block text-sm font-medium text-pg-fg-default";
-
 const FORM_HINT = "mt-1.5 text-xs leading-relaxed text-pg-fg-subtle";
-
-const SECTION_HEADING = "text-base font-semibold text-pg-fg-default border-b border-pg-border-subtle pb-2";
+const CARD_CLASS =
+  "rounded-2xl border border-pg-border-muted bg-pg-canvas-subtle px-5 py-5 shadow-sm";
 
 function toEditableSettings(settings: UserSetting): EditableSettings {
   return {
@@ -121,9 +132,147 @@ function isSameSettings(left: UserSetting, right: UserSetting) {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
+function SettingCard({
+  action,
+  children,
+  description,
+  title,
+}: {
+  action?: ReactNode;
+  children: ReactNode;
+  description?: string;
+  title: string;
+}) {
+  return (
+    <div className={CARD_CLASS}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold text-pg-fg-default">{title}</h3>
+          {description ? (
+            <p className="mt-1 text-sm leading-relaxed text-pg-fg-muted">{description}</p>
+          ) : null}
+        </div>
+        {action ? <div className="shrink-0">{action}</div> : null}
+      </div>
+      <div className="mt-4 space-y-4">{children}</div>
+    </div>
+  );
+}
+
+function ToggleRow({
+  checked,
+  description,
+  disabled = false,
+  id,
+  nested = false,
+  onChange,
+  title,
+}: {
+  checked: boolean;
+  description?: string;
+  disabled?: boolean;
+  id: string;
+  nested?: boolean;
+  onChange: (checked: boolean) => void;
+  title: string;
+}) {
+  return (
+    <label
+      className={`flex items-start gap-3 rounded-xl border px-4 py-3 transition-colors ${
+        disabled
+          ? "cursor-not-allowed border-pg-border-subtle bg-pg-canvas-default/70"
+          : "cursor-pointer border-pg-border-default bg-pg-canvas-default hover:border-pg-border-default"
+      } ${nested ? "ml-4" : ""}`}
+      htmlFor={id}
+    >
+      <input
+        checked={checked}
+        className="mt-0.5 h-4 w-4 rounded border-pg-border-default accent-pg-accent-fg"
+        disabled={disabled}
+        id={id}
+        onChange={(event) => onChange(event.target.checked)}
+        type="checkbox"
+      />
+      <span className="min-w-0">
+        <span className={`block text-sm font-medium ${disabled ? "text-pg-fg-subtle" : "text-pg-fg-default"}`}>
+          {title}
+        </span>
+        {description ? (
+          <span className="mt-1 block text-xs leading-relaxed text-pg-fg-subtle">
+            {description}
+          </span>
+        ) : null}
+      </span>
+    </label>
+  );
+}
+
+function OptionCard({
+  checked,
+  description,
+  label,
+  name,
+  onSelect,
+}: {
+  checked: boolean;
+  description: string;
+  label: string;
+  name: string;
+  onSelect: () => void;
+}) {
+  return (
+    <label
+      className={`flex cursor-pointer items-start gap-3 rounded-xl border px-4 py-3 transition-colors ${
+        checked
+          ? "border-pg-accent-fg bg-pg-accent-subtle"
+          : "border-pg-border-default bg-pg-canvas-default hover:border-pg-border-default"
+      }`}
+    >
+      <input
+        checked={checked}
+        className="mt-0.5 h-4 w-4 accent-pg-accent-fg"
+        name={name}
+        onChange={onSelect}
+        type="radio"
+      />
+      <span className="min-w-0">
+        <span className={`block text-sm font-medium ${checked ? "text-pg-fg-default" : "text-pg-fg-muted"}`}>
+          {label}
+        </span>
+        <span className="mt-1 block text-xs leading-relaxed text-pg-fg-subtle">
+          {description}
+        </span>
+      </span>
+    </label>
+  );
+}
+
+function SaveStatusText({ saveStatus }: { saveStatus: "idle" | "saving" | "saved" | "error" }) {
+  if (saveStatus === "saving") {
+    return <span className="text-xs text-pg-fg-subtle">正在保存</span>;
+  }
+
+  if (saveStatus === "saved") {
+    return <span className="text-xs text-pg-fg-subtle">已保存</span>;
+  }
+
+  if (saveStatus === "error") {
+    return <span className="text-xs text-pg-danger-fg">保存失败</span>;
+  }
+
+  return null;
+}
+
 export function SettingsShell() {
   const settings = useSettingsQuery();
   const updateSettingsMutation = useUpdateSettingsMutation();
+  const {
+    layoutMode,
+    activeSectionId,
+    registerContainer,
+    registerSection,
+    scrollToSection,
+  } = useSettingsNavigation();
 
   const { data } = settings;
 
@@ -170,7 +319,6 @@ export function SettingsShell() {
     setSearchShortcut(nextEditable.searchShortcut);
     setSearchShortcutEnabled(nextEditable.searchShortcutEnabled);
 
-    // 延迟标记初始化完成，避免同步服务端值时再次触发自动保存
     hydrationTimerRef.current = window.setTimeout(() => {
       isInitializingRef.current = false;
       hydrationTimerRef.current = null;
@@ -229,7 +377,6 @@ export function SettingsShell() {
     };
   }, []);
 
-  // 自动保存 debounce（800ms）
   useEffect(() => {
     if (!data) return;
     if (isInitializingRef.current) return;
@@ -317,39 +464,32 @@ export function SettingsShell() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
+  const loadError = settings.isError && !data
+    ? getErrorMessage(settings.error, "设置加载失败，请稍后重试。")
+    : null;
   const saveError = updateSettingsMutation.error
     ? getErrorMessage(updateSettingsMutation.error, "保存设置失败，请稍后重试。")
     : null;
 
-  if (settings.isLoading && !data) {
-    return (
-      <div className="flex h-screen items-center justify-center">
-        <LoadingSpinner size="sm" text="正在加载设置..." />
-      </div>
-    );
-  }
-
   return (
-    <main className="flex min-h-screen flex-col">
-      <div className="h-[3px] w-full bg-gradient-to-r from-pg-blue-5 to-pg-blue-4 shrink-0" />
-      <div className="mx-auto w-full max-w-[680px] px-6 py-8">
-        {/* Header */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between">
-            <h1 className="text-xl font-semibold text-pg-fg-default">
+    <main className="flex min-h-screen flex-col bg-pg-canvas-default">
+      <div className="h-[3px] w-full shrink-0 bg-gradient-to-r from-pg-blue-5 to-pg-blue-4" />
+      <div className="mx-auto w-full max-w-[1080px] px-6 py-8" ref={registerContainer}>
+        <header className="mb-8 flex flex-col gap-4 border-b border-pg-border-muted pb-6 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-pg-fg-subtle">
               FloatPaste
-            </h1>
-            {saveStatus === "saved" && (
-              <span className="text-xs text-pg-fg-subtle">已保存</span>
-            )}
+            </p>
+            <h1 className="mt-2 text-2xl font-semibold text-pg-fg-default">设置</h1>
+            <p className="mt-2 text-sm text-pg-fg-muted">偏好设置会自动保存。</p>
           </div>
-          <p className="mt-1 text-sm text-pg-fg-muted">
-            偏好设置会自动保存。
-          </p>
-        </div>
+          <div className="flex items-center">
+            <SaveStatusText saveStatus={saveStatus} />
+          </div>
+        </header>
 
         {saveError ? (
-          <div className="mb-6 flex items-start justify-between gap-3 rounded-md border border-pg-danger-fg bg-pg-danger-subtle px-4 py-3 text-sm text-pg-danger-fg">
+          <div className="mb-6 flex items-start justify-between gap-3 rounded-xl border border-pg-danger-fg/40 bg-pg-danger-subtle px-4 py-3 text-sm text-pg-danger-fg">
             <p>{saveError}</p>
             <button
               className="shrink-0 text-xs font-semibold uppercase tracking-wider transition-opacity hover:opacity-80"
@@ -361,228 +501,260 @@ export function SettingsShell() {
           </div>
         ) : null}
 
-        {/* ── 快捷键 ── */}
-        <section className="mb-10">
-          <h2 className={SECTION_HEADING}>快捷键</h2>
-          <div className="mt-5 space-y-4">
-            <label className="block">
-              <span className={FORM_LABEL}>全局快捷键</span>
-              <input
-                className={FORM_INPUT}
-                onChange={(e) => setShortcut(e.target.value)}
-                value={shortcut}
+        {settings.isLoading && !data ? (
+          <div className="flex min-h-[320px] items-center justify-center rounded-2xl border border-pg-border-muted bg-pg-canvas-subtle">
+            <LoadingSpinner size="sm" text="正在加载设置..." />
+          </div>
+        ) : loadError ? (
+          <div className="rounded-2xl border border-pg-danger-fg/40 bg-pg-danger-subtle px-5 py-5">
+            <h2 className="text-sm font-semibold text-pg-danger-fg">设置加载失败</h2>
+            <p className="mt-2 text-sm leading-relaxed text-pg-fg-muted">{loadError}</p>
+            <button
+              className="mt-4 rounded-lg border border-pg-danger-fg/40 px-3 py-2 text-sm font-medium text-pg-danger-fg transition-opacity hover:opacity-80"
+              onClick={() => {
+                void settings.refetch();
+              }}
+              type="button"
+            >
+              重新加载
+            </button>
+          </div>
+        ) : (
+          <div className={layoutMode === "sidebar" ? "grid grid-cols-[240px_minmax(0,1fr)] gap-8" : ""}>
+            {layoutMode === "sidebar" ? (
+              <SettingsNav
+                activeSectionId={activeSectionId}
+                layoutMode="sidebar"
+                onSelect={scrollToSection}
               />
-            </label>
+            ) : null}
 
-            <div className="block">
-              <div className="mb-1.5 flex items-center justify-between">
-                <span className={FORM_LABEL}>搜索窗口快捷键</span>
-                <label className="flex cursor-pointer items-center gap-2" htmlFor="search-shortcut-enabled">
-                  <input
-                    id="search-shortcut-enabled"
-                    checked={searchShortcutEnabled}
-                    className="h-4 w-4 rounded border-pg-border-default accent-pg-accent-fg"
-                    onChange={(e) => setSearchShortcutEnabled(e.target.checked)}
-                    type="checkbox"
-                  />
-                  <span className="text-xs text-pg-fg-subtle">启用</span>
-                </label>
+            <div className="min-w-0">
+              {layoutMode === "compact" ? (
+                <SettingsNav
+                  activeSectionId={activeSectionId}
+                  layoutMode="compact"
+                  onSelect={scrollToSection}
+                />
+              ) : null}
+
+              <div className="space-y-10">
+                <SettingsSection
+                  description={sectionDescriptions.shortcuts}
+                  id="shortcuts"
+                  registerSection={registerSection}
+                  title="快捷键"
+                >
+                  <SettingCard
+                    description="控制速贴面板的全局唤起方式。"
+                    title="速贴唤起"
+                  >
+                    <label className="block">
+                      <span className={FORM_LABEL}>全局快捷键</span>
+                      <input
+                        className={FORM_INPUT}
+                        onChange={(event) => setShortcut(event.target.value)}
+                        value={shortcut}
+                      />
+                      <p className={FORM_HINT}>在任意位置快速唤起 FloatPaste 速贴面板。</p>
+                    </label>
+                  </SettingCard>
+
+                  <SettingCard
+                    action={(
+                      <label className="flex cursor-pointer items-center gap-2" htmlFor="search-shortcut-enabled">
+                        <input
+                          checked={searchShortcutEnabled}
+                          className="h-4 w-4 rounded border-pg-border-default accent-pg-accent-fg"
+                          id="search-shortcut-enabled"
+                          onChange={(event) => setSearchShortcutEnabled(event.target.checked)}
+                          type="checkbox"
+                        />
+                        <span className="text-xs text-pg-fg-subtle">启用</span>
+                      </label>
+                    )}
+                    description="为搜索窗口单独保留一组更适合检索场景的快捷键。"
+                    title="搜索窗口"
+                  >
+                    <label className="block">
+                      <span className={FORM_LABEL}>搜索窗口快捷键</span>
+                      <input
+                        className={FORM_INPUT}
+                        disabled={!searchShortcutEnabled}
+                        onChange={(event) => setSearchShortcut(event.target.value)}
+                        placeholder="Alt+S"
+                        value={searchShortcut}
+                      />
+                      <p className={FORM_HINT}>关闭启用开关后会保留当前快捷键值，但暂时不响应。</p>
+                    </label>
+                  </SettingCard>
+                </SettingsSection>
+
+                <SettingsSection
+                  description={sectionDescriptions.general}
+                  id="general"
+                  registerSection={registerSection}
+                  title="通用"
+                >
+                  <SettingCard
+                    description="控制历史记录保留规模与速贴面板的一次性浏览密度。"
+                    title="历史与列表"
+                  >
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <label className="block">
+                        <span className={FORM_LABEL}>历史记录上限</span>
+                        <input
+                          className={FORM_INPUT}
+                          min={100}
+                          onChange={(event) => setHistoryLimit(Number(event.target.value) || 1000)}
+                          step={100}
+                          type="number"
+                          value={historyLimit}
+                        />
+                      </label>
+
+                      <label className="block">
+                        <span className={FORM_LABEL}>速贴窗口记录数</span>
+                        <input
+                          className={FORM_INPUT}
+                          max={1000}
+                          min={9}
+                          onChange={(event) => setPickerRecordLimit(Number(event.target.value) || 50)}
+                          type="number"
+                          value={pickerRecordLimit}
+                        />
+                        <p className={FORM_HINT}>
+                          控制速贴面板一次可滚动浏览的记录数，数字快捷键仍只覆盖前 9 条。
+                        </p>
+                      </label>
+                    </div>
+                  </SettingCard>
+                </SettingsSection>
+
+                <SettingsSection
+                  description={sectionDescriptions.appearance}
+                  id="appearance"
+                  registerSection={registerSection}
+                  title="外观"
+                >
+                  <SettingCard
+                    description="选择日常使用的界面主题。"
+                    title="界面主题"
+                  >
+                    <div className="space-y-2">
+                      {themeModeOptions.map((option) => (
+                        <OptionCard
+                          checked={themeMode === option.value}
+                          description={option.description}
+                          key={option.value}
+                          label={option.label}
+                          name="theme-mode"
+                          onSelect={() => setThemeMode(option.value)}
+                        />
+                      ))}
+                    </div>
+                  </SettingCard>
+
+                  <SettingCard
+                    description="决定速贴窗口在唤起时更贴近哪里的上下文。"
+                    title="速贴窗口显示位置"
+                  >
+                    <div className="space-y-2">
+                      {pickerPositionOptions.map((option) => (
+                        <OptionCard
+                          checked={pickerPositionMode === option.value}
+                          description={option.description}
+                          key={option.value}
+                          label={option.label}
+                          name="picker-position-mode"
+                          onSelect={() => setPickerPositionMode(option.value)}
+                        />
+                      ))}
+                    </div>
+                  </SettingCard>
+                </SettingsSection>
+
+                <SettingsSection
+                  description={sectionDescriptions.behavior}
+                  id="behavior"
+                  registerSection={registerSection}
+                  title="行为"
+                >
+                  <SettingCard
+                    description="先决定是否跟随系统开机，再配置静默启动这一从属选项。"
+                    title="开机启动"
+                  >
+                    <ToggleRow
+                      checked={launchOnStartup}
+                      description="登录系统后自动启动 FloatPaste。"
+                      id="launch-on-startup"
+                      onChange={(checked) => {
+                        setLaunchOnStartup(checked);
+                        if (!checked) {
+                          setSilentOnStartup(false);
+                        }
+                      }}
+                      title="开机自启"
+                    />
+                    <ToggleRow
+                      checked={silentOnStartup}
+                      description="仅在已启用开机自启时可用，启动后不主动打断当前工作流。"
+                      disabled={!launchOnStartup}
+                      id="silent-on-startup"
+                      nested
+                      onChange={setSilentOnStartup}
+                      title="开机时静默启动"
+                    />
+                  </SettingCard>
+
+                  <SettingCard
+                    description="控制贴回完成后的剪贴板处理与监听行为。"
+                    title="贴回与监听"
+                  >
+                    <ToggleRow
+                      checked={restoreClipboardAfterPaste}
+                      description="贴回完成后恢复原有剪贴板内容，减少对当前工作流的干扰。"
+                      id="restore-clipboard"
+                      onChange={setRestoreClipboardAfterPaste}
+                      title="回贴后恢复剪贴板"
+                    />
+                    <ToggleRow
+                      checked={pauseMonitoring}
+                      description="暂停后不会继续采集新的剪贴板记录。"
+                      id="pause-monitoring"
+                      onChange={setPauseMonitoring}
+                      title="暂停监听"
+                    />
+                  </SettingCard>
+                </SettingsSection>
+
+                <SettingsSection
+                  description={sectionDescriptions.excludedApps}
+                  id="excludedApps"
+                  registerSection={registerSection}
+                  title="排除应用"
+                >
+                  <SettingCard
+                    description="每行填写一个可执行文件名，命中的应用不会被采集进历史记录。"
+                    title="忽略指定进程"
+                  >
+                    <label className="block">
+                      <span className={FORM_LABEL}>进程列表</span>
+                      <textarea
+                        className={`${FORM_INPUT} min-h-[140px] leading-relaxed`}
+                        onChange={(event) => setExcludedAppsText(event.target.value)}
+                        placeholder={"每行一个可执行文件名，例如：\nKeePass.exe\nWindowsTerminal.exe"}
+                        value={excludedAppsText}
+                      />
+                      <p className={FORM_HINT}>建议使用完整进程名，避免误伤其他应用。</p>
+                    </label>
+                  </SettingCard>
+                </SettingsSection>
               </div>
-              <input
-                className={FORM_INPUT}
-                disabled={!searchShortcutEnabled}
-                onChange={(e) => setSearchShortcut(e.target.value)}
-                placeholder="Alt+S"
-                value={searchShortcut}
-              />
-              <p className={FORM_HINT}>全局快捷键，直接打开搜索窗口。</p>
             </div>
           </div>
-        </section>
-
-        {/* ── 通用 ── */}
-        <section className="mb-6">
-          <h2 className={SECTION_HEADING}>通用</h2>
-          <div className="mt-5 space-y-4">
-            <label className="block">
-              <span className={FORM_LABEL}>历史记录上限</span>
-              <input
-                className={FORM_INPUT}
-                min={100}
-                onChange={(e) => setHistoryLimit(Number(e.target.value) || 1000)}
-                step={100}
-                type="number"
-                value={historyLimit}
-              />
-            </label>
-
-            <label className="block">
-              <span className={FORM_LABEL}>速贴窗口记录数</span>
-              <input
-                className={FORM_INPUT}
-                max={1000}
-                min={9}
-                onChange={(e) => setPickerRecordLimit(Number(e.target.value) || 50)}
-                type="number"
-                value={pickerRecordLimit}
-              />
-              <p className={FORM_HINT}>
-                控制速贴面板一次可滚动浏览的记录数，数字快捷键仍只覆盖前 9 条。
-              </p>
-            </label>
-          </div>
-        </section>
-
-        {/* ── 外观 ── */}
-        <section className="mb-10">
-          <h2 className={SECTION_HEADING}>外观</h2>
-          <div className="mt-5 space-y-4">
-            <fieldset className="border-0 p-0 m-0">
-              <legend className={FORM_LABEL}>界面主题</legend>
-              <div className="space-y-2">
-                {themeModeOptions.map((option) => (
-                  <label
-                    className={`flex cursor-pointer items-start gap-3 rounded-md border px-4 py-3 transition-colors ${
-                      themeMode === option.value
-                        ? "border-pg-accent-fg bg-pg-accent-subtle"
-                        : "border-pg-border-muted hover:border-pg-border-default"
-                    }`}
-                    key={option.value}
-                  >
-                    <input
-                      checked={themeMode === option.value}
-                      className="mt-0.5 h-4 w-4 accent-pg-accent-fg"
-                      name="theme-mode"
-                      onChange={() => setThemeMode(option.value)}
-                      type="radio"
-                    />
-                    <span className="min-w-0">
-                      <span className={`block text-sm font-medium ${themeMode === option.value ? "text-pg-fg-default" : "text-pg-fg-muted"}`}>
-                        {option.label}
-                      </span>
-                      <span className="mt-0.5 block text-xs text-pg-fg-subtle">
-                        {option.description}
-                      </span>
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </fieldset>
-
-            <fieldset className="border-0 p-0 m-0">
-              <legend className={FORM_LABEL}>速贴窗口显示位置</legend>
-              <div className="space-y-2">
-                {pickerPositionOptions.map((option) => (
-                  <label
-                    className={`flex cursor-pointer items-start gap-3 rounded-md border px-4 py-3 transition-colors ${
-                      pickerPositionMode === option.value
-                        ? "border-pg-accent-fg bg-pg-accent-subtle"
-                        : "border-pg-border-muted hover:border-pg-border-default"
-                    }`}
-                    key={option.value}
-                  >
-                    <input
-                      checked={pickerPositionMode === option.value}
-                      className="mt-0.5 h-4 w-4 accent-pg-accent-fg"
-                      name="picker-position-mode"
-                      onChange={() => setPickerPositionMode(option.value)}
-                      type="radio"
-                    />
-                    <span className="min-w-0">
-                      <span className={`block text-sm font-medium ${pickerPositionMode === option.value ? "text-pg-fg-default" : "text-pg-fg-muted"}`}>
-                        {option.label}
-                      </span>
-                      <span className="mt-0.5 block text-xs text-pg-fg-subtle">
-                        {option.description}
-                      </span>
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </fieldset>
-          </div>
-        </section>
-
-        {/* ── 行为 ── */}
-        <section className="mb-6">
-          <h2 className={SECTION_HEADING}>行为</h2>
-          <div className="mt-5 space-y-2">
-            <label className="flex cursor-pointer items-center gap-3 rounded-md border border-pg-border-muted px-4 py-3 transition-colors hover:border-pg-border-default" htmlFor="launch-on-startup">
-              <input
-                className="h-4 w-4 accent-pg-accent-fg"
-                id="launch-on-startup"
-                checked={launchOnStartup}
-                onChange={(e) => {
-                  const checked = e.target.checked;
-                  setLaunchOnStartup(checked);
-                  if (!checked) setSilentOnStartup(false);
-                }}
-                type="checkbox"
-              />
-              <span className="text-sm font-medium text-pg-fg-default">开机自启</span>
-            </label>
-
-            <label
-              className={`flex items-center gap-3 rounded-md border px-4 py-3 transition-colors ${
-                launchOnStartup
-                  ? "cursor-pointer border-pg-border-muted hover:border-pg-border-default"
-                  : "cursor-not-allowed border-pg-border-subtle"
-              }`}
-              htmlFor="silent-on-startup"
-            >
-              <input
-                className="h-4 w-4 accent-pg-accent-fg"
-                id="silent-on-startup"
-                checked={silentOnStartup}
-                disabled={!launchOnStartup}
-                onChange={(e) => setSilentOnStartup(e.target.checked)}
-                type="checkbox"
-              />
-              <span className={`text-sm font-medium ${launchOnStartup ? "text-pg-fg-default" : "text-pg-fg-subtle"}`}>
-                开机时静默启动
-              </span>
-            </label>
-
-            <label className="flex cursor-pointer items-center gap-3 rounded-md border border-pg-border-muted px-4 py-3 transition-colors hover:border-pg-border-default" htmlFor="restore-clipboard">
-              <input
-                className="h-4 w-4 accent-pg-accent-fg"
-                id="restore-clipboard"
-                checked={restoreClipboardAfterPaste}
-                onChange={(e) => setRestoreClipboardAfterPaste(e.target.checked)}
-                type="checkbox"
-              />
-              <span className="text-sm font-medium text-pg-fg-default">回贴后恢复剪贴板</span>
-            </label>
-
-            <label className="flex cursor-pointer items-center gap-3 rounded-md border border-pg-border-muted px-4 py-3 transition-colors hover:border-pg-border-default" htmlFor="pause-monitoring">
-              <input
-                className="h-4 w-4 accent-pg-accent-fg"
-                id="pause-monitoring"
-                checked={pauseMonitoring}
-                onChange={(e) => setPauseMonitoring(e.target.checked)}
-                type="checkbox"
-              />
-              <span className="text-sm font-medium text-pg-fg-default">暂停监听</span>
-            </label>
-          </div>
-        </section>
-
-        {/* ── 排除应用 ── */}
-        <section className="mb-10">
-          <h2 className={SECTION_HEADING}>排除应用</h2>
-          <div className="mt-5">
-            <label className="block">
-              <textarea
-                className={`${FORM_INPUT} min-h-[100px] leading-relaxed`}
-                onChange={(e) => setExcludedAppsText(e.target.value)}
-                placeholder={"每行一个可执行文件名，例如：\nKeePass.exe\nWindowsTerminal.exe"}
-                value={excludedAppsText}
-              />
-            </label>
-          </div>
-        </section>
+        )}
       </div>
     </main>
   );
 }
-
