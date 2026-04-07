@@ -11,6 +11,7 @@ import { SETTINGS_CHANGED_EVENT } from "../bridge/events";
 import { isTauriRuntime } from "../bridge/runtime";
 import { getCurrentWindowLabel } from "../bridge/window";
 import { DEFAULT_THEME_MODE, useAppliedTheme } from "../shared/theme";
+import { DEFAULT_CUSTOM_THEME_COLORS } from "../shared/themeColors";
 
 export function App() {
   const [windowLabel, setWindowLabel] = useState(() => getCurrentWindowLabel());
@@ -21,7 +22,10 @@ export function App() {
     refetchOnWindowFocus: false,
   });
 
-  useAppliedTheme(settingsQuery.data?.themeMode ?? DEFAULT_THEME_MODE);
+  useAppliedTheme(
+    settingsQuery.data?.themeMode ?? DEFAULT_THEME_MODE,
+    settingsQuery.data?.customThemeColors ?? DEFAULT_CUSTOM_THEME_COLORS,
+  );
 
   useEffect(() => {
     if (!isTauriRuntime()) {

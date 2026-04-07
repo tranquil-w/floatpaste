@@ -7,7 +7,18 @@ import {
 import { isTauriRuntime } from "../../bridge/runtime";
 import { hideCurrentWindow } from "../../bridge/window";
 import { queryClient } from "../../app/queryClient";
-import type { PickerPositionMode, ThemeMode, UserSetting } from "../../shared/types/settings";
+import type {
+  CustomThemeColors,
+  PickerPositionMode,
+  ThemeColorPalette,
+  ThemeMode,
+  UserSetting,
+} from "../../shared/types/settings";
+import {
+  DEFAULT_CUSTOM_THEME_COLORS,
+  getCustomThemeColorErrors,
+  sanitizeCustomThemeColors,
+} from "../../shared/themeColors";
 import { LoadingSpinner } from "../../shared/ui/LoadingSpinner";
 import { getErrorMessage } from "../../shared/utils/error";
 import { SettingsNav } from "./SettingsNav";
@@ -29,6 +40,7 @@ type EditableSettings = {
   excludedAppsText: string;
   searchShortcut: string;
   searchShortcutEnabled: boolean;
+  customThemeColors: CustomThemeColors;
 };
 
 const pickerPositionOptions: Array<{
@@ -105,6 +117,7 @@ function toEditableSettings(settings: UserSetting): EditableSettings {
     excludedAppsText: settings.excludedApps.join("\n"),
     searchShortcut: settings.searchShortcut,
     searchShortcutEnabled: settings.searchShortcutEnabled,
+    customThemeColors: settings.customThemeColors,
   };
 }
 
@@ -125,6 +138,7 @@ function toSettingsPayload(editable: EditableSettings): UserSetting {
       .filter(Boolean),
     searchShortcut: editable.searchShortcut,
     searchShortcutEnabled: editable.searchShortcutEnabled,
+    customThemeColors: sanitizeCustomThemeColors(editable.customThemeColors),
   };
 }
 
@@ -263,6 +277,42 @@ function SaveStatusText({ saveStatus }: { saveStatus: "idle" | "saving" | "saved
   return null;
 }
 
+function ThemeColorInput({
+  error,
+  hint,
+  label,
+  onChange,
+  value,
+}: {
+  error?: string;
+  hint: string;
+  label: string;
+  onChange: (value: string) => void;
+  value: string;
+}) {
+  return (
+    <label className="block">
+      <span className={FORM_LABEL}>{label}</span>
+      <div className="flex items-center gap-3">
+        <span
+          aria-hidden="true"
+          className="h-9 w-9 shrink-0 rounded-lg border border-pg-border-default bg-pg-canvas-default"
+          style={{ backgroundColor: value }}
+        />
+        <input
+          className={FORM_INPUT}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder="#RRGGBB"
+          value={value}
+        />
+      </div>
+      <p className={error ? "mt-1.5 text-xs leading-relaxed text-pg-danger-fg" : FORM_HINT}>
+        {error ?? hint}
+      </p>
+    </label>
+  );
+}
+
 export function SettingsShell() {
   const settings = useSettingsQuery();
   const updateSettingsMutation = useUpdateSettingsMutation();
@@ -288,6 +338,7 @@ export function SettingsShell() {
   const [excludedAppsText, setExcludedAppsText] = useState("");
   const [searchShortcut, setSearchShortcut] = useState("Alt+S");
   const [searchShortcutEnabled, setSearchShortcutEnabled] = useState(true);
+  const [customThemeColors, setCustomThemeColors] = useState<CustomThemeColors>(DEFAULT_CUSTOM_THEME_COLORS);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const isInitializingRef = useRef(true);
   const hasHydratedFromServerRef = useRef(false);
@@ -318,6 +369,7 @@ export function SettingsShell() {
     setExcludedAppsText(nextEditable.excludedAppsText);
     setSearchShortcut(nextEditable.searchShortcut);
     setSearchShortcutEnabled(nextEditable.searchShortcutEnabled);
+    setCustomThemeColors(nextEditable.customThemeColors);
 
     hydrationTimerRef.current = window.setTimeout(() => {
       isInitializingRef.current = false;
@@ -339,6 +391,7 @@ export function SettingsShell() {
       excludedAppsText,
       searchShortcut,
       searchShortcutEnabled,
+      customThemeColors,
     });
   }, [
     shortcut,
@@ -353,7 +406,11 @@ export function SettingsShell() {
     excludedAppsText,
     searchShortcut,
     searchShortcutEnabled,
+    customThemeColors,
   ]);
+
+  const colorErrors = getCustomThemeColorErrors(customThemeColors);
+  const hasColorErrors = Object.keys(colorErrors).length > 0;
 
   useEffect(() => {
     if (!data) return;
@@ -380,6 +437,7 @@ export function SettingsShell() {
   useEffect(() => {
     if (!data) return;
     if (isInitializingRef.current) return;
+    if (hasColorErrors) return;
     const payload = latestLocalPayloadRef.current;
     if (!payload) return;
     if (isSameSettings(payload, data)) return;
@@ -423,6 +481,8 @@ export function SettingsShell() {
     excludedAppsText,
     searchShortcut,
     searchShortcutEnabled,
+    customThemeColors,
+    hasColorErrors,
     data,
     updateSettingsMutation,
   ]);
@@ -470,10 +530,26 @@ export function SettingsShell() {
   const saveError = updateSettingsMutation.error
     ? getErrorMessage(updateSettingsMutation.error, "保存设置失败，请稍后重试。")
     : null;
+  const updateThemeColor = (
+    themeKey: keyof CustomThemeColors,
+    field: keyof ThemeColorPalette,
+    value: string,
+  ) => {
+    setCustomThemeColors((current) => ({
+      ...current,
+      [themeKey]: {
+        ...current[themeKey],
+        [field]: value,
+      },
+    }));
+  };
 
   return (
     <main className="flex min-h-screen flex-col bg-pg-canvas-default">
-      <div className="h-[3px] w-full shrink-0 bg-gradient-to-r from-pg-blue-5 to-pg-blue-4" />
+      <div
+        className="h-[3px] w-full shrink-0"
+        style={{ backgroundImage: "linear-gradient(to right, var(--pg-accent-emphasis), var(--pg-accent-hover))" }}
+      />
       <div className="mx-auto w-full max-w-[1080px] px-6 py-8" ref={registerContainer}>
         <header className="mb-8 flex flex-col gap-4 border-b border-pg-border-muted pb-6 sm:flex-row sm:items-start sm:justify-between">
           <div>
@@ -651,6 +727,61 @@ export function SettingsShell() {
                           name="theme-mode"
                           onSelect={() => setThemeMode(option.value)}
                         />
+                      ))}
+                    </div>
+                  </SettingCard>
+
+                  <SettingCard
+                    action={(
+                      <button
+                        className="rounded-lg border border-pg-border-default px-3 py-2 text-xs font-medium text-pg-fg-muted transition-colors hover:bg-pg-canvas-default hover:text-pg-fg-default"
+                        onClick={() => setCustomThemeColors(DEFAULT_CUSTOM_THEME_COLORS)}
+                        type="button"
+                      >
+                        恢复默认
+                      </button>
+                    )}
+                    description="分别为浅色与深色主题输入窗口背景、卡片背景与强调色，Tooltip 会自动同步。"
+                    title="自定义颜色"
+                  >
+                    <div className="grid gap-6 lg:grid-cols-2">
+                      {(["light", "dark"] as const).map((themeKey) => (
+                        <div
+                          className="rounded-xl border border-pg-border-default bg-pg-canvas-default px-4 py-4"
+                          key={themeKey}
+                        >
+                          <div className="mb-4">
+                            <h4 className="text-sm font-semibold text-pg-fg-default">
+                              {themeKey === "light" ? "浅色主题" : "深色主题"}
+                            </h4>
+                            <p className="mt-1 text-xs leading-relaxed text-pg-fg-subtle">
+                              输入 `#RRGGBB`，例如 `#EFF2F5`。
+                            </p>
+                          </div>
+                          <div className="space-y-4">
+                            <ThemeColorInput
+                              error={colorErrors[`${themeKey}.windowBg`]}
+                              hint="控制窗口主体背景。"
+                              label="窗口背景色"
+                              onChange={(value) => updateThemeColor(themeKey, "windowBg", value)}
+                              value={customThemeColors[themeKey].windowBg}
+                            />
+                            <ThemeColorInput
+                              error={colorErrors[`${themeKey}.cardBg`]}
+                              hint="用于卡片、列表项和 tooltip 主体。"
+                              label="卡片背景色"
+                              onChange={(value) => updateThemeColor(themeKey, "cardBg", value)}
+                              value={customThemeColors[themeKey].cardBg}
+                            />
+                            <ThemeColorInput
+                              error={colorErrors[`${themeKey}.accent`]}
+                              hint="用于选中态、按钮、焦点与高亮。"
+                              label="强调色"
+                              onChange={(value) => updateThemeColor(themeKey, "accent", value)}
+                              value={customThemeColors[themeKey].accent}
+                            />
+                          </div>
+                        </div>
                       ))}
                     </div>
                   </SettingCard>

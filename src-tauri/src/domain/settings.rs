@@ -7,6 +7,12 @@ const DEFAULT_MAIN_SHORTCUT: &str = "Alt+Q";
 const DEFAULT_SEARCH_SHORTCUT: &str = "Alt+S";
 const LEGACY_MAIN_SHORTCUT: &str = "Ctrl+`";
 const LEGACY_SEARCH_SHORTCUTS: [&str; 2] = ["Win+F", "Super+F"];
+const DEFAULT_LIGHT_WINDOW_BG: &str = "#EFF2F5";
+const DEFAULT_LIGHT_CARD_BG: &str = "#E6EAEF";
+const DEFAULT_LIGHT_ACCENT: &str = "#0969DA";
+const DEFAULT_DARK_WINDOW_BG: &str = "#282C34";
+const DEFAULT_DARK_CARD_BG: &str = "#2E333C";
+const DEFAULT_DARK_ACCENT: &str = "#478BE6";
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -75,6 +81,67 @@ pub struct StoredWindowPosition {
     pub height: Option<u32>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ThemeColorPalette {
+    pub window_bg: String,
+    pub card_bg: String,
+    pub accent: String,
+}
+
+impl ThemeColorPalette {
+    fn light_default() -> Self {
+        Self {
+            window_bg: DEFAULT_LIGHT_WINDOW_BG.to_string(),
+            card_bg: DEFAULT_LIGHT_CARD_BG.to_string(),
+            accent: DEFAULT_LIGHT_ACCENT.to_string(),
+        }
+    }
+
+    fn dark_default() -> Self {
+        Self {
+            window_bg: DEFAULT_DARK_WINDOW_BG.to_string(),
+            card_bg: DEFAULT_DARK_CARD_BG.to_string(),
+            accent: DEFAULT_DARK_ACCENT.to_string(),
+        }
+    }
+
+    fn sanitized(self, fallback: &Self) -> Self {
+        Self {
+            window_bg: sanitize_hex_color(self.window_bg, &fallback.window_bg),
+            card_bg: sanitize_hex_color(self.card_bg, &fallback.card_bg),
+            accent: sanitize_hex_color(self.accent, &fallback.accent),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomThemeColors {
+    #[serde(default = "ThemeColorPalette::light_default")]
+    pub light: ThemeColorPalette,
+    #[serde(default = "ThemeColorPalette::dark_default")]
+    pub dark: ThemeColorPalette,
+}
+
+impl Default for CustomThemeColors {
+    fn default() -> Self {
+        Self {
+            light: ThemeColorPalette::light_default(),
+            dark: ThemeColorPalette::dark_default(),
+        }
+    }
+}
+
+impl CustomThemeColors {
+    fn sanitized(self) -> Self {
+        Self {
+            light: self.light.sanitized(&ThemeColorPalette::light_default()),
+            dark: self.dark.sanitized(&ThemeColorPalette::dark_default()),
+        }
+    }
+}
+
 /// 用户设置结构
 ///
 /// # 快捷键格式说明
@@ -109,6 +176,8 @@ pub struct UserSetting {
     pub search_shortcut: String,
     #[serde(alias = "workbench_shortcut_enabled")]
     pub search_shortcut_enabled: bool,
+    #[serde(default)]
+    pub custom_theme_colors: CustomThemeColors,
 }
 
 impl Default for UserSetting {
@@ -130,6 +199,7 @@ impl Default for UserSetting {
             theme_mode: ThemeMode::System,
             search_shortcut: DEFAULT_SEARCH_SHORTCUT.to_string(),
             search_shortcut_enabled: true,
+            custom_theme_colors: CustomThemeColors::default(),
         }
     }
 }
@@ -168,6 +238,7 @@ impl UserSetting {
             self.search_shortcut = DEFAULT_SEARCH_SHORTCUT.to_string();
         }
 
+        self.custom_theme_colors = self.custom_theme_colors.sanitized();
         self.resolve_search_shortcut_conflict();
         self
     }
@@ -213,10 +284,26 @@ pub(crate) fn normalize_shortcut_for_registration(shortcut: &str) -> String {
         .join("+")
 }
 
+fn sanitize_hex_color(value: String, fallback: &str) -> String {
+    let trimmed = value.trim();
+    if is_valid_hex_color(trimmed) {
+        trimmed.to_ascii_uppercase()
+    } else {
+        fallback.to_string()
+    }
+}
+
+fn is_valid_hex_color(value: &str) -> bool {
+    value.len() == 7
+        && value.starts_with('#')
+        && value.chars().skip(1).all(|char| char.is_ascii_hexdigit())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        PickerPositionMode, ThemeMode, UserSetting, normalize_shortcut_for_compare,
+        CustomThemeColors, PickerPositionMode, ThemeColorPalette, ThemeMode, UserSetting,
+        normalize_shortcut_for_compare,
     };
 
     #[test]
@@ -470,5 +557,63 @@ mod tests {
         .sanitized();
 
         assert!(!settings.search_shortcut_enabled);
+    }
+
+    #[test]
+    fn custom_theme_colors_defaults_are_available() {
+        let settings = UserSetting::default();
+
+        assert_eq!(settings.custom_theme_colors.light.window_bg, "#EFF2F5");
+        assert_eq!(settings.custom_theme_colors.light.card_bg, "#E6EAEF");
+        assert_eq!(settings.custom_theme_colors.light.accent, "#0969DA");
+        assert_eq!(settings.custom_theme_colors.dark.window_bg, "#282C34");
+        assert_eq!(settings.custom_theme_colors.dark.card_bg, "#2E333C");
+        assert_eq!(settings.custom_theme_colors.dark.accent, "#478BE6");
+    }
+
+    #[test]
+    fn deserialize_old_settings_without_custom_theme_colors_uses_defaults() {
+        let settings: UserSetting = serde_json::from_str(
+            r#"{
+                "shortcut":"Alt+Q",
+                "launchOnStartup":false,
+                "historyLimit":1000,
+                "pickerRecordLimit":50,
+                "excludedApps":[],
+                "restoreClipboardAfterPaste":true,
+                "pauseMonitoring":false
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(settings.custom_theme_colors.light.window_bg, "#EFF2F5");
+        assert_eq!(settings.custom_theme_colors.dark.card_bg, "#2E333C");
+    }
+
+    #[test]
+    fn sanitized_custom_theme_colors_fall_back_when_hex_is_invalid() {
+        let settings = UserSetting {
+            custom_theme_colors: CustomThemeColors {
+                light: ThemeColorPalette {
+                    window_bg: "blue".to_string(),
+                    card_bg: "#EEF2F5".to_string(),
+                    accent: "#123456".to_string(),
+                },
+                dark: ThemeColorPalette {
+                    window_bg: "#151515".to_string(),
+                    card_bg: "#22".to_string(),
+                    accent: "orange".to_string(),
+                },
+            },
+            ..UserSetting::default()
+        }
+        .sanitized();
+
+        assert_eq!(settings.custom_theme_colors.light.window_bg, "#EFF2F5");
+        assert_eq!(settings.custom_theme_colors.light.card_bg, "#EEF2F5");
+        assert_eq!(settings.custom_theme_colors.light.accent, "#123456");
+        assert_eq!(settings.custom_theme_colors.dark.window_bg, "#151515");
+        assert_eq!(settings.custom_theme_colors.dark.card_bg, "#2E333C");
+        assert_eq!(settings.custom_theme_colors.dark.accent, "#478BE6");
     }
 }

@@ -1,6 +1,7 @@
 use tauri::{AppHandle, State};
 use tracing::warn;
 use std::time::Duration;
+use std::collections::HashMap;
 
 use crate::{
     app_bootstrap::AppState,
@@ -83,8 +84,9 @@ pub async fn show_tooltip(
     y: f64,
     html: String,
     theme: String,
+    theme_vars: HashMap<String, String>,
 ) -> Result<(), String> {
-    TooltipWindow::show_tooltip(&app, request_id, x, y, html, &theme)
+    TooltipWindow::show_tooltip(&app, request_id, x, y, html, &theme, &theme_vars)
 }
 
 #[tauri::command]
