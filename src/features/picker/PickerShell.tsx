@@ -631,17 +631,19 @@ export function PickerShell() {
                       </div>
 
                       <div
-                        className={`flex w-full items-center gap-2 text-[10px] leading-none transition-colors ${isSelected
+                        className={`flex w-full flex-wrap items-center gap-x-2 gap-y-1 text-[10px] leading-none transition-colors ${isSelected
                           ? "text-pg-fg-muted"
                           : "text-pg-fg-subtle"
                           }`}
                       >
-                        {index < 9 ? <kbd className={STYLES.kbdBadge(isSelected)}>{index + 1}</kbd> : null}
-                        <span className={STYLES.typeBadge(isSelected)}>{getClipTypeLabel(item)}</span>
-                        <span className={`min-w-0 flex-1 truncate ${isSelected ? "font-medium text-pg-fg-muted" : "font-medium"}`}>
-                          {item.sourceApp ?? "未知来源"}
-                        </span>
-                        <span className="flex shrink-0 items-center gap-1 font-medium">
+                        <div className="flex min-w-0 flex-1 items-center gap-2">
+                          {index < 9 ? <kbd className={STYLES.kbdBadge(isSelected)}>{index + 1}</kbd> : null}
+                          <span className={STYLES.typeBadge(isSelected)}>{getClipTypeLabel(item)}</span>
+                          <span className={`min-w-0 flex-1 truncate ${isSelected ? "font-medium text-pg-fg-muted" : "font-medium"}`}>
+                            {item.sourceApp ?? "未知来源"}
+                          </span>
+                        </div>
+                        <span className="ml-auto flex shrink-0 items-center gap-1 whitespace-nowrap font-medium">
                           <span className="tabular-nums">
                             {formatDateTime(item.lastUsedAt ?? item.createdAt)}
                           </span>
