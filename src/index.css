@@ -31,6 +31,7 @@
   --pg-blue-4: #218bff;
   --pg-blue-5: #0969da;
   --pg-blue-5-rgb: 9, 105, 218;
+  --pg-accent-rgb: 9, 105, 218;
   --pg-blue-6: #0550ae;
   --pg-blue-7: #033d8b;
   --pg-blue-8: #0a3069;
@@ -72,7 +73,7 @@
   --pg-purple-7: #512a97;
 
   /* Light-theme accent-subtle: low-intensity blue to keep feedback clear without warming the page */
-  --pg-accent-subtle: rgba(var(--pg-blue-5-rgb), 0.12);
+  --pg-accent-subtle: rgba(var(--pg-accent-rgb), 0.12);
 
   color: var(--pg-fg-default);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;
@@ -106,6 +107,8 @@ html.dark {
   --pg-blue-3: #539bf5;
   --pg-blue-4: #4184e4;
   --pg-blue-5: #316dca;
+  --pg-blue-5-rgb: 71, 139, 230;
+  --pg-accent-rgb: 71, 139, 230;
   --pg-blue-6: #255ab2;
   --pg-blue-7: #1b4b91;
   --pg-blue-8: #143d79;
@@ -209,8 +212,9 @@ html.dark {
   --pg-border-default: var(--pg-neutral-7);
   --pg-border-muted: var(--pg-neutral-7);
   --pg-accent-fg: #478be6;
+  --pg-accent-rgb: 71, 139, 230;
 
-  --pg-accent-subtle: rgba(56, 139, 253, 0.15);
+  --pg-accent-subtle: rgba(var(--pg-accent-rgb), 0.18);
   --pg-success-subtle: rgba(46, 160, 67, 0.15);
   --pg-danger-subtle: rgba(248, 81, 73, 0.15);
   --pg-warning-subtle: rgba(187, 128, 9, 0.15);
@@ -357,11 +361,11 @@ textarea {
 /* Selection colors - light theme default */
 ::selection {
   color: var(--pg-neutral-0);
-  background: var(--pg-blue-5);
+  background: var(--pg-accent-emphasis);
 }
 
 /* Selection colors - dark theme */
 html.dark ::selection {
   color: var(--pg-neutral-0);
-  background: var(--pg-blue-3);
+  background: var(--pg-accent-hover);
 }

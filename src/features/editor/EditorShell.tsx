@@ -213,7 +213,10 @@ export function EditorShell() {
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-pg-canvas-default text-pg-fg-default">
-      <div className="h-[3px] w-full bg-gradient-to-r from-pg-blue-5 to-pg-blue-4 shrink-0" />
+      <div
+        className="h-[3px] w-full shrink-0"
+        style={{ backgroundImage: "linear-gradient(to right, var(--pg-accent-emphasis), var(--pg-accent-hover))" }}
+      />
 
       {noticeMessage ? (
         <div className="bg-pg-success-subtle px-5 py-2 text-sm text-pg-success-fg">

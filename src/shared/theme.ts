@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import type { ThemeMode } from "./types/settings";
+import type { CustomThemeColors, ThemeMode } from "./types/settings";
+import { buildThemeCssVariables, DEFAULT_CUSTOM_THEME_COLORS, sanitizeCustomThemeColors } from "./themeColors";
 
 export const DEFAULT_THEME_MODE: ThemeMode = "system";
 
@@ -19,7 +20,10 @@ export function resolveTheme(themeMode: ThemeMode, prefersDark: boolean): "light
   return themeMode;
 }
 
-export function useAppliedTheme(themeMode: ThemeMode) {
+export function useAppliedTheme(
+  themeMode: ThemeMode,
+  customThemeColors: CustomThemeColors = DEFAULT_CUSTOM_THEME_COLORS,
+) {
   const [prefersDark, setPrefersDark] = useState(() => getThemeMediaQuery()?.matches ?? false);
 
   useEffect(() => {
@@ -49,6 +53,7 @@ export function useAppliedTheme(themeMode: ThemeMode) {
   }, []);
 
   const resolvedTheme = resolveTheme(themeMode, prefersDark);
+  const sanitizedColors = sanitizeCustomThemeColors(customThemeColors);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -56,7 +61,11 @@ export function useAppliedTheme(themeMode: ThemeMode) {
     root.dataset.theme = resolvedTheme;
     root.dataset.themeMode = themeMode;
     root.style.colorScheme = resolvedTheme;
-  }, [resolvedTheme, themeMode]);
+    const themeVars = buildThemeCssVariables(resolvedTheme, sanitizedColors);
+    for (const [name, value] of Object.entries(themeVars)) {
+      root.style.setProperty(name, value);
+    }
+  }, [resolvedTheme, sanitizedColors, themeMode]);
 
   return resolvedTheme;
 }

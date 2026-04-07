@@ -186,11 +186,12 @@ export async function showTooltip(
   y: number,
   html: string,
   theme: TooltipTheme = "dark",
+  themeVars: Record<string, string> = {},
 ): Promise<void> {
   if (!isTauriRuntime()) {
     return;
   }
-  return invoke("show_tooltip", { requestId, x, y, html, theme });
+  return invoke("show_tooltip", { requestId, x, y, html, theme, themeVars });
 }
 
 export async function hideTooltip(): Promise<void> {

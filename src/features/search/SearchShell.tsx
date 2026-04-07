@@ -46,6 +46,7 @@ import { getClipTypeLabel } from "../../shared/utils/clipDisplay";
 import { formatDateTime } from "../../shared/utils/time";
 import { LoadingSpinner } from "../../shared/ui/LoadingSpinner";
 import { TOOLTIP_SHOW_DELAY_MS } from "../../shared/ui/tooltipConfig";
+import { buildThemeCssVariables, DEFAULT_CUSTOM_THEME_COLORS } from "../../shared/themeColors";
 import { getSearchKeyboardAction } from "./keyboard";
 import {
   getSearchFilterCommitFocusTarget,
@@ -98,8 +99,8 @@ const STYLES = {
   listItemShell: (selected: boolean) =>
     `rounded-[9px] border transition-[border-color,background-color,box-shadow] ${
       selected
-        ? "border-pg-border-default bg-pg-canvas-subtle shadow-[inset_0_0_0_1px_rgba(var(--pg-shadow-color),0.04)]"
-        : "border-transparent bg-transparent"
+        ? "border-pg-accent-fg bg-pg-accent-subtle shadow-[inset_0_0_0_1px_rgba(var(--pg-shadow-color),0.04)]"
+        : "border-pg-border-subtle bg-pg-canvas-subtle"
     }`,
   listItemLayout: (selected: boolean) =>
     `group grid w-full items-start gap-2.5 px-2 py-3 text-left transition-colors ${
@@ -107,7 +108,7 @@ const STYLES = {
         ? "grid-cols-[auto,minmax(0,1fr),auto]"
         : "grid-cols-[auto,minmax(0,1fr)]"
     } ${
-      selected ? "" : "hover:bg-pg-canvas-subtle"
+      selected ? "" : "hover:bg-pg-canvas-inset"
     }`,
   glyphBox: (selected: boolean) =>
     `flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] text-sm font-semibold transition-colors ${
@@ -460,6 +461,10 @@ export function SearchShell() {
           position.y,
           tooltipHtml,
           (document.documentElement.dataset.theme as "dark" | "light") ?? "dark",
+          buildThemeCssVariables(
+            ((document.documentElement.dataset.theme as "dark" | "light") ?? "dark"),
+            settingsQuery.data?.customThemeColors ?? DEFAULT_CUSTOM_THEME_COLORS,
+          ),
         );
       })().catch((error) => {
         console.warn("[FloatPaste] Search tooltip 定位或显示失败:", error);
@@ -1108,10 +1113,11 @@ export function SearchShell() {
     <div className={STYLES.shell} ref={shellRef}>
       <div className={STYLES.panel}>
         <div
-          className="h-[3px] w-full shrink-0 bg-gradient-to-r from-pg-blue-5 to-pg-blue-4"
+          className="h-[3px] w-full shrink-0"
           onMouseDown={(event) => {
             void handleSearchWindowDragStart(event);
           }}
+          style={{ backgroundImage: "linear-gradient(to right, var(--pg-accent-emphasis), var(--pg-accent-hover))" }}
         />
 
         <header

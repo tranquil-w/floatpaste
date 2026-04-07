@@ -21,6 +21,7 @@ import { TOOLTIP_SHOW_DELAY_MS } from "../../shared/ui/tooltipConfig";
 import { getClipTypeLabel } from "../../shared/utils/clipDisplay";
 import { formatDateTime } from "../../shared/utils/time";
 import { LoadingSpinner } from "../../shared/ui/LoadingSpinner";
+import { buildThemeCssVariables, DEFAULT_CUSTOM_THEME_COLORS } from "../../shared/themeColors";
 import {
   WindowResizeHandles,
   type WindowResizeHandle,
@@ -41,16 +42,16 @@ const STYLES = {
     "flex h-screen w-screen flex-col overflow-hidden rounded-md border border-pg-border-muted bg-pg-canvas-default",
   header:
     "flex shrink-0 items-center justify-between border-b border-pg-border-subtle bg-pg-canvas-default px-3 py-1.5",
-  headerDot: "h-2 w-2 rounded-full bg-pg-accent-fg shadow-[0_0_0_3px_rgba(var(--pg-blue-5-rgb),0.10)]",
+  headerDot: "h-2 w-2 rounded-full bg-pg-accent-fg shadow-[0_0_0_3px_rgba(var(--pg-accent-rgb),0.10)]",
   headerMessage:
     "ml-2 rounded-[3px] bg-pg-accent-subtle px-1.5 py-0.5 text-[10px] font-medium leading-none text-pg-accent-fg",
   headerButton:
     "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-semibold text-pg-fg-muted transition-colors hover:bg-pg-accent-subtle hover:text-pg-fg-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pg-accent-fg focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-45",
   itemButton: (selected: boolean, favorited: boolean) => `group relative flex w-full flex-col gap-1.5 rounded-[8px] px-1.5 py-2 text-left transition-colors border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pg-accent-fg focus-visible:ring-offset-2 ${selected
-    ? "border-[color:rgba(var(--pg-blue-5-rgb),0.35)] bg-pg-accent-subtle shadow-[0_1px_0_rgba(var(--pg-shadow-color),0.14),inset_0_0_0_1px_rgba(var(--pg-blue-5-rgb),0.08)]"
+    ? "border-[color:rgba(var(--pg-accent-rgb),0.35)] bg-pg-accent-subtle shadow-[0_1px_0_rgba(var(--pg-shadow-color),0.14),inset_0_0_0_1px_rgba(var(--pg-accent-rgb),0.08)]"
     : favorited
-      ? "border-pg-border-subtle border-l-[3px] border-l-pg-accent-fg bg-pg-canvas-default hover:border-pg-border-default hover:bg-pg-canvas-subtle"
-      : "bg-pg-canvas-default border-pg-border-subtle hover:border-pg-border-default hover:bg-pg-canvas-subtle"
+      ? "border-pg-border-subtle border-l-[3px] border-l-pg-accent-fg bg-pg-canvas-subtle hover:border-pg-border-default hover:bg-pg-canvas-inset"
+      : "bg-pg-canvas-subtle border-pg-border-subtle hover:border-pg-border-default hover:bg-pg-canvas-inset"
     }`,
   itemContent: (selected: boolean, favorited: boolean) =>
     `${selected ? "text-pg-fg-default font-semibold" : favorited ? "text-pg-fg-default font-medium" : "text-pg-fg-muted font-medium"} line-clamp-4 text-[13px] leading-[1.55] tracking-tight break-words [overflow-wrap:anywhere] whitespace-pre-wrap transition-colors`,
@@ -500,6 +501,10 @@ export function PickerShell() {
           position.y,
           tooltipHtml,
           (document.documentElement.dataset.theme as "dark" | "light") ?? "dark",
+          buildThemeCssVariables(
+            ((document.documentElement.dataset.theme as "dark" | "light") ?? "dark"),
+            settings.data?.customThemeColors ?? DEFAULT_CUSTOM_THEME_COLORS,
+          ),
         );
       })().catch((error) => {
         console.warn("[FloatPaste] tooltip 定位或显示失败:", error);

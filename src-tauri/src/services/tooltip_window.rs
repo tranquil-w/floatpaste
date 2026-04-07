@@ -1,4 +1,5 @@
 use std::sync::Mutex;
+use std::collections::HashMap;
 
 use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, Position, Size, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tracing::{info, warn};
@@ -81,6 +82,7 @@ impl TooltipWindow {
         y: f64,
         html: String,
         theme: &str,
+        theme_vars: &HashMap<String, String>,
     ) -> Result<(), String> {
         let window = Self::ensure_window(app)?;
 
@@ -92,9 +94,11 @@ impl TooltipWindow {
             .map_err(|e| format!("Tooltip HTML 序列化失败: {e}"))?;
         let json_theme = serde_json::to_string(theme)
             .map_err(|e| format!("Tooltip theme 序列化失败: {e}"))?;
+        let json_theme_vars = serde_json::to_string(theme_vars)
+            .map_err(|e| format!("Tooltip themeVars 序列化失败: {e}"))?;
         window.eval(&format!(
-            "window.showTooltip({}, {}, {})",
-            json_request_id, json_html, json_theme
+            "window.showTooltip({}, {}, {}, {})",
+            json_request_id, json_html, json_theme, json_theme_vars
         ))
             .map_err(|e| {
                 clear_pending_tooltip_request();

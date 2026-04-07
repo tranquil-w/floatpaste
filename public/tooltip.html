@@ -129,6 +129,17 @@ const tooltipState = {
   timeoutId: null,
 };
 
+function applyThemeVars(themeVars) {
+  const style = document.documentElement.style;
+  if (!themeVars || typeof themeVars !== "object") {
+    return;
+  }
+
+  Object.entries(themeVars).forEach(function([name, value]) {
+    style.setProperty(name, value);
+  });
+}
+
 function cleanupPendingImage() {
   if (tooltipState.image && tooltipState.imageLoadHandler) {
     tooltipState.image.removeEventListener('load', tooltipState.imageLoadHandler);
@@ -193,8 +204,9 @@ function fallbackToText(el, image) {
   el.insertBefore(content, meta || null);
 }
 
-window.showTooltip = function showTooltip(requestId, html, theme) {
+window.showTooltip = function showTooltip(requestId, html, theme, themeVars) {
   document.documentElement.classList.toggle('dark', theme === 'dark');
+  applyThemeVars(themeVars);
   const el = document.getElementById('tooltip');
 
   cleanupPendingImage();

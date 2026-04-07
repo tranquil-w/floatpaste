@@ -66,6 +66,7 @@ class FakeTooltipElement {
   image: FakeImageElement | null = null;
   offsetWidth = 320;
   offsetHeight = 160;
+  appliedThemeVars: Record<string, string> = {};
 
   set innerHTML(value: string) {
     this.currentHtml = value;
@@ -156,6 +157,11 @@ function createTooltipRuntimeHarness() {
       documentElement: {
         classList: {
           toggle: () => undefined,
+        },
+        style: {
+          setProperty: (name: string, value: string) => {
+            tooltip.appliedThemeVars[name] = value;
+          },
         },
       },
       getElementById: (id: string) => {
@@ -344,4 +350,20 @@ test("图片 tooltip 加载失败后会回退为纯文本并重新测量", () =>
   assert.equal(harness.tooltip.insertedContent?.className, "tooltip-content");
   assert.equal(harness.tooltip.insertedContent?.textContent, "图片加载失败时的回退文本");
   assert.equal(harness.tooltipReadyCalls.at(-1)?.requestId, 9);
+});
+
+test("tooltip runtime 会应用传入的运行时主题变量", () => {
+  const harness = createTooltipRuntimeHarness();
+  harness.showTooltip(
+    10,
+    `<div class="tooltip-content">demo</div>`,
+    "dark",
+    {
+      "--pg-canvas-subtle": "#202020",
+      "--pg-accent-fg": "#ff6600",
+    },
+  );
+
+  assert.equal(harness.tooltip.appliedThemeVars["--pg-canvas-subtle"], "#202020");
+  assert.equal(harness.tooltip.appliedThemeVars["--pg-accent-fg"], "#ff6600");
 });

@@ -11,10 +11,23 @@ import type { UserSetting } from "../shared/types/settings";
 const now = Date.now();
 const pickerPositionModes = new Set(["mouse", "lastPosition", "caret"]);
 const themeModes = new Set(["system", "light", "dark"]);
+const HEX_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
 const DEFAULT_MAIN_SHORTCUT = "Alt+Q";
 const DEFAULT_SEARCH_SHORTCUT = "Alt+S";
 const LEGACY_MAIN_SHORTCUT = "Ctrl+`";
 const LEGACY_SEARCH_SHORTCUTS = new Set(["win+f", "windows+f", "super+f"]);
+const DEFAULT_CUSTOM_THEME_COLORS = {
+  light: {
+    windowBg: "#EFF2F5",
+    cardBg: "#E6EAEF",
+    accent: "#0969DA",
+  },
+  dark: {
+    windowBg: "#282C34",
+    cardBg: "#2E333C",
+    accent: "#478BE6",
+  },
+} as const;
 
 function normalizeMainShortcut(shortcut: string): string {
   const trimmed = shortcut.trim();
@@ -37,6 +50,26 @@ function normalizeSearchShortcut(shortcut: string): string {
   return trimmed;
 }
 
+function sanitizeHexColor(value: string | undefined, fallback: string): string {
+  const trimmed = value?.trim() ?? "";
+  return HEX_COLOR_PATTERN.test(trimmed) ? trimmed.toUpperCase() : fallback;
+}
+
+function sanitizeCustomThemeColors(payload: UserSetting["customThemeColors"]): UserSetting["customThemeColors"] {
+  return {
+    light: {
+      windowBg: sanitizeHexColor(payload?.light?.windowBg, DEFAULT_CUSTOM_THEME_COLORS.light.windowBg),
+      cardBg: sanitizeHexColor(payload?.light?.cardBg, DEFAULT_CUSTOM_THEME_COLORS.light.cardBg),
+      accent: sanitizeHexColor(payload?.light?.accent, DEFAULT_CUSTOM_THEME_COLORS.light.accent),
+    },
+    dark: {
+      windowBg: sanitizeHexColor(payload?.dark?.windowBg, DEFAULT_CUSTOM_THEME_COLORS.dark.windowBg),
+      cardBg: sanitizeHexColor(payload?.dark?.cardBg, DEFAULT_CUSTOM_THEME_COLORS.dark.cardBg),
+      accent: sanitizeHexColor(payload?.dark?.accent, DEFAULT_CUSTOM_THEME_COLORS.dark.accent),
+    },
+  };
+}
+
 function sanitizeSettings(payload: UserSetting): UserSetting {
   const pickerPositionMode = pickerPositionModes.has(payload.pickerPositionMode)
     ? payload.pickerPositionMode
@@ -52,6 +85,7 @@ function sanitizeSettings(payload: UserSetting): UserSetting {
     themeMode,
     searchShortcut: normalizeSearchShortcut(payload.searchShortcut),
     searchShortcutEnabled: payload.searchShortcutEnabled,
+    customThemeColors: sanitizeCustomThemeColors(payload.customThemeColors),
   };
 }
 
@@ -371,5 +405,6 @@ let settings: UserSetting = {
   themeMode: "system",
   searchShortcut: DEFAULT_SEARCH_SHORTCUT,
   searchShortcutEnabled: true,
+  customThemeColors: DEFAULT_CUSTOM_THEME_COLORS,
 };
 
