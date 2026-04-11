@@ -577,7 +577,7 @@ export function PickerShell() {
           </div>
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col rounded-b-md bg-pg-canvas-subtle px-0 py-1.5">
+        <div className="flex min-h-0 flex-1 flex-col rounded-b-md bg-pg-canvas-default px-0 py-1.5">
           {recent.isLoading ? (
             <div className="flex h-full items-center justify-center">
               <LoadingSpinner size="sm" text="正在加载记录..." />
