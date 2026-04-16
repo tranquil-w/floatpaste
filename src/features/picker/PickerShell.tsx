@@ -588,8 +588,8 @@ export function PickerShell() {
               <p className="text-xs text-pg-fg-subtle">复制内容后按 Alt+Q 打开此面板</p>
             </div>
           ) : (
-            <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable_both-edges]">
-              <div className="grid gap-1 px-1 transition-colors">
+            <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]">
+              <div className="grid gap-1 pl-[14px] pr-1 transition-colors">
                 {items.map((item, index) => {
                   const isSelected = index === selectedIndex;
                   const imageUrl = item.type === "image"
