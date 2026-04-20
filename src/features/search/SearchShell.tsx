@@ -1504,7 +1504,13 @@ export function SearchShell() {
                           </div>
                         </div>
                         {isSelected ? (
-                          <div className={STYLES.selectedActions}>
+                          <div
+                            className={STYLES.selectedActions}
+                            onMouseMove={(event) => {
+                              event.stopPropagation();
+                              cancelTooltip();
+                            }}
+                          >
                             <div
                               className={STYLES.selectedActionStack}
                               onClick={(event) => event.stopPropagation()}
