@@ -17,8 +17,8 @@ use crate::{
     domain::{
         error::AppError,
         events::{
-            PICKER_CONFIRM_EVENT, PICKER_FAVORITE_EVENT, PICKER_NAVIGATE_EVENT,
-            PICKER_OPEN_EDITOR_EVENT, PICKER_SELECT_INDEX_EVENT,
+            PICKER_CONFIRM_AS_FILE_EVENT, PICKER_CONFIRM_EVENT, PICKER_FAVORITE_EVENT,
+            PICKER_NAVIGATE_EVENT, PICKER_OPEN_EDITOR_EVENT, PICKER_SELECT_INDEX_EVENT,
         },
         settings::normalize_shortcut_for_registration,
     },
@@ -27,10 +27,11 @@ use crate::{
 
 pub struct ShortcutManager;
 
-const PICKER_SESSION_SHORTCUTS: [&str; 15] = [
+const PICKER_SESSION_SHORTCUTS: [&str; 16] = [
     "Up",
     "Down",
     "Enter",
+    "Shift+Enter",
     "Escape",
     "Ctrl+Space",
     "Digit1",
@@ -254,6 +255,7 @@ impl ShortcutManager {
 
             let emit_result = match normalized.as_str() {
                 "enter" => app.emit(PICKER_CONFIRM_EVENT, ()),
+                "shift+enter" => app.emit(PICKER_CONFIRM_AS_FILE_EVENT, ()),
                 "escape" | "esc" => {
                     info!("命中 Picker 关闭快捷键: {normalized}");
                     let app_handle = app.clone();

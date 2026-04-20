@@ -4,6 +4,7 @@ pub const PICKER_SESSION_START_EVENT: &str = "picker://session-start";
 pub const PICKER_SESSION_END_EVENT: &str = "picker://session-end";
 pub const PICKER_NAVIGATE_EVENT: &str = "picker://navigate";
 pub const PICKER_CONFIRM_EVENT: &str = "picker://confirm";
+pub const PICKER_CONFIRM_AS_FILE_EVENT: &str = "picker://confirm-as-file";
 pub const PICKER_SELECT_INDEX_EVENT: &str = "picker://select-index";
 pub const PICKER_OPEN_EDITOR_EVENT: &str = "picker://open-editor";
 pub const PICKER_FAVORITE_EVENT: &str = "picker://favorite";

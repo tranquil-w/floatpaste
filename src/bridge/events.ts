@@ -6,6 +6,7 @@ export const PICKER_SESSION_START_EVENT = "picker://session-start";
 export const PICKER_SESSION_END_EVENT = "picker://session-end";
 export const PICKER_NAVIGATE_EVENT = "picker://navigate";
 export const PICKER_CONFIRM_EVENT = "picker://confirm";
+export const PICKER_CONFIRM_AS_FILE_EVENT = "picker://confirm-as-file";
 export const PICKER_SELECT_INDEX_EVENT = "picker://select-index";
 export const PICKER_OPEN_EDITOR_EVENT = "picker://open-editor";
 export const PICKER_FAVORITE_EVENT = "picker://favorite";

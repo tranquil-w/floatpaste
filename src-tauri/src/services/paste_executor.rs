@@ -46,7 +46,7 @@ impl PasteExecutor {
         let mut clipboard =
             Clipboard::new().map_err(|error| AppError::Clipboard(error.to_string()))?;
 
-        write_item_to_clipboard(app, state, &mut clipboard, &detail)?;
+        write_item_to_clipboard(app, state, &mut clipboard, &detail, option.as_file)?;
 
         let clip_type_label = clip_type_label(&detail.r#type);
 
@@ -318,6 +318,7 @@ fn write_item_to_clipboard(
     state: &AppState,
     clipboard: &mut Clipboard,
     detail: &ClipItemDetail,
+    as_file: bool,
 ) -> Result<(), AppError> {
     match detail.r#type.as_str() {
         "text" => {
@@ -338,38 +339,53 @@ fn write_item_to_clipboard(
                 ));
             };
 
-            let image = state.image_storage.load_image(image_path)?;
-            if let Some(owner_window) = resolve_clipboard_owner_window(app) {
-                let crate::services::image_storage::DecodedImage {
-                    rgba,
-                    width,
-                    height,
-                    png_bytes,
-                } = image;
-                write_image_to_clipboard(
-                    owner_window,
-                    &ClipboardImageData {
+            if as_file {
+                let absolute_path = state.image_storage.resolve_existing_image_path(image_path)?;
+                let path_str = absolute_path.to_string_lossy().to_string();
+
+                if let Some(normalized) = NormalizeService::normalize_text(&path_str, None) {
+                    state
+                        .self_write_guard()
+                        .suppress_hash(normalized.normalized.hash, Duration::from_secs(3))?;
+                }
+
+                clipboard
+                    .set_text(path_str)
+                    .map_err(|error| AppError::Clipboard(error.to_string()))
+            } else {
+                let image = state.image_storage.load_image(image_path)?;
+                if let Some(owner_window) = resolve_clipboard_owner_window(app) {
+                    let crate::services::image_storage::DecodedImage {
                         rgba,
                         width,
                         height,
-                        png_bytes: Some(png_bytes),
-                    },
-                )?;
-            } else {
-                clipboard
-                    .set_image(ImageData {
-                        width: image.width,
-                        height: image.height,
-                        bytes: Cow::Owned(image.rgba),
-                    })
-                    .map_err(|error| AppError::Clipboard(error.to_string()))?;
+                        png_bytes,
+                    } = image;
+                    write_image_to_clipboard(
+                        owner_window,
+                        &ClipboardImageData {
+                            rgba,
+                            width,
+                            height,
+                            png_bytes: Some(png_bytes),
+                        },
+                    )?;
+                } else {
+                    clipboard
+                        .set_image(ImageData {
+                            width: image.width,
+                            height: image.height,
+                            bytes: Cow::Owned(image.rgba),
+                        })
+                        .map_err(|error| AppError::Clipboard(error.to_string()))?;
+                }
+
+                state
+                    .self_write_guard()
+                    .suppress_hash(detail.hash.clone(), Duration::from_secs(3))?;
+
+                Ok(())
             }
-
-            state
-                .self_write_guard()
-                .suppress_hash(detail.hash.clone(), Duration::from_secs(3))?;
-
-            Ok(())
         }
         "file" => {
             if detail.file_paths.is_empty() {
