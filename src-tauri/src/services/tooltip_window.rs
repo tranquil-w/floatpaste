@@ -5,7 +5,22 @@ use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, Position, Size, 
 use tracing::{info, warn};
 
 #[cfg(target_os = "windows")]
-use windows::Win32::UI::WindowsAndMessaging::{HWND_TOPMOST, SetWindowPos, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW};
+use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, HWND_TOPMOST, SetWindowPos, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW};
+
+/// Return the cursor position in physical screen coordinates.
+#[cfg(target_os = "windows")]
+fn get_physical_cursor_position() -> (i32, i32) {
+    let mut pt = windows::Win32::Foundation::POINT::default();
+    unsafe {
+        let _ = GetCursorPos(&mut pt);
+    }
+    (pt.x, pt.y)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn get_physical_cursor_position() -> (i32, i32) {
+    (0, 0)
+}
 
 pub const TOOLTIP_WINDOW_LABEL: &str = "tooltip";
 
@@ -129,10 +144,11 @@ impl TooltipWindow {
         if let Err(e) = window.set_size(Size::Physical(PhysicalSize::new(w, h))) {
             warn!("tooltip 窗口设置大小失败: {e}");
         }
-        if let Err(e) = window.set_position(Position::Physical(PhysicalPosition::new(
-            request.x as i32,
-            request.y as i32,
-        ))) {
+
+        // Resolve tooltip position, flipping when it would overflow the work area
+        let (x, y) = Self::resolve_clamped_position(app, request.x, request.y, w, h);
+
+        if let Err(e) = window.set_position(Position::Physical(PhysicalPosition::new(x, y))) {
             warn!("tooltip 窗口设置位置失败: {e}");
         }
 
@@ -185,6 +201,53 @@ impl TooltipWindow {
         }
 
         Ok(())
+    }
+
+    /// Resolve tooltip position, flipping to the opposite side of the cursor when
+    /// the default placement would overflow the monitor work area.
+    fn resolve_clamped_position(app: &AppHandle, x: f64, y: f64, w: u32, h: u32) -> (i32, i32) {
+        let monitors = app.available_monitors().unwrap_or_default();
+        let primary = app.primary_monitor().ok().flatten();
+
+        let work_area = monitors
+            .iter()
+            .find(|m| {
+                let pos = m.position();
+                let sz = m.size();
+                x >= pos.x as f64
+                    && x < (pos.x + sz.width as i32) as f64
+                    && y >= pos.y as f64
+                    && y < (pos.y + sz.height as i32) as f64
+            })
+            .or(primary.as_ref())
+            .map(|m| m.work_area().clone());
+
+        let Some(wa) = work_area else {
+            return (x as i32, y as i32);
+        };
+
+        let wa_right = wa.position.x + wa.size.width as i32;
+        let wa_bottom = wa.position.y + wa.size.height as i32;
+
+        // Get cursor position so we can flip to the opposite side when needed
+        let (cx, cy) = get_physical_cursor_position();
+
+        // When flipping, leave a gap between cursor and tooltip edge
+        const FLIP_GAP: i32 = 4;
+
+        let mut tx = x as i32;
+        let mut ty = y as i32;
+
+        // Flip horizontally if tooltip would overflow the right edge
+        if tx + w as i32 > wa_right {
+            tx = cx - w as i32 - FLIP_GAP;
+        }
+        // Flip vertically if tooltip would overflow the bottom edge
+        if ty + h as i32 > wa_bottom {
+            ty = cy - h as i32 - FLIP_GAP;
+        }
+
+        (tx, ty)
     }
 }
 
