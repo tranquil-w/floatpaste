@@ -5,6 +5,7 @@ import { queryClient } from "../../app/queryClient";
 import { hidePicker, hideTooltip, openEditorFromPicker, pasteItem, setItemFavorited, showTooltip } from "../../bridge/commands";
 import {
   CLIPS_CHANGED_EVENT,
+  PICKER_CONFIRM_AS_FILE_EVENT,
   PICKER_CONFIRM_EVENT,
   PICKER_FAVORITE_EVENT,
   PICKER_NAVIGATE_EVENT,
@@ -161,7 +162,7 @@ export function PickerShell() {
     }
   };
 
-  const confirmSelection = async (index: number) => {
+  const confirmSelection = async (index: number, asFile = false) => {
     const item = itemsRef.current[index];
     if (!item) {
       return;
@@ -172,6 +173,7 @@ export function PickerShell() {
     await pasteItem(item.id, {
       restoreClipboardAfterPaste: restoreClipboardRef.current,
       pasteToTarget: true,
+      ...(asFile && item.type === "image" ? { asFile: true } : {}),
     });
     // picker 紧接着会被隐藏，不清空的话下次打开时会闪过旧消息
     setLastMessage("");
@@ -279,6 +281,7 @@ export function PickerShell() {
     let unlistenSettings: (() => void) | undefined;
     let unlistenNavigate: (() => void) | undefined;
     let unlistenConfirm: (() => void) | undefined;
+    let unlistenConfirmAsFile: (() => void) | undefined;
     let unlistenSelectIndex: (() => void) | undefined;
     let unlistenOpenEditor: (() => void) | undefined;
     let unlistenFavorite: (() => void) | undefined;
@@ -352,6 +355,15 @@ export function PickerShell() {
       unlistenConfirm = cleanup;
     });
 
+    void listen(PICKER_CONFIRM_AS_FILE_EVENT, async () => {
+      if (disposed) {
+        return;
+      }
+      await confirmSelection(selectedIndexRef.current, true);
+    }).then((cleanup) => {
+      unlistenConfirmAsFile = cleanup;
+    });
+
     void listen<number>(PICKER_SELECT_INDEX_EVENT, async (event) => {
       const itemCount = itemsRef.current.length;
       if (disposed || !itemCount) {
@@ -392,6 +404,7 @@ export function PickerShell() {
       unlistenSettings?.();
       unlistenNavigate?.();
       unlistenConfirm?.();
+      unlistenConfirmAsFile?.();
       unlistenSelectIndex?.();
       unlistenOpenEditor?.();
       unlistenFavorite?.();
@@ -450,7 +463,9 @@ export function PickerShell() {
 
       if (event.key === "Enter") {
         event.preventDefault();
-        void confirmSelection(selectedIndexRef.current);
+        const item = itemsRef.current[selectedIndexRef.current];
+        const asFile = event.shiftKey && item?.type === "image";
+        void confirmSelection(selectedIndexRef.current, asFile);
         return;
       }
 

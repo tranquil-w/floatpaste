@@ -14,6 +14,7 @@ import {
 } from "../../bridge/commands";
 import {
   CLIPS_CHANGED_EVENT,
+  PICKER_CONFIRM_AS_FILE_EVENT,
   PICKER_CONFIRM_EVENT,
   PICKER_FAVORITE_EVENT,
   PICKER_NAVIGATE_EVENT,
@@ -983,7 +984,13 @@ export function SearchShell() {
 
         if (event.key === "Enter") {
           event.preventDefault();
-          void forwardPickerConfirm();
+          if (event.shiftKey) {
+            void emitTo("picker", PICKER_CONFIRM_AS_FILE_EVENT).catch((error) => {
+              console.error("控制速贴面板失败", error);
+            });
+          } else {
+            void forwardPickerConfirm();
+          }
           return;
         }
 
@@ -1016,6 +1023,13 @@ export function SearchShell() {
           navigateSelection("down");
           return;
         case "paste":
+          if (event.shiftKey) {
+            const currentItem = itemsRef.current.find((item) => item.id === selectedItemIdRef.current);
+            if (currentItem?.type === "image") {
+              void handlePasteSelectedAsFile();
+              return;
+            }
+          }
           void handlePasteSelected();
           return;
         case "edit-item":
@@ -1073,6 +1087,24 @@ export function SearchShell() {
       await pasteItem(currentItem.id, {
         restoreClipboardAfterPaste: restoreClipboardRef.current,
         pasteToTarget: true,
+      });
+    } catch (error) {
+      showError("执行粘贴失败，请稍后重试");
+      console.error("执行粘贴失败", error);
+    }
+  }
+
+  async function handlePasteSelectedAsFile() {
+    const currentItem = itemsRef.current.find((item) => item.id === selectedItemIdRef.current);
+    if (!currentItem || currentItem.type !== "image") {
+      return;
+    }
+
+    try {
+      await pasteItem(currentItem.id, {
+        restoreClipboardAfterPaste: restoreClipboardRef.current,
+        pasteToTarget: true,
+        asFile: true,
       });
     } catch (error) {
       showError("执行粘贴失败，请稍后重试");
@@ -1472,7 +1504,13 @@ export function SearchShell() {
                           </div>
                         </div>
                         {isSelected ? (
-                          <div className={STYLES.selectedActions}>
+                          <div
+                            className={STYLES.selectedActions}
+                            onMouseMove={(event) => {
+                              event.stopPropagation();
+                              cancelTooltip();
+                            }}
+                          >
                             <div
                               className={STYLES.selectedActionStack}
                               onClick={(event) => event.stopPropagation()}
@@ -1505,6 +1543,34 @@ export function SearchShell() {
                                   <path d="M9 15h6" />
                                 </svg>
                               </button>
+                              {(detailQuery.data?.type ?? item.type) === "image" ? (
+                                <button
+                                  aria-label="粘贴为文件路径"
+                                  className={STYLES.actionButtonSecondary}
+                                  onMouseDown={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                  }}
+                                  onClick={() => void handlePasteSelectedAsFile()}
+                                  title="粘贴为路径"
+                                  type="button"
+                                >
+                                  <svg
+                                    aria-hidden="true"
+                                    className="h-4 w-4"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth="1.8"
+                                    viewBox="0 0 24 24"
+                                  >
+                                    <path d="M4 7V4h16v3" />
+                                    <path d="M9 20h6" />
+                                    <path d="M12 4v16" />
+                                  </svg>
+                                </button>
+                              ) : null}
                               {(detailQuery.data?.type ?? item.type) === "text" ? (
                                 <button
                                   aria-label="编辑当前条目"
