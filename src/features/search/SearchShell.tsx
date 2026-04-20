@@ -26,6 +26,7 @@ import {
   SEARCH_PASTE_EVENT,
   SEARCH_SESSION_END_EVENT,
   SEARCH_SESSION_START_EVENT,
+  SETTINGS_CHANGED_EVENT,
 } from "../../bridge/events";
 import { getImageUrl } from "../../bridge/imageUrl";
 import { isTauriRuntime } from "../../bridge/runtime";
@@ -330,6 +331,7 @@ export function SearchShell() {
     [hasKeyword, recentQuery.data?.items, searchQuery.data?.items],
   );
   const itemsRef = useRef<ClipItemSummary[]>(items);
+  const restoreClipboardRef = useRef(settingsQuery.data?.restoreClipboardAfterPaste ?? true);
   const detailQuery = useItemDetailQuery(selectedItemId);
 
   const clearTooltipTimer = () => {
@@ -420,6 +422,10 @@ export function SearchShell() {
     itemsRef.current = items;
     selectedItemIdRef.current = selectedItemId;
   }, [items, selectedItemId]);
+
+  useEffect(() => {
+    restoreClipboardRef.current = settingsQuery.data?.restoreClipboardAfterPaste ?? true;
+  }, [settingsQuery.data?.restoreClipboardAfterPaste]);
 
   const handleItemMouseMove = (event: React.MouseEvent, item: ClipItemSummary) => {
     if (!tauriRuntime || item.type !== "image") {
@@ -761,6 +767,7 @@ export function SearchShell() {
     let offPaste: (() => void) | undefined;
     let offSuspend: (() => void) | undefined;
     let offResume: (() => void) | undefined;
+    let offSettingsChanged: (() => void) | undefined;
 
     const handleListenError = (eventName: string, error: unknown) => {
       console.error(`注册搜索窗口事件监听失败: ${eventName}`, error);
@@ -773,7 +780,9 @@ export function SearchShell() {
       source: string;
       itemId?: string;
       initialKeyword?: string;
-    }>(SEARCH_SESSION_START_EVENT, (event) => {
+    }>(SEARCH_SESSION_START_EVENT, async (event) => {
+      await queryClient.invalidateQueries({ queryKey: ["settings"] });
+
       setSession({
         source: "global" as const,
         initialItemId: event.payload.itemId,
@@ -903,6 +912,18 @@ export function SearchShell() {
       handleListenError(SEARCH_INPUT_RESUME_EVENT, error);
     });
 
+    void listen(SETTINGS_CHANGED_EVENT, async () => {
+      await queryClient.invalidateQueries({ queryKey: ["settings"] });
+    }).then((cleanup) => {
+      if (disposed) {
+        cleanup();
+        return;
+      }
+      offSettingsChanged = cleanup;
+    }).catch((error) => {
+      handleListenError(SETTINGS_CHANGED_EVENT, error);
+    });
+
     return () => {
       disposed = true;
       offStart?.();
@@ -913,6 +934,7 @@ export function SearchShell() {
       offPaste?.();
       offSuspend?.();
       offResume?.();
+      offSettingsChanged?.();
     };
   }, [reset, setKeyword, setSelectedItemId, setSession]);
 
@@ -1049,7 +1071,7 @@ export function SearchShell() {
 
     try {
       await pasteItem(currentItem.id, {
-        restoreClipboardAfterPaste: settingsQuery.data?.restoreClipboardAfterPaste ?? true,
+        restoreClipboardAfterPaste: restoreClipboardRef.current,
         pasteToTarget: true,
       });
     } catch (error) {

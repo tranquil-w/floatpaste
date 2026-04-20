@@ -127,6 +127,7 @@ export function PickerShell() {
   const [lastMessage, setLastMessage] = useState("");
   const itemsRef = useRef<ClipItemSummary[]>([]);
   const selectedIndexRef = useRef(0);
+  const restoreClipboardRef = useRef(settings.data?.restoreClipboardAfterPaste ?? true);
   const favoriteTogglePendingRef = useRef(false);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -169,7 +170,7 @@ export function PickerShell() {
     cancelTooltip();
 
     await pasteItem(item.id, {
-      restoreClipboardAfterPaste: settings.data?.restoreClipboardAfterPaste ?? true,
+      restoreClipboardAfterPaste: restoreClipboardRef.current,
       pasteToTarget: true,
     });
     // picker 紧接着会被隐藏，不清空的话下次打开时会闪过旧消息
@@ -212,6 +213,10 @@ export function PickerShell() {
   useEffect(() => {
     itemsRef.current = items;
   }, [items]);
+
+  useEffect(() => {
+    restoreClipboardRef.current = settings.data?.restoreClipboardAfterPaste ?? true;
+  }, [settings.data?.restoreClipboardAfterPaste]);
 
   useEffect(() => {
     selectedIndexRef.current = selectedIndex;
