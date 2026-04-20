@@ -546,10 +546,6 @@ export function SettingsShell() {
 
   return (
     <main className="flex min-h-screen flex-col bg-pg-canvas-default">
-      <div
-        className="h-[3px] w-full shrink-0"
-        style={{ backgroundImage: "linear-gradient(to right, var(--pg-accent-emphasis), var(--pg-accent-hover))" }}
-      />
       <div className="mx-auto w-full max-w-[1080px] px-6 py-8" ref={registerContainer}>
         <header className="mb-8 flex flex-col gap-4 border-b border-pg-border-muted pb-6 sm:flex-row sm:items-start sm:justify-between">
           <div>

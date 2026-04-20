@@ -1134,14 +1134,6 @@ export function SearchShell() {
   return (
     <div className={STYLES.shell} ref={shellRef}>
       <div className={STYLES.panel}>
-        <div
-          className="h-[3px] w-full shrink-0"
-          onMouseDown={(event) => {
-            void handleSearchWindowDragStart(event);
-          }}
-          style={{ backgroundImage: "linear-gradient(to right, var(--pg-accent-emphasis), var(--pg-accent-hover))" }}
-        />
-
         <header
           ref={headerRef}
           className={STYLES.searchHeader}
