@@ -2,8 +2,8 @@ use chrono::Utc;
 use serde::Serialize;
 use std::time::Duration;
 use tauri::{
-    AppHandle, Emitter, Manager, PhysicalSize, Position, Size, WebviewUrl, WebviewWindow,
-    WebviewWindowBuilder, WindowEvent,
+    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, Position, Size, WebviewUrl,
+    WebviewWindow, WebviewWindowBuilder, WindowEvent,
 };
 use tracing::{error, info, warn};
 
@@ -281,10 +281,11 @@ impl WindowCoordinator {
 
         state.set_search_session(search_session)?;
 
-        show_and_focus_window(&window)?;
+        position_search_on_cursor_monitor(&window);
         if restore_search_window_geometry(&window) {
             show_and_focus_window(&window)?;
         }
+        show_and_focus_window(&window)?;
 
         state.begin_search_activation();
         begin_search_window_minimize_monitor(app.clone(), state.clone());
@@ -825,6 +826,27 @@ fn restore_search_window_geometry(window: &WebviewWindow) -> bool {
     )));
     let _ = window.center();
     true
+}
+
+fn position_search_on_cursor_monitor(window: &WebviewWindow) {
+    use crate::platform::windows::picker_position::{current_cursor_point, work_area_from_point};
+
+    let Ok(cursor) = current_cursor_point() else {
+        return;
+    };
+    let Ok(work_area) = work_area_from_point(cursor) else {
+        return;
+    };
+    let Ok(size) = window.inner_size() else {
+        return;
+    };
+
+    let window_width = size.width as i32;
+    let window_height = size.height as i32;
+    let x = work_area.left + (work_area.width() - window_width) / 2;
+    let y = work_area.top + (work_area.height() - window_height) / 2;
+
+    let _ = window.set_position(Position::Physical(PhysicalPosition::new(x, y)));
 }
 
 fn begin_search_window_minimize_monitor(app: AppHandle, state: AppState) {
