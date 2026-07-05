@@ -30,6 +30,7 @@ Thumbs.db
 tmp/
 .superpowers/
 .claude/settings.local.json
+.zcode/
 
 # AI/工具临时产物
 .playwright-mcp/
