@@ -701,6 +701,9 @@ fn restore_picker_window_size(app: &AppHandle, window: &WebviewWindow) {
     }
 }
 
+/// 从 Editor 返回 Picker：恢复窗口可见性与会话快捷键，但**故意不发送
+/// PICKER_SESSION_START_EVENT**，以保留用户进入编辑器时的选中项和滚动位置，
+/// 让"编辑完返回"自然衔接原上下文，而非回跳到列表顶部。
 fn restore_picker_after_editor(
     app: &AppHandle,
     state: &AppState,
@@ -738,6 +741,9 @@ fn restore_picker_after_editor(
     Ok(())
 }
 
+/// 从 Editor 返回 Search：恢复窗口可见性，但**故意不发送
+/// SEARCH_SESSION_START_EVENT**，以保留用户进入编辑器时的选中项和滚动位置，
+/// 让"编辑完返回"自然衔接原上下文，而非回跳到列表顶部。
 fn restore_search_after_editor(app: &AppHandle, state: &AppState) -> Result<(), AppError> {
     let window = ensure_search_window(app)?;
     show_and_focus_window(&window)?;

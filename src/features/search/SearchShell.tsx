@@ -293,6 +293,7 @@ export function SearchShell() {
   const errorRef = useRef<HTMLDivElement>(null);
   const sectionBarRef = useRef<HTMLDivElement>(null);
   const listContentRef = useRef<HTMLDivElement>(null);
+  const listScrollRef = useRef<HTMLElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const selectedItemIdRef = useRef<string | null>(selectedItemId);
   const itemRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -795,6 +796,9 @@ export function SearchShell() {
       setKeyword(event.payload.initialKeyword ?? "");
       setSelectedItemId(event.payload.itemId ?? null);
       setInputSuspended(false);
+      // 窗口通过 hide/show 复用，DOM 滚动位置会被保留。
+      // 每次打开都把列表滚回顶部，避免停留在上次关闭时的位置。
+      listScrollRef.current?.scrollTo({ top: 0 });
     }).then((cleanup) => {
       if (disposed) {
         cleanup();
@@ -1390,7 +1394,10 @@ export function SearchShell() {
           <span>{resultCountLabel}</span>
         </div>
 
-        <main className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]">
+        <main
+          ref={listScrollRef}
+          className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]"
+        >
           <div ref={listContentRef} className="px-0.5 pb-1 pt-1.5">
             {isLoading ? (
               <div className="flex min-h-[160px] items-center justify-center py-12">

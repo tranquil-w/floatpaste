@@ -131,6 +131,7 @@ export function PickerShell() {
   const restoreClipboardRef = useRef(settings.data?.restoreClipboardAfterPaste ?? true);
   const favoriteTogglePendingRef = useRef(false);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const listScrollRef = useRef<HTMLDivElement | null>(null);
   const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tooltipRequestIdRef = useRef(0);
   const imageUrlCacheRef = useRef(new Map<string, string | null>());
@@ -305,6 +306,9 @@ export function PickerShell() {
         selectedIndexRef.current = 0;
         setSelectedIndex(0);
         setLastMessage("");
+        // 窗口通过 hide/show 复用，DOM 滚动位置会被保留。
+        // 每次打开都把列表滚回顶部，避免停留在上次关闭时的位置。
+        listScrollRef.current?.scrollTo({ top: 0 });
       }
     }).then((cleanup) => {
       unlistenStart = cleanup;
@@ -608,7 +612,10 @@ export function PickerShell() {
               <p className="text-xs text-pg-fg-subtle">复制内容后按 Alt+Q 打开此面板</p>
             </div>
           ) : (
-            <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]">
+            <div
+              ref={listScrollRef}
+              className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]"
+            >
               <div className="grid gap-1 pl-[14px] pr-1 transition-colors">
                 {items.map((item, index) => {
                   const isSelected = index === selectedIndex;
