@@ -32,7 +32,6 @@ impl HistoryService {
         }
 
         match DedupService::default().decide(&state.repository, &normalized.normalized.hash)? {
-            DedupDecision::Skip => Ok(None),
             DedupDecision::BumpExisting(existing_id) => {
                 state.repository.bump_item(&existing_id).map(Some)
             }
@@ -68,7 +67,6 @@ impl HistoryService {
         }
 
         match DedupService::default().decide(&state.repository, &normalized.normalized.hash)? {
-            DedupDecision::Skip => Ok(None),
             DedupDecision::BumpExisting(existing_id) => {
                 state.repository.bump_item(&existing_id).map(Some)
             }
@@ -114,7 +112,6 @@ impl HistoryService {
         }
 
         match DedupService::default().decide(&state.repository, &normalized.normalized.hash)? {
-            DedupDecision::Skip => Ok(None),
             DedupDecision::BumpExisting(existing_id) => {
                 state.repository.bump_item(&existing_id).map(Some)
             }

@@ -365,20 +365,6 @@ impl SqliteRepository {
         Ok(())
     }
 
-    pub fn has_recent_hash(&self, hash: &str, cutoff_timestamp_ms: i64) -> Result<bool, AppError> {
-        let connection = self.connection.lock()?;
-        let value = connection.query_row(
-            "SELECT EXISTS(
-                SELECT 1
-                FROM clip_items
-                WHERE hash = ?1 AND deleted_at IS NULL AND created_at >= ?2
-            )",
-            params![hash, cutoff_timestamp_ms],
-            |row| row.get::<_, i64>(0),
-        )?;
-        Ok(value > 0)
-    }
-
     /// 查找（未删除的）具有相同 hash 的现有记录，返回其 id
     pub fn find_existing_by_hash(&self, hash: &str) -> Result<Option<String>, AppError> {
         let connection = self.connection.lock()?;
@@ -392,13 +378,20 @@ impl SqliteRepository {
         Ok(id)
     }
 
-    /// 刷新指定记录的 created_at 和 updated_at 到当前时间，使其排到列表顶部
+    /// 刷新指定记录的 created_at、updated_at 和 last_used_at 到当前时间，使其排到列表顶部。
+    ///
+    /// 调用场景：用户重新复制了与历史记录中某项完全相同的内容，去重命中后置顶已有项。
+    /// 列表排序为 `COALESCE(last_used_at, created_at) DESC`：
+    /// - 若仅刷新 created_at，曾被 mark_used 的记录（last_used_at 已设旧值）排序键
+    ///   仍指向旧的 last_used_at，无法置顶。
+    /// - 因此这里同时刷新 last_used_at。语义上，"重新复制相同内容"本身就是一次
+    ///   活跃互动（与粘贴同类），将其计入 last_used_at 与用户对"最近使用"的直觉一致。
     pub fn bump_item(&self, id: &str) -> Result<ClipItemDetail, AppError> {
         let now = Utc::now().timestamp_millis();
         {
             let connection = self.connection.lock()?;
             connection.execute(
-                "UPDATE clip_items SET created_at = ?2, updated_at = ?2 WHERE id = ?1 AND deleted_at IS NULL",
+                "UPDATE clip_items SET created_at = ?2, updated_at = ?2, last_used_at = ?2 WHERE id = ?1 AND deleted_at IS NULL",
                 params![id, now],
             )?;
         }
@@ -1397,8 +1390,74 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
         // 时间戳应该被更新到更新的值
         assert_ne!(bumped.created_at, before.created_at);
         assert_ne!(bumped.updated_at, before.updated_at);
+        // last_used_at 也应被刷新，避免排序仍指向旧时间戳导致条目无法置顶
+        assert_ne!(bumped.last_used_at, before.last_used_at);
+        assert!(bumped.last_used_at.is_some());
         // 收藏状态应保持不变
         assert!(bumped.is_favorited);
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    /// 回归测试：当用户重新复制与历史记录中已有项完全相同的内容时，
+    /// 该已有项应被置顶，即便它之前曾被粘贴使用过（last_used_at 非空）。
+    ///
+    /// 复现条件：列表排序键为 `COALESCE(last_used_at, created_at) DESC`。
+    /// 若 bump_item 只更新 created_at 而不动 last_used_at，
+    /// 对 last_used_at 已有值的记录，重新复制时其排序位置不会变化。
+    #[test]
+    fn bump_item_moves_already_used_item_to_top() {
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+        let now = Utc::now();
+
+        // 一条"曾被粘贴使用过"的旧记录（last_used_at 已设为 8 分钟前）
+        seed_item(
+            &repository,
+            "previously-used",
+            "shared content",
+            (now - Duration::minutes(30)).timestamp_millis(),
+            Some((now - Duration::minutes(8)).timestamp_millis()),
+            false,
+        );
+        // 一条稍后创建、但活跃时间早于"刚刚重新复制"的新记录
+        seed_item(
+            &repository,
+            "newer-item",
+            "newer content",
+            (now - Duration::minutes(2)).timestamp_millis(),
+            None,
+            false,
+        );
+
+        // 初始顺序：newer-item（2 分钟前）排在 previously-used（last_used_at = 8 分钟前）之前
+        let items = repository.list_recent(10).unwrap();
+        assert_eq!(items[0].id, "newer-item");
+        assert_eq!(items[1].id, "previously-used");
+
+        // 模拟"再次复制相同内容"：去重命中后调用 bump_item
+        let before_bump = Utc::now();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        let bumped = repository.bump_item("previously-used").unwrap();
+        assert!(bumped.last_used_at.is_some());
+
+        // 修复后：previously-used 应被置顶，因为 last_used_at 已刷新为当前时间
+        let items = repository.list_recent(10).unwrap();
+        assert_eq!(
+            items[0].id, "previously-used",
+            "重新复制相同内容应把已有项置顶，即使它曾被粘贴使用过"
+        );
+        assert_eq!(items[1].id, "newer-item");
+
+        // bumped.last_used_at 必须严格晚于 bump 之前的时间戳，证明已被刷新
+        let bumped_used_at = chrono::DateTime::parse_from_rfc3339(&bumped.last_used_at.unwrap())
+            .unwrap()
+            .with_timezone(&Utc);
+        assert!(
+            bumped_used_at > before_bump,
+            "last_used_at 应被刷新为当前时间，实际: {bumped_used_at:?}"
+        );
 
         drop(repository);
         fs::remove_file(path).unwrap();
