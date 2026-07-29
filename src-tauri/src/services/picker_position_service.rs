@@ -28,8 +28,7 @@ impl PickerPositionService {
         target_window_hwnd: Option<isize>,
     ) -> Result<Option<PhysicalPosition<i32>>, AppError> {
         let size = window
-            .outer_size()
-            .map_err(|error| AppError::Message(error.to_string()))?;
+            .outer_size()?;
         let window_width = size.width as i32;
         let window_height = size.height as i32;
 
@@ -50,11 +49,9 @@ impl PickerPositionService {
         window: &WebviewWindow,
     ) -> Result<Option<StoredWindowPosition>, AppError> {
         let position = window
-            .outer_position()
-            .map_err(|error| AppError::Message(error.to_string()))?;
+            .outer_position()?;
         let size = window
-            .inner_size()
-            .map_err(|error| AppError::Message(error.to_string()))?;
+            .inner_size()?;
         let (width, height) = clamp_window_size(size.width, size.height);
 
         Ok(Some(StoredWindowPosition {

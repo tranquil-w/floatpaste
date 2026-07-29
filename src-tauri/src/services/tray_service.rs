@@ -16,17 +16,13 @@ pub struct TrayService;
 impl TrayService {
     pub fn setup(app: &AppHandle) -> Result<(), AppError> {
         let open_settings = MenuItemBuilder::with_id("open-settings", "打开设置")
-            .build(app)
-            .map_err(|error| AppError::Message(error.to_string()))?;
+            .build(app)?;
         let open_picker = MenuItemBuilder::with_id("open-picker", "打开速贴面板")
-            .build(app)
-            .map_err(|error| AppError::Message(error.to_string()))?;
+            .build(app)?;
         let toggle_monitoring = MenuItemBuilder::with_id("toggle-monitoring", "暂停 / 恢复监听")
-            .build(app)
-            .map_err(|error| AppError::Message(error.to_string()))?;
+            .build(app)?;
         let quit = MenuItemBuilder::with_id("quit", "退出")
-            .build(app)
-            .map_err(|error| AppError::Message(error.to_string()))?;
+            .build(app)?;
 
         let menu = MenuBuilder::new(app)
             .items(&[
@@ -35,8 +31,7 @@ impl TrayService {
                 &toggle_monitoring,
                 &quit,
             ])
-            .build()
-            .map_err(|error| AppError::Message(error.to_string()))?;
+            .build()?;
 
         let icon = app
             .default_window_icon()
@@ -108,8 +103,7 @@ impl TrayService {
                     }
                 }
             })
-            .build(app)
-            .map_err(|error| AppError::Message(error.to_string()))?;
+            .build(app)?;
 
         Ok(())
     }

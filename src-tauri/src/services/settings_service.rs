@@ -16,8 +16,7 @@ impl SettingsService {
             .then(|| settings.search_shortcut.as_str());
         ShortcutManager::sync_registered_shortcuts(app, &settings.shortcut, search)?;
         StartupService::sync_from_settings(&settings)?;
-        app.emit(SETTINGS_CHANGED_EVENT, &settings)
-            .map_err(|error| AppError::Message(error.to_string()))?;
+        app.emit(SETTINGS_CHANGED_EVENT, &settings)?;
         Ok(())
     }
 }
