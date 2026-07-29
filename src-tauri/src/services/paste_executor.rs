@@ -1,4 +1,4 @@
-use std::{borrow::Cow, fs, thread, time::Duration};
+use std::{borrow::Cow, thread, time::Duration};
 
 use arboard::{Clipboard, Error as ClipboardError, ImageData};
 use tauri::{AppHandle, Manager};
@@ -21,7 +21,8 @@ use crate::{
         image_clipboard::{read_image_from_clipboard, write_image_to_clipboard, ClipboardImageData},
     },
     services::{
-        normalize_service::NormalizeService, shortcut_manager::ShortcutManager,
+        normalize_service::{analyze_file_paths, NormalizeService},
+        shortcut_manager::ShortcutManager,
         window_coordinator::{
             WindowCoordinator, EDITOR_WINDOW_LABEL, PICKER_WINDOW_LABEL, SEARCH_WINDOW_LABEL,
             SETTINGS_WINDOW_LABEL,
@@ -258,55 +259,6 @@ fn restore_clipboard_snapshot(app: &AppHandle, snapshot: ClipboardSnapshot) -> R
             Ok(())
         }
         ClipboardSnapshot::Files(file_paths) => write_file_paths_to_clipboard(&file_paths),
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct FileSelectionStats {
-    directory_count: i32,
-    total_size: Option<i64>,
-}
-
-fn analyze_file_paths(file_paths: &[String]) -> FileSelectionStats {
-    let mut total_size = 0i64;
-    let mut directory_count = 0i32;
-    let mut size_available = true;
-
-    for path in file_paths {
-        let metadata = match fs::metadata(path) {
-            Ok(metadata) => metadata,
-            Err(_) => {
-                size_available = false;
-                continue;
-            }
-        };
-
-        if metadata.is_dir() {
-            directory_count += 1;
-            size_available = false;
-            continue;
-        }
-
-        let Ok(file_size) = i64::try_from(metadata.len()) else {
-            size_available = false;
-            continue;
-        };
-        total_size = match total_size.checked_add(file_size) {
-            Some(total_size) => total_size,
-            None => {
-                size_available = false;
-                continue;
-            }
-        };
-    }
-
-    FileSelectionStats {
-        directory_count,
-        total_size: if size_available {
-            Some(total_size)
-        } else {
-            None
-        },
     }
 }
 

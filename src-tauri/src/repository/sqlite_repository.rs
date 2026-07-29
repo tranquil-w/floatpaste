@@ -1,5 +1,4 @@
 use std::{
-    fs,
     path::Path,
     sync::{Arc, Mutex},
 };
@@ -765,7 +764,7 @@ fn resolve_file_clip_fields(
         };
     }
 
-    let analyzed = analyze_file_paths(file_paths);
+    let analyzed = crate::services::normalize_service::analyze_file_paths(file_paths);
     let file_count = if stored_file_count > 0 {
         stored_file_count
     } else {
@@ -790,58 +789,6 @@ fn resolve_file_clip_fields(
         file_count,
         directory_count,
         total_size,
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-struct FilePathAnalysis {
-    directory_count: i32,
-    total_size: Option<i64>,
-}
-
-fn analyze_file_paths(file_paths: &[String]) -> FilePathAnalysis {
-    let mut total_size = 0i64;
-    let mut directory_count = 0i32;
-    let mut size_available = true;
-
-    for path in file_paths {
-        let metadata = match fs::metadata(path) {
-            Ok(metadata) => metadata,
-            Err(_) => {
-                size_available = false;
-                continue;
-            }
-        };
-
-        if metadata.is_dir() {
-            directory_count += 1;
-            size_available = false;
-            continue;
-        }
-
-        let file_size = match i64::try_from(metadata.len()) {
-            Ok(file_size) => file_size,
-            Err(_) => {
-                size_available = false;
-                continue;
-            }
-        };
-        total_size = match total_size.checked_add(file_size) {
-            Some(total_size) => total_size,
-            None => {
-                size_available = false;
-                continue;
-            }
-        };
-    }
-
-    FilePathAnalysis {
-        directory_count,
-        total_size: if size_available {
-            Some(total_size)
-        } else {
-            None
-        },
     }
 }
 

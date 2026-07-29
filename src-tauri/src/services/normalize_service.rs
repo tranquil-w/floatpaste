@@ -1,4 +1,7 @@
+use std::fs;
+
 use sha2::{Digest, Sha256};
+use tracing::debug;
 
 use crate::domain::clip_item::{
     NewClipFileItem, NewClipImageItem, NewClipTextItem, NormalizedClipFile, NormalizedClipImage,
@@ -155,6 +158,67 @@ pub fn build_file_preview(
         .map(format_bytes)
         .map(|size| format!("{file_count} 个文件 ({size})"))
         .unwrap_or_else(|| format!("{file_count} 个文件"))
+}
+
+/// 文件选择集合的统计结果。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FileSelectionStats {
+    pub directory_count: i32,
+    pub total_size: Option<i64>,
+}
+
+/// 遍历文件路径，统计其中的目录数与所有普通文件的总大小。
+///
+/// - 任一路径元数据读取失败、文件大小超出 i64 范围或总大小累计溢出时，
+///   `total_size` 退化为 `None`（视为"大小不可用"），但不影响 `directory_count`。
+/// - 只要存在目录，文件总大小即视为不可用（`total_size = None`）。
+pub fn analyze_file_paths(file_paths: &[String]) -> FileSelectionStats {
+    let mut total_size = 0i64;
+    let mut directory_count = 0i32;
+    let mut size_available = true;
+
+    for path in file_paths {
+        let metadata = match fs::metadata(path) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                debug!("读取文件元数据失败，无法统计文件总大小: {path}, {error}");
+                size_available = false;
+                continue;
+            }
+        };
+
+        if metadata.is_dir() {
+            directory_count += 1;
+            size_available = false;
+            continue;
+        }
+
+        let file_size = match i64::try_from(metadata.len()) {
+            Ok(file_size) => file_size,
+            Err(_) => {
+                debug!("文件大小超出 i64 支持范围，无法统计文件总大小: {path}");
+                size_available = false;
+                continue;
+            }
+        };
+        total_size = match total_size.checked_add(file_size) {
+            Some(total_size) => total_size,
+            None => {
+                debug!("文件总大小累计溢出，无法统计文件总大小");
+                size_available = false;
+                continue;
+            }
+        };
+    }
+
+    FileSelectionStats {
+        directory_count,
+        total_size: if size_available {
+            Some(total_size)
+        } else {
+            None
+        },
+    }
 }
 
 fn format_bytes(bytes: i64) -> String {

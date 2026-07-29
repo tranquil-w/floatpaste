@@ -1,4 +1,4 @@
-use std::{fs, thread, time::Duration};
+use std::{thread, time::Duration};
 
 use arboard::Clipboard;
 use tauri::{AppHandle, Emitter};
@@ -13,7 +13,10 @@ use crate::{
         file_clipboard::read_file_paths_from_clipboard,
         image_clipboard::read_image_from_clipboard,
     },
-    services::history_service::HistoryService,
+    services::{
+        history_service::HistoryService,
+        normalize_service::analyze_file_paths,
+    },
 };
 
 const CLIPBOARD_POLL_INTERVAL_MS: u64 = 800;
@@ -114,61 +117,6 @@ fn process_clipboard_change(
     Ok(())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct FileSelectionStats {
-    directory_count: i32,
-    total_size: Option<i64>,
-}
-
-fn analyze_file_paths(file_paths: &[String]) -> FileSelectionStats {
-    let mut total_size = 0i64;
-    let mut directory_count = 0i32;
-    let mut size_available = true;
-
-    for path in file_paths {
-        let metadata = match fs::metadata(path) {
-            Ok(metadata) => metadata,
-            Err(error) => {
-                debug!("读取文件元数据失败，无法统计文件总大小: {path}, {error}");
-                size_available = false;
-                continue;
-            }
-        };
-
-        if metadata.is_dir() {
-            directory_count += 1;
-            size_available = false;
-            continue;
-        }
-
-        let file_size = match i64::try_from(metadata.len()) {
-            Ok(file_size) => file_size,
-            Err(_) => {
-                debug!("文件大小超出 i64 支持范围，无法统计文件总大小: {path}");
-                size_available = false;
-                continue;
-            }
-        };
-        total_size = match total_size.checked_add(file_size) {
-            Some(total_size) => total_size,
-            None => {
-                debug!("文件总大小累计溢出，无法统计文件总大小");
-                size_available = false;
-                continue;
-            }
-        };
-    }
-
-    FileSelectionStats {
-        directory_count,
-        total_size: if size_available {
-            Some(total_size)
-        } else {
-            None
-        },
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -176,8 +124,9 @@ mod tests {
     use arboard::Error as ClipboardError;
     use uuid::Uuid;
 
-    use super::{analyze_file_paths, FileSelectionStats};
+    use super::analyze_file_paths;
     use super::super::clipboard_error::should_retry_clipboard_read;
+    use crate::services::normalize_service::FileSelectionStats;
 
     fn temp_path(name: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!("floatpaste-{name}-{}", Uuid::new_v4()))
