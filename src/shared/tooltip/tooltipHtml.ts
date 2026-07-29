@@ -1,4 +1,4 @@
-import type { ClipItemSummary } from "../../shared/types/clips";
+import type { ClipItemSummary } from "../types/clips";
 
 export const TOOLTIP_IMAGE_PREVIEW_MAX_WIDTH = 560;
 export const TOOLTIP_IMAGE_PREVIEW_MAX_HEIGHT = 420;

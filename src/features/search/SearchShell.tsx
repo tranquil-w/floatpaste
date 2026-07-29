@@ -61,8 +61,8 @@ import {
   setFavoritedOnDetail,
   setFavoritedOnSearchResult,
 } from "./favoritedState";
-import { buildTooltipHtml } from "../picker/tooltipHtml";
-import { resolveTooltipShowPosition } from "../picker/tooltipState";
+import { buildTooltipHtml } from "../../shared/tooltip/tooltipHtml";
+import { resolveTooltipShowPosition } from "../../shared/tooltip/tooltipState";
 import { useQuery } from "@tanstack/react-query";
 import {
   createSearchRecentQueryKey,

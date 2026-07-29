@@ -35,8 +35,8 @@ import {
 } from "./queries";
 import { toggleFavoriteSelection } from "./favoriteToggle";
 import { PICKER_IMAGE_THUMBNAIL_STYLE } from "./previewLayout";
-import { buildTooltipHtml } from "./tooltipHtml";
-import { resolveTooltipShowPosition } from "./tooltipState";
+import { buildTooltipHtml } from "../../shared/tooltip/tooltipHtml";
+import { resolveTooltipShowPosition } from "../../shared/tooltip/tooltipState";
 
 const STYLES = {
   container:
