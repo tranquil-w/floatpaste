@@ -64,14 +64,6 @@ extern "system" fn mouse_hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) ->
                     if let Some(window) = app.get_webview_window("picker") {
                         if window.is_visible().unwrap_or(false) {
                             if let Ok(hwnd_obj) = window.hwnd() {
-                                // in windows 0.61, window.hwnd() usually returns an HWND
-                                // or tauri returns a raw pointer which we cast.
-                                // Actually tauri's hwnd() returns std::ffi::c_void pointer.
-                                // wait, does it? tauri::WebviewWindow::hwnd() returns Result<HWND, tauri::Error>
-                                // Let's check window_utils.rs we saw earlier:
-                                // let tauri_hwnd = window.hwnd().unwrap();
-                                // let hwnd_isize = tauri_hwnd.0 as isize;
-                                // let hwnd = HWND(hwnd_isize as *mut _);
                                 let hwnd_isize = hwnd_obj.0 as isize;
                                 let hwnd = HWND(hwnd_isize as *mut _);
 

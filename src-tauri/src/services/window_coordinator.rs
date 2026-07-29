@@ -566,7 +566,7 @@ fn configure_search_window(window: &WebviewWindow) {
 
     #[cfg(target_os = "windows")]
     if let Err(error) = crate::platform::windows::window_utils::block_alt_menu_activation(window) {
-        warn!("æ‹¦æˆªæœç´¢çª—å£ Alt ç³»ç»Ÿèœå•æ¿€æ´»å¤±è´¥: {error}");
+        warn!("拦截搜索窗口 Alt 系统菜单激活失败: {error}");
     }
 
     let app = window.app_handle().clone();
