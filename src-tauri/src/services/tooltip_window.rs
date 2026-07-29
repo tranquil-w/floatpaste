@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, Position, Size, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tracing::{info, warn};
 
+use crate::domain::error::AppError;
+
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, HWND_TOPMOST, SetWindowPos, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW};
 
@@ -65,7 +67,7 @@ fn clear_pending_tooltip_request() {
 pub struct TooltipWindow;
 
 impl TooltipWindow {
-    pub fn ensure_window(app: &AppHandle) -> Result<WebviewWindow, String> {
+    pub fn ensure_window(app: &AppHandle) -> Result<WebviewWindow, AppError> {
         if let Some(window) = app.get_webview_window(TOOLTIP_WINDOW_LABEL) {
             return Ok(window);
         }
@@ -87,7 +89,7 @@ impl TooltipWindow {
         .map_err(|e| {
             let msg = format!("创建 tooltip 窗口失败: {e}");
             warn!("{msg}");
-            msg
+            AppError::Message(msg)
         })?;
 
         info!("tooltip 窗口已创建");
@@ -103,20 +105,15 @@ impl TooltipWindow {
         html: String,
         theme: &str,
         theme_vars: &HashMap<String, String>,
-    ) -> Result<(), String> {
+    ) -> Result<(), AppError> {
         let window = Self::ensure_window(app)?;
 
-        set_pending_tooltip_request(Some(PendingTooltipRequest { request_id, x, y }))
-            .map_err(|e| e.to_string())?;
+        set_pending_tooltip_request(Some(PendingTooltipRequest { request_id, x, y }))?;
 
-        let json_request_id = serde_json::to_string(&request_id)
-            .map_err(|e| format!("Tooltip requestId 序列化失败: {e}"))?;
-        let json_html = serde_json::to_string(&html)
-            .map_err(|e| format!("Tooltip HTML 序列化失败: {e}"))?;
-        let json_theme = serde_json::to_string(theme)
-            .map_err(|e| format!("Tooltip theme 序列化失败: {e}"))?;
-        let json_theme_vars = serde_json::to_string(theme_vars)
-            .map_err(|e| format!("Tooltip themeVars 序列化失败: {e}"))?;
+        let json_request_id = serde_json::to_string(&request_id)?;
+        let json_html = serde_json::to_string(&html)?;
+        let json_theme = serde_json::to_string(theme)?;
+        let json_theme_vars = serde_json::to_string(theme_vars)?;
         window.eval(&format!(
             "window.showTooltip({}, {}, {}, {})",
             json_request_id, json_html, json_theme, json_theme_vars
@@ -124,7 +121,7 @@ impl TooltipWindow {
             .map_err(|e| {
                 clear_pending_tooltip_request();
                 warn!("tooltip JS eval 失败: {e}");
-                e.to_string()
+                e
             })?;
 
         Ok(())
@@ -135,8 +132,8 @@ impl TooltipWindow {
         request_id: u32,
         width: u32,
         height: u32,
-    ) -> Result<(), String> {
-        let Some(request) = take_matching_pending_tooltip_request(request_id).map_err(|e| e.to_string())?
+    ) -> Result<(), AppError> {
+        let Some(request) = take_matching_pending_tooltip_request(request_id)?
         else {
             return Ok(());
         };
@@ -163,7 +160,7 @@ impl TooltipWindow {
         {
             crate::platform::windows::window_utils::set_window_click_through(&window)?;
 
-            let tauri_hwnd = window.hwnd().map_err(|e| e.to_string())?;
+            let tauri_hwnd = window.hwnd()?;
             let hwnd = windows::Win32::Foundation::HWND(tauri_hwnd.0 as isize as *mut _);
             unsafe {
                 let _ = SetWindowPos(
@@ -180,13 +177,13 @@ impl TooltipWindow {
 
         #[cfg(not(target_os = "windows"))]
         {
-            window.show().map_err(|e| e.to_string())?;
+            window.show()?;
         }
 
         Ok(())
     }
 
-    pub fn hide_tooltip(app: &AppHandle) -> Result<(), String> {
+    pub fn hide_tooltip(app: &AppHandle) -> Result<(), AppError> {
         clear_pending_tooltip_request();
 
         let Some(window) = app.get_webview_window(TOOLTIP_WINDOW_LABEL) else {
@@ -204,7 +201,7 @@ impl TooltipWindow {
 
         #[cfg(not(target_os = "windows"))]
         {
-            window.hide().map_err(|e| e.to_string())?;
+            window.hide()?;
         }
 
         Ok(())

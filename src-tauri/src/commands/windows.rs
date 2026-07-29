@@ -84,16 +84,16 @@ pub async fn show_tooltip(
     theme: String,
     theme_vars: HashMap<String, String>,
 ) -> Result<(), String> {
-    TooltipWindow::show_tooltip(&app, request_id, x, y, html, &theme, &theme_vars)
+    TooltipWindow::show_tooltip(&app, request_id, x, y, html, &theme, &theme_vars).map_err(map_error)
 }
 
 #[tauri::command]
 pub fn tooltip_ready(app: AppHandle, request_id: u32, width: u32, height: u32) -> Result<(), String> {
-    TooltipWindow::on_tooltip_ready(&app, request_id, width, height)
+    TooltipWindow::on_tooltip_ready(&app, request_id, width, height).map_err(map_error)
 }
 
 #[tauri::command]
 pub fn hide_tooltip(app: AppHandle) -> Result<(), String> {
-    TooltipWindow::hide_tooltip(&app)
+    TooltipWindow::hide_tooltip(&app).map_err(map_error)
 }
 

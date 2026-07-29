@@ -8,6 +8,10 @@ pub enum AppError {
     Io(#[from] std::io::Error),
     #[error("序列化错误: {0}")]
     SerdeJson(#[from] serde_json::Error),
+    #[error("Tauri 运行时错误: {0}")]
+    Tauri(#[from] tauri::Error),
+    #[error("Windows 系统调用错误: {0}")]
+    Windows(#[from] windows::core::Error),
     #[error("系统剪贴板不可用: {0}")]
     Clipboard(String),
     #[error("状态锁已损坏")]

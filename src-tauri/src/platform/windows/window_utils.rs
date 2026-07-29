@@ -1,4 +1,6 @@
 use tauri::WebviewWindow;
+
+use crate::domain::error::AppError;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::SetActiveWindow;
 use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
@@ -23,8 +25,8 @@ fn is_alt_menu_syscommand(wparam: usize) -> bool {
     (wparam & 0xFFF0) == SC_KEYMENU as usize
 }
 
-pub fn remove_window_system_menu(window: &WebviewWindow) -> Result<(), String> {
-    let tauri_hwnd = window.hwnd().map_err(|e| e.to_string())?;
+pub fn remove_window_system_menu(window: &WebviewWindow) -> Result<(), AppError> {
+    let tauri_hwnd = window.hwnd()?;
     let hwnd_isize = tauri_hwnd.0 as isize;
     let hwnd = HWND(hwnd_isize as *mut _);
 
@@ -45,8 +47,8 @@ pub fn remove_window_system_menu(window: &WebviewWindow) -> Result<(), String> {
     Ok(())
 }
 
-pub fn block_alt_menu_activation(window: &WebviewWindow) -> Result<(), String> {
-    let tauri_hwnd = window.hwnd().map_err(|e| e.to_string())?;
+pub fn block_alt_menu_activation(window: &WebviewWindow) -> Result<(), AppError> {
+    let tauri_hwnd = window.hwnd()?;
     let hwnd_isize = tauri_hwnd.0 as isize;
     let hwnd = HWND(hwnd_isize as *mut _);
 
@@ -62,8 +64,8 @@ pub fn block_alt_menu_activation(window: &WebviewWindow) -> Result<(), String> {
     Ok(())
 }
 
-pub fn show_window_no_activate(window: &WebviewWindow) -> Result<(), String> {
-    let tauri_hwnd = window.hwnd().map_err(|e| e.to_string())?;
+pub fn show_window_no_activate(window: &WebviewWindow) -> Result<(), AppError> {
+    let tauri_hwnd = window.hwnd()?;
     let hwnd_isize = tauri_hwnd.0 as isize;
     let hwnd = HWND(hwnd_isize as *mut _);
 
@@ -92,16 +94,16 @@ pub fn show_window_no_activate(window: &WebviewWindow) -> Result<(), String> {
     Ok(())
 }
 
-pub fn is_window_minimized(window: &WebviewWindow) -> Result<bool, String> {
-    let tauri_hwnd = window.hwnd().map_err(|e| e.to_string())?;
+pub fn is_window_minimized(window: &WebviewWindow) -> Result<bool, AppError> {
+    let tauri_hwnd = window.hwnd()?;
     let hwnd_isize = tauri_hwnd.0 as isize;
     let hwnd = HWND(hwnd_isize as *mut _);
 
     Ok(unsafe { IsIconic(hwnd).as_bool() })
 }
 
-pub fn hide_window(window: &WebviewWindow) -> Result<(), String> {
-    let tauri_hwnd = window.hwnd().map_err(|e| e.to_string())?;
+pub fn hide_window(window: &WebviewWindow) -> Result<(), AppError> {
+    let tauri_hwnd = window.hwnd()?;
     let hwnd_isize = tauri_hwnd.0 as isize;
     let hwnd = HWND(hwnd_isize as *mut _);
 
@@ -112,8 +114,8 @@ pub fn hide_window(window: &WebviewWindow) -> Result<(), String> {
     Ok(())
 }
 
-pub fn set_window_click_through(window: &WebviewWindow) -> Result<(), String> {
-    let tauri_hwnd = window.hwnd().map_err(|e| e.to_string())?;
+pub fn set_window_click_through(window: &WebviewWindow) -> Result<(), AppError> {
+    let tauri_hwnd = window.hwnd()?;
     let hwnd_isize = tauri_hwnd.0 as isize;
     let hwnd = HWND(hwnd_isize as *mut _);
 
@@ -129,17 +131,17 @@ pub fn set_window_click_through(window: &WebviewWindow) -> Result<(), String> {
     Ok(())
 }
 
-pub fn is_cursor_inside_window(window: &WebviewWindow) -> Result<bool, String> {
-    let tauri_hwnd = window.hwnd().map_err(|e| e.to_string())?;
+pub fn is_cursor_inside_window(window: &WebviewWindow) -> Result<bool, AppError> {
+    let tauri_hwnd = window.hwnd()?;
     let hwnd_isize = tauri_hwnd.0 as isize;
     let hwnd = HWND(hwnd_isize as *mut _);
 
     unsafe {
         let mut rect = RECT::default();
-        GetWindowRect(hwnd, &mut rect).map_err(|e| e.to_string())?;
+        GetWindowRect(hwnd, &mut rect)?;
 
         let mut cursor = POINT::default();
-        GetCursorPos(&mut cursor).map_err(|e| e.to_string())?;
+        GetCursorPos(&mut cursor)?;
 
         Ok(cursor.x >= rect.left
             && cursor.x <= rect.right
@@ -148,8 +150,8 @@ pub fn is_cursor_inside_window(window: &WebviewWindow) -> Result<bool, String> {
     }
 }
 
-pub fn restore_window_and_focus(window: &WebviewWindow) -> Result<(), String> {
-    let tauri_hwnd = window.hwnd().map_err(|e| e.to_string())?;
+pub fn restore_window_and_focus(window: &WebviewWindow) -> Result<(), AppError> {
+    let tauri_hwnd = window.hwnd()?;
     let hwnd_isize = tauri_hwnd.0 as isize;
     let hwnd = HWND(hwnd_isize as *mut _);
 
@@ -178,7 +180,7 @@ pub fn restore_window_and_focus(window: &WebviewWindow) -> Result<(), String> {
     Ok(())
 }
 
-pub fn apply_picker_window_shape(_window: &WebviewWindow) -> Result<(), String> {
+pub fn apply_picker_window_shape(_window: &WebviewWindow) -> Result<(), AppError> {
     Ok(())
 }
 

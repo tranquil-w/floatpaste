@@ -92,11 +92,9 @@ impl WindowCoordinator {
         let window = ensure_settings_window(app)?;
 
         window
-            .show()
-            .map_err(|error| AppError::Message(error.to_string()))?;
+            .show()?;
         window
-            .set_focus()
-            .map_err(|error| AppError::Message(error.to_string()))?;
+            .set_focus()?;
         Ok(())
     }
 
@@ -132,8 +130,7 @@ impl WindowCoordinator {
 
         #[cfg(target_os = "windows")]
         {
-            crate::platform::windows::window_utils::show_window_no_activate(&window)
-                .map_err(|error| AppError::Message(error.to_string()))?;
+            crate::platform::windows::window_utils::show_window_no_activate(&window)?;
             if let Some(hwnd) = target.window_hwnd {
                 let _ = crate::platform::windows::active_app::ActiveAppResolver::restore_foreground_window_with_focus(
                     hwnd,
@@ -144,8 +141,7 @@ impl WindowCoordinator {
         #[cfg(not(target_os = "windows"))]
         {
             window
-                .show()
-                .map_err(|error| AppError::Message(error.to_string()))?;
+                .show()?;
         }
 
         window
@@ -155,8 +151,7 @@ impl WindowCoordinator {
                     session_id: Utc::now().timestamp_millis().to_string(),
                     shown_at: Utc::now().to_rfc3339(),
                 },
-            )
-            .map_err(|error| AppError::Message(error.to_string()))?;
+            )?;
 
         Ok(())
     }
@@ -184,19 +179,16 @@ impl WindowCoordinator {
         };
 
         if window
-            .is_visible()
-            .map_err(|error| AppError::Message(error.to_string()))?
+            .is_visible()?
         {
             persist_picker_window_position(app, &window);
             #[cfg(target_os = "windows")]
             {
-                crate::platform::windows::window_utils::hide_window(&window)
-                    .map_err(AppError::Message)?;
+                crate::platform::windows::window_utils::hide_window(&window)?;
             }
             #[cfg(not(target_os = "windows"))]
             window
-                .hide()
-                .map_err(|error| AppError::Message(error.to_string()))?;
+                .hide()?;
         }
 
         info!("隐藏 Picker");
@@ -298,8 +290,7 @@ impl WindowCoordinator {
                     item_id: None,
                     initial_keyword: None,
                 },
-            )
-            .map_err(|error| AppError::Message(error.to_string()))?;
+            )?;
 
         info!("全局快捷键打开 Search");
         Ok(())
@@ -354,12 +345,10 @@ impl WindowCoordinator {
         };
 
         if window
-            .is_visible()
-            .map_err(|error| AppError::Message(error.to_string()))?
+            .is_visible()?
         {
             window
-                .hide()
-                .map_err(|error| AppError::Message(error.to_string()))?;
+                .hide()?;
         }
 
         let _ = window.emit(EDITOR_SESSION_END_EVENT, ());
@@ -385,14 +374,11 @@ impl WindowCoordinator {
         state.begin_editor_activation();
 
         window
-            .show()
-            .map_err(|error| AppError::Message(error.to_string()))?;
+            .show()?;
         window
-            .set_focus()
-            .map_err(|error| AppError::Message(error.to_string()))?;
+            .set_focus()?;
         window
-            .emit(EDITOR_SESSION_START_EVENT, session)
-            .map_err(|error| AppError::Message(error.to_string()))?;
+            .emit(EDITOR_SESSION_START_EVENT, session)?;
 
         info!("打开 Editor");
         Ok(())
@@ -410,12 +396,10 @@ impl WindowCoordinator {
         };
 
         if window
-            .is_visible()
-            .map_err(|error| AppError::Message(error.to_string()))?
+            .is_visible()?
         {
             window
-                .hide()
-                .map_err(|error| AppError::Message(error.to_string()))?;
+                .hide()?;
         }
 
         Ok(())
@@ -433,12 +417,10 @@ fn hide_search_window(
 
     if let Some(window) = app.get_webview_window(SEARCH_WINDOW_LABEL) {
         if window
-            .is_visible()
-            .map_err(|error| AppError::Message(error.to_string()))?
+            .is_visible()?
         {
             window
-                .hide()
-                .map_err(|error| AppError::Message(error.to_string()))?;
+                .hide()?;
         }
 
         if let Err(err) = window.emit(SEARCH_SESSION_END_EVENT, ()) {
@@ -717,14 +699,12 @@ fn restore_picker_after_editor(
 
     #[cfg(target_os = "windows")]
     {
-        crate::platform::windows::window_utils::show_window_no_activate(&window)
-            .map_err(|error| AppError::Message(error.to_string()))?;
+        crate::platform::windows::window_utils::show_window_no_activate(&window)?;
     }
     #[cfg(not(target_os = "windows"))]
     {
         window
-            .show()
-            .map_err(|error| AppError::Message(error.to_string()))?;
+            .show()?;
     }
 
     state.begin_picker_activation();
@@ -759,50 +739,46 @@ fn restore_search_after_editor(app: &AppHandle, state: &AppState) -> Result<(), 
 
 fn is_window_ready_for_reuse(window: &WebviewWindow) -> Result<bool, AppError> {
     let is_visible = window
-        .is_visible()
-        .map_err(|error| AppError::Message(error.to_string()))?;
+        .is_visible()?;
     #[cfg(target_os = "windows")]
-    let is_minimized = crate::platform::windows::window_utils::is_window_minimized(window)
-        .map_err(AppError::Message)?;
+    let is_minimized = crate::platform::windows::window_utils::is_window_minimized(window)?;
 
     #[cfg(not(target_os = "windows"))]
     let is_minimized = window
-        .is_minimized()
-        .map_err(|error| AppError::Message(error.to_string()))?;
+        .is_minimized()?;
 
     Ok(is_visible && !is_minimized)
 }
 
 fn show_and_focus_window(window: &WebviewWindow) -> Result<(), AppError> {
     window
-        .show()
-        .map_err(|error| AppError::Message(error.to_string()))?;
+        .show()?;
 
     #[cfg(target_os = "windows")]
     {
-        let mut last_error: Option<String> = None;
+        let mut last_error: Option<AppError> = None;
 
         for attempt in 0..=WINDOW_FOCUS_MAX_RETRIES {
             match crate::platform::windows::window_utils::restore_window_and_focus(window) {
                 Ok(()) => return Ok(()),
-                Err(error) if should_retry_window_focus(&error) && attempt < WINDOW_FOCUS_MAX_RETRIES => {
+                Err(error)
+                    if should_retry_window_focus(&error) && attempt < WINDOW_FOCUS_MAX_RETRIES =>
+                {
                     last_error = Some(error);
                     std::thread::sleep(Duration::from_millis(WINDOW_FOCUS_RETRY_DELAY_MS));
                 }
-                Err(error) => return Err(AppError::Message(error)),
+                Err(error) => return Err(error),
             }
         }
 
-        return Err(AppError::Message(
-            last_error.unwrap_or_else(|| "搜索窗口聚焦失败".to_string()),
-        ));
+        return Err(last_error
+            .unwrap_or_else(|| AppError::Message("搜索窗口聚焦失败".to_string())));
     }
 
     #[cfg(not(target_os = "windows"))]
     {
         window
-            .set_focus()
-            .map_err(|error| AppError::Message(error.to_string()))?;
+            .set_focus()?;
         Ok(())
     }
 }
@@ -917,8 +893,9 @@ fn notify_search_input_state(app: &AppHandle, target_window_hwnd: Option<isize>,
     let _ = search.emit(event_name, ());
 }
 
-fn should_retry_window_focus(error: &str) -> bool {
+fn should_retry_window_focus(error: &AppError) -> bool {
     error
+        .to_string()
         .to_ascii_lowercase()
         .contains("underlying handle is not available")
 }
@@ -975,6 +952,7 @@ mod tests {
         should_restore_picker_after_search_close, should_retry_window_focus,
         SETTINGS_WINDOW_DEFAULT_HEIGHT, SETTINGS_WINDOW_DEFAULT_WIDTH, SETTINGS_WINDOW_MIN_WIDTH,
     };
+    use crate::domain::error::AppError;
     use crate::domain::search_session::{SearchSession, SearchSource};
     use serde_json::Value;
 
@@ -1049,13 +1027,15 @@ mod tests {
 
     #[test]
     fn should_retry_window_focus_when_underlying_handle_is_not_available() {
-        assert!(should_retry_window_focus(
-            "the underlying handle is not available"
-        ));
+        assert!(should_retry_window_focus(&AppError::Message(
+            "the underlying handle is not available".to_string()
+        )));
     }
 
     #[test]
     fn should_not_retry_window_focus_for_other_errors() {
-        assert!(!should_retry_window_focus("permission denied"));
+        assert!(!should_retry_window_focus(&AppError::Message(
+            "permission denied".to_string()
+        )));
     }
 }
