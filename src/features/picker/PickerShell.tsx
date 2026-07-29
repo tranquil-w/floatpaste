@@ -37,6 +37,7 @@ import { toggleFavoriteSelection } from "./favoriteToggle";
 import { PICKER_IMAGE_THUMBNAIL_STYLE } from "./previewLayout";
 import { buildTooltipHtml } from "../../shared/tooltip/tooltipHtml";
 import { resolveTooltipShowPosition } from "../../shared/tooltip/tooltipState";
+import { invalidateSettings } from "../../shared/queries/settingsQuery";
 
 const STYLES = {
   container:
@@ -298,7 +299,7 @@ export function PickerShell() {
     });
 
     void listen(PICKER_SESSION_START_EVENT, async () => {
-      await queryClient.invalidateQueries({ queryKey: ["settings"] });
+      await invalidateSettings(queryClient);
       await queryClient.invalidateQueries({ queryKey: ["picker-recent"] });
 
       if (!disposed) {
@@ -321,7 +322,7 @@ export function PickerShell() {
     });
 
     void listen(SETTINGS_CHANGED_EVENT, async () => {
-      await queryClient.invalidateQueries({ queryKey: ["settings"] });
+      await invalidateSettings(queryClient);
       await queryClient.invalidateQueries({ queryKey: ["picker-recent"] });
 
       if (!disposed) {

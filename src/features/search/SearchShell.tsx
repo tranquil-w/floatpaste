@@ -36,7 +36,7 @@ import {
   setCurrentWindowLogicalSize,
   startCurrentWindowDragging,
 } from "../../bridge/window";
-import { getSettings } from "../../bridge/commands";
+import { invalidateSettings, useSettingsQuery } from "../../shared/queries/settingsQuery";
 import { useItemDetailQuery } from "../../shared/queries/clipQueries";
 import type {
   ClipItemDetail,
@@ -322,12 +322,7 @@ export function SearchShell() {
   const hasKeyword = keyword.trim().length > 0;
   const recentQuery = useSearchRecentQuery(activeFilter, !hasKeyword);
   const searchQuery = useSearchSearchQuery(keyword, activeFilter, hasKeyword);
-  const settingsQuery = useQuery({
-    queryKey: ["settings"],
-    queryFn: getSettings,
-    staleTime: 0,
-    refetchOnWindowFocus: false,
-  });
+  const settingsQuery = useSettingsQuery({ staleTime: 0 });
   const items = useMemo<ClipItemSummary[]>(
     () => (hasKeyword ? (searchQuery.data?.items ?? []) : (recentQuery.data?.items ?? [])),
     [hasKeyword, recentQuery.data?.items, searchQuery.data?.items],
@@ -783,7 +778,7 @@ export function SearchShell() {
       itemId?: string;
       initialKeyword?: string;
     }>(SEARCH_SESSION_START_EVENT, async (event) => {
-      await queryClient.invalidateQueries({ queryKey: ["settings"] });
+      await invalidateSettings(queryClient);
 
       setSession({
         source: "global" as const,
@@ -918,7 +913,7 @@ export function SearchShell() {
     });
 
     void listen(SETTINGS_CHANGED_EVENT, async () => {
-      await queryClient.invalidateQueries({ queryKey: ["settings"] });
+      await invalidateSettings(queryClient);
     }).then((cleanup) => {
       if (disposed) {
         cleanup();

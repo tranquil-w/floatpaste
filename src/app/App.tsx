@@ -1,26 +1,20 @@
 import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
 import { queryClient } from "./queryClient";
 import { SettingsShell } from "../features/settings/SettingsShell";
 import { EditorShell } from "../features/editor";
 import { PickerShell } from "../features/picker/PickerShell";
 import { SearchShell } from "../features/search/SearchShell";
-import { getSettings } from "../bridge/commands";
 import { SETTINGS_CHANGED_EVENT } from "../bridge/events";
 import { isTauriRuntime } from "../bridge/runtime";
 import { getCurrentWindowLabel } from "../bridge/window";
 import { DEFAULT_THEME_MODE, useAppliedTheme } from "../shared/theme";
 import { DEFAULT_CUSTOM_THEME_COLORS } from "../shared/themeColors";
+import { invalidateSettings, useSettingsQuery } from "../shared/queries/settingsQuery";
 
 export function App() {
   const [windowLabel, setWindowLabel] = useState(() => getCurrentWindowLabel());
-  const settingsQuery = useQuery({
-    queryKey: ["settings"],
-    queryFn: getSettings,
-    staleTime: 0,
-    refetchOnWindowFocus: false,
-  });
+  const settingsQuery = useSettingsQuery({ staleTime: 0 });
 
   useAppliedTheme(
     settingsQuery.data?.themeMode ?? DEFAULT_THEME_MODE,
@@ -34,7 +28,7 @@ export function App() {
 
     let unlistenSettings: (() => void) | undefined;
     void listen(SETTINGS_CHANGED_EVENT, async () => {
-      await queryClient.invalidateQueries({ queryKey: ["settings"] });
+      await invalidateSettings(queryClient);
     }).then((cleanup) => {
       unlistenSettings = cleanup;
     });

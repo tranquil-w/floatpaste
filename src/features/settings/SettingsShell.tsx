@@ -26,6 +26,10 @@ import { SettingsSection } from "./SettingsSection";
 import { SETTINGS_SECTIONS, type SettingsSectionId } from "./settingsSections";
 import { useSettingsNavigation } from "./useSettingsNavigation";
 import { useSettingsQuery, useUpdateSettingsMutation } from "./queries";
+import {
+  invalidateSettings,
+  settingsQueryKey,
+} from "../../shared/queries/settingsQuery";
 
 type EditableSettings = {
   shortcut: string;
@@ -448,7 +452,7 @@ export function SettingsShell() {
       setSaveStatus("saving");
       updateSettingsMutation.mutate(payload, {
         onSuccess: (nextValue, variables) => {
-          queryClient.setQueryData(["settings"], nextValue);
+          queryClient.setQueryData(settingsQueryKey, nextValue);
 
           if (requestId !== latestSaveRequestIdRef.current) {
             return;
@@ -494,13 +498,13 @@ export function SettingsShell() {
     let offOpenSettings: (() => void) | undefined;
 
     void listen(SETTINGS_CHANGED_EVENT, async () => {
-      await queryClient.invalidateQueries({ queryKey: ["settings"] });
+      await invalidateSettings(queryClient);
     }).then((cleanup) => {
       offSettings = cleanup;
     });
 
     void listen(SETTINGS_OPEN_SETTINGS_EVENT, async () => {
-      await queryClient.invalidateQueries({ queryKey: ["settings"] });
+      await invalidateSettings(queryClient);
     }).then((cleanup) => {
       offOpenSettings = cleanup;
     });

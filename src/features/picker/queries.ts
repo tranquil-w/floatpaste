@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { getSettings, listRecentItems } from "../../bridge/commands";
+import { listRecentItems } from "../../bridge/commands";
+import { useSettingsQuery } from "../../shared/queries/settingsQuery";
 
 export const DEFAULT_PICKER_RECORD_LIMIT = 50;
 
@@ -8,12 +9,7 @@ export function normalizePickerRecordLimit(limit: number) {
 }
 
 export function usePickerSettingsQuery() {
-  return useQuery({
-    queryKey: ["settings"],
-    queryFn: getSettings,
-    staleTime: 0,
-    refetchOnWindowFocus: false,
-  });
+  return useSettingsQuery({ staleTime: 0 });
 }
 
 export function usePickerRecentQuery(limit = DEFAULT_PICKER_RECORD_LIMIT, enabled = true) {
