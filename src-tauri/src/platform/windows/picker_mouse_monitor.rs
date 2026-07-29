@@ -1,6 +1,6 @@
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager};
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, GetWindowRect, SetWindowsHookExW, UnhookWindowsHookEx, HHOOK, MSLLHOOKSTRUCT,
@@ -18,7 +18,10 @@ pub struct PickerMouseMonitor;
 
 impl PickerMouseMonitor {
     pub fn begin_session(app: AppHandle) {
-        let mut handle = APP_HANDLE.lock().unwrap();
+        let Ok(mut handle) = APP_HANDLE.lock() else {
+            warn!("APP_HANDLE 锁已损坏，跳过鼠标钩子会话注册");
+            return;
+        };
         *handle = Some(app);
 
         unsafe {
@@ -43,7 +46,10 @@ impl PickerMouseMonitor {
                 let _ = UnhookWindowsHookEx(HHOOK(h as *mut core::ffi::c_void));
             }
         }
-        let mut handle = APP_HANDLE.lock().unwrap();
+        let Ok(mut handle) = APP_HANDLE.lock() else {
+            warn!("APP_HANDLE 锁已损坏，跳过鼠标钩子会话清理");
+            return;
+        };
         *handle = None;
     }
 }
@@ -59,7 +65,11 @@ extern "system" fn mouse_hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) ->
             || msg == WM_NCMBUTTONDOWN
         {
             let close_picker = {
-                let app_lock = APP_HANDLE.lock().unwrap();
+                let Ok(app_lock) = APP_HANDLE.lock()
+                else {
+                    // 锁中毒时无法判定，放行事件避免误关闭 Picker
+                    unsafe { return CallNextHookEx(None, code, wparam, lparam) };
+                };
                 if let Some(app) = app_lock.as_ref() {
                     if let Some(window) = app.get_webview_window("picker") {
                         if window.is_visible().unwrap_or(false) {
@@ -101,7 +111,9 @@ extern "system" fn mouse_hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) ->
 
             if close_picker {
                 let app = {
-                    let lock = APP_HANDLE.lock().unwrap();
+                    let Ok(lock) = APP_HANDLE.lock() else {
+                        unsafe { return CallNextHookEx(None, code, wparam, lparam) };
+                    };
                     lock.as_ref().cloned()
                 };
                 if let Some(app_clone) = app {

@@ -33,28 +33,33 @@ pub(crate) struct PendingTooltipRequest {
 
 static PENDING_TOOLTIP_REQUEST: Mutex<Option<PendingTooltipRequest>> = Mutex::new(None);
 
-fn set_pending_tooltip_request(request: Option<PendingTooltipRequest>) {
-    *PENDING_TOOLTIP_REQUEST.lock().unwrap() = request;
+fn set_pending_tooltip_request(
+    request: Option<PendingTooltipRequest>,
+) -> Result<(), crate::domain::error::AppError> {
+    *PENDING_TOOLTIP_REQUEST.lock()? = request;
+    Ok(())
 }
 
 #[cfg(test)]
 fn take_pending_tooltip_request() -> Option<PendingTooltipRequest> {
-    PENDING_TOOLTIP_REQUEST.lock().unwrap().take()
+    PENDING_TOOLTIP_REQUEST.lock().ok()?.take()
 }
 
-fn take_matching_pending_tooltip_request(request_id: u32) -> Option<PendingTooltipRequest> {
-    let mut pending_request = PENDING_TOOLTIP_REQUEST.lock().unwrap();
+fn take_matching_pending_tooltip_request(
+    request_id: u32,
+) -> Result<Option<PendingTooltipRequest>, crate::domain::error::AppError> {
+    let mut pending_request = PENDING_TOOLTIP_REQUEST.lock()?;
     match *pending_request {
         Some(request) if request.request_id == request_id => {
             *pending_request = None;
-            Some(request)
+            Ok(Some(request))
         }
-        _ => None,
+        _ => Ok(None),
     }
 }
 
 fn clear_pending_tooltip_request() {
-    set_pending_tooltip_request(None);
+    let _ = set_pending_tooltip_request(None);
 }
 
 pub struct TooltipWindow;
@@ -101,7 +106,8 @@ impl TooltipWindow {
     ) -> Result<(), String> {
         let window = Self::ensure_window(app)?;
 
-        set_pending_tooltip_request(Some(PendingTooltipRequest { request_id, x, y }));
+        set_pending_tooltip_request(Some(PendingTooltipRequest { request_id, x, y }))
+            .map_err(|e| e.to_string())?;
 
         let json_request_id = serde_json::to_string(&request_id)
             .map_err(|e| format!("Tooltip requestId 序列化失败: {e}"))?;
@@ -130,7 +136,8 @@ impl TooltipWindow {
         width: u32,
         height: u32,
     ) -> Result<(), String> {
-        let Some(request) = take_matching_pending_tooltip_request(request_id) else {
+        let Some(request) = take_matching_pending_tooltip_request(request_id).map_err(|e| e.to_string())?
+        else {
             return Ok(());
         };
 
@@ -272,7 +279,8 @@ mod tests {
             request_id: 7,
             x: 320.0,
             y: 240.0,
-        }));
+        }))
+        .unwrap();
 
         clear_pending_tooltip_request();
 
@@ -285,9 +293,10 @@ mod tests {
             request_id: 9,
             x: 512.0,
             y: 288.0,
-        }));
+        }))
+        .unwrap();
 
-        assert_eq!(take_matching_pending_tooltip_request(8), None);
+        assert_eq!(take_matching_pending_tooltip_request(8).unwrap(), None);
         assert_eq!(
             take_pending_tooltip_request(),
             Some(PendingTooltipRequest {
