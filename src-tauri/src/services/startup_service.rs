@@ -11,8 +11,7 @@ impl StartupService {
         #[cfg(target_os = "windows")]
         {
             let value = if settings.launch_on_startup {
-                let executable = std::env::current_exe()
-                    .map_err(|error| AppError::Message(error.to_string()))?;
+                let executable = std::env::current_exe()?;
                 let arguments = if settings.silent_on_startup {
                     vec!["--silent"]
                 } else {
@@ -23,8 +22,7 @@ impl StartupService {
                 None
             };
 
-            crate::platform::windows::startup::sync_run_entry(STARTUP_ENTRY_NAME, value.as_deref())
-                .map_err(AppError::Message)?;
+            crate::platform::windows::startup::sync_run_entry(STARTUP_ENTRY_NAME, value.as_deref())?;
         }
 
         #[cfg(not(target_os = "windows"))]

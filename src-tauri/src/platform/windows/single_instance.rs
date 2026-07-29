@@ -11,7 +11,10 @@ use windows::{
     },
 };
 
-use crate::{launch_mode::LaunchMode, services::window_coordinator::SETTINGS_WINDOW_TITLE};
+use crate::{
+    domain::error::AppError, launch_mode::LaunchMode,
+    services::window_coordinator::SETTINGS_WINDOW_TITLE,
+};
 
 use super::wide_string::to_wide;
 
@@ -31,16 +34,17 @@ impl Drop for SingleInstanceGuard {
 
 pub fn acquire_or_focus_existing(
     launch_mode: LaunchMode,
-) -> Result<Option<SingleInstanceGuard>, String> {
+) -> Result<Option<SingleInstanceGuard>, AppError> {
     let mutex_name = to_wide(SINGLE_INSTANCE_MUTEX_NAME);
-    let handle = unsafe { CreateMutexW(None, false, PCWSTR::from_raw(mutex_name.as_ptr())) }
-        .map_err(|error: windows::core::Error| error.to_string())?;
+    let handle = unsafe { CreateMutexW(None, false, PCWSTR::from_raw(mutex_name.as_ptr())) }?;
 
     if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
         let _ = unsafe { CloseHandle(handle) };
         if !launch_mode.is_silent() {
             if !focus_existing_settings_window() {
-                return Err("检测到已有实例，但唤醒现有设置窗口失败".to_string());
+                return Err(AppError::Message(
+                    "检测到已有实例，但唤醒现有设置窗口失败".to_string(),
+                ));
             }
         }
         return Ok(None);

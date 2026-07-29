@@ -6,12 +6,14 @@ use windows::{
     },
 };
 
+use crate::domain::error::AppError;
+
 use super::wide_string::to_wide;
 
 const RUN_KEY_PATH: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 const ERROR_FILE_NOT_FOUND_HRESULT: HRESULT = HRESULT(0x80070002u32 as i32);
 
-pub fn sync_run_entry(entry_name: &str, value: Option<&str>) -> Result<(), String> {
+pub fn sync_run_entry(entry_name: &str, value: Option<&str>) -> Result<(), AppError> {
     let mut key = HKEY::default();
     let path = to_wide(RUN_KEY_PATH);
     unsafe {
@@ -26,8 +28,7 @@ pub fn sync_run_entry(entry_name: &str, value: Option<&str>) -> Result<(), Strin
             &mut key,
             None,
         )
-        .ok()
-        .map_err(|error: windows::core::Error| error.to_string())?;
+        .ok()?;
     }
 
     let result = match value {
@@ -39,7 +40,7 @@ pub fn sync_run_entry(entry_name: &str, value: Option<&str>) -> Result<(), Strin
     result
 }
 
-fn set_string_value(key: HKEY, name: &str, value: &str) -> Result<(), String> {
+fn set_string_value(key: HKEY, name: &str, value: &str) -> Result<(), AppError> {
     let name = to_wide(name);
     let value = to_wide(value);
     let bytes = unsafe {
@@ -58,16 +59,16 @@ fn set_string_value(key: HKEY, name: &str, value: &str) -> Result<(), String> {
             Some(bytes),
         )
         .ok()
-        .map_err(|error| error.to_string())
+        .map_err(AppError::from)
     }
 }
 
-fn delete_value(key: HKEY, name: &str) -> Result<(), String> {
+fn delete_value(key: HKEY, name: &str) -> Result<(), AppError> {
     let name = to_wide(name);
     match unsafe { RegDeleteValueW(key, PCWSTR::from_raw(name.as_ptr())) }.ok() {
         Ok(()) => Ok(()),
         Err(error) if error.code() == ERROR_FILE_NOT_FOUND_HRESULT => Ok(()),
-        Err(error) => Err(error.to_string()),
+        Err(error) => Err(AppError::from(error)),
     }
 }
 

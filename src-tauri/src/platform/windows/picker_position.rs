@@ -1,6 +1,5 @@
 use std::mem::size_of;
 
-use windows::core::Error;
 use windows::Win32::{
     Foundation::{HWND, POINT, RECT},
     Graphics::Gdi::{
@@ -10,6 +9,8 @@ use windows::Win32::{
         GetCursorPos, GetGUIThreadInfo, GetWindowThreadProcessId, GUITHREADINFO,
     },
 };
+
+use crate::domain::error::AppError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ScreenPoint {
@@ -35,39 +36,37 @@ impl ScreenRect {
     }
 }
 
-pub fn current_cursor_point() -> Result<ScreenPoint, String> {
+pub fn current_cursor_point() -> Result<ScreenPoint, AppError> {
     let mut point = POINT::default();
-    unsafe { GetCursorPos(&mut point) }.map_err(windows_error_to_string)?;
+    unsafe { GetCursorPos(&mut point) }?;
     Ok(ScreenPoint {
         x: point.x,
         y: point.y,
     })
 }
 
-pub fn caret_point_for_window(hwnd: isize) -> Result<ScreenPoint, String> {
+pub fn caret_point_for_window(hwnd: isize) -> Result<ScreenPoint, AppError> {
     let hwnd = HWND(hwnd as *mut _);
     let thread_id = unsafe { GetWindowThreadProcessId(hwnd, None) };
     if thread_id == 0 {
-        return Err("未找到目标窗口线程".to_string());
+        return Err(AppError::Message("未找到目标窗口线程".to_string()));
     }
 
     let mut gui_info = GUITHREADINFO {
         cbSize: size_of::<GUITHREADINFO>() as u32,
         ..Default::default()
     };
-    unsafe { GetGUIThreadInfo(thread_id, &mut gui_info) }.map_err(windows_error_to_string)?;
+    unsafe { GetGUIThreadInfo(thread_id, &mut gui_info) }?;
 
     if gui_info.hwndCaret.0.is_null() {
-        return Err("目标线程没有可用插入符".to_string());
+        return Err(AppError::Message("目标线程没有可用插入符".to_string()));
     }
 
     let mut point = POINT {
         x: gui_info.rcCaret.left + rect_width(gui_info.rcCaret) / 2,
         y: gui_info.rcCaret.bottom,
     };
-    unsafe { ClientToScreen(gui_info.hwndCaret, &mut point) }
-        .ok()
-        .map_err(windows_error_to_string)?;
+    unsafe { ClientToScreen(gui_info.hwndCaret, &mut point) }.ok()?;
 
     Ok(ScreenPoint {
         x: point.x,
@@ -75,7 +74,7 @@ pub fn caret_point_for_window(hwnd: isize) -> Result<ScreenPoint, String> {
     })
 }
 
-pub fn work_area_from_point(point: ScreenPoint) -> Result<ScreenRect, String> {
+pub fn work_area_from_point(point: ScreenPoint) -> Result<ScreenRect, AppError> {
     let monitor = unsafe {
         MonitorFromPoint(
             POINT {
@@ -86,16 +85,14 @@ pub fn work_area_from_point(point: ScreenPoint) -> Result<ScreenRect, String> {
         )
     };
     if monitor.0.is_null() {
-        return Err("未找到目标显示器".to_string());
+        return Err(AppError::Message("未找到目标显示器".to_string()));
     }
 
     let mut monitor_info = MONITORINFO {
         cbSize: size_of::<MONITORINFO>() as u32,
         ..Default::default()
     };
-    unsafe { GetMonitorInfoW(monitor, &mut monitor_info as *mut _ as *mut MONITORINFO) }
-        .ok()
-        .map_err(windows_error_to_string)?;
+    unsafe { GetMonitorInfoW(monitor, &mut monitor_info as *mut _ as *mut MONITORINFO) }.ok()?;
 
     Ok(ScreenRect {
         left: monitor_info.rcWork.left,
@@ -107,8 +104,4 @@ pub fn work_area_from_point(point: ScreenPoint) -> Result<ScreenRect, String> {
 
 fn rect_width(rect: RECT) -> i32 {
     rect.right - rect.left
-}
-
-fn windows_error_to_string(error: Error) -> String {
-    error.to_string()
 }
