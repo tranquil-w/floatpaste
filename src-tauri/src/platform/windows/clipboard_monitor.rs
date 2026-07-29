@@ -1,6 +1,6 @@
 use std::{fs, thread, time::Duration};
 
-use arboard::{Clipboard, Error as ClipboardError};
+use arboard::Clipboard;
 use tauri::{AppHandle, Emitter};
 use tracing::{debug, warn};
 use windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
@@ -9,7 +9,8 @@ use crate::{
     app_bootstrap::AppState,
     domain::{error::AppError, events::CLIPS_CHANGED_EVENT},
     platform::windows::{
-        active_app::ActiveAppResolver, file_clipboard::read_file_paths_from_clipboard,
+        active_app::ActiveAppResolver, clipboard_error::{map_clipboard_error, should_retry_clipboard_read},
+        file_clipboard::read_file_paths_from_clipboard,
         image_clipboard::read_image_from_clipboard,
     },
     services::history_service::HistoryService,
@@ -113,14 +114,6 @@ fn process_clipboard_change(
     Ok(())
 }
 
-fn should_retry_clipboard_read(error: &ClipboardError) -> bool {
-    matches!(error, ClipboardError::ClipboardOccupied)
-}
-
-fn map_clipboard_error(error: ClipboardError) -> AppError {
-    AppError::Clipboard(error.to_string())
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct FileSelectionStats {
     directory_count: i32,
@@ -183,7 +176,8 @@ mod tests {
     use arboard::Error as ClipboardError;
     use uuid::Uuid;
 
-    use super::{analyze_file_paths, should_retry_clipboard_read, FileSelectionStats};
+    use super::{analyze_file_paths, FileSelectionStats};
+    use super::super::clipboard_error::should_retry_clipboard_read;
 
     fn temp_path(name: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!("floatpaste-{name}-{}", Uuid::new_v4()))

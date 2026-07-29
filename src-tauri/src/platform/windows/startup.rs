@@ -1,5 +1,3 @@
-use std::{ffi::OsStr, os::windows::ffi::OsStrExt};
-
 use windows::{
     core::{HRESULT, PCWSTR},
     Win32::System::Registry::{
@@ -7,6 +5,8 @@ use windows::{
         KEY_SET_VALUE, REG_OPTION_NON_VOLATILE, REG_SZ,
     },
 };
+
+use super::wide_string::to_wide;
 
 const RUN_KEY_PATH: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 const ERROR_FILE_NOT_FOUND_HRESULT: HRESULT = HRESULT(0x80070002u32 as i32);
@@ -69,10 +69,6 @@ fn delete_value(key: HKEY, name: &str) -> Result<(), String> {
         Err(error) if error.code() == ERROR_FILE_NOT_FOUND_HRESULT => Ok(()),
         Err(error) => Err(error.to_string()),
     }
-}
-
-fn to_wide(value: &str) -> Vec<u16> {
-    OsStr::new(value).encode_wide().chain(Some(0)).collect()
 }
 
 #[cfg(test)]

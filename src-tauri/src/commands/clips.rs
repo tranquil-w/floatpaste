@@ -15,9 +15,7 @@ use crate::{
     },
 };
 
-fn map_error(error: impl ToString) -> String {
-    error.to_string()
-}
+use super::map_error;
 
 #[tauri::command]
 pub fn list_recent_items(

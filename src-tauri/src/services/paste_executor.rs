@@ -15,6 +15,7 @@ use crate::{
     },
     platform::windows::{
         active_app::ActiveAppResolver,
+        clipboard_error::should_retry_clipboard_read,
         file_clipboard::read_file_paths_from_clipboard,
         file_clipboard::write_file_paths_to_clipboard as write_file_paths_to_clipboard_impl,
         image_clipboard::{read_image_from_clipboard, write_image_to_clipboard, ClipboardImageData},
@@ -307,10 +308,6 @@ fn analyze_file_paths(file_paths: &[String]) -> FileSelectionStats {
             None
         },
     }
-}
-
-fn should_retry_clipboard_read(error: &ClipboardError) -> bool {
-    matches!(error, ClipboardError::ClipboardOccupied)
 }
 
 fn write_item_to_clipboard(

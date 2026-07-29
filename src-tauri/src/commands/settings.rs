@@ -6,9 +6,7 @@ use crate::{
     services::settings_service::SettingsService,
 };
 
-fn map_error(error: impl ToString) -> String {
-    error.to_string()
-}
+use super::map_error;
 
 fn persist_and_apply_settings(
     app: &AppHandle,

@@ -1,4 +1,4 @@
-use std::{ffi::OsStr, os::windows::ffi::OsStrExt, thread, time::Duration};
+use std::{thread, time::Duration};
 
 use windows::{
     core::PCWSTR,
@@ -12,6 +12,8 @@ use windows::{
 };
 
 use crate::{launch_mode::LaunchMode, services::window_coordinator::SETTINGS_WINDOW_TITLE};
+
+use super::wide_string::to_wide;
 
 const SINGLE_INSTANCE_MUTEX_NAME: &str = "Local\\FloatPaste.SingleInstance";
 
@@ -76,8 +78,4 @@ fn try_focus_existing_settings_window() -> bool {
         }
         SetForegroundWindow(hwnd).as_bool()
     }
-}
-
-fn to_wide(value: &str) -> Vec<u16> {
-    OsStr::new(value).encode_wide().chain(Some(0)).collect()
 }

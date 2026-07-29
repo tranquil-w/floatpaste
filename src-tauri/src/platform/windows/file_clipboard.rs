@@ -18,6 +18,8 @@ use windows::{
 
 use crate::domain::error::AppError;
 
+use super::clipboard_error::map_clipboard_error;
+
 const CF_HDROP_FORMAT: u32 = 15;
 
 pub fn read_file_paths_from_clipboard() -> Result<Option<Vec<String>>, AppError> {
@@ -141,8 +143,4 @@ fn free_global_memory(handle: HGLOBAL) -> Result<(), AppError> {
             .map(|_| ())
             .map_err(map_clipboard_error)
     }
-}
-
-fn map_clipboard_error(error: windows::core::Error) -> AppError {
-    AppError::Clipboard(error.to_string())
 }
