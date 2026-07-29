@@ -1,5 +1,4 @@
 use tauri::{AppHandle, Emitter, State};
-use tracing::warn;
 
 use crate::{
     app_bootstrap::AppState,
@@ -10,8 +9,7 @@ use crate::{
         events::CLIPS_CHANGED_EVENT,
     },
     services::{
-        normalize_service::NormalizeService, paste_executor::PasteExecutor,
-        search_service::SearchService,
+        clip_service::ClipService, paste_executor::PasteExecutor, search_service::SearchService,
     },
 };
 
@@ -62,33 +60,14 @@ pub fn update_text_item(
     id: String,
     text: String,
 ) -> Result<ClipItemDetail, String> {
-    // 检查是否是文本类型，只允许编辑文本类型
-    let existing = state.repository.get_item_detail(&id).map_err(map_error)?;
-    if existing.r#type != "text" {
-        return Err(format!("不能编辑 {} 类型的记录", existing.r#type));
-    }
-
-    let normalized = NormalizeService::normalize_text(&text, None)
-        .ok_or_else(|| "更新内容不能为空".to_string())?;
-    let detail = state
-        .repository
-        .update_text(&id, &normalized)
-        .map_err(map_error)?;
+    let detail = ClipService::update_text(&state, &id, &text).map_err(map_error)?;
     let _ = app.emit(CLIPS_CHANGED_EVENT, &detail.id);
     Ok(detail)
 }
 
 #[tauri::command]
 pub fn delete_item(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<(), String> {
-    let detail = state.repository.get_item_detail(&id).map_err(map_error)?;
-    state.repository.delete_item(&id).map_err(map_error)?;
-    if detail.r#type == "image" {
-        if let Some(image_path) = detail.image_path.as_deref() {
-            if let Err(error) = state.image_storage.delete_image(image_path) {
-                warn!("删除图片文件失败: {image_path}, error={error}");
-            }
-        }
-    }
+    ClipService::delete(&state, &id).map_err(map_error)?;
     let _ = app.emit(CLIPS_CHANGED_EVENT, &id);
     Ok(())
 }
@@ -100,10 +79,7 @@ pub fn set_item_favorited(
     id: String,
     value: bool,
 ) -> Result<(), String> {
-    state
-        .repository
-        .set_favorited(&id, value)
-        .map_err(map_error)?;
+    ClipService::set_favorited(&state, &id, value).map_err(map_error)?;
     let _ = app.emit(CLIPS_CHANGED_EVENT, &id);
     Ok(())
 }

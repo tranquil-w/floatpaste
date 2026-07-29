@@ -1,3 +1,4 @@
+pub mod clip_service;
 pub mod dedup_service;
 pub mod history_service;
 pub mod image_storage;
