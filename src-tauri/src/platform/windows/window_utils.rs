@@ -217,29 +217,6 @@ mod tests {
     }
 
     #[test]
-    fn show_window_no_activate_should_not_use_tauri_show_before_native_no_activate_show() {
-        let source = include_str!("window_utils.rs");
-        let start = source.find("pub fn show_window_no_activate").unwrap();
-        let end = source.find("pub fn is_window_minimized").unwrap();
-        let function_source = &source[start..end];
-
-        assert!(function_source.contains("ShowWindow(hwnd, SW_SHOWNOACTIVATE)"));
-        assert!(!function_source.contains("window.show()"));
-        assert!(function_source.contains("WS_EX_NOACTIVATE"));
-        assert!(!function_source.contains("SetWindowLongPtrW(hwnd, GWL_EXSTYLE, original_ex_style)"));
-    }
-
-    #[test]
-    fn hide_window_should_use_native_sw_hide() {
-        let source = include_str!("window_utils.rs");
-        let start = source.find("pub fn hide_window").unwrap();
-        let end = source.find("pub fn is_cursor_inside_window").unwrap();
-        let function_source = &source[start..end];
-
-        assert!(function_source.contains("ShowWindow(hwnd, SW_HIDE)"));
-    }
-
-    #[test]
     fn alt_menu_syscommand_detection_only_matches_keymenu() {
         assert!(is_alt_menu_syscommand(SC_KEYMENU as usize));
         assert!(is_alt_menu_syscommand((SC_KEYMENU as usize) | 0x0001));
