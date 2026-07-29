@@ -1,11 +1,11 @@
 pub mod active_app;
+pub mod clipboard_error;
 pub mod clipboard_monitor;
 pub mod file_clipboard;
 pub mod image_clipboard;
 pub mod picker_mouse_monitor;
 pub mod picker_position;
-pub mod shortcuts;
 pub mod single_instance;
 pub mod startup;
-pub mod tray;
+pub mod wide_string;
 pub mod window_utils;
