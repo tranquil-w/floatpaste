@@ -60,9 +60,7 @@ export function SettingsNav({ activeSectionId, layoutMode, onSelect }: SettingsN
                 type="button"
               >
                 <span className="block text-sm font-medium">{section.label}</span>
-                <span className="mt-1 block text-xs text-pg-fg-subtle">
-                  {section.description}
-                </span>
+                <span className="mt-1 block text-xs text-pg-fg-subtle">{section.description}</span>
               </button>
             );
           })}

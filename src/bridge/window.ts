@@ -3,14 +3,7 @@ import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { isTauriRuntime } from "./runtime";
 
 export type WindowResizeDirection =
-  | "East"
-  | "North"
-  | "NorthEast"
-  | "NorthWest"
-  | "South"
-  | "SouthEast"
-  | "SouthWest"
-  | "West";
+  "East" | "North" | "NorthEast" | "NorthWest" | "South" | "SouthEast" | "SouthWest" | "West";
 
 export function getCurrentWindowLabel(): "picker" | "search" | "editor" | "settings" {
   if (!isTauriRuntime()) {
@@ -46,9 +39,7 @@ export async function startCurrentWindowDragging(): Promise<void> {
   await getCurrentWebviewWindow().startDragging();
 }
 
-export async function startCurrentWindowResize(
-  direction: WindowResizeDirection,
-): Promise<void> {
+export async function startCurrentWindowResize(direction: WindowResizeDirection): Promise<void> {
   if (!isTauriRuntime()) {
     return;
   }
@@ -56,10 +47,7 @@ export async function startCurrentWindowResize(
   await getCurrentWebviewWindow().startResizeDragging(direction);
 }
 
-export async function setCurrentWindowLogicalSize(
-  width: number,
-  height: number,
-): Promise<void> {
+export async function setCurrentWindowLogicalSize(width: number, height: number): Promise<void> {
   if (!isTauriRuntime()) {
     return;
   }

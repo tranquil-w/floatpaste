@@ -1,9 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
-import {
-  SETTINGS_CHANGED_EVENT,
-  SETTINGS_OPEN_SETTINGS_EVENT,
-} from "../../bridge/events";
+import { SETTINGS_CHANGED_EVENT, SETTINGS_OPEN_SETTINGS_EVENT } from "../../bridge/events";
 import { isTauriRuntime } from "../../bridge/runtime";
 import { hideCurrentWindow } from "../../bridge/window";
 import { queryClient } from "../../app/queryClient";
@@ -23,13 +20,10 @@ import { LoadingSpinner } from "../../shared/ui/LoadingSpinner";
 import { getErrorMessage } from "../../shared/utils/error";
 import { SettingsNav } from "./SettingsNav";
 import { SettingsSection } from "./SettingsSection";
-import { SETTINGS_SECTIONS, type SettingsSectionId } from "./settingsSections";
+import { type SettingsSectionId } from "./settingsSections";
 import { useSettingsNavigation } from "./useSettingsNavigation";
 import { useSettingsQuery, useUpdateSettingsMutation } from "./queries";
-import {
-  invalidateSettings,
-  settingsQueryKey,
-} from "../../shared/queries/settingsQuery";
+import { invalidateSettings, settingsQueryKey } from "../../shared/queries/settingsQuery";
 
 type EditableSettings = {
   shortcut: string;
@@ -212,7 +206,9 @@ function ToggleRow({
         type="checkbox"
       />
       <span className="min-w-0">
-        <span className={`block text-sm font-medium ${disabled ? "text-pg-fg-subtle" : "text-pg-fg-default"}`}>
+        <span
+          className={`block text-sm font-medium ${disabled ? "text-pg-fg-subtle" : "text-pg-fg-default"}`}
+        >
           {title}
         </span>
         {description ? (
@@ -254,12 +250,12 @@ function OptionCard({
         type="radio"
       />
       <span className="min-w-0">
-        <span className={`block text-sm font-medium ${checked ? "text-pg-fg-default" : "text-pg-fg-muted"}`}>
+        <span
+          className={`block text-sm font-medium ${checked ? "text-pg-fg-default" : "text-pg-fg-muted"}`}
+        >
           {label}
         </span>
-        <span className="mt-1 block text-xs leading-relaxed text-pg-fg-subtle">
-          {description}
-        </span>
+        <span className="mt-1 block text-xs leading-relaxed text-pg-fg-subtle">{description}</span>
       </span>
     </label>
   );
@@ -320,13 +316,8 @@ function ThemeColorInput({
 export function SettingsShell() {
   const settings = useSettingsQuery();
   const updateSettingsMutation = useUpdateSettingsMutation();
-  const {
-    layoutMode,
-    activeSectionId,
-    registerContainer,
-    registerSection,
-    scrollToSection,
-  } = useSettingsNavigation();
+  const { layoutMode, activeSectionId, registerContainer, registerSection, scrollToSection } =
+    useSettingsNavigation();
 
   const { data } = settings;
 
@@ -342,7 +333,9 @@ export function SettingsShell() {
   const [excludedAppsText, setExcludedAppsText] = useState("");
   const [searchShortcut, setSearchShortcut] = useState("Alt+S");
   const [searchShortcutEnabled, setSearchShortcutEnabled] = useState(true);
-  const [customThemeColors, setCustomThemeColors] = useState<CustomThemeColors>(DEFAULT_CUSTOM_THEME_COLORS);
+  const [customThemeColors, setCustomThemeColors] = useState<CustomThemeColors>(
+    DEFAULT_CUSTOM_THEME_COLORS,
+  );
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const isInitializingRef = useRef(true);
   const hasHydratedFromServerRef = useRef(false);
@@ -458,7 +451,10 @@ export function SettingsShell() {
             return;
           }
 
-          if (latestLocalPayloadRef.current && isSameSettings(latestLocalPayloadRef.current, variables)) {
+          if (
+            latestLocalPayloadRef.current &&
+            isSameSettings(latestLocalPayloadRef.current, variables)
+          ) {
             applyServerSettings(nextValue);
             setSaveStatus("saved");
           }
@@ -528,9 +524,10 @@ export function SettingsShell() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  const loadError = settings.isError && !data
-    ? getErrorMessage(settings.error, "设置加载失败，请稍后重试。")
-    : null;
+  const loadError =
+    settings.isError && !data
+      ? getErrorMessage(settings.error, "设置加载失败，请稍后重试。")
+      : null;
   const saveError = updateSettingsMutation.error
     ? getErrorMessage(updateSettingsMutation.error, "保存设置失败，请稍后重试。")
     : null;
@@ -596,7 +593,9 @@ export function SettingsShell() {
             </button>
           </div>
         ) : (
-          <div className={layoutMode === "sidebar" ? "grid grid-cols-[240px_minmax(0,1fr)] gap-8" : ""}>
+          <div
+            className={layoutMode === "sidebar" ? "grid grid-cols-[240px_minmax(0,1fr)] gap-8" : ""}
+          >
             {layoutMode === "sidebar" ? (
               <SettingsNav
                 activeSectionId={activeSectionId}
@@ -621,10 +620,7 @@ export function SettingsShell() {
                   registerSection={registerSection}
                   title="快捷键"
                 >
-                  <SettingCard
-                    description="控制速贴面板的全局唤起方式。"
-                    title="速贴唤起"
-                  >
+                  <SettingCard description="控制速贴面板的全局唤起方式。" title="速贴唤起">
                     <label className="block">
                       <span className={FORM_LABEL}>全局快捷键</span>
                       <input
@@ -637,8 +633,11 @@ export function SettingsShell() {
                   </SettingCard>
 
                   <SettingCard
-                    action={(
-                      <label className="flex cursor-pointer items-center gap-2" htmlFor="search-shortcut-enabled">
+                    action={
+                      <label
+                        className="flex cursor-pointer items-center gap-2"
+                        htmlFor="search-shortcut-enabled"
+                      >
                         <input
                           checked={searchShortcutEnabled}
                           className="h-4 w-4 rounded border-pg-border-default accent-pg-accent-fg"
@@ -648,7 +647,7 @@ export function SettingsShell() {
                         />
                         <span className="text-xs text-pg-fg-subtle">启用</span>
                       </label>
-                    )}
+                    }
                     description="为搜索窗口单独保留一组更适合检索场景的快捷键。"
                     title="搜索窗口"
                   >
@@ -695,7 +694,9 @@ export function SettingsShell() {
                           className={FORM_INPUT}
                           max={1000}
                           min={9}
-                          onChange={(event) => setPickerRecordLimit(Number(event.target.value) || 50)}
+                          onChange={(event) =>
+                            setPickerRecordLimit(Number(event.target.value) || 50)
+                          }
                           type="number"
                           value={pickerRecordLimit}
                         />
@@ -713,10 +714,7 @@ export function SettingsShell() {
                   registerSection={registerSection}
                   title="外观"
                 >
-                  <SettingCard
-                    description="选择日常使用的界面主题。"
-                    title="界面主题"
-                  >
+                  <SettingCard description="选择日常使用的界面主题。" title="界面主题">
                     <div className="space-y-2">
                       {themeModeOptions.map((option) => (
                         <OptionCard
@@ -732,7 +730,7 @@ export function SettingsShell() {
                   </SettingCard>
 
                   <SettingCard
-                    action={(
+                    action={
                       <button
                         className="rounded-lg border border-pg-border-default px-3 py-2 text-xs font-medium text-pg-fg-muted transition-colors hover:bg-pg-canvas-default hover:text-pg-fg-default"
                         onClick={() => setCustomThemeColors(DEFAULT_CUSTOM_THEME_COLORS)}
@@ -740,7 +738,7 @@ export function SettingsShell() {
                       >
                         恢复默认
                       </button>
-                    )}
+                    }
                     description="分别为浅色与深色主题输入窗口背景、卡片背景与强调色，Tooltip 会自动同步。"
                     title="自定义颜色"
                   >
@@ -874,7 +872,9 @@ export function SettingsShell() {
                       <textarea
                         className={`${FORM_INPUT} min-h-[140px] leading-relaxed`}
                         onChange={(event) => setExcludedAppsText(event.target.value)}
-                        placeholder={"每行一个可执行文件名，例如：\nKeePass.exe\nWindowsTerminal.exe"}
+                        placeholder={
+                          "每行一个可执行文件名，例如：\nKeePass.exe\nWindowsTerminal.exe"
+                        }
                         value={excludedAppsText}
                       />
                       <p className={FORM_HINT}>建议使用完整进程名，避免误伤其他应用。</p>

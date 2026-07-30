@@ -6,7 +6,12 @@ interface PanelProps extends PropsWithChildren {
   "aria-labelledby"?: string;
 }
 
-export function Panel({ children, className = "", "aria-label": ariaLabel, "aria-labelledby": ariaLabelledBy }: PanelProps) {
+export function Panel({
+  children,
+  className = "",
+  "aria-label": ariaLabel,
+  "aria-labelledby": ariaLabelledBy,
+}: PanelProps) {
   return (
     <section
       aria-label={ariaLabel}

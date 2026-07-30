@@ -24,11 +24,7 @@ export function SettingsSection({
   );
 
   return (
-    <section
-      className="scroll-mt-24 space-y-4"
-      id={id}
-      ref={handleRef}
-    >
+    <section className="scroll-mt-24 space-y-4" id={id} ref={handleRef}>
       <header className="space-y-1">
         <h2 className="text-lg font-semibold text-pg-fg-default">{title}</h2>
         <p className="text-sm text-pg-fg-muted">{description}</p>

@@ -1,9 +1,5 @@
 export type SettingsSectionId =
-  | "shortcuts"
-  | "general"
-  | "appearance"
-  | "behavior"
-  | "excludedApps";
+  "shortcuts" | "general" | "appearance" | "behavior" | "excludedApps";
 
 export type SettingsSectionMeta = {
   id: SettingsSectionId;

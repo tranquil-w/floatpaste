@@ -33,10 +33,7 @@ export function createSearchRecentQueryKey(filter: SearchQuickFilter) {
   return ["search-recent", query] as const;
 }
 
-export function createSearchSearchQueryKey(
-  keyword: string,
-  filter: SearchQuickFilter,
-) {
+export function createSearchSearchQueryKey(keyword: string, filter: SearchQuickFilter) {
   const query: SearchQuery = {
     keyword,
     filters: buildFilters(filter),
@@ -61,11 +58,7 @@ export function useSearchRecentQuery(filter: SearchQuickFilter, enabled: boolean
   });
 }
 
-export function useSearchSearchQuery(
-  keyword: string,
-  filter: SearchQuickFilter,
-  enabled: boolean,
-) {
+export function useSearchSearchQuery(keyword: string, filter: SearchQuickFilter, enabled: boolean) {
   const queryKey = createSearchSearchQueryKey(keyword, filter);
   const query = queryKey[1];
 

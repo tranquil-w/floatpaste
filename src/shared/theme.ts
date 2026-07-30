@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import type { CustomThemeColors, ThemeMode } from "./types/settings";
-import { buildThemeCssVariables, DEFAULT_CUSTOM_THEME_COLORS, sanitizeCustomThemeColors } from "./themeColors";
+import {
+  buildThemeCssVariables,
+  DEFAULT_CUSTOM_THEME_COLORS,
+  sanitizeCustomThemeColors,
+} from "./themeColors";
 
 export const DEFAULT_THEME_MODE: ThemeMode = "system";
 

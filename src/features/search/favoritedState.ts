@@ -1,8 +1,4 @@
-import type {
-  ClipItemDetail,
-  ClipItemSummary,
-  SearchResult,
-} from "../../shared/types/clips";
+import type { ClipItemDetail, ClipItemSummary, SearchResult } from "../../shared/types/clips";
 
 export function getSearchItemFavoritedState(
   item: ClipItemSummary | null | undefined,

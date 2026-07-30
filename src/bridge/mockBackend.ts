@@ -55,15 +55,23 @@ function sanitizeHexColor(value: string | undefined, fallback: string): string {
   return HEX_COLOR_PATTERN.test(trimmed) ? trimmed.toUpperCase() : fallback;
 }
 
-function sanitizeCustomThemeColors(payload: UserSetting["customThemeColors"]): UserSetting["customThemeColors"] {
+function sanitizeCustomThemeColors(
+  payload: UserSetting["customThemeColors"],
+): UserSetting["customThemeColors"] {
   return {
     light: {
-      windowBg: sanitizeHexColor(payload?.light?.windowBg, DEFAULT_CUSTOM_THEME_COLORS.light.windowBg),
+      windowBg: sanitizeHexColor(
+        payload?.light?.windowBg,
+        DEFAULT_CUSTOM_THEME_COLORS.light.windowBg,
+      ),
       cardBg: sanitizeHexColor(payload?.light?.cardBg, DEFAULT_CUSTOM_THEME_COLORS.light.cardBg),
       accent: sanitizeHexColor(payload?.light?.accent, DEFAULT_CUSTOM_THEME_COLORS.light.accent),
     },
     dark: {
-      windowBg: sanitizeHexColor(payload?.dark?.windowBg, DEFAULT_CUSTOM_THEME_COLORS.dark.windowBg),
+      windowBg: sanitizeHexColor(
+        payload?.dark?.windowBg,
+        DEFAULT_CUSTOM_THEME_COLORS.dark.windowBg,
+      ),
       cardBg: sanitizeHexColor(payload?.dark?.cardBg, DEFAULT_CUSTOM_THEME_COLORS.dark.cardBg),
       accent: sanitizeHexColor(payload?.dark?.accent, DEFAULT_CUSTOM_THEME_COLORS.dark.accent),
     },
@@ -228,7 +236,9 @@ function rankItems(query: SearchQuery): ClipItemDetail[] {
 
   if (keyword) {
     result = result.filter((item) =>
-      `${item.contentPreview} ${item.searchText} ${item.sourceApp ?? ""}`.toLowerCase().includes(keyword),
+      `${item.contentPreview} ${item.searchText} ${item.sourceApp ?? ""}`
+        .toLowerCase()
+        .includes(keyword),
     );
 
     result.sort((left, right) => {
@@ -364,8 +374,9 @@ export async function mockPasteItem(id: string, option: PasteOption): Promise<Pa
 
   return {
     success: true,
-    code:
-      option.restoreClipboardAfterPaste ? `${item.type}_clipboard_only_restore` : `${item.type}_clipboard_only`,
+    code: option.restoreClipboardAfterPaste
+      ? `${item.type}_clipboard_only_restore`
+      : `${item.type}_clipboard_only`,
     message:
       item.type === "text"
         ? "浏览器预览模式下仅模拟写入文本剪贴板，系统注入将在 Tauri 环境执行。"
@@ -407,4 +418,3 @@ let settings: UserSetting = {
   searchShortcutEnabled: true,
   customThemeColors: DEFAULT_CUSTOM_THEME_COLORS,
 };
-

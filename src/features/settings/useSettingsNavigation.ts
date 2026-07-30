@@ -68,10 +68,7 @@ export function useSettingsNavigation(): UseSettingsNavigationResult {
   const unlockTimerRef = useRef<number | null>(null);
 
   const syncLayoutMode = useEffectEvent((nextWidth?: number) => {
-    const width =
-      nextWidth ??
-      containerElement?.getBoundingClientRect().width ??
-      window.innerWidth;
+    const width = nextWidth ?? containerElement?.getBoundingClientRect().width ?? window.innerWidth;
     setLayoutMode(getLayoutMode(width));
   });
 

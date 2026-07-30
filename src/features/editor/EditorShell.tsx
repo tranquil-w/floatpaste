@@ -228,7 +228,9 @@ export function EditorShell() {
         {!session ? (
           <div className="flex h-full flex-col items-center justify-center gap-1">
             <p className="text-sm text-pg-fg-muted">选择一个文本条目开始编辑</p>
-            <p className="text-xs text-pg-fg-subtle">在速贴面板或搜索结果中，选中文本后按 Ctrl+Enter</p>
+            <p className="text-xs text-pg-fg-subtle">
+              在速贴面板或搜索结果中，选中文本后按 Ctrl+Enter
+            </p>
           </div>
         ) : detailQuery.isLoading ? (
           <div className="flex h-full items-center justify-center">
@@ -248,9 +250,7 @@ export function EditorShell() {
           />
         ) : (
           <div className="rounded-lg border border-pg-border-default bg-pg-canvas-subtle p-5">
-            <h2 className="text-base font-semibold text-pg-fg-muted">
-              此条目无法编辑
-            </h2>
+            <h2 className="text-base font-semibold text-pg-fg-muted">此条目无法编辑</h2>
             <p className="mt-2 text-sm leading-6 text-pg-fg-muted">
               只有文本类型的条目可以在这里编辑。你可以关闭当前窗口并返回来源界面继续操作。
             </p>
@@ -259,9 +259,7 @@ export function EditorShell() {
       </main>
 
       <footer className="flex shrink-0 items-center justify-between border-t border-pg-border-muted px-5 py-3">
-        <div className="text-sm text-pg-fg-subtle">
-          Ctrl+S 保存 · Esc 关闭
-        </div>
+        <div className="text-sm text-pg-fg-subtle">Ctrl+S 保存 · Esc 关闭</div>
         <div className="flex items-center gap-2">
           <button
             className="rounded-md border border-pg-border-default px-4 py-2 text-sm hover:bg-pg-canvas-subtle"
@@ -296,9 +294,7 @@ export function EditorShell() {
             >
               有未保存的修改
             </h2>
-            <p className="mt-2 text-sm leading-6 text-pg-fg-muted">
-              保存修改还是放弃并关闭？
-            </p>
+            <p className="mt-2 text-sm leading-6 text-pg-fg-muted">保存修改还是放弃并关闭？</p>
             <div className="mt-6 flex justify-end gap-2">
               <button
                 className="rounded-md border border-pg-border-default px-4 py-2 text-sm"
@@ -330,9 +326,3 @@ export function EditorShell() {
     </div>
   );
 }
-
-
-
-
-
-

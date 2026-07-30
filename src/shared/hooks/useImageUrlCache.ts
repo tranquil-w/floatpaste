@@ -26,12 +26,7 @@ export function useImageUrlCache(items: ClipItemSummary[]) {
     const cache = cacheRef.current;
 
     for (const item of items) {
-      if (
-        item.type !== "image"
-        || !item.imagePath
-        || cache.has(item.id)
-        || pending.has(item.id)
-      ) {
+      if (item.type !== "image" || !item.imagePath || cache.has(item.id) || pending.has(item.id)) {
         continue;
       }
 

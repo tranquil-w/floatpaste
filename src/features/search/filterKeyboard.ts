@@ -1,17 +1,7 @@
-export type SearchFilterTriggerAction =
-  | "open-next"
-  | "open-prev"
-  | "toggle-menu"
-  | null;
+export type SearchFilterTriggerAction = "open-next" | "open-prev" | "toggle-menu" | null;
 
 export type SearchFilterOptionAction =
-  | "next"
-  | "prev"
-  | "first"
-  | "last"
-  | "commit"
-  | "close"
-  | null;
+  "next" | "prev" | "first" | "last" | "commit" | "close" | null;
 
 export type SearchFilterCommitFocusTarget = "search-input";
 

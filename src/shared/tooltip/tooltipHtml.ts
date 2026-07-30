@@ -100,7 +100,10 @@ function formatTooltipDateTime(value: string | null): string {
   return formatAbsoluteDateTime(date);
 }
 
-export function buildTooltipHtml(item: ClipItemSummary, options: BuildTooltipHtmlOptions = {}): string {
+export function buildTooltipHtml(
+  item: ClipItemSummary,
+  options: BuildTooltipHtmlOptions = {},
+): string {
   const metaParts: string[] = [];
   const escapedSource = escapeHtml(item.sourceApp ?? "未知来源");
 

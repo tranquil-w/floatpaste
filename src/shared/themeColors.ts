@@ -22,7 +22,7 @@ function mixHexColors(base: string, target: string, ratio: number): string {
   const left = parseHexColor(base);
   const right = parseHexColor(target);
   const mixed = left.map((value, index) =>
-    Math.round(value + (right[index]! - value) * clampedRatio)
+    Math.round(value + (right[index]! - value) * clampedRatio),
   );
 
   return toHexColor(mixed[0]!, mixed[1]!, mixed[2]!);
@@ -37,7 +37,10 @@ function parseHexColor(value: string): [number, number, number] {
 }
 
 function toHexColor(red: number, green: number, blue: number): string {
-  return `#${[red, green, blue].map((value) => value.toString(16).padStart(2, "0")).join("").toUpperCase()}`;
+  return `#${[red, green, blue]
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("")
+    .toUpperCase()}`;
 }
 
 function toRgbChannels(value: string): string {
@@ -78,9 +81,13 @@ export function getCustomThemeColorErrors(colors: CustomThemeColors): Record<str
   const sanitized = sanitizeCustomThemeColors(colors);
   const errors: Record<string, string> = {};
 
-  for (const [themeName, palette] of Object.entries(colors) as Array<[keyof CustomThemeColors, ThemeColorPalette]>) {
+  for (const [themeName, palette] of Object.entries(colors) as Array<
+    [keyof CustomThemeColors, ThemeColorPalette]
+  >) {
     const next = sanitized[themeName];
-    for (const [fieldName, value] of Object.entries(palette) as Array<[keyof ThemeColorPalette, string]>) {
+    for (const [fieldName, value] of Object.entries(palette) as Array<
+      [keyof ThemeColorPalette, string]
+    >) {
       if (value.trim() && next[fieldName] !== value.trim().toUpperCase()) {
         errors[`${themeName}.${fieldName}`] = "请输入 #RRGGBB 格式的十六进制颜色";
       }
@@ -112,16 +119,8 @@ export function buildThemeCssVariables(
     isLightTheme ? "#000000" : "#FFFFFF",
     isLightTheme ? 0.1 : 0.13,
   );
-  const borderSubtle = mixHexColors(
-    palette.cardBg,
-    palette.windowBg,
-    0.4,
-  );
-  const accentHover = mixHexColors(
-    palette.accent,
-    "#FFFFFF",
-    isLightTheme ? 0.08 : 0.12,
-  );
+  const borderSubtle = mixHexColors(palette.cardBg, palette.windowBg, 0.4);
+  const accentHover = mixHexColors(palette.accent, "#FFFFFF", isLightTheme ? 0.08 : 0.12);
 
   return {
     "--pg-user-window-bg": palette.windowBg,

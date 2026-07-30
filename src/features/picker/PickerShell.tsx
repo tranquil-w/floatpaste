@@ -2,7 +2,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { queryClient } from "../../app/queryClient";
-import { hidePicker, hideTooltip, openEditorFromPicker, pasteItem, setItemFavorited, showTooltip } from "../../bridge/commands";
+import {
+  hidePicker,
+  hideTooltip,
+  openEditorFromPicker,
+  pasteItem,
+  setItemFavorited,
+  showTooltip,
+} from "../../bridge/commands";
 import {
   CLIPS_CHANGED_EVENT,
   PICKER_CONFIRM_AS_FILE_EVENT,
@@ -23,10 +30,7 @@ import { getClipTypeLabel } from "../../shared/utils/clipDisplay";
 import { formatDateTime } from "../../shared/utils/time";
 import { LoadingSpinner } from "../../shared/ui/LoadingSpinner";
 import { buildThemeCssVariables, DEFAULT_CUSTOM_THEME_COLORS } from "../../shared/themeColors";
-import {
-  WindowResizeHandles,
-  type WindowResizeHandle,
-} from "../../shared/ui/WindowResizeHandles";
+import { WindowResizeHandles, type WindowResizeHandle } from "../../shared/ui/WindowResizeHandles";
 import {
   DEFAULT_PICKER_RECORD_LIMIT,
   normalizePickerRecordLimit,
@@ -44,27 +48,31 @@ const STYLES = {
     "flex h-screen w-screen flex-col overflow-hidden rounded-md border border-pg-border-muted bg-pg-canvas-default",
   header:
     "flex shrink-0 items-center justify-between border-b border-pg-border-subtle bg-pg-canvas-default px-3 py-1.5",
-  headerDot: "h-2 w-2 rounded-full bg-pg-accent-fg shadow-[0_0_0_3px_rgba(var(--pg-accent-rgb),0.10)]",
+  headerDot:
+    "h-2 w-2 rounded-full bg-pg-accent-fg shadow-[0_0_0_3px_rgba(var(--pg-accent-rgb),0.10)]",
   headerMessage:
     "ml-2 rounded-[3px] bg-pg-accent-subtle px-1.5 py-0.5 text-[10px] font-medium leading-none text-pg-accent-fg",
   headerButton:
     "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-semibold text-pg-fg-muted transition-colors hover:bg-pg-accent-subtle hover:text-pg-fg-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pg-accent-fg focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-45",
-  itemButton: (selected: boolean, favorited: boolean) => `group relative flex w-full flex-col gap-1.5 rounded-[8px] px-1.5 py-2 text-left transition-colors border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pg-accent-fg focus-visible:ring-offset-2 ${selected
-    ? "border-[color:rgba(var(--pg-accent-rgb),0.35)] bg-pg-accent-subtle shadow-[0_1px_0_rgba(var(--pg-shadow-color),0.14),inset_0_0_0_1px_rgba(var(--pg-accent-rgb),0.08)]"
-    : favorited
-      ? "border-pg-border-subtle border-l-[3px] border-l-pg-accent-fg bg-pg-canvas-subtle hover:border-pg-border-default hover:bg-pg-canvas-inset"
-      : "bg-pg-canvas-subtle border-pg-border-subtle hover:border-pg-border-default hover:bg-pg-canvas-inset"
+  itemButton: (selected: boolean, favorited: boolean) =>
+    `group relative flex w-full flex-col gap-1.5 rounded-[8px] px-1.5 py-2 text-left transition-colors border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pg-accent-fg focus-visible:ring-offset-2 ${
+      selected
+        ? "border-[color:rgba(var(--pg-accent-rgb),0.35)] bg-pg-accent-subtle shadow-[0_1px_0_rgba(var(--pg-shadow-color),0.14),inset_0_0_0_1px_rgba(var(--pg-accent-rgb),0.08)]"
+        : favorited
+          ? "border-pg-border-subtle border-l-[3px] border-l-pg-accent-fg bg-pg-canvas-subtle hover:border-pg-border-default hover:bg-pg-canvas-inset"
+          : "bg-pg-canvas-subtle border-pg-border-subtle hover:border-pg-border-default hover:bg-pg-canvas-inset"
     }`,
   itemContent: (selected: boolean, favorited: boolean) =>
     `${selected ? "text-pg-fg-default font-semibold" : favorited ? "text-pg-fg-default font-medium" : "text-pg-fg-muted font-medium"} line-clamp-4 text-[13px] leading-[1.55] tracking-tight break-words [overflow-wrap:anywhere] whitespace-pre-wrap transition-colors`,
-  kbdBadge: (selected: boolean) => `inline-flex h-[18px] min-w-[18px] px-1.5 items-center justify-center rounded-[4px] font-mono text-[9px] font-bold transition-colors ${selected
-    ? "bg-pg-accent-fg text-pg-fg-on-emphasis shadow-[inset_0_0_0_1px_rgba(255,255,255,0.10)]"
-    : "bg-pg-canvas-subtle text-pg-fg-subtle group-hover:bg-pg-neutral-3 group-hover:text-pg-fg-muted"
+  kbdBadge: (selected: boolean) =>
+    `inline-flex h-[18px] min-w-[18px] px-1.5 items-center justify-center rounded-[4px] font-mono text-[9px] font-bold transition-colors ${
+      selected
+        ? "bg-pg-accent-fg text-pg-fg-on-emphasis shadow-[inset_0_0_0_1px_rgba(255,255,255,0.10)]"
+        : "bg-pg-canvas-subtle text-pg-fg-subtle group-hover:bg-pg-neutral-3 group-hover:text-pg-fg-muted"
     }`,
   typeBadge: (selected: boolean) =>
-    `shrink-0 rounded-[3px] px-1.5 py-0.5 text-[10px] font-medium ${selected
-      ? "bg-pg-canvas-default text-pg-fg-muted"
-      : "bg-pg-neutral-3 text-pg-fg-subtle"
+    `shrink-0 rounded-[3px] px-1.5 py-0.5 text-[10px] font-medium ${
+      selected ? "bg-pg-canvas-default text-pg-fg-muted" : "bg-pg-neutral-3 text-pg-fg-subtle"
     }`,
 };
 
@@ -72,14 +80,12 @@ const PICKER_RESIZE_HANDLES: WindowResizeHandle[] = [
   {
     key: "north-left",
     direction: "North",
-    className:
-      "absolute left-3 right-[calc(50%+2.25rem)] top-0 z-20 h-2 cursor-ns-resize",
+    className: "absolute left-3 right-[calc(50%+2.25rem)] top-0 z-20 h-2 cursor-ns-resize",
   },
   {
     key: "north-right",
     direction: "North",
-    className:
-      "absolute left-[calc(50%+2.25rem)] right-3 top-0 z-20 h-2 cursor-ns-resize",
+    className: "absolute left-[calc(50%+2.25rem)] right-3 top-0 z-20 h-2 cursor-ns-resize",
   },
   {
     key: "south",
@@ -138,8 +144,6 @@ export function PickerShell() {
 
   const items = useMemo(() => recent.data ?? [], [recent.data]);
   const imageCache = useImageUrlCache(items);
-  const selectedItem = items[selectedIndex] ?? null;
-  const canEditSelected = selectedItem?.type === "text";
 
   const clearTooltipTimer = () => {
     if (tooltipTimerRef.current) {
@@ -497,7 +501,7 @@ export function PickerShell() {
           tooltipHtml,
           (document.documentElement.dataset.theme as "dark" | "light") ?? "dark",
           buildThemeCssVariables(
-            ((document.documentElement.dataset.theme as "dark" | "light") ?? "dark"),
+            (document.documentElement.dataset.theme as "dark" | "light") ?? "dark",
             settings.data?.customThemeColors ?? DEFAULT_CUSTOM_THEME_COLORS,
           ),
         );
@@ -521,11 +525,9 @@ export function PickerShell() {
   return (
     <div className="m-0 h-screen w-screen select-none overflow-hidden bg-transparent p-0 text-pg-fg-default">
       <div className={STYLES.container}>
-        {tauriRuntime
-          ? (
-            <WindowResizeHandles handles={PICKER_RESIZE_HANDLES} errorLabel="速贴" />
-          )
-          : null}
+        {tauriRuntime ? (
+          <WindowResizeHandles handles={PICKER_RESIZE_HANDLES} errorLabel="速贴" />
+        ) : null}
 
         <div className={STYLES.header}>
           <div className="flex min-w-0 flex-1 items-center gap-2" data-tauri-drag-region>
@@ -533,11 +535,7 @@ export function PickerShell() {
             <span className="text-[11px] font-semibold tracking-[0.02em] text-pg-fg-muted">
               FloatPaste
             </span>
-            {lastMessage ? (
-              <span className={STYLES.headerMessage}>
-                {lastMessage}
-              </span>
-            ) : null}
+            {lastMessage ? <span className={STYLES.headerMessage}>{lastMessage}</span> : null}
           </div>
         </div>
 
@@ -559,9 +557,7 @@ export function PickerShell() {
               <div className="grid gap-1 pl-[14px] pr-1 transition-colors">
                 {items.map((item, index) => {
                   const isSelected = index === selectedIndex;
-                  const imageUrl = item.type === "image"
-                    ? imageCache.getCached(item.id)
-                    : null;
+                  const imageUrl = item.type === "image" ? imageCache.getCached(item.id) : null;
                   return (
                     <button
                       ref={(el) => {
@@ -584,34 +580,38 @@ export function PickerShell() {
                         {imageUrl ? (
                           <img
                             alt=""
-                            className={`mt-0.5 shrink-0 rounded-[6px] border object-contain ${isSelected
-                              ? "border-pg-border-default bg-pg-canvas-default"
-                              : "border-pg-border-subtle bg-pg-canvas-subtle"
-                              }`}
+                            className={`mt-0.5 shrink-0 rounded-[6px] border object-contain ${
+                              isSelected
+                                ? "border-pg-border-default bg-pg-canvas-default"
+                                : "border-pg-border-subtle bg-pg-canvas-subtle"
+                            }`}
                             onError={() => imageCache.markError(item.id)}
                             src={imageUrl}
                             style={PICKER_IMAGE_THUMBNAIL_STYLE}
                           />
                         ) : null}
                         <div className="min-w-0 flex-1">
-                          <span
-                            className={STYLES.itemContent(isSelected, item.isFavorited)}
-                          >
+                          <span className={STYLES.itemContent(isSelected, item.isFavorited)}>
                             {item.contentPreview}
                           </span>
                         </div>
                       </div>
 
                       <div
-                        className={`flex w-full flex-wrap items-center gap-x-2 gap-y-1 text-[10px] leading-none transition-colors ${isSelected
-                          ? "text-pg-fg-muted"
-                          : "text-pg-fg-subtle"
-                          }`}
+                        className={`flex w-full flex-wrap items-center gap-x-2 gap-y-1 text-[10px] leading-none transition-colors ${
+                          isSelected ? "text-pg-fg-muted" : "text-pg-fg-subtle"
+                        }`}
                       >
                         <div className="flex min-w-0 flex-1 items-center gap-2">
-                          {index < 9 ? <kbd className={STYLES.kbdBadge(isSelected)}>{index + 1}</kbd> : null}
-                          <span className={STYLES.typeBadge(isSelected)}>{getClipTypeLabel(item)}</span>
-                          <span className={`min-w-0 flex-1 truncate ${isSelected ? "font-medium text-pg-fg-muted" : "font-medium"}`}>
+                          {index < 9 ? (
+                            <kbd className={STYLES.kbdBadge(isSelected)}>{index + 1}</kbd>
+                          ) : null}
+                          <span className={STYLES.typeBadge(isSelected)}>
+                            {getClipTypeLabel(item)}
+                          </span>
+                          <span
+                            className={`min-w-0 flex-1 truncate ${isSelected ? "font-medium text-pg-fg-muted" : "font-medium"}`}
+                          >
                             {item.sourceApp ?? "未知来源"}
                           </span>
                         </div>
@@ -620,7 +620,11 @@ export function PickerShell() {
                             {formatDateTime(item.lastUsedAt ?? item.createdAt)}
                           </span>
                           {item.isFavorited ? (
-                            <span className={`${isSelected ? "text-[11px]" : "text-[12px]"} text-pg-favorite`}>★</span>
+                            <span
+                              className={`${isSelected ? "text-[11px]" : "text-[12px]"} text-pg-favorite`}
+                            >
+                              ★
+                            </span>
                           ) : null}
                         </span>
                       </div>
@@ -635,4 +639,3 @@ export function PickerShell() {
     </div>
   );
 }
-

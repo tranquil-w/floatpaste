@@ -41,8 +41,18 @@ export function App() {
   useEffect(() => {
     const label = getCurrentWindowLabel();
     setWindowLabel(label);
-    document.documentElement.classList.remove("window-picker", "window-settings", "window-search", "window-editor");
-    document.body.classList.remove("theme-picker", "theme-settings", "theme-search", "theme-editor");
+    document.documentElement.classList.remove(
+      "window-picker",
+      "window-settings",
+      "window-search",
+      "window-editor",
+    );
+    document.body.classList.remove(
+      "theme-picker",
+      "theme-settings",
+      "theme-search",
+      "theme-editor",
+    );
 
     if (label === "picker") {
       document.documentElement.classList.add("window-picker");

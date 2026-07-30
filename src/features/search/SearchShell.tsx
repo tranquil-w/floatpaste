@@ -63,7 +63,6 @@ import {
 } from "./favoritedState";
 import { buildTooltipHtml } from "../../shared/tooltip/tooltipHtml";
 import { resolveTooltipShowPosition } from "../../shared/tooltip/tooltipState";
-import { useQuery } from "@tanstack/react-query";
 import {
   createSearchRecentQueryKey,
   createSearchSearchQueryKey,
@@ -79,8 +78,7 @@ const STYLES = {
     "relative flex h-screen w-screen flex-col overflow-hidden bg-pg-canvas-default text-pg-fg-default",
   panel:
     "flex h-full w-full flex-col overflow-hidden border border-pg-border-default bg-pg-canvas-default shadow-[0_20px_60px_rgba(var(--pg-shadow-color),0.18)]",
-  searchHeader:
-    "flex items-center gap-3 border-b border-pg-border-subtle px-3 py-3",
+  searchHeader: "flex items-center gap-3 border-b border-pg-border-subtle px-3 py-3",
   searchControl:
     "relative flex flex-1 items-center rounded-md border border-pg-border-subtle bg-pg-canvas-default px-2",
   searchControlIcon:
@@ -90,8 +88,7 @@ const STYLES = {
   searchFilterDivider: "mx-2 h-5 w-px shrink-0 bg-pg-border-subtle",
   searchFilterButton:
     "flex h-9 shrink-0 items-center gap-2 rounded-md px-2.5 text-[13px] font-medium leading-5 text-pg-fg-default transition-colors hover:bg-pg-canvas-subtle focus:bg-pg-canvas-subtle focus:outline-none",
-  searchFilterChevron:
-    "h-3.5 w-3.5 text-pg-fg-subtle transition-transform duration-150",
+  searchFilterChevron: "h-3.5 w-3.5 text-pg-fg-subtle transition-transform duration-150",
   searchFilterPanel:
     "absolute right-0 top-[calc(100%+0.5rem)] z-30 min-w-[156px] overflow-hidden rounded-md border border-pg-border-default bg-pg-canvas-default shadow-[0_16px_40px_rgba(var(--pg-shadow-color),0.18)]",
   searchFilterOption: (active: boolean, selected: boolean) =>
@@ -106,24 +103,17 @@ const STYLES = {
     }`,
   listItemLayout: (selected: boolean) =>
     `group grid w-full items-start gap-2.5 px-2 py-3 text-left transition-colors ${
-      selected
-        ? "grid-cols-[auto,minmax(0,1fr),auto]"
-        : "grid-cols-[auto,minmax(0,1fr)]"
-    } ${
-      selected ? "" : "hover:bg-pg-canvas-inset"
-    }`,
+      selected ? "grid-cols-[auto,minmax(0,1fr),auto]" : "grid-cols-[auto,minmax(0,1fr)]"
+    } ${selected ? "" : "hover:bg-pg-canvas-inset"}`,
   glyphBox: (selected: boolean) =>
     `flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] text-sm font-semibold transition-colors ${
       selected
         ? "bg-pg-neutral-5 text-pg-fg-default shadow-[inset_0_0_0_1px_rgba(var(--pg-shadow-color),0.06)] dark:bg-pg-neutral-6"
         : "bg-pg-canvas-subtle text-pg-fg-muted group-hover:text-pg-fg-default"
     }`,
-  selectedActions:
-    "col-start-3 row-start-1 flex justify-end self-start pt-1",
-  selectedActionStack:
-    "flex items-center gap-1.5",
-  inlineMetaRow:
-    "mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-pg-fg-subtle",
+  selectedActions: "col-start-3 row-start-1 flex justify-end self-start pt-1",
+  selectedActionStack: "flex items-center gap-1.5",
+  inlineMetaRow: "mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-pg-fg-subtle",
   actionButton:
     "flex h-8 w-8 items-center justify-center rounded-md bg-pg-accent-emphasis text-pg-fg-on-emphasis transition-colors hover:opacity-90",
   actionButtonSecondary:
@@ -178,13 +168,9 @@ function getFilterLabel(filter: SearchQuickFilter) {
   return FILTER_OPTIONS.find((option) => option.value === filter)?.label ?? "全部";
 }
 
-function getAdjacentFilter(
-  current: SearchQuickFilter,
-  direction: 1 | -1,
-): SearchQuickFilter {
+function getAdjacentFilter(current: SearchQuickFilter, direction: 1 | -1): SearchQuickFilter {
   const currentIndex = FILTER_OPTIONS.findIndex((option) => option.value === current);
-  const nextIndex =
-    (currentIndex + direction + FILTER_OPTIONS.length) % FILTER_OPTIONS.length;
+  const nextIndex = (currentIndex + direction + FILTER_OPTIONS.length) % FILTER_OPTIONS.length;
   return FILTER_OPTIONS[nextIndex]?.value ?? "all";
 }
 
@@ -258,14 +244,9 @@ function getItemDetailMeta(detail: ClipItemDetail | ClipItemSummary): string[] {
   return meta;
 }
 
-async function handleSearchWindowDragStart(
-  event: MouseEvent<HTMLElement>,
-) {
+async function handleSearchWindowDragStart(event: MouseEvent<HTMLElement>) {
   const target = event.target as HTMLElement | null;
-  if (
-    !target ||
-    target.closest("input, button, textarea, select, [data-no-window-drag='true']")
-  ) {
+  if (!target || target.closest("input, button, textarea, select, [data-no-window-drag='true']")) {
     return;
   }
 
@@ -278,15 +259,8 @@ async function handleSearchWindowDragStart(
 }
 
 export function SearchShell() {
-  const {
-    keyword,
-    reset,
-    selectedItemId,
-    session,
-    setKeyword,
-    setSelectedItemId,
-    setSession,
-  } = useSearchStore();
+  const { keyword, reset, selectedItemId, session, setKeyword, setSelectedItemId, setSession } =
+    useSearchStore();
   const tauriRuntime = isTauriRuntime();
   const shellRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLElement>(null);
@@ -301,14 +275,11 @@ export function SearchShell() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<SearchQuickFilter>("all");
   const [isFilterOpen, setIsFilterOpen] = useState(false);
-  const [highlightedFilter, setHighlightedFilter] =
-    useState<SearchQuickFilter>("all");
+  const [highlightedFilter, setHighlightedFilter] = useState<SearchQuickFilter>("all");
   const filterRootRef = useRef<HTMLDivElement>(null);
   const filterPanelRef = useRef<HTMLDivElement>(null);
   const filterTriggerRef = useRef<HTMLButtonElement>(null);
-  const filterOptionRefs = useRef<
-    Partial<Record<SearchQuickFilter, HTMLDivElement | null>>
-  >({});
+  const filterOptionRefs = useRef<Partial<Record<SearchQuickFilter, HTMLDivElement | null>>>({});
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const filterCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -463,7 +434,7 @@ export function SearchShell() {
           tooltipHtml,
           (document.documentElement.dataset.theme as "dark" | "light") ?? "dark",
           buildThemeCssVariables(
-            ((document.documentElement.dataset.theme as "dark" | "light") ?? "dark"),
+            (document.documentElement.dataset.theme as "dark" | "light") ?? "dark",
             settingsQuery.data?.customThemeColors ?? DEFAULT_CUSTOM_THEME_COLORS,
           ),
         );
@@ -519,22 +490,21 @@ export function SearchShell() {
         resizeFrameRef.current = null;
 
         const shellRect = shellRef.current?.getBoundingClientRect();
-        const shellHeight = Math.round(
-          shellRect?.height ?? 0,
-        );
+        const shellHeight = Math.round(shellRect?.height ?? 0);
         const headerHeight = headerRef.current?.offsetHeight ?? 0;
         const errorHeight = errorRef.current?.offsetHeight ?? 0;
         const sectionHeight = sectionBarRef.current?.offsetHeight ?? 0;
         const listContentHeight = Math.ceil(
           listContentRef.current?.getBoundingClientRect().height ?? 0,
         );
-        const filterPanelBottom = isFilterOpen && shellRect && filterPanelRef.current
-          ? Math.ceil(
-            filterPanelRef.current.getBoundingClientRect().bottom
-              - shellRect.top
-              + SEARCH_FILTER_PANEL_WINDOW_MARGIN,
-          )
-          : 0;
+        const filterPanelBottom =
+          isFilterOpen && shellRect && filterPanelRef.current
+            ? Math.ceil(
+                filterPanelRef.current.getBoundingClientRect().bottom -
+                  shellRect.top +
+                  SEARCH_FILTER_PANEL_WINDOW_MARGIN,
+              )
+            : 0;
 
         if (!headerHeight || !sectionHeight || (!listContentHeight && !filterPanelBottom)) {
           return;
@@ -769,15 +739,17 @@ export function SearchShell() {
       // 窗口通过 hide/show 复用，DOM 滚动位置会被保留。
       // 每次打开都把列表滚回顶部，避免停留在上次关闭时的位置。
       listScrollRef.current?.scrollTo({ top: 0 });
-    }).then((cleanup) => {
-      if (disposed) {
-        cleanup();
-        return;
-      }
-      offStart = cleanup;
-    }).catch((error) => {
-      handleListenError(SEARCH_SESSION_START_EVENT, error);
-    });
+    })
+      .then((cleanup) => {
+        if (disposed) {
+          cleanup();
+          return;
+        }
+        offStart = cleanup;
+      })
+      .catch((error) => {
+        handleListenError(SEARCH_SESSION_START_EVENT, error);
+      });
 
     void listen(CLIPS_CHANGED_EVENT, () => {
       void refreshSearchQueries().catch((error) => {
@@ -786,15 +758,17 @@ export function SearchShell() {
           showError("刷新搜索结果失败，请稍后重试");
         }
       });
-    }).then((cleanup) => {
-      if (disposed) {
-        cleanup();
-        return;
-      }
-      offClipsChanged = cleanup;
-    }).catch((error) => {
-      handleListenError(CLIPS_CHANGED_EVENT, error);
-    });
+    })
+      .then((cleanup) => {
+        if (disposed) {
+          cleanup();
+          return;
+        }
+        offClipsChanged = cleanup;
+      })
+      .catch((error) => {
+        handleListenError(CLIPS_CHANGED_EVENT, error);
+      });
 
     void listen(SEARCH_SESSION_END_EVENT, () => {
       setInputSuspended(false);
@@ -802,15 +776,17 @@ export function SearchShell() {
       setActiveFilter("all");
       setHighlightedFilter("all");
       reset();
-    }).then((cleanup) => {
-      if (disposed) {
-        cleanup();
-        return;
-      }
-      offEnd = cleanup;
-    }).catch((error) => {
-      handleListenError(SEARCH_SESSION_END_EVENT, error);
-    });
+    })
+      .then((cleanup) => {
+        if (disposed) {
+          cleanup();
+          return;
+        }
+        offEnd = cleanup;
+      })
+      .catch((error) => {
+        handleListenError(SEARCH_SESSION_END_EVENT, error);
+      });
 
     void listen<string>(SEARCH_NAVIGATE_EVENT, (event) => {
       const currentItems = itemsRef.current;
@@ -827,77 +803,89 @@ export function SearchShell() {
       if (nextIndex >= 0) {
         setSelectedItemId(currentItems[nextIndex]?.id ?? null);
       }
-    }).then((cleanup) => {
-      if (disposed) {
-        cleanup();
-        return;
-      }
-      offNavigate = cleanup;
-    }).catch((error) => {
-      handleListenError(SEARCH_NAVIGATE_EVENT, error);
-    });
+    })
+      .then((cleanup) => {
+        if (disposed) {
+          cleanup();
+          return;
+        }
+        offNavigate = cleanup;
+      })
+      .catch((error) => {
+        handleListenError(SEARCH_NAVIGATE_EVENT, error);
+      });
 
     void listen(SEARCH_EDIT_ITEM_EVENT, () => {
       void handleOpenEditor();
-    }).then((cleanup) => {
-      if (disposed) {
-        cleanup();
-        return;
-      }
-      offEdit = cleanup;
-    }).catch((error) => {
-      handleListenError(SEARCH_EDIT_ITEM_EVENT, error);
-    });
+    })
+      .then((cleanup) => {
+        if (disposed) {
+          cleanup();
+          return;
+        }
+        offEdit = cleanup;
+      })
+      .catch((error) => {
+        handleListenError(SEARCH_EDIT_ITEM_EVENT, error);
+      });
 
     void listen(SEARCH_PASTE_EVENT, () => {
       void handlePasteSelected();
-    }).then((cleanup) => {
-      if (disposed) {
-        cleanup();
-        return;
-      }
-      offPaste = cleanup;
-    }).catch((error) => {
-      handleListenError(SEARCH_PASTE_EVENT, error);
-    });
+    })
+      .then((cleanup) => {
+        if (disposed) {
+          cleanup();
+          return;
+        }
+        offPaste = cleanup;
+      })
+      .catch((error) => {
+        handleListenError(SEARCH_PASTE_EVENT, error);
+      });
 
     void listen(SEARCH_INPUT_SUSPEND_EVENT, () => {
       setInputSuspended(true);
       searchInputRef.current?.blur();
-    }).then((cleanup) => {
-      if (disposed) {
-        cleanup();
-        return;
-      }
-      offSuspend = cleanup;
-    }).catch((error) => {
-      handleListenError(SEARCH_INPUT_SUSPEND_EVENT, error);
-    });
+    })
+      .then((cleanup) => {
+        if (disposed) {
+          cleanup();
+          return;
+        }
+        offSuspend = cleanup;
+      })
+      .catch((error) => {
+        handleListenError(SEARCH_INPUT_SUSPEND_EVENT, error);
+      });
 
     void listen(SEARCH_INPUT_RESUME_EVENT, () => {
       setInputSuspended(false);
       searchInputRef.current?.focus();
-    }).then((cleanup) => {
-      if (disposed) {
-        cleanup();
-        return;
-      }
-      offResume = cleanup;
-    }).catch((error) => {
-      handleListenError(SEARCH_INPUT_RESUME_EVENT, error);
-    });
+    })
+      .then((cleanup) => {
+        if (disposed) {
+          cleanup();
+          return;
+        }
+        offResume = cleanup;
+      })
+      .catch((error) => {
+        handleListenError(SEARCH_INPUT_RESUME_EVENT, error);
+      });
 
     void listen(SETTINGS_CHANGED_EVENT, async () => {
       await invalidateSettings(queryClient);
-    }).then((cleanup) => {
-      if (disposed) {
-        cleanup();
-        return;
-      }
-      offSettingsChanged = cleanup;
-    }).catch((error) => {
-      handleListenError(SETTINGS_CHANGED_EVENT, error);
-    });
+    })
+      .then((cleanup) => {
+        if (disposed) {
+          cleanup();
+          return;
+        }
+        offSettingsChanged = cleanup;
+      })
+      .catch((error) => {
+        handleListenError(SETTINGS_CHANGED_EVENT, error);
+      });
 
     return () => {
       disposed = true;
@@ -917,11 +905,7 @@ export function SearchShell() {
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       // 下拉菜单自己处理方向键、Tab 和 Enter，避免被全局搜索快捷键抢走。
-      if (
-        target?.closest("[data-search-filter-root='true']")
-        && !event.ctrlKey
-        && !event.metaKey
-      ) {
+      if (target?.closest("[data-search-filter-root='true']") && !event.ctrlKey && !event.metaKey) {
         return;
       }
 
@@ -998,7 +982,9 @@ export function SearchShell() {
           return;
         case "paste":
           if (event.shiftKey) {
-            const currentItem = itemsRef.current.find((item) => item.id === selectedItemIdRef.current);
+            const currentItem = itemsRef.current.find(
+              (item) => item.id === selectedItemIdRef.current,
+            );
             if (currentItem?.type === "image") {
               void handlePasteSelectedAsFile();
               return;
@@ -1100,9 +1086,8 @@ export function SearchShell() {
       const favored = getSearchItemFavoritedState(currentItem, currentDetail);
       const nextFavorited = !favored;
       await setItemFavorited(id, nextFavorited);
-      queryClient.setQueryData<ClipItemDetail | undefined>(
-        ["detail", id],
-        (detail) => setFavoritedOnDetail(detail, id, nextFavorited),
+      queryClient.setQueryData<ClipItemDetail | undefined>(["detail", id], (detail) =>
+        setFavoritedOnDetail(detail, id, nextFavorited),
       );
       queryClient.setQueriesData<SearchResult | undefined>(
         { queryKey: ["search-recent"] },
@@ -1116,9 +1101,8 @@ export function SearchShell() {
         const activeQueryKey = hasKeyword
           ? createSearchSearchQueryKey(keyword, activeFilter)
           : createSearchRecentQueryKey(activeFilter);
-        queryClient.setQueryData<SearchResult | undefined>(
-          activeQueryKey,
-          (result) => setFavoritedOnSearchResult(result, id, nextFavorited, {
+        queryClient.setQueryData<SearchResult | undefined>(activeQueryKey, (result) =>
+          setFavoritedOnSearchResult(result, id, nextFavorited, {
             removeUnfavoritedItem: true,
           }),
         );
@@ -1382,19 +1366,17 @@ export function SearchShell() {
               <div className="space-y-1">
                 {items.map((item, index) => {
                   const isSelected = selectedItemId === item.id;
-                  const inlineDetail = isSelected ? detailQuery.data ?? item : null;
+                  const inlineDetail = isSelected ? (detailQuery.data ?? item) : null;
                   const isFavorited = getSearchItemFavoritedState(
                     item,
                     detailQuery.data?.id === item.id ? detailQuery.data : null,
                   );
-                  const imageUrl = item.type === "image"
-                    ? imageCache.getCached(item.id)
-                    : null;
+                  const imageUrl = item.type === "image" ? imageCache.getCached(item.id) : null;
                   const itemMeta = getItemDetailMeta(inlineDetail ?? item);
                   const selectedPreviewText = detailQuery.isLoading
                     ? "正在载入条目详情..."
                     : detailQuery.data?.type === "text"
-                      ? (detailQuery.data.fullText || detailQuery.data.contentPreview)
+                      ? detailQuery.data.fullText || detailQuery.data.contentPreview
                       : item.contentPreview;
                   const previewText = isSelected ? selectedPreviewText : item.contentPreview;
 

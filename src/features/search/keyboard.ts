@@ -1,11 +1,5 @@
 export type SearchKeyboardAction =
-  | "navigate-up"
-  | "navigate-down"
-  | "paste"
-  | "edit-item"
-  | "toggle-favorite"
-  | "close"
-  | null;
+  "navigate-up" | "navigate-down" | "paste" | "edit-item" | "toggle-favorite" | "close" | null;
 
 export function getSearchKeyboardAction({
   key,

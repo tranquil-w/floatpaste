@@ -21,11 +21,7 @@ export function LoadingSpinner({ size = "md", text }: LoadingSpinnerProps) {
         className={`${sizeClasses[size]} animate-spin rounded-full border-pg-neutral-6 border-t-pg-accent-fg`}
         aria-hidden="true"
       />
-      {text && (
-        <span className="text-sm font-medium text-pg-fg-muted">
-          {text}
-        </span>
-      )}
+      {text && <span className="text-sm font-medium text-pg-fg-muted">{text}</span>}
       <span className="sr-only">加载中...</span>
     </div>
   );

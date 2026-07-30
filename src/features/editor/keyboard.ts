@@ -1,10 +1,5 @@
 export type EditorKeyboardAction =
-  | "request-close"
-  | "save"
-  | "confirm-cancel"
-  | "confirm-primary"
-  | "trap-confirm-focus"
-  | null;
+  "request-close" | "save" | "confirm-cancel" | "confirm-primary" | "trap-confirm-focus" | null;
 
 const DIALOG_FOCUSABLE_SELECTOR = [
   "button:not([disabled])",
