@@ -102,9 +102,24 @@ impl WindowCoordinator {
         let window = ensure_picker_window(app)?;
         let settings = state.current_settings()?;
         if state.is_picker_active() {
-            let session = state.picker_session()?;
-            apply_picker_window_position(&window, state, &settings, session.target_window_hwnd);
-            return Ok(());
+            // 兜底：is_picker_active 是独立的 AtomicBool，可能与窗口真实可见性脱节
+            // （例如 Win+D、多屏切换、DPI/缩放变化、被全屏应用抢占后窗口被系统隐藏）。
+            // 若标志位为激活但窗口实际不可见，直接返回会让后续所有打开尝试（快捷键、托盘、命令）
+            // 沦为空操作而死锁。这里校验真实可见性，不一致时重置状态后走完整显示流程。
+            let window_actually_visible = window.is_visible().unwrap_or(false);
+            if window_actually_visible {
+                let session = state.picker_session()?;
+                apply_picker_window_position(
+                    &window,
+                    state,
+                    &settings,
+                    session.target_window_hwnd,
+                );
+                return Ok(());
+            }
+            warn!("Picker 标志位为激活但窗口实际不可见，重置状态后重新显示");
+            state.end_picker_activation();
+            ShortcutManager::unregister_picker_session_shortcuts(app);
         }
 
         restore_picker_window_size(app, &window);
@@ -156,11 +171,38 @@ impl WindowCoordinator {
         Ok(())
     }
 
-    pub fn toggle_picker(app: &AppHandle, state: &AppState) -> Result<(), AppError> {
-        if state.is_picker_active() {
-            Self::hide_picker_and_restore_target(app, state)
-        } else {
-            Self::show_picker(app, state)
+    /// 退出前的集中收尾：置退出标志、卸载低级鼠标钩子、停止长按导航、销毁所有窗口。
+    ///
+    /// 关键：必须真正销毁（destroy）窗口，而非仅隐藏（SW_HIDE）。隐藏的窗口仍是存活的
+    /// `Chrome_WidgetWin_0` 类窗口，Chromium 在进程拆解时注销窗口类会因 `ERROR_CLASS_HAS_WINDOWS
+    /// (1412)` 失败（参见 tauri#7606、tauri#14088）。销毁后进程退出阶段不再有同类窗口残留。
+    /// 供托盘退出与 `RunEvent::ExitRequested` 共用，幂等可重复调用。
+    pub fn prepare_for_exit(app: &AppHandle) {
+        if let Some(state) = app.try_state::<AppState>() {
+            state.begin_quit();
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            crate::platform::windows::picker_mouse_monitor::PickerMouseMonitor::end_session();
+        }
+
+        // 停止 picker 长按导航 repeat 线程，避免它在退出后继续 run_on_main_thread + emit。
+        ShortcutManager::stop_all_picker_navigation_repeat();
+
+        // 真正销毁所有窗口（destroy 绕过 CloseRequested 拦截，直接释放窗口及其 webview）。
+        for label in [
+            PICKER_WINDOW_LABEL,
+            SEARCH_WINDOW_LABEL,
+            EDITOR_WINDOW_LABEL,
+            SETTINGS_WINDOW_LABEL,
+            crate::services::tooltip_window::TOOLTIP_WINDOW_LABEL,
+        ] {
+            if let Some(window) = app.get_webview_window(label) {
+                if let Err(error) = window.destroy() {
+                    warn!("退出时销毁窗口 {label} 失败: {error}");
+                }
+            }
         }
     }
 
@@ -207,6 +249,14 @@ impl WindowCoordinator {
         let app_handle = app.clone();
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(50));
+            // 退出窗口期不再恢复目标窗口焦点 / 操作搜索窗口，避免在退出阶段访问正被销毁的 webview。
+            let is_quitting = app_handle
+                .try_state::<AppState>()
+                .map(|state| state.is_quitting())
+                .unwrap_or(false);
+            if is_quitting {
+                return;
+            }
             let app_clone = app_handle.clone();
             let _ = app_handle.run_on_main_thread(move || {
                 if let Some(hwnd) = session.target_window_hwnd {
@@ -838,7 +888,7 @@ fn begin_search_window_minimize_monitor(app: AppHandle, state: AppState) {
         std::thread::spawn(move || loop {
             std::thread::sleep(Duration::from_millis(120));
 
-            if !state.is_search_active() {
+            if !state.is_search_active() || state.is_quitting() {
                 break;
             }
 
@@ -859,7 +909,7 @@ fn begin_search_window_minimize_monitor(app: AppHandle, state: AppState) {
             let app_handle = app.clone();
             let state_clone = state.clone();
             let _ = app.run_on_main_thread(move || {
-                if state_clone.is_search_active() {
+                if state_clone.is_search_active() && !state_clone.is_quitting() {
                     if let Err(error) = WindowCoordinator::hide_search_without_restore_target(
                         &app_handle,
                         &state_clone,

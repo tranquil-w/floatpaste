@@ -8,7 +8,10 @@ use tracing::warn;
 use crate::{
     app_bootstrap::AppState,
     domain::error::AppError,
-    services::{settings_service::SettingsService, window_coordinator::WindowCoordinator},
+    services::{
+        settings_service::SettingsService, shortcut_manager::ShortcutManager,
+        window_coordinator::WindowCoordinator,
+    },
 };
 
 pub struct TrayService;
@@ -53,8 +56,16 @@ impl TrayService {
                         warn!("托盘打开 Picker 时应用状态未就绪");
                         return;
                     };
-                    if let Err(error) = WindowCoordinator::toggle_picker(app, &state) {
-                        warn!("托盘切换 Picker 失败: {error}");
+                    // 菜单语义为"打开"：直接走显示路径。show_picker 已能自愈标志位与
+                    // 窗口可见性脱节的情形，并在已正常显示时仅重定位。显示成功后注册
+                    // 会话快捷键（方向键/回车/Esc 等），否则从托盘打开的速贴窗口无法
+                    // 用键盘操作，与主快捷键路径行为一致。
+                    if let Err(error) = WindowCoordinator::show_picker(app, &state) {
+                        warn!("托盘显示 Picker 失败: {error}");
+                    } else if let Err(error) =
+                        ShortcutManager::register_picker_session_shortcuts(app)
+                    {
+                        warn!("托盘打开 Picker 后注册会话快捷键失败: {error}");
                     }
                 }
                 "toggle-monitoring" => {
@@ -83,9 +94,10 @@ impl TrayService {
                     }
                 }
                 "quit" => {
-                    if let Some(state) = app.try_state::<AppState>() {
-                        state.begin_quit();
-                    }
+                    // 退出前同步销毁所有窗口 + 卸载鼠标钩子 + 停止长按导航。
+                    // 必须销毁（而非隐藏）窗口，否则 Chromium 注销窗口类时仍会因
+                    // ERROR_CLASS_HAS_WINDOWS (1412) 失败。RunEvent::ExitRequested 兜底再调一次（幂等）。
+                    WindowCoordinator::prepare_for_exit(app);
                     app.exit(0);
                 }
                 _ => {}

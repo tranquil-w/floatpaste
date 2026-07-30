@@ -31,6 +31,11 @@ impl ClipboardMonitor {
             loop {
                 thread::sleep(Duration::from_millis(CLIPBOARD_POLL_INTERVAL_MS));
 
+                // 退出后停止轮询，避免继续访问 AppHandle / emit 事件到已销毁的窗口。
+                if state.is_quitting() {
+                    break;
+                }
+
                 let settings = match state.current_settings() {
                     Ok(settings) => settings,
                     Err(error) => {

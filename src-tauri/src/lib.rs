@@ -125,6 +125,14 @@ pub fn run() {
             commands::windows::tooltip_ready,
             commands::windows::hide_tooltip
         ])
-        .run(tauri::generate_context!())
-        .expect("运行 Tauri 应用失败");
+        .build(tauri::generate_context!())
+        .expect("构建 Tauri 应用失败")
+        .run(|app_handle, event| {
+            // 退出请求阶段：在窗口实际销毁前同步清理低级资源（鼠标钩子、可见窗口等），
+            // 避免进程退出时仍有 Chrome_WidgetWin_0 类窗口存活而触发
+            // Chromium 的 `Failed to unregister class ... Error = 1412` 报错。
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                crate::services::window_coordinator::WindowCoordinator::prepare_for_exit(app_handle);
+            }
+        });
 }

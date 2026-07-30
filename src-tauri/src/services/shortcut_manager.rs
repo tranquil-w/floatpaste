@@ -175,7 +175,6 @@ impl ShortcutManager {
             }
 
             info!("命中主快捷键: {normalized}");
-            let is_active = state.is_picker_active();
             let app_handle = app.clone();
             let state_clone = state.clone();
 
@@ -183,7 +182,13 @@ impl ShortcutManager {
                 thread::sleep(SHORTCUT_CALLBACK_DEFER_DELAY);
                 let app_clone = app_handle.clone();
                 let _ = app_handle.run_on_main_thread(move || {
-                    if is_active {
+                    // 退出窗口期不再切换窗口，避免在退出阶段操作/创建窗口。
+                    if state_clone.is_quitting() {
+                        return;
+                    }
+                    // 实时读取激活状态，避免在工作线程提前捕获快照后，于延迟期间
+                    // 被鼠标钩子等其它路径改写（TOCTOU），从而把"打开"误判成"关闭"。
+                    if state_clone.is_picker_active() {
                         Self::unregister_picker_session_shortcuts(&app_clone);
                         if let Err(error) = WindowCoordinator::hide_picker_and_restore_target(
                             &app_clone,
@@ -262,6 +267,10 @@ impl ShortcutManager {
                     let state_clone = state.clone();
                     thread::spawn(move || {
                         thread::sleep(SHORTCUT_CALLBACK_DEFER_DELAY);
+                        // 退出窗口期不再触发延迟的窗口操作。
+                        if state_clone.is_quitting() {
+                            return;
+                        }
                         let app_clone = app_handle.clone();
                         let _ = app_handle.run_on_main_thread(move || {
                             Self::unregister_picker_session_shortcuts(&app_clone);
@@ -365,8 +374,17 @@ impl ShortcutManager {
                     break;
                 }
 
-                let is_active = app_handle
-                    .try_state::<AppState>()
+                let app_state = app_handle.try_state::<AppState>();
+                // 退出窗口期停止长按导航，避免退出后继续 run_on_main_thread + emit。
+                let is_quitting = app_state
+                    .as_ref()
+                    .map(|state| state.is_quitting())
+                    .unwrap_or(true);
+                if is_quitting {
+                    break;
+                }
+
+                let is_active = app_state
                     .map(|state| state.is_picker_active())
                     .unwrap_or(false);
                 if !is_active || current_picker_navigation_direction() != Some(direction) {
@@ -389,6 +407,12 @@ impl ShortcutManager {
         });
 
         true
+    }
+
+    /// 停止所有 picker 长按导航 repeat 线程。供退出收尾调用，避免退出后仍有
+    /// repeat 线程通过 run_on_main_thread 操作窗口。
+    pub fn stop_all_picker_navigation_repeat() {
+        Self::stop_picker_navigation_repeat(None);
     }
 
     fn stop_picker_navigation_repeat(direction: Option<&'static str>) {
@@ -486,6 +510,14 @@ where
 {
     thread::spawn(move || {
         thread::sleep(SHORTCUT_CALLBACK_DEFER_DELAY);
+        // 退出窗口期不再触发延迟的窗口操作，避免退出阶段操作/创建窗口。
+        let is_quitting = app
+            .try_state::<AppState>()
+            .map(|state| state.is_quitting())
+            .unwrap_or(true);
+        if is_quitting {
+            return;
+        }
         let app_clone = app.clone();
         let _ = app.run_on_main_thread(move || action(app_clone));
     });
