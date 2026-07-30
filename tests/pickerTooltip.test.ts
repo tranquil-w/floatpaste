@@ -3,14 +3,14 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
-import { resolveTooltipShowPosition } from "../src/features/picker/tooltipState.ts";
+import { resolveTooltipShowPosition } from "../src/shared/tooltip/tooltipState.ts";
 import {
   buildTooltipHtml,
   escapeHtml,
   escapeHtmlAttribute,
   TOOLTIP_IMAGE_PREVIEW_MAX_HEIGHT,
   TOOLTIP_IMAGE_PREVIEW_MAX_WIDTH,
-} from "../src/features/picker/tooltipHtml.ts";
+} from "../src/shared/tooltip/tooltipHtml.ts";
 import {
   PICKER_IMAGE_THUMBNAIL_SIZE,
 } from "../src/features/picker/previewLayout.ts";
