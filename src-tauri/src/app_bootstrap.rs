@@ -29,22 +29,40 @@ pub struct AppState {
     pub image_storage: ImageStorage,
     settings: Arc<RwLock<UserSetting>>,
     self_write_guard: SelfWriteGuard,
-    picker_session: Arc<Mutex<PickerSession>>,
-    picker_active: Arc<AtomicBool>,
-    picker_session_shortcuts_registered: Arc<AtomicBool>,
     quitting: Arc<AtomicBool>,
-    search_session: Arc<Mutex<Option<SearchSession>>>,
-    search_active: Arc<AtomicBool>,
-    search_session_monitor_token: Arc<AtomicU64>,
-    search_focus_loss_ignore_deadline: Arc<Mutex<Option<Instant>>>,
-    editor_session: Arc<Mutex<Option<EditorSession>>>,
-    editor_active: Arc<AtomicBool>,
+    picker: PickerState,
+    search: SearchState,
+    editor: EditorState,
 }
 
 #[derive(Debug, Default, Clone)]
 pub struct PickerSession {
     pub target_window_hwnd: Option<isize>,
     pub target_focus_hwnd: Option<isize>,
+}
+
+/// Picker 速贴面板的会话状态。
+#[derive(Clone, Default)]
+struct PickerState {
+    session: Arc<Mutex<PickerSession>>,
+    active: Arc<AtomicBool>,
+    session_shortcuts_registered: Arc<AtomicBool>,
+}
+
+/// Search 搜索窗口的会话状态。
+#[derive(Clone, Default)]
+struct SearchState {
+    session: Arc<Mutex<Option<SearchSession>>>,
+    active: Arc<AtomicBool>,
+    session_monitor_token: Arc<AtomicU64>,
+    focus_loss_ignore_deadline: Arc<Mutex<Option<Instant>>>,
+}
+
+/// Editor 编辑器窗口的会话状态。
+#[derive(Clone, Default)]
+struct EditorState {
+    session: Arc<Mutex<Option<EditorSession>>>,
+    active: Arc<AtomicBool>,
 }
 
 impl AppState {
@@ -58,16 +76,10 @@ impl AppState {
             image_storage,
             settings: Arc::new(RwLock::new(settings)),
             self_write_guard: SelfWriteGuard::default(),
-            picker_session: Arc::new(Mutex::new(PickerSession::default())),
-            picker_active: Arc::new(AtomicBool::new(false)),
-            picker_session_shortcuts_registered: Arc::new(AtomicBool::new(false)),
             quitting: Arc::new(AtomicBool::new(false)),
-            search_session: Arc::new(Mutex::new(None)),
-            search_active: Arc::new(AtomicBool::new(false)),
-            search_session_monitor_token: Arc::new(AtomicU64::new(0)),
-            search_focus_loss_ignore_deadline: Arc::new(Mutex::new(None)),
-            editor_session: Arc::new(Mutex::new(None)),
-            editor_active: Arc::new(AtomicBool::new(false)),
+            picker: PickerState::default(),
+            search: SearchState::default(),
+            editor: EditorState::default(),
         }
     }
 
@@ -91,35 +103,37 @@ impl AppState {
         hwnd: Option<isize>,
         focus_hwnd: Option<isize>,
     ) -> Result<(), AppError> {
-        let mut session = self.picker_session.lock()?;
+        let mut session = self.picker.session.lock()?;
         session.target_window_hwnd = hwnd;
         session.target_focus_hwnd = focus_hwnd;
         Ok(())
     }
 
     pub fn picker_session(&self) -> Result<PickerSession, AppError> {
-        Ok(self.picker_session.lock()?.clone())
+        Ok(self.picker.session.lock()?.clone())
     }
 
     pub fn begin_picker_activation(&self) {
-        self.picker_active.store(true, Ordering::SeqCst);
+        self.picker.active.store(true, Ordering::SeqCst);
     }
 
     pub fn end_picker_activation(&self) {
-        self.picker_active.store(false, Ordering::SeqCst);
+        self.picker.active.store(false, Ordering::SeqCst);
     }
 
     pub fn is_picker_active(&self) -> bool {
-        self.picker_active.load(Ordering::SeqCst)
+        self.picker.active.load(Ordering::SeqCst)
     }
 
     pub fn set_picker_session_shortcuts_registered(&self, registered: bool) {
-        self.picker_session_shortcuts_registered
+        self.picker
+            .session_shortcuts_registered
             .store(registered, Ordering::SeqCst);
     }
 
     pub fn picker_session_shortcuts_registered(&self) -> bool {
-        self.picker_session_shortcuts_registered
+        self.picker
+            .session_shortcuts_registered
             .load(Ordering::SeqCst)
     }
 
@@ -132,51 +146,52 @@ impl AppState {
     }
 
     pub fn set_search_session(&self, session: SearchSession) -> Result<(), AppError> {
-        let mut current = self.search_session.lock()?;
+        let mut current = self.search.session.lock()?;
         *current = Some(session);
         Ok(())
     }
 
     pub fn search_session(&self) -> Result<Option<SearchSession>, AppError> {
-        Ok(self.search_session.lock()?.clone())
+        Ok(self.search.session.lock()?.clone())
     }
 
     pub fn clear_search_session(&self) -> Result<(), AppError> {
-        let mut current = self.search_session.lock()?;
+        let mut current = self.search.session.lock()?;
         *current = None;
         Ok(())
     }
 
     pub fn begin_search_activation(&self) {
-        self.search_active.store(true, Ordering::SeqCst);
+        self.search.active.store(true, Ordering::SeqCst);
     }
 
     pub fn end_search_activation(&self) {
-        self.search_active.store(false, Ordering::SeqCst);
+        self.search.active.store(false, Ordering::SeqCst);
     }
 
     pub fn is_search_active(&self) -> bool {
-        self.search_active.load(Ordering::SeqCst)
+        self.search.active.load(Ordering::SeqCst)
     }
 
     pub fn next_search_session_monitor_token(&self) -> u64 {
-        self.search_session_monitor_token
+        self.search
+            .session_monitor_token
             .fetch_add(1, Ordering::SeqCst)
             + 1
     }
 
     pub fn current_search_session_monitor_token(&self) -> u64 {
-        self.search_session_monitor_token.load(Ordering::SeqCst)
+        self.search.session_monitor_token.load(Ordering::SeqCst)
     }
 
     pub fn mark_search_focus_loss_ignored_for(&self, duration: Duration) -> Result<(), AppError> {
-        let mut deadline = self.search_focus_loss_ignore_deadline.lock()?;
+        let mut deadline = self.search.focus_loss_ignore_deadline.lock()?;
         *deadline = Some(Instant::now() + duration);
         Ok(())
     }
 
     pub fn should_ignore_search_focus_loss(&self) -> Result<bool, AppError> {
-        let mut deadline = self.search_focus_loss_ignore_deadline.lock()?;
+        let mut deadline = self.search.focus_loss_ignore_deadline.lock()?;
         let Some(current_deadline) = *deadline else {
             return Ok(false);
         };
@@ -191,27 +206,27 @@ impl AppState {
     }
 
     pub fn set_editor_session(&self, session: EditorSession) -> Result<(), AppError> {
-        let mut current = self.editor_session.lock()?;
+        let mut current = self.editor.session.lock()?;
         *current = Some(session);
         Ok(())
     }
 
     pub fn editor_session(&self) -> Result<Option<EditorSession>, AppError> {
-        Ok(self.editor_session.lock()?.clone())
+        Ok(self.editor.session.lock()?.clone())
     }
 
     pub fn clear_editor_session(&self) -> Result<(), AppError> {
-        let mut current = self.editor_session.lock()?;
+        let mut current = self.editor.session.lock()?;
         *current = None;
         Ok(())
     }
 
     pub fn begin_editor_activation(&self) {
-        self.editor_active.store(true, Ordering::SeqCst);
+        self.editor.active.store(true, Ordering::SeqCst);
     }
 
     pub fn end_editor_activation(&self) {
-        self.editor_active.store(false, Ordering::SeqCst);
+        self.editor.active.store(false, Ordering::SeqCst);
     }
 }
 
