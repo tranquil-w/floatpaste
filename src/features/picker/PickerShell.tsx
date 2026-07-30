@@ -15,9 +15,9 @@ import {
   PICKER_SESSION_START_EVENT,
   SETTINGS_CHANGED_EVENT,
 } from "../../bridge/events";
-import { getImageUrl } from "../../bridge/imageUrl";
 import { isTauriRuntime } from "../../bridge/runtime";
 import type { ClipItemSummary } from "../../shared/types/clips";
+import { useImageUrlCache } from "../../shared/hooks/useImageUrlCache";
 import { TOOLTIP_SHOW_DELAY_MS } from "../../shared/ui/tooltipConfig";
 import { getClipTypeLabel } from "../../shared/utils/clipDisplay";
 import { formatDateTime } from "../../shared/utils/time";
@@ -135,11 +135,9 @@ export function PickerShell() {
   const listScrollRef = useRef<HTMLDivElement | null>(null);
   const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tooltipRequestIdRef = useRef(0);
-  const imageUrlCacheRef = useRef(new Map<string, string | null>());
-  const imageUrlPendingRef = useRef(new Set<string>());
-  const [, setImageUrlVersion] = useState(0);
 
   const items = useMemo(() => recent.data ?? [], [recent.data]);
+  const imageCache = useImageUrlCache(items);
   const selectedItem = items[selectedIndex] ?? null;
   const canEditSelected = selectedItem?.type === "text";
 
@@ -242,34 +240,6 @@ export function PickerShell() {
       });
     }
   }, [selectedIndex]);
-
-  useEffect(() => {
-    let disposed = false;
-    const imageItems = items.filter((item) =>
-      item.type === "image"
-      && Boolean(item.imagePath)
-      && !imageUrlCacheRef.current.has(item.id)
-      && !imageUrlPendingRef.current.has(item.id)
-    );
-
-    for (const item of imageItems) {
-      imageUrlPendingRef.current.add(item.id);
-      void getImageUrl(item.imagePath).then((imageUrl) => {
-        imageUrlCacheRef.current.set(item.id, imageUrl);
-      }).catch(() => {
-        imageUrlCacheRef.current.set(item.id, null);
-      }).finally(() => {
-        imageUrlPendingRef.current.delete(item.id);
-        if (!disposed) {
-          setImageUrlVersion((current) => current + 1);
-        }
-      });
-    }
-
-    return () => {
-      disposed = true;
-    };
-  }, [items]);
 
   useEffect(() => {
     if (!tauriRuntime) {
@@ -497,7 +467,7 @@ export function PickerShell() {
     tooltipTimerRef.current = setTimeout(() => {
       tooltipTimerRef.current = null;
       void (async () => {
-        const imageUrl = await resolveItemImageUrl(item);
+        const imageUrl = await imageCache.resolve(item);
         if (tooltipRequestIdRef.current !== requestId) {
           return;
         }
@@ -540,37 +510,6 @@ export function PickerShell() {
   const handleItemMouseLeave = () => {
     if (!tauriRuntime) return;
     cancelTooltip();
-  };
-
-  const handleThumbnailError = (itemId: string) => {
-    if (imageUrlCacheRef.current.get(itemId) === null) {
-      return;
-    }
-
-    imageUrlCacheRef.current.set(itemId, null);
-    setImageUrlVersion((current) => current + 1);
-  };
-
-  const resolveItemImageUrl = async (item: ClipItemSummary): Promise<string | null> => {
-    if (item.type !== "image" || !item.imagePath) {
-      return null;
-    }
-
-    const cachedImageUrl = imageUrlCacheRef.current.get(item.id);
-    if (cachedImageUrl !== undefined) {
-      return cachedImageUrl;
-    }
-
-    try {
-      const imageUrl = await getImageUrl(item.imagePath);
-      imageUrlCacheRef.current.set(item.id, imageUrl);
-      setImageUrlVersion((current) => current + 1);
-      return imageUrl;
-    } catch {
-      imageUrlCacheRef.current.set(item.id, null);
-      setImageUrlVersion((current) => current + 1);
-      return null;
-    }
   };
 
   useEffect(() => {
@@ -621,7 +560,7 @@ export function PickerShell() {
                 {items.map((item, index) => {
                   const isSelected = index === selectedIndex;
                   const imageUrl = item.type === "image"
-                    ? (imageUrlCacheRef.current.get(item.id) ?? null)
+                    ? imageCache.getCached(item.id)
                     : null;
                   return (
                     <button
@@ -649,7 +588,7 @@ export function PickerShell() {
                               ? "border-pg-border-default bg-pg-canvas-default"
                               : "border-pg-border-subtle bg-pg-canvas-subtle"
                               }`}
-                            onError={() => handleThumbnailError(item.id)}
+                            onError={() => imageCache.markError(item.id)}
                             src={imageUrl}
                             style={PICKER_IMAGE_THUMBNAIL_STYLE}
                           />

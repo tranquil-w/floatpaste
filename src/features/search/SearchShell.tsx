@@ -29,8 +29,8 @@ import {
   SEARCH_SESSION_START_EVENT,
   SETTINGS_CHANGED_EVENT,
 } from "../../bridge/events";
-import { getImageUrl } from "../../bridge/imageUrl";
 import { isTauriRuntime } from "../../bridge/runtime";
+import { useImageUrlCache } from "../../shared/hooks/useImageUrlCache";
 import {
   setCurrentWindowLogicalSizeBounds,
   setCurrentWindowLogicalSize,
@@ -297,11 +297,8 @@ export function SearchShell() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const selectedItemIdRef = useRef<string | null>(selectedItemId);
   const itemRefs = useRef<(HTMLDivElement | null)[]>([]);
-  const imageUrlCacheRef = useRef(new Map<string, string | null>());
-  const imageUrlPendingRef = useRef(new Set<string>());
   const [inputSuspended, setInputSuspended] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [, setImageUrlVersion] = useState(0);
   const [activeFilter, setActiveFilter] = useState<SearchQuickFilter>("all");
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [highlightedFilter, setHighlightedFilter] =
@@ -327,6 +324,7 @@ export function SearchShell() {
     () => (hasKeyword ? (searchQuery.data?.items ?? []) : (recentQuery.data?.items ?? [])),
     [hasKeyword, recentQuery.data?.items, searchQuery.data?.items],
   );
+  const imageCache = useImageUrlCache(items);
   const itemsRef = useRef<ClipItemSummary[]>(items);
   const restoreClipboardRef = useRef(settingsQuery.data?.restoreClipboardAfterPaste ?? true);
   const detailQuery = useItemDetailQuery(selectedItemId);
@@ -435,7 +433,7 @@ export function SearchShell() {
     tooltipTimerRef.current = setTimeout(() => {
       tooltipTimerRef.current = null;
       void (async () => {
-        const imageUrl = imageUrlCacheRef.current.get(item.id) ?? await getImageUrl(item.imagePath);
+        const imageUrl = await imageCache.resolve(item);
         if (tooltipRequestIdRef.current !== requestId) {
           return;
         }
@@ -481,29 +479,6 @@ export function SearchShell() {
     }
     cancelTooltip();
   };
-
-  useEffect(() => {
-    items.forEach((item) => {
-      if (
-        item.type !== "image"
-        || !item.imagePath
-        || imageUrlCacheRef.current.has(item.id)
-        || imageUrlPendingRef.current.has(item.id)
-      ) {
-        return;
-      }
-
-      imageUrlPendingRef.current.add(item.id);
-      void getImageUrl(item.imagePath).then((imageUrl) => {
-        imageUrlCacheRef.current.set(item.id, imageUrl);
-        setImageUrlVersion((current) => current + 1);
-      }).catch(() => {
-        imageUrlCacheRef.current.set(item.id, null);
-      }).finally(() => {
-        imageUrlPendingRef.current.delete(item.id);
-      });
-    });
-  }, [items]);
 
   // 当选中项改变时，自动滚动到视图
   useEffect(() => {
@@ -1413,7 +1388,7 @@ export function SearchShell() {
                     detailQuery.data?.id === item.id ? detailQuery.data : null,
                   );
                   const imageUrl = item.type === "image"
-                    ? (imageUrlCacheRef.current.get(item.id) ?? null)
+                    ? imageCache.getCached(item.id)
                     : null;
                   const itemMeta = getItemDetailMeta(inlineDetail ?? item);
                   const selectedPreviewText = detailQuery.isLoading
@@ -1466,8 +1441,7 @@ export function SearchShell() {
                                   : "border-pg-border-subtle bg-pg-canvas-subtle"
                               }`}
                               onError={() => {
-                                imageUrlCacheRef.current.set(item.id, null);
-                                setImageUrlVersion((current) => current + 1);
+                                imageCache.markError(item.id);
                               }}
                               src={imageUrl}
                               style={SEARCH_IMAGE_THUMBNAIL_STYLE}
