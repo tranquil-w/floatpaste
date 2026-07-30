@@ -18,112 +18,20 @@ use crate::domain::{
         SearchQuery, SearchResult, SearchSort,
     },
     error::AppError,
-    settings::{StoredWindowPosition, UserSetting},
 };
-
-const USER_SETTINGS_KEY: &str = "user_settings";
-// 继续复用旧 key，兼容已落盘的“仅位置”状态。
-const PICKER_WINDOW_STATE_KEY: &str = "picker_last_position";
-const CURRENT_SCHEMA_VERSION: i32 = 3;
-const CLIP_ITEMS_MEDIA_COLUMNS: [(&str, &str); 7] = [
-    ("image_path", "TEXT NULL"),
-    ("image_width", "INTEGER NULL"),
-    ("image_height", "INTEGER NULL"),
-    ("image_format", "TEXT NULL"),
-    ("file_size", "INTEGER NULL"),
-    ("file_paths", "TEXT NOT NULL DEFAULT '[]'"),
-    ("file_count", "INTEGER NOT NULL DEFAULT 0"),
-];
-const CLIP_ITEMS_TOTAL_SIZE_COLUMN: (&str, &str) = ("total_size", "INTEGER NULL");
-const CLIP_ITEMS_DIRECTORY_COUNT_COLUMN: (&str, &str) =
-    ("directory_count", "INTEGER NOT NULL DEFAULT 0");
 
 #[derive(Clone)]
 pub struct SqliteRepository {
-    connection: Arc<Mutex<Connection>>,
+    pub(super) connection: Arc<Mutex<Connection>>,
 }
 
 impl SqliteRepository {
     pub fn new(path: &Path) -> Result<Self, AppError> {
         let connection = Connection::open(path)?;
-        initialize_database(&connection)?;
+        super::schema::initialize_database(&connection)?;
         Ok(Self {
             connection: Arc::new(Mutex::new(connection)),
         })
-    }
-
-    pub fn load_settings(&self) -> Result<UserSetting, AppError> {
-        let connection = self.connection.lock()?;
-        let settings_json = connection
-            .query_row(
-                "SELECT value FROM settings WHERE key = ?1",
-                [USER_SETTINGS_KEY],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?;
-
-        let mut setting = settings_json
-            .map(|raw| serde_json::from_str::<UserSetting>(&raw))
-            .transpose()?
-            .unwrap_or_default();
-
-        let mut statement = connection
-            .prepare("SELECT executable_name FROM excluded_apps ORDER BY executable_name ASC")?;
-        let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
-        let excluded_apps = rows.collect::<Result<Vec<_>, _>>()?;
-        if !excluded_apps.is_empty() {
-            setting.excluded_apps = excluded_apps;
-        }
-
-        Ok(setting.sanitized())
-    }
-
-    pub fn load_picker_window_state(&self) -> Result<Option<StoredWindowPosition>, AppError> {
-        let connection = self.connection.lock()?;
-        let raw_value = connection
-            .query_row(
-                "SELECT value FROM settings WHERE key = ?1",
-                [PICKER_WINDOW_STATE_KEY],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?;
-
-        raw_value
-            .map(|raw| serde_json::from_str::<StoredWindowPosition>(&raw))
-            .transpose()
-            .map_err(Into::into)
-    }
-
-    pub fn save_settings(&self, setting: &UserSetting) -> Result<(), AppError> {
-        let connection = self.connection.lock()?;
-        let transaction = connection.unchecked_transaction()?;
-        transaction.execute(
-            "INSERT INTO settings(key, value) VALUES(?1, ?2)
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            params![USER_SETTINGS_KEY, serde_json::to_string(setting)?],
-        )?;
-        transaction.execute("DELETE FROM excluded_apps", [])?;
-        for app in &setting.excluded_apps {
-            transaction.execute(
-                "INSERT INTO excluded_apps(executable_name) VALUES(?1)",
-                [app],
-            )?;
-        }
-        transaction.commit()?;
-        Ok(())
-    }
-
-    pub fn save_picker_window_state(
-        &self,
-        position: &StoredWindowPosition,
-    ) -> Result<(), AppError> {
-        let connection = self.connection.lock()?;
-        connection.execute(
-            "INSERT INTO settings(key, value) VALUES(?1, ?2)
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            params![PICKER_WINDOW_STATE_KEY, serde_json::to_string(position)?],
-        )?;
-        Ok(())
     }
 
     pub fn save_text_item(&self, item: &NewClipTextItem) -> Result<ClipItemDetail, AppError> {
@@ -528,106 +436,6 @@ fn build_filters_clause_with_alias(query: &SearchQuery, alias: &str) -> (String,
     (clauses.join(" AND "), values)
 }
 
-fn initialize_database(connection: &Connection) -> Result<(), AppError> {
-    connection.execute_batch(include_str!("../../migrations/0001_init.sql"))?;
-
-    let schema_version = current_schema_version(connection)?;
-    if schema_version < CURRENT_SCHEMA_VERSION {
-        apply_schema_upgrades(connection, schema_version)?;
-    } else if !clip_items_has_media_columns(connection)? {
-        // 兼容历史上未记录 user_version 的已有数据库。
-        apply_media_columns_migration(connection)?;
-        set_schema_version(connection, CURRENT_SCHEMA_VERSION)?;
-    }
-
-    Ok(())
-}
-
-fn apply_schema_upgrades(connection: &Connection, current_version: i32) -> Result<(), AppError> {
-    if current_version < 2 {
-        apply_media_columns_migration(connection)?;
-    }
-
-    if current_version < 3 {
-        apply_directory_count_migration(connection)?;
-    }
-
-    set_schema_version(connection, CURRENT_SCHEMA_VERSION)
-}
-
-fn apply_media_columns_migration(connection: &Connection) -> Result<(), AppError> {
-    for (column_name, definition) in clip_items_media_columns() {
-        if column_exists(connection, "clip_items", column_name)? {
-            continue;
-        }
-
-        connection.execute(
-            &format!("ALTER TABLE clip_items ADD COLUMN {column_name} {definition}"),
-            [],
-        )?;
-    }
-
-    Ok(())
-}
-
-fn apply_directory_count_migration(connection: &Connection) -> Result<(), AppError> {
-    let (column_name, definition) = CLIP_ITEMS_DIRECTORY_COUNT_COLUMN;
-    if !column_exists(connection, "clip_items", column_name)? {
-        connection.execute(
-            &format!("ALTER TABLE clip_items ADD COLUMN {column_name} {definition}"),
-            [],
-        )?;
-    }
-
-    Ok(())
-}
-
-fn current_schema_version(connection: &Connection) -> Result<i32, AppError> {
-    connection
-        .query_row("PRAGMA user_version", [], |row| row.get(0))
-        .map_err(Into::into)
-}
-
-fn set_schema_version(connection: &Connection, version: i32) -> Result<(), AppError> {
-    connection.pragma_update(None, "user_version", version)?;
-    Ok(())
-}
-
-fn clip_items_has_media_columns(connection: &Connection) -> Result<bool, AppError> {
-    for (column_name, _) in clip_items_media_columns() {
-        if !column_exists(connection, "clip_items", column_name)? {
-            return Ok(false);
-        }
-    }
-
-    Ok(true)
-}
-
-fn clip_items_media_columns() -> impl Iterator<Item = (&'static str, &'static str)> {
-    CLIP_ITEMS_MEDIA_COLUMNS
-        .iter()
-        .copied()
-        .chain(std::iter::once(CLIP_ITEMS_TOTAL_SIZE_COLUMN))
-        .chain(std::iter::once(CLIP_ITEMS_DIRECTORY_COUNT_COLUMN))
-}
-
-fn column_exists(
-    connection: &Connection,
-    table_name: &str,
-    column_name: &str,
-) -> Result<bool, AppError> {
-    let mut statement = connection.prepare(&format!("PRAGMA table_info({table_name})"))?;
-    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
-
-    for existing_column in rows {
-        if existing_column? == column_name {
-            return Ok(true);
-        }
-    }
-
-    Ok(false)
-}
-
 fn prefix(alias: &str) -> String {
     if alias.is_empty() {
         String::new()
@@ -830,7 +638,8 @@ mod tests {
     use chrono::{Duration, Utc};
     use rusqlite::{params, Connection};
 
-    use super::{bool_to_i64, SqliteRepository, PICKER_WINDOW_STATE_KEY};
+    use super::{bool_to_i64, SqliteRepository};
+    use super::super::settings::PICKER_WINDOW_STATE_KEY;
     use crate::domain::{
         clip_item::{ClipType, SearchFilters, SearchQuery, SearchSort},
         settings::StoredWindowPosition,
