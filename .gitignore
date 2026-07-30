@@ -23,7 +23,9 @@ pnpm-debug.log*
 !.env.example
 
 # 编辑器与系统文件
-.vscode/
+# 仅忽略 VSCode 个人配置，保留 extensions.json 以共享推荐插件
+.vscode/*
+!.vscode/extensions.json
 .idea/
 .DS_Store
 Thumbs.db
