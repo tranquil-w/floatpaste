@@ -1,5 +1,6 @@
 pub const CLIPS_CHANGED_EVENT: &str = "clips://changed";
 pub const SETTINGS_CHANGED_EVENT: &str = "settings://changed";
+pub const TAGS_CHANGED_EVENT: &str = "tags://changed";
 pub const PICKER_SESSION_START_EVENT: &str = "picker://session-start";
 pub const PICKER_SESSION_END_EVENT: &str = "picker://session-end";
 pub const PICKER_NAVIGATE_EVENT: &str = "picker://navigate";

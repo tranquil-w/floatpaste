@@ -34,8 +34,22 @@ CREATE VIRTUAL TABLE IF NOT EXISTS clip_items_fts USING fts5(
   item_id UNINDEXED,
   full_text,
   search_text,
-  source_app
+  source_app,
+  tags
 );
+
+CREATE TABLE IF NOT EXISTS tags (
+  name TEXT PRIMARY KEY COLLATE NOCASE,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS clip_item_tags (
+  item_id TEXT NOT NULL REFERENCES clip_items(id) ON DELETE CASCADE,
+  tag_name TEXT NOT NULL COLLATE NOCASE REFERENCES tags(name) ON DELETE CASCADE,
+  PRIMARY KEY (item_id, tag_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_clip_item_tags_tag ON clip_item_tags(tag_name);
 
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,

@@ -1,5 +1,5 @@
 export type SettingsSectionId =
-  "shortcuts" | "general" | "appearance" | "behavior" | "excludedApps";
+  "shortcuts" | "general" | "appearance" | "behavior" | "excludedApps" | "tags";
 
 export type SettingsSectionMeta = {
   id: SettingsSectionId;
@@ -13,4 +13,5 @@ export const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
   { id: "appearance", label: "外观", description: "主题与窗口位置" },
   { id: "behavior", label: "行为", description: "启动与监听策略" },
   { id: "excludedApps", label: "排除应用", description: "忽略指定进程" },
+  { id: "tags", label: "标签", description: "管理剪贴记录标签" },
 ];

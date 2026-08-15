@@ -5,6 +5,7 @@ import type {
   PasteResult,
   SearchQuery,
   SearchResult,
+  TagInfo,
 } from "../shared/types/clips";
 import type { UserSetting } from "../shared/types/settings";
 
@@ -119,6 +120,7 @@ let items: ClipItemDetail[] = [
     filePaths: [],
     fileCount: 0,
     totalSize: null,
+    tags: ["工作", "产品"],
   },
   {
     id: "demo-2",
@@ -133,6 +135,7 @@ let items: ClipItemDetail[] = [
     updatedAt: new Date(now - 1000 * 60 * 20).toISOString(),
     lastUsedAt: null,
     hash: "demo-hash-2",
+    tags: ["灵感"],
     imagePath: null,
     imageWidth: null,
     imageHeight: null,
@@ -163,6 +166,7 @@ let items: ClipItemDetail[] = [
     filePaths: [],
     fileCount: 0,
     totalSize: null,
+    tags: [],
   },
   {
     id: "demo-4",
@@ -185,6 +189,7 @@ let items: ClipItemDetail[] = [
     imageHeight: null,
     imageFormat: null,
     fileSize: null,
+    tags: ["产品"],
   },
   {
     id: "demo-5",
@@ -211,11 +216,16 @@ let items: ClipItemDetail[] = [
     imageHeight: null,
     imageFormat: null,
     fileSize: null,
+    tags: [],
   },
 ];
 
 function getActivityTimestamp(item: ClipItemDetail): number {
   return Date.parse(item.lastUsedAt ?? item.createdAt);
+}
+
+function priorityScore(item: ClipItemDetail): number {
+  return (item.isFavorited ? 1 : 0) + (item.tags.length > 0 ? 1 : 0);
 }
 
 function rankItems(query: SearchQuery): ClipItemDetail[] {
@@ -234,14 +244,27 @@ function rankItems(query: SearchQuery): ClipItemDetail[] {
     result = result.filter((item) => item.sourceApp === query.filters.sourceApp);
   }
 
+  if (query.filters.tagNames?.length) {
+    result = result.filter((item) =>
+      query.filters.tagNames!.every((tagName) =>
+        item.tags.some((candidate) => candidate.toLowerCase() === tagName.toLowerCase()),
+      ),
+    );
+  }
+
   if (keyword) {
     result = result.filter((item) =>
-      `${item.contentPreview} ${item.searchText} ${item.sourceApp ?? ""}`
+      `${item.contentPreview} ${item.searchText} ${item.sourceApp ?? ""} ${item.tags.join(" ")}`
         .toLowerCase()
         .includes(keyword),
     );
 
     result.sort((left, right) => {
+      const boostDiff = priorityScore(right) - priorityScore(left);
+      if (boostDiff !== 0) {
+        return boostDiff;
+      }
+
       const leftIndex = left.searchText.indexOf(keyword);
       const rightIndex = right.searchText.indexOf(keyword);
       if (leftIndex !== rightIndex) {
@@ -286,7 +309,84 @@ function toSummary(item: ClipItemDetail): ClipItemSummary {
     imageHeight: item.imageHeight,
     imageFormat: item.imageFormat,
     fileSize: item.fileSize,
+    tags: [...item.tags],
   };
+}
+
+function normalizeTagName(name: string): string {
+  return name.split(/\s+/).join(" ").trim();
+}
+
+export async function mockListTags(): Promise<TagInfo[]> {
+  const tagNames = new Set<string>();
+  for (const item of items) {
+    for (const tagName of item.tags) {
+      tagNames.add(tagName);
+    }
+  }
+
+  return [...tagNames]
+    .map((name) => ({
+      name,
+      itemCount: items.filter((item) =>
+        item.tags.some((candidate) => candidate.toLowerCase() === name.toLowerCase()),
+      ).length,
+      createdAt: items
+        .map((item) => item.createdAt)
+        .sort()[0] ?? new Date().toISOString(),
+    }))
+    .sort((left, right) => right.itemCount - left.itemCount || left.name.localeCompare(right.name));
+}
+
+export async function mockSetItemTags(
+  id: string,
+  tagNames: string[],
+): Promise<ClipItemDetail> {
+  const item = items.find((entry) => entry.id === id);
+  if (!item) {
+    throw new Error("未找到对应剪贴记录");
+  }
+
+  const normalized: string[] = [];
+  for (const raw of tagNames) {
+    const name = normalizeTagName(raw);
+    if (!name) {
+      continue;
+    }
+    if (!normalized.some((existing) => existing.toLowerCase() === name.toLowerCase())) {
+      normalized.push(name);
+    }
+  }
+  item.tags = normalized;
+  item.updatedAt = new Date().toISOString();
+  return structuredClone(item);
+}
+
+export async function mockRenameTag(oldName: string, newName: string): Promise<void> {
+  const target = normalizeTagName(newName);
+  if (!target) {
+    throw new Error("标签名不能为空");
+  }
+
+  for (const item of items) {
+    item.tags = item.tags.flatMap((tagName) => {
+      if (tagName.toLowerCase() !== oldName.toLowerCase()) {
+        return [tagName];
+      }
+      return [target];
+    }).filter(
+      (tagName, index, all) =>
+        all.findIndex((other) => other.toLowerCase() === tagName.toLowerCase()) === index,
+    );
+  }
+}
+
+export async function mockDeleteTag(name: string): Promise<void> {
+  for (const item of items) {
+    item.tags = item.tags.filter(
+      (tagName) => tagName.toLowerCase() !== name.toLowerCase(),
+    );
+  }
 }
 
 export async function mockListRecentItems(limit: number): Promise<ClipItemSummary[]> {

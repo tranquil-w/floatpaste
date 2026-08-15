@@ -28,6 +28,7 @@ import {
   SEARCH_SESSION_END_EVENT,
   SEARCH_SESSION_START_EVENT,
   SETTINGS_CHANGED_EVENT,
+  TAGS_CHANGED_EVENT,
 } from "../../bridge/events";
 import { isTauriRuntime } from "../../bridge/runtime";
 import { useImageUrlCache } from "../../shared/hooks/useImageUrlCache";
@@ -68,6 +69,7 @@ import {
   createSearchSearchQueryKey,
   useSearchRecentQuery,
   useSearchSearchQuery,
+  useTagsQuery,
 } from "./queries";
 import { getNextSearchNavigationIndex } from "./state";
 import { useSearchStore } from "./store";
@@ -114,6 +116,18 @@ const STYLES = {
   selectedActions: "col-start-3 row-start-1 flex justify-end self-start pt-1",
   selectedActionStack: "flex items-center gap-1.5",
   inlineMetaRow: "mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-pg-fg-subtle",
+  tagChipRow:
+    "flex items-center gap-1.5 overflow-x-auto border-b border-pg-border-subtle px-3 py-2",
+  tagChip: (selected: boolean) =>
+    `shrink-0 rounded-full px-2.5 py-1 text-[12px] leading-4 transition-colors focus:outline-none ${
+      selected
+        ? "bg-pg-accent-subtle text-pg-accent-fg"
+        : "bg-pg-canvas-subtle text-pg-fg-muted hover:bg-pg-canvas-inset"
+    }`,
+  itemTagChips: "mt-1 flex flex-wrap items-center gap-1",
+  itemTagChip:
+    "rounded-full bg-pg-canvas-inset px-1.5 py-0.5 text-[11px] leading-4 text-pg-fg-muted",
+  itemTagOverflow: "text-[11px] leading-4 text-pg-fg-subtle",
   actionButton:
     "flex h-8 w-8 items-center justify-center rounded-md bg-pg-accent-emphasis text-pg-fg-on-emphasis transition-colors hover:opacity-90",
   actionButtonSecondary:
@@ -134,6 +148,7 @@ const FILTER_OPTIONS: Array<{ value: SearchQuickFilter; label: string }> = [
   { value: "text", label: "文本" },
   { value: "image", label: "图片" },
   { value: "file", label: "文件" },
+  { value: "tag", label: "标签" },
 ];
 
 async function refreshSearchQueries() {
@@ -141,6 +156,7 @@ async function refreshSearchQueries() {
     queryClient.invalidateQueries({ queryKey: ["detail"] }),
     queryClient.invalidateQueries({ queryKey: ["search-recent"] }),
     queryClient.invalidateQueries({ queryKey: ["search-query"] }),
+    queryClient.invalidateQueries({ queryKey: ["tags"] }),
   ]);
 }
 
@@ -274,6 +290,7 @@ export function SearchShell() {
   const [inputSuspended, setInputSuspended] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<SearchQuickFilter>("all");
+  const [activeTagNames, setActiveTagNames] = useState<string[]>([]);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [highlightedFilter, setHighlightedFilter] = useState<SearchQuickFilter>("all");
   const filterRootRef = useRef<HTMLDivElement>(null);
@@ -288,8 +305,9 @@ export function SearchShell() {
   const lastAppliedWindowHeightRef = useRef<number | null>(null);
   const favoriteTogglePendingRef = useRef(false);
   const hasKeyword = keyword.trim().length > 0;
-  const recentQuery = useSearchRecentQuery(activeFilter, !hasKeyword);
-  const searchQuery = useSearchSearchQuery(keyword, activeFilter, hasKeyword);
+  const recentQuery = useSearchRecentQuery(activeFilter, activeTagNames, !hasKeyword);
+  const searchQuery = useSearchSearchQuery(keyword, activeFilter, activeTagNames, hasKeyword);
+  const tagsQuery = useTagsQuery(activeFilter === "tag");
   const settingsQuery = useSettingsQuery({ staleTime: 0 });
   const items = useMemo<ClipItemSummary[]>(
     () => (hasKeyword ? (searchQuery.data?.items ?? []) : (recentQuery.data?.items ?? [])),
@@ -647,6 +665,15 @@ export function SearchShell() {
     });
   };
 
+  // 标签芯片多选（AND 语义）；按忽略大小写比对，与后端 NOCASE 行为一致
+  const toggleActiveTag = (tagName: string) => {
+    setActiveTagNames((current) =>
+      current.some((name) => name.toLowerCase() === tagName.toLowerCase())
+        ? current.filter((name) => name.toLowerCase() !== tagName.toLowerCase())
+        : [...current, tagName],
+    );
+  };
+
   async function forwardPickerNavigate(direction: "up" | "down") {
     try {
       await emitTo("picker", PICKER_NAVIGATE_EVENT, direction);
@@ -710,6 +737,7 @@ export function SearchShell() {
     let offSuspend: (() => void) | undefined;
     let offResume: (() => void) | undefined;
     let offSettingsChanged: (() => void) | undefined;
+    let offTagsChanged: (() => void) | undefined;
 
     const handleListenError = (eventName: string, error: unknown) => {
       console.error(`注册搜索窗口事件监听失败: ${eventName}`, error);
@@ -733,6 +761,7 @@ export function SearchShell() {
       setIsFilterOpen(false);
       setActiveFilter("all");
       setHighlightedFilter("all");
+      setActiveTagNames([]);
       setKeyword(event.payload.initialKeyword ?? "");
       setSelectedItemId(event.payload.itemId ?? null);
       setInputSuspended(false);
@@ -775,6 +804,7 @@ export function SearchShell() {
       setIsFilterOpen(false);
       setActiveFilter("all");
       setHighlightedFilter("all");
+      setActiveTagNames([]);
       reset();
     })
       .then((cleanup) => {
@@ -887,6 +917,22 @@ export function SearchShell() {
         handleListenError(SETTINGS_CHANGED_EVENT, error);
       });
 
+    void listen(TAGS_CHANGED_EVENT, () => {
+      void refreshSearchQueries().catch((error) => {
+        console.error("刷新标签数据失败", error);
+      });
+    })
+      .then((cleanup) => {
+        if (disposed) {
+          cleanup();
+          return;
+        }
+        offTagsChanged = cleanup;
+      })
+      .catch((error) => {
+        handleListenError(TAGS_CHANGED_EVENT, error);
+      });
+
     return () => {
       disposed = true;
       offStart?.();
@@ -898,6 +944,7 @@ export function SearchShell() {
       offSuspend?.();
       offResume?.();
       offSettingsChanged?.();
+      offTagsChanged?.();
     };
   }, [reset, setKeyword, setSelectedItemId, setSession]);
 
@@ -1099,8 +1146,8 @@ export function SearchShell() {
       );
       if (!nextFavorited && activeFilter === "favorite") {
         const activeQueryKey = hasKeyword
-          ? createSearchSearchQueryKey(keyword, activeFilter)
-          : createSearchRecentQueryKey(activeFilter);
+          ? createSearchSearchQueryKey(keyword, activeFilter, activeTagNames)
+          : createSearchRecentQueryKey(activeFilter, activeTagNames);
         queryClient.setQueryData<SearchResult | undefined>(activeQueryKey, (result) =>
           setFavoritedOnSearchResult(result, id, nextFavorited, {
             removeUnfavoritedItem: true,
@@ -1340,12 +1387,37 @@ export function SearchShell() {
           </div>
         ) : null}
 
-        <div
-          ref={sectionBarRef}
-          className="flex items-center justify-between border-b border-pg-border-subtle px-5 py-3 text-xs font-medium text-pg-fg-muted"
-        >
-          <span>{getSectionLabel(hasKeyword)}</span>
-          <span>{resultCountLabel}</span>
+        <div ref={sectionBarRef}>
+          <div className="flex items-center justify-between border-b border-pg-border-subtle px-5 py-3 text-xs font-medium text-pg-fg-muted">
+            <span>{getSectionLabel(hasKeyword)}</span>
+            <span>{resultCountLabel}</span>
+          </div>
+          {activeFilter === "tag" ? (
+            <div className={STYLES.tagChipRow} data-no-window-drag="true">
+              {tagsQuery.isLoading ? (
+                <span className="text-xs text-pg-fg-subtle">加载标签...</span>
+              ) : (tagsQuery.data ?? []).length === 0 ? (
+                <span className="text-xs text-pg-fg-subtle">暂无标签，可在编辑窗口为条目添加</span>
+              ) : (
+                (tagsQuery.data ?? []).map((tag) => {
+                  const selected = activeTagNames.some(
+                    (name) => name.toLowerCase() === tag.name.toLowerCase(),
+                  );
+                  return (
+                    <button
+                      aria-pressed={selected}
+                      className={STYLES.tagChip(selected)}
+                      key={tag.name}
+                      onClick={() => toggleActiveTag(tag.name)}
+                      type="button"
+                    >
+                      {tag.name}
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          ) : null}
         </div>
 
         <main
@@ -1446,7 +1518,7 @@ export function SearchShell() {
                               {previewText}
                             </p>
                             <div className="flex shrink-0 items-center gap-2">
-                              {isFavorited ? (
+                              {isFavorited && !isSelected ? (
                                 <span className="text-[12px] text-pg-favorite">★</span>
                               ) : null}
                             </div>
@@ -1460,6 +1532,20 @@ export function SearchShell() {
                             ))}
                             {isFavorited ? <span aria-hidden="true">• 已收藏</span> : null}
                           </div>
+                          {item.tags.length > 0 ? (
+                            <div className={STYLES.itemTagChips}>
+                              {item.tags.slice(0, 3).map((tagName) => (
+                                <span className={STYLES.itemTagChip} key={tagName}>
+                                  {tagName}
+                                </span>
+                              ))}
+                              {item.tags.length > 3 ? (
+                                <span className={STYLES.itemTagOverflow}>
+                                  +{item.tags.length - 3}
+                                </span>
+                              ) : null}
+                            </div>
+                          ) : null}
                         </div>
                         {isSelected ? (
                           <div

@@ -12,13 +12,25 @@ use rusqlite::{
 use tracing::warn;
 use uuid::Uuid;
 
-use crate::domain::{
-    clip_item::{
-        ClipItemDetail, ClipItemSummary, NewClipFileItem, NewClipImageItem, NewClipTextItem,
-        SearchQuery, SearchResult, SearchSort,
+use crate::{
+    domain::{
+        clip_item::{
+            ClipItemDetail, ClipItemSummary, NewClipFileItem, NewClipImageItem, NewClipTextItem,
+            SearchQuery, SearchResult, SearchSort, TagInfo,
+        },
+        error::AppError,
     },
-    error::AppError,
+    services::normalize_service::space_cjk_text,
 };
+
+/// 列表/详情查询统一的标签聚合子查询：按 NOCASE 排序保证输出顺序确定，
+/// 分隔符用 char(31)（SQLite 字符串字面量没有 \x 转义）。
+const TAG_NAMES_SUBQUERY: &str = "COALESCE((
+    SELECT GROUP_CONCAT(tag_name, char(31)) FROM (
+      SELECT tag_name FROM clip_item_tags WHERE item_id = ci.id
+      ORDER BY tag_name COLLATE NOCASE
+    )
+  ), '')";
 
 #[derive(Clone)]
 pub struct SqliteRepository {
@@ -57,13 +69,13 @@ impl SqliteRepository {
                 ],
             )?;
             transaction.execute(
-                "INSERT INTO clip_items_fts(item_id, full_text, search_text, source_app)
-                 VALUES(?1, ?2, ?3, ?4)",
+                "INSERT INTO clip_items_fts(item_id, full_text, search_text, source_app, tags)
+                 VALUES(?1, ?2, ?3, ?4, '')",
                 params![
                     id,
-                    item.normalized.full_text,
-                    item.normalized.search_text,
-                    item.source_app
+                    space_cjk_text(&item.normalized.full_text),
+                    space_cjk_text(&item.normalized.search_text),
+                    item.source_app.as_deref().map(space_cjk_text),
                 ],
             )?;
             transaction.commit()?;
@@ -98,9 +110,13 @@ impl SqliteRepository {
                 ],
             )?;
             transaction.execute(
-                "INSERT INTO clip_items_fts(item_id, full_text, search_text, source_app)
-                 VALUES(?1, '', ?2, ?3)",
-                params![id, item.normalized.search_text, item.source_app],
+                "INSERT INTO clip_items_fts(item_id, full_text, search_text, source_app, tags)
+                 VALUES(?1, '', ?2, ?3, '')",
+                params![
+                    id,
+                    space_cjk_text(&item.normalized.search_text),
+                    item.source_app.as_deref().map(space_cjk_text),
+                ],
             )?;
             transaction.commit()?;
         }
@@ -134,9 +150,13 @@ impl SqliteRepository {
                 ],
             )?;
             transaction.execute(
-                "INSERT INTO clip_items_fts(item_id, full_text, search_text, source_app)
-                 VALUES(?1, '', ?2, ?3)",
-                params![id, item.normalized.search_text, item.source_app],
+                "INSERT INTO clip_items_fts(item_id, full_text, search_text, source_app, tags)
+                 VALUES(?1, '', ?2, ?3, '')",
+                params![
+                    id,
+                    space_cjk_text(&item.normalized.search_text),
+                    item.source_app.as_deref().map(space_cjk_text),
+                ],
             )?;
             transaction.commit()?;
         }
@@ -146,15 +166,16 @@ impl SqliteRepository {
     pub fn list_recent(&self, limit: u32) -> Result<Vec<ClipItemSummary>, AppError> {
         let connection = self.connection.lock()?;
         let sql = format!(
-            "SELECT id, type, preview_text, source_app, is_favorited,
-                    image_path, image_width, image_height, image_format, file_size,
-                    file_paths, file_count, total_size, directory_count,
-                    created_at, updated_at, last_used_at, substr(full_text, 1, 3000)
-             FROM clip_items
-             WHERE deleted_at IS NULL
+            "SELECT ci.id, ci.type, ci.preview_text, ci.source_app, ci.is_favorited,
+                    ci.image_path, ci.image_width, ci.image_height, ci.image_format, ci.file_size,
+                    ci.file_paths, ci.file_count, ci.total_size, ci.directory_count,
+                    ci.created_at, ci.updated_at, ci.last_used_at, substr(ci.full_text, 1, 3000),
+                    {TAG_NAMES_SUBQUERY} AS tag_names
+             FROM clip_items ci
+             WHERE ci.deleted_at IS NULL
              ORDER BY {}
              LIMIT ?1",
-            activity_order_clause(""),
+            activity_order_clause("ci"),
         );
         let mut statement = connection.prepare(&sql)?;
         let rows = statement.query_map([limit], map_summary_row)?;
@@ -164,15 +185,16 @@ impl SqliteRepository {
     pub fn list_favorites(&self, limit: u32) -> Result<Vec<ClipItemSummary>, AppError> {
         let connection = self.connection.lock()?;
         let sql = format!(
-            "SELECT id, type, preview_text, source_app, is_favorited,
-                    image_path, image_width, image_height, image_format, file_size,
-                    file_paths, file_count, total_size, directory_count,
-                    created_at, updated_at, last_used_at, substr(full_text, 1, 3000)
-             FROM clip_items
-             WHERE deleted_at IS NULL AND is_favorited = 1
+            "SELECT ci.id, ci.type, ci.preview_text, ci.source_app, ci.is_favorited,
+                    ci.image_path, ci.image_width, ci.image_height, ci.image_format, ci.file_size,
+                    ci.file_paths, ci.file_count, ci.total_size, ci.directory_count,
+                    ci.created_at, ci.updated_at, ci.last_used_at, substr(ci.full_text, 1, 3000),
+                    {TAG_NAMES_SUBQUERY} AS tag_names
+             FROM clip_items ci
+             WHERE ci.deleted_at IS NULL AND ci.is_favorited = 1
              ORDER BY {}
              LIMIT ?1",
-            activity_order_clause(""),
+            activity_order_clause("ci"),
         );
         let mut statement = connection.prepare(&sql)?;
         let rows = statement.query_map([limit], map_summary_row)?;
@@ -181,14 +203,15 @@ impl SqliteRepository {
 
     pub fn get_item_detail(&self, id: &str) -> Result<ClipItemDetail, AppError> {
         let connection = self.connection.lock()?;
-        let mut statement = connection.prepare(
-            "SELECT id, type, preview_text, full_text, search_text, source_app,
-                    is_favorited, created_at, updated_at, last_used_at, hash,
-                    image_path, image_width, image_height, image_format, file_size,
-                    file_paths, file_count, total_size, directory_count
-             FROM clip_items
-             WHERE id = ?1 AND deleted_at IS NULL",
-        )?;
+        let mut statement = connection.prepare(&format!(
+            "SELECT ci.id, ci.type, ci.preview_text, ci.full_text, ci.search_text, ci.source_app,
+                    ci.is_favorited, ci.created_at, ci.updated_at, ci.last_used_at, ci.hash,
+                    ci.image_path, ci.image_width, ci.image_height, ci.image_format, ci.file_size,
+                    ci.file_paths, ci.file_count, ci.total_size, ci.directory_count,
+                    {TAG_NAMES_SUBQUERY} AS tag_names
+             FROM clip_items ci
+             WHERE ci.id = ?1 AND ci.deleted_at IS NULL"
+        ))?;
 
         statement
             .query_row([id], map_detail_row)
@@ -225,16 +248,7 @@ impl SqliteRepository {
                 ],
             )?;
             transaction.execute("DELETE FROM clip_items_fts WHERE item_id = ?1", [id])?;
-            transaction.execute(
-                "INSERT INTO clip_items_fts(item_id, full_text, search_text, source_app)
-                 VALUES(?1, ?2, ?3, ?4)",
-                params![
-                    id,
-                    text.normalized.full_text,
-                    text.normalized.search_text,
-                    text.source_app
-                ],
-            )?;
+            rewrite_item_fts_row(&transaction, id)?;
             transaction.commit()?;
         }
         self.get_item_detail(id)
@@ -305,6 +319,118 @@ impl SqliteRepository {
         self.get_item_detail(id)
     }
 
+    /// 全部标签及使用次数（计数只统计未删除条目），按使用次数降序、同数按名称升序。
+    pub fn list_tags(&self) -> Result<Vec<TagInfo>, AppError> {
+        let connection = self.connection.lock()?;
+        let mut statement = connection.prepare(
+            "SELECT t.name, t.created_at, COUNT(ci.id) AS item_count
+             FROM tags t
+             LEFT JOIN clip_item_tags cit ON cit.tag_name = t.name
+             LEFT JOIN clip_items ci ON ci.id = cit.item_id AND ci.deleted_at IS NULL
+             GROUP BY t.name
+             ORDER BY item_count DESC, t.name COLLATE NOCASE ASC",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok(TagInfo {
+                name: row.get(0)?,
+                item_count: row.get::<_, i64>(2)? as u32,
+                created_at: timestamp_to_iso(row.get_ref(1)?),
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// 全量替换条目标签并同步 FTS 的 tags 列。调用方负责归一化与去重。
+    pub fn set_item_tags(
+        &self,
+        id: &str,
+        tag_names: &[String],
+    ) -> Result<ClipItemDetail, AppError> {
+        let now = Utc::now().timestamp_millis();
+        {
+            let connection = self.connection.lock()?;
+            let transaction = connection.unchecked_transaction()?;
+            let exists = transaction
+                .query_row(
+                    "SELECT COUNT(*) FROM clip_items WHERE id = ?1 AND deleted_at IS NULL",
+                    [id],
+                    |row| row.get::<_, i64>(0),
+                )?
+                > 0;
+            if !exists {
+                return Err(AppError::Message("未找到对应剪贴记录".to_string()));
+            }
+
+            transaction.execute("DELETE FROM clip_item_tags WHERE item_id = ?1", [id])?;
+            for tag_name in tag_names {
+                transaction.execute(
+                    "INSERT OR IGNORE INTO tags(name, created_at) VALUES(?1, ?2)",
+                    params![tag_name, now],
+                )?;
+                transaction.execute(
+                    "INSERT OR IGNORE INTO clip_item_tags(item_id, tag_name) VALUES(?1, ?2)",
+                    params![id, tag_name],
+                )?;
+            }
+            rewrite_item_fts_row(&transaction, id)?;
+            transaction.commit()?;
+        }
+        self.get_item_detail(id)
+    }
+
+    /// 重命名标签；新名已存在时合并（关联取并集，删旧标签）。
+    ///
+    /// 外键即时检查下无法直接 UPDATE 主键，统一走"先插后删"四步；
+    /// 大小写变体重命名（如 work → Work）在 NOCASE 下新旧名是同一标签，
+    /// 需经临时名中转，否则中间的 DELETE 会把关联一并删掉。
+    pub fn rename_tag(&self, old_name: &str, new_name: &str) -> Result<(), AppError> {
+        let connection = self.connection.lock()?;
+        let transaction = connection.unchecked_transaction()?;
+        let affected_ids = tag_affected_item_ids(&transaction, old_name)?;
+        if affected_ids.is_empty() {
+            let exists = transaction
+                .query_row(
+                    "SELECT COUNT(*) FROM tags WHERE name = ?1",
+                    [old_name],
+                    |row| row.get::<_, i64>(0),
+                )?
+                > 0;
+            if !exists {
+                return Err(AppError::Message("标签不存在".to_string()));
+            }
+        }
+
+        if old_name.eq_ignore_ascii_case(new_name) {
+            if old_name == new_name {
+                return Ok(());
+            }
+            let temp_name = format!("__rename_temp__{}", Uuid::new_v4());
+            apply_rename_steps(&transaction, old_name, &temp_name)?;
+            apply_rename_steps(&transaction, &temp_name, new_name)?;
+        } else {
+            apply_rename_steps(&transaction, old_name, new_name)?;
+        }
+
+        for item_id in &affected_ids {
+            rewrite_item_fts_row(&transaction, item_id)?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// 删除标签及其全部关联（依赖外键级联），并同步受影响条目的 FTS 行。
+    pub fn delete_tag(&self, name: &str) -> Result<(), AppError> {
+        let connection = self.connection.lock()?;
+        let transaction = connection.unchecked_transaction()?;
+        let affected_ids = tag_affected_item_ids(&transaction, name)?;
+        transaction.execute("DELETE FROM tags WHERE name = ?1", [name])?;
+        for item_id in &affected_ids {
+            rewrite_item_fts_row(&transaction, item_id)?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
     pub fn search(&self, query: SearchQuery) -> Result<SearchResult, AppError> {
         let normalized = query.normalized();
         let keyword = normalized.keyword.trim().to_string();
@@ -317,7 +443,7 @@ impl SqliteRepository {
     fn search_recent(&self, query: SearchQuery) -> Result<SearchResult, AppError> {
         let (where_clause, mut values) = build_filters_clause(&query);
         let connection = self.connection.lock()?;
-        let count_sql = format!("SELECT COUNT(*) FROM clip_items WHERE {where_clause}");
+        let count_sql = format!("SELECT COUNT(*) FROM clip_items ci WHERE {where_clause}");
         let total = connection.query_row(
             &count_sql,
             rusqlite::params_from_iter(values.clone()),
@@ -327,15 +453,16 @@ impl SqliteRepository {
         values.push(Value::Integer(i64::from(query.limit)));
         values.push(Value::Integer(i64::from(query.offset)));
         let sql = format!(
-            "SELECT id, type, preview_text, source_app, is_favorited,
-                    image_path, image_width, image_height, image_format, file_size,
-                    file_paths, file_count, total_size, directory_count,
-                    created_at, updated_at, last_used_at, substr(full_text, 1, 3000)
-             FROM clip_items
+            "SELECT ci.id, ci.type, ci.preview_text, ci.source_app, ci.is_favorited,
+                    ci.image_path, ci.image_width, ci.image_height, ci.image_format, ci.file_size,
+                    ci.file_paths, ci.file_count, ci.total_size, ci.directory_count,
+                    ci.created_at, ci.updated_at, ci.last_used_at, substr(ci.full_text, 1, 3000),
+                    {TAG_NAMES_SUBQUERY} AS tag_names
+             FROM clip_items ci
              WHERE {where_clause}
              ORDER BY {}
              LIMIT ? OFFSET ?",
-            activity_order_clause(""),
+            activity_order_clause("ci"),
         );
 
         let mut statement = connection.prepare(&sql)?;
@@ -373,21 +500,30 @@ impl SqliteRepository {
 
         let mut data_values = vec![Value::Text(fts_query)];
         data_values.extend(filter_values);
+        // search_text 精确子串加权：关键词以字面形式出现在 search_text（文件名/标题/描述）
+        // 中的记录排在最前，让"标题命中"优于"正文命中"，也区分开多关键词的连续短语命中。
+        let like_pattern = format!("%{}%", escape_like(&query.keyword.trim().to_lowercase()));
+        data_values.push(Value::Text(like_pattern));
         data_values.push(Value::Integer(i64::from(query.limit)));
         data_values.push(Value::Integer(i64::from(query.offset)));
         let order_clause = match query.sort {
             SearchSort::RecentDesc => activity_order_clause("ci"),
-            SearchSort::RelevanceDesc => "bm25(clip_items_fts) ASC,
+            // 收藏与带标签的条目优先（各计 1 分），其余按原有相关度规则排序
+            SearchSort::RelevanceDesc => format!(
+                "{}, CASE WHEN ci.search_text LIKE ? ESCAPE '\\' THEN 0 ELSE 1 END ASC,
+                 bm25(clip_items_fts) ASC,
                  COALESCE(ci.last_used_at, ci.created_at) DESC,
-                 ci.created_at DESC"
-                .to_string(),
+                 ci.created_at DESC",
+                priority_score_clause("ci"),
+            ),
         };
 
         let sql = format!(
             "SELECT ci.id, ci.type, ci.preview_text, ci.source_app, ci.is_favorited,
                     ci.image_path, ci.image_width, ci.image_height, ci.image_format, ci.file_size,
                     ci.file_paths, ci.file_count, ci.total_size, ci.directory_count,
-                    ci.created_at, ci.updated_at, ci.last_used_at, substr(ci.full_text, 1, 3000)
+                    ci.created_at, ci.updated_at, ci.last_used_at, substr(ci.full_text, 1, 3000),
+                    {TAG_NAMES_SUBQUERY} AS tag_names
              FROM clip_items_fts
              JOIN clip_items ci ON ci.id = clip_items_fts.item_id
              WHERE clip_items_fts MATCH ? AND {filter_clause}
@@ -405,8 +541,98 @@ impl SqliteRepository {
     }
 }
 
+/// 重命名的"先插后删"四步。`?new` 不存在时为纯重命名，已存在时自然演变为合并。
+/// 禁止用 UPDATE OR REPLACE 改 tags.name：合并场景下 REPLACE 会触发级联删光新名关联。
+fn apply_rename_steps(
+    transaction: &Connection,
+    old_name: &str,
+    new_name: &str,
+) -> Result<(), AppError> {
+    let now = Utc::now().timestamp_millis();
+    transaction.execute(
+        "INSERT OR IGNORE INTO tags(name, created_at) VALUES(?1, ?2)",
+        params![new_name, now],
+    )?;
+    transaction.execute(
+        "INSERT OR IGNORE INTO clip_item_tags(item_id, tag_name)
+         SELECT item_id, ?2 FROM clip_item_tags WHERE tag_name = ?1",
+        params![old_name, new_name],
+    )?;
+    transaction.execute(
+        "DELETE FROM clip_item_tags WHERE tag_name = ?1",
+        params![old_name],
+    )?;
+    transaction.execute("DELETE FROM tags WHERE name = ?1", params![old_name])?;
+    Ok(())
+}
+
+/// 收集引用某标签的条目 id，供级联/删行后批量重建 FTS 使用。
+fn tag_affected_item_ids(transaction: &Connection, tag_name: &str) -> Result<Vec<String>, AppError> {
+    let mut statement = transaction.prepare(
+        "SELECT DISTINCT item_id FROM clip_item_tags WHERE tag_name = ?1",
+    )?;
+    let rows = statement.query_map([tag_name], |row| row.get::<_, String>(0))?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+/// 按数据库当前内容整行重写条目的 FTS 行（含 tags 列）。
+///
+/// `tags` 列取该条目聚合后的标签名，逐个 `space_cjk_text` 后以空格拼接，
+/// 与查询侧的逐词空格化保持对称。条目不存在（已软删）时仅清理残留行。
+fn rewrite_item_fts_row(transaction: &Connection, id: &str) -> Result<(), AppError> {
+    let row = transaction
+        .query_row(
+            &format!(
+                "SELECT ci.full_text, ci.search_text, ci.source_app,
+                        {TAG_NAMES_SUBQUERY} AS tag_names
+                 FROM clip_items ci WHERE ci.id = ?1 AND ci.deleted_at IS NULL"
+            ),
+            [id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            },
+        )
+        .optional()?;
+    transaction.execute("DELETE FROM clip_items_fts WHERE item_id = ?1", [id])?;
+    let Some((full_text, search_text, source_app, tag_names)) = row else {
+        return Ok(());
+    };
+
+    let tags_index_text = tag_names
+        .split('\u{1f}')
+        .map(space_cjk_text)
+        .collect::<Vec<_>>()
+        .join(" ");
+    transaction.execute(
+        "INSERT INTO clip_items_fts(item_id, full_text, search_text, source_app, tags)
+         VALUES(?1, ?2, ?3, ?4, ?5)",
+        params![
+            id,
+            space_cjk_text(&full_text),
+            space_cjk_text(&search_text),
+            source_app.as_deref().map(space_cjk_text).unwrap_or_default(),
+            tags_index_text
+        ],
+    )?;
+    Ok(())
+}
+
+/// 把 char(31) 拼接的标签聚合结果拆为字符串数组。
+fn parse_tags(tag_names: String) -> Vec<String> {
+    if tag_names.is_empty() {
+        Vec::new()
+    } else {
+        tag_names.split('\u{1f}').map(str::to_string).collect()
+    }
+}
+
 fn build_filters_clause(query: &SearchQuery) -> (String, Vec<Value>) {
-    build_filters_clause_with_alias(query, "")
+    build_filters_clause_with_alias(query, "ci")
 }
 
 fn build_filters_clause_with_alias(query: &SearchQuery, alias: &str) -> (String, Vec<Value>) {
@@ -433,6 +659,21 @@ fn build_filters_clause_with_alias(query: &SearchQuery, alias: &str) -> (String,
         values.push(Value::Text(source_app.to_string()));
     }
 
+    // 标签筛选为 AND 语义：每个标签一条 EXISTS；空列表等价于未筛选
+    if let Some(tag_names) = query.filters.tag_names.as_ref() {
+        for tag_name in tag_names
+            .iter()
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+        {
+            clauses.push(format!(
+                "EXISTS (SELECT 1 FROM clip_item_tags t WHERE t.item_id = {}id AND t.tag_name = ?)",
+                prefix(alias)
+            ));
+            values.push(Value::Text(tag_name.to_string()));
+        }
+    }
+
     (clauses.join(" AND "), values)
 }
 
@@ -452,14 +693,34 @@ fn activity_order_clause(alias: &str) -> String {
     )
 }
 
+/// 相关度排序的优先级得分：收藏 +1、带任一标签 +1，降序排在最前。
+fn priority_score_clause(alias: &str) -> String {
+    format!(
+        "(CASE WHEN {0}is_favorited THEN 1 ELSE 0 END
+          + CASE WHEN EXISTS (SELECT 1 FROM clip_item_tags t WHERE t.item_id = {0}id) THEN 1 ELSE 0 END) DESC",
+        prefix(alias)
+    )
+}
+
 fn build_fts_query(keyword: &str) -> String {
     keyword
         .split_whitespace()
         .map(str::trim)
         .filter(|token| !token.is_empty())
+        // 对每个原始词做 CJK 逐字空格化：中文"测试"变为短语"测 试"，
+        // 与索引侧的 space_cjk_text 对称，可命中任意位置的连续中文串。
+        .map(space_cjk_text)
         .map(|token| format!("\"{}\"*", token.replace('"', "\"\"")))
         .collect::<Vec<_>>()
         .join(" AND ")
+}
+
+/// 转义 LIKE 模式中的通配符，使关键词按字面匹配。
+fn escape_like(input: &str) -> String {
+    input
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
 }
 
 fn map_summary_row(row: &Row<'_>) -> rusqlite::Result<ClipItemSummary> {
@@ -499,6 +760,7 @@ fn map_summary_row(row: &Row<'_>) -> rusqlite::Result<ClipItemSummary> {
         image_height: row.get(7)?,
         image_format: row.get(8)?,
         file_size: row.get(9)?,
+        tags: parse_tags(row.get::<_, String>(18)?),
     })
 }
 
@@ -538,6 +800,7 @@ fn map_detail_row(row: &Row<'_>) -> rusqlite::Result<ClipItemDetail> {
         file_count: resolved_file_fields.file_count,
         directory_count: resolved_file_fields.directory_count,
         total_size: resolved_file_fields.total_size,
+        tags: parse_tags(row.get::<_, String>(20)?),
     })
 }
 
@@ -638,10 +901,12 @@ mod tests {
     use chrono::{Duration, Utc};
     use rusqlite::{params, Connection};
 
-    use super::{bool_to_i64, SqliteRepository};
+    use super::{bool_to_i64, space_cjk_text, SqliteRepository};
     use super::super::settings::PICKER_WINDOW_STATE_KEY;
     use crate::domain::{
-        clip_item::{ClipType, SearchFilters, SearchQuery, SearchSort},
+        clip_item::{
+            ClipType, NewClipTextItem, NormalizedClipText, SearchFilters, SearchQuery, SearchSort,
+        },
         settings::StoredWindowPosition,
     };
 
@@ -692,12 +957,22 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
             uuid::Uuid::new_v4()
         ))
     }
-
     #[test]
     fn new_upgrades_legacy_database_with_media_columns() {
         let path = temp_db_path();
         let connection = Connection::open(&path).unwrap();
         connection.execute_batch(LEGACY_SCHEMA_SQL).unwrap();
+        // 预置一条旧格式记录：FTS 索引为未空格化的原文（旧行为）
+        connection
+            .execute_batch(
+                "INSERT INTO clip_items(
+                    id, type, full_text, preview_text, search_text, source_app,
+                    is_favorited, hash, created_at, updated_at, last_used_at, deleted_at
+                ) VALUES('legacy-item', 'text', '遗留记录包含测试关键词', '遗留记录包含测试关键词', '遗留记录包含测试关键词', NULL, 0, 'legacy-hash', 1, 1, NULL, NULL);
+                INSERT INTO clip_items_fts(item_id, full_text, search_text, source_app)
+                VALUES('legacy-item', '遗留记录包含测试关键词', '遗留记录包含测试关键词', NULL);"
+            )
+            .unwrap();
         drop(connection);
 
         let repository = SqliteRepository::new(&path).unwrap();
@@ -726,7 +1001,20 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
             .unwrap()
             .query_row("PRAGMA user_version", [], |row| row.get::<_, i32>(0))
             .unwrap();
-        assert_eq!(version, 3);
+        assert_eq!(version, 5);
+
+        // v4 迁移重建了 FTS 索引：旧记录的中文关键词（位于连续中文串中部）应可命中
+        let migrated_result = repository
+            .search(SearchQuery {
+                keyword: "测试".to_string(),
+                filters: SearchFilters::default(),
+                offset: 0,
+                limit: 10,
+                sort: SearchSort::RelevanceDesc,
+            })
+            .unwrap();
+        assert_eq!(migrated_result.total, 1);
+        assert_eq!(migrated_result.items[0].id, "legacy-item");
 
         drop(repository);
         fs::remove_file(path).unwrap();
@@ -761,7 +1049,7 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
             .execute(
                 "INSERT INTO clip_items_fts(item_id, full_text, search_text, source_app)
                  VALUES(?1, ?2, ?2, NULL)",
-                rusqlite::params![id, preview],
+                rusqlite::params![id, space_cjk_text(preview)],
             )
             .unwrap();
     }
@@ -797,7 +1085,11 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
             .execute(
                 "INSERT INTO clip_items_fts(item_id, full_text, search_text, source_app)
                  VALUES(?1, ?2, ?3, NULL)",
-                rusqlite::params![id, if clip_type == "text" { preview } else { "" }, preview],
+                rusqlite::params![
+                    id,
+                    space_cjk_text(if clip_type == "text" { preview } else { "" }),
+                    space_cjk_text(preview),
+                ],
             )
             .unwrap();
     }
@@ -1045,6 +1337,7 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
                     clip_type: Some(ClipType::Image),
                     source_app: None,
                     include_deleted: None,
+                    tag_names: None,
                 },
                 offset: 0,
                 limit: 10,
@@ -1064,6 +1357,7 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
                     clip_type: Some(ClipType::File),
                     source_app: None,
                     include_deleted: None,
+                    tag_names: None,
                 },
                 offset: 0,
                 limit: 10,
@@ -1074,6 +1368,212 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
         assert_eq!(keyword_result.total, 1);
         assert_eq!(keyword_result.items.len(), 1);
         assert_eq!(keyword_result.items[0].id, "file-item");
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    fn seed_text_item(repository: &SqliteRepository, full_text: &str) -> String {
+        repository
+            .save_text_item(&NewClipTextItem {
+                normalized: NormalizedClipText {
+                    full_text: full_text.to_string(),
+                    preview_text: full_text.to_string(),
+                    search_text: full_text.to_string(),
+                    hash: format!("hash-{full_text}"),
+                },
+                source_app: None,
+            })
+            .unwrap()
+            .id
+    }
+
+    #[test]
+    fn search_chinese_keyword_matches_mid_string() {
+        // 中文关键词应命中连续中文串中部的匹配（旧实现会漏掉此类记录）
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+        let mid_id = seed_text_item(&repository, "这是一段测试代码");
+        let prefix_id = seed_text_item(&repository, "测试功能说明");
+
+        let result = repository
+            .search(SearchQuery {
+                keyword: "测试".to_string(),
+                filters: SearchFilters::default(),
+                offset: 0,
+                limit: 10,
+                sort: SearchSort::RelevanceDesc,
+            })
+            .unwrap();
+
+        assert_eq!(result.total, 2);
+        let ids: Vec<&str> = result.items.iter().map(|item| item.id.as_str()).collect();
+        assert!(ids.contains(&mid_id.as_str()));
+        assert!(ids.contains(&prefix_id.as_str()));
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn search_chinese_keyword_requires_contiguous_chars() {
+        // 短语语义：只命中连续出现的"测试"，"测一个试"不应命中
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+        let contiguous_id = seed_text_item(&repository, "这是一个测试场景");
+        seed_text_item(&repository, "测一个试");
+
+        let result = repository
+            .search(SearchQuery {
+                keyword: "测试".to_string(),
+                filters: SearchFilters::default(),
+                offset: 0,
+                limit: 10,
+                sort: SearchSort::RelevanceDesc,
+            })
+            .unwrap();
+
+        assert_eq!(result.total, 1);
+        assert_eq!(result.items[0].id, contiguous_id);
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn search_chinese_multi_keyword_uses_and() {
+        // 多关键词 AND 语义：每个词都要命中
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+        let both_id = seed_text_item(&repository, "测试功能说明");
+        seed_text_item(&repository, "普通测试记录");
+
+        let result = repository
+            .search(SearchQuery {
+                keyword: "测试 功能".to_string(),
+                filters: SearchFilters::default(),
+                offset: 0,
+                limit: 10,
+                sort: SearchSort::RelevanceDesc,
+            })
+            .unwrap();
+
+        assert_eq!(result.total, 1);
+        assert_eq!(result.items[0].id, both_id);
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn search_english_prefix_behavior_preserved() {
+        // 英文前缀匹配行为保持不变：test 命中 testing
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+        seed_text_item(&repository, "contest testing");
+        seed_text_item(&repository, "a test of the system");
+
+        let result = repository
+            .search(SearchQuery {
+                keyword: "test".to_string(),
+                filters: SearchFilters::default(),
+                offset: 0,
+                limit: 10,
+                sort: SearchSort::RelevanceDesc,
+            })
+            .unwrap();
+
+        assert_eq!(result.total, 2);
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn search_ranks_contiguous_phrase_above_scattered_tokens() {
+        // 排序：多关键词中连续短语命中（search_text 字面包含）排在分散命中之前
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+        let now = Utc::now();
+        seed_item(
+            &repository,
+            "recent-scattered",
+            "world of hello",
+            (now - Duration::minutes(1)).timestamp_millis(),
+            None,
+            false,
+        );
+        seed_item(
+            &repository,
+            "older-contiguous",
+            "hello world",
+            (now - Duration::minutes(5)).timestamp_millis(),
+            None,
+            false,
+        );
+
+        let result = repository
+            .search(SearchQuery {
+                keyword: "hello world".to_string(),
+                filters: SearchFilters::default(),
+                offset: 0,
+                limit: 10,
+                sort: SearchSort::RelevanceDesc,
+            })
+            .unwrap();
+
+        // 尽管 recent-scattered 更近，连续短语命中应排在前面
+        assert_eq!(result.items[0].id, "older-contiguous");
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn search_relevance_ranks_favorited_and_tagged_items_first() {
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+        let now = Utc::now();
+        // plain：最新且标题命中；tagged：带标签；favorited：收藏。优先级应压过时间与短语命中
+        seed_item(
+            &repository,
+            "plain-recent",
+            "hello world",
+            (now - Duration::minutes(1)).timestamp_millis(),
+            None,
+            false,
+        );
+        seed_item(
+            &repository,
+            "tagged-older",
+            "hello world",
+            (now - Duration::minutes(5)).timestamp_millis(),
+            None,
+            false,
+        );
+        repository.set_item_tags("tagged-older", &["工作".to_string()]).unwrap();
+        seed_item(
+            &repository,
+            "favorited-oldest",
+            "world of hello",
+            (now - Duration::minutes(10)).timestamp_millis(),
+            None,
+            true,
+        );
+
+        let result = repository
+            .search(SearchQuery {
+                keyword: "hello world".to_string(),
+                filters: SearchFilters::default(),
+                offset: 0,
+                limit: 10,
+                sort: SearchSort::RelevanceDesc,
+            })
+            .unwrap();
+
+        // favorited 与 tagged 优先级同为 1 分，其内部再按标题精确命中排序
+        let ids: Vec<&str> = result.items.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(ids, vec!["tagged-older", "favorited-oldest", "plain-recent"]);
 
         drop(repository);
         fs::remove_file(path).unwrap();
@@ -1263,6 +1763,305 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
                 height: None,
             })
         );
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn set_item_tags_replaces_idempotently_and_clears_with_empty() {
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+        let id = seed_text_item(&repository, "标签测试内容");
+
+        let detail = repository
+            .set_item_tags(&id, &["工作".to_string(), "资料".to_string()])
+            .unwrap();
+        assert_eq!(detail.tags, vec!["工作".to_string(), "资料".to_string()]);
+
+        // 幂等：重复提交同一集合结果不变
+        let detail = repository
+            .set_item_tags(&id, &["工作".to_string(), "资料".to_string()])
+            .unwrap();
+        assert_eq!(detail.tags.len(), 2);
+
+        // 全量替换：旧标签被移除，NOCASE 变体对齐到既有写法
+        let detail = repository
+            .set_item_tags(&id, &["WORK".to_string(), "个人".to_string()])
+            .unwrap();
+        assert_eq!(detail.tags, vec!["WORK".to_string(), "个人".to_string()]);
+
+        // 空数组清空
+        let detail = repository.set_item_tags(&id, &[]).unwrap();
+        assert!(detail.tags.is_empty());
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn set_item_tags_nocase_variants_dedupe_to_single_row() {
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+        let id = seed_text_item(&repository, "去重验证");
+
+        // 模拟 TagService 归一化去重后的提交
+        let detail = repository
+            .set_item_tags(&id, &["Work".to_string()])
+            .unwrap();
+        assert_eq!(detail.tags, vec!["Work".to_string()]);
+        // 数据库中仅一行关联（tags 表也只有一个标签）
+        let connection = repository.connection.lock().unwrap();
+        let rows: i64 = connection
+            .query_row("SELECT COUNT(*) FROM clip_item_tags WHERE item_id = ?1", [&id], |r| r.get(0))
+            .unwrap();
+        let tag_rows: i64 =
+            connection.query_row("SELECT COUNT(*) FROM tags", [], |r| r.get(0)).unwrap();
+        drop(connection);
+        assert_eq!(rows, 1);
+        assert_eq!(tag_rows, 1);
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn rename_tag_syncs_fts_and_merges_case_variants() {
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+        let id = seed_text_item(&repository, "重命名验证正文");
+        repository
+            .set_item_tags(&id, &["旧标签".to_string()])
+            .unwrap();
+
+        // 旧标签名可命中
+        let before = repository.search(SearchQuery {
+            keyword: "旧标签".to_string(),
+            filters: SearchFilters::default(),
+            offset: 0,
+            limit: 10,
+            sort: SearchSort::RelevanceDesc,
+        }).unwrap();
+        assert_eq!(before.total, 1);
+
+        repository.rename_tag("旧标签", "新标签").unwrap();
+
+        // 旧名不再命中（无幽灵命中），新名可命中（FTS 已同步）
+        let after_old = repository.search(SearchQuery {
+            keyword: "旧标签".to_string(),
+            filters: SearchFilters::default(),
+            offset: 0,
+            limit: 10,
+            sort: SearchSort::RelevanceDesc,
+        }).unwrap();
+        assert_eq!(after_old.total, 0);
+        let after_new = repository.search(SearchQuery {
+            keyword: "新标签".to_string(),
+            filters: SearchFilters::default(),
+            offset: 0,
+            limit: 10,
+            sort: SearchSort::RelevanceDesc,
+        }).unwrap();
+        assert_eq!(after_new.total, 1);
+        assert_eq!(after_new.items[0].tags, vec!["新标签".to_string()]);
+
+        // 合并：新名已存在时关联取并集、旧标签消失
+        let other = seed_text_item(&repository, "另一条内容");
+        repository.set_item_tags(&other, &["目标".to_string()]).unwrap();
+        repository.rename_tag("新标签", "目标").unwrap();
+        let tags = repository.list_tags().unwrap();
+        let names: Vec<String> = tags.iter().map(|tag| tag.name.clone()).collect();
+        assert!(!names.contains(&"新标签".to_string()));
+        let detail = repository.get_item_detail(&id).unwrap();
+        assert_eq!(detail.tags, vec!["目标".to_string()]);
+
+        // 大小写变体重命名不丢关联
+        repository.rename_tag("目标", "Target").unwrap();
+        let detail = repository.get_item_detail(&id).unwrap();
+        assert_eq!(detail.tags, vec!["Target".to_string()]);
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn update_text_preserves_tag_fts_hits() {
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+        let id = seed_text_item(&repository, "编辑前内容");
+        repository.set_item_tags(&id, &["重要".to_string()]).unwrap();
+
+        let updated = repository
+            .update_text(
+                &id,
+                &NewClipTextItem {
+                    normalized: NormalizedClipText {
+                        full_text: "编辑后内容".to_string(),
+                        preview_text: "编辑后内容".to_string(),
+                        search_text: "编辑后内容".to_string(),
+                        hash: "hash-edited".to_string(),
+                    },
+                    source_app: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(updated.tags, vec!["重要".to_string()]);
+
+        let result = repository.search(SearchQuery {
+            keyword: "重要".to_string(),
+            filters: SearchFilters::default(),
+            offset: 0,
+            limit: 10,
+            sort: SearchSort::RelevanceDesc,
+        }).unwrap();
+        assert_eq!(result.total, 1);
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn delete_tag_removes_associations_and_list_tags_excludes_deleted_items() {
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+        let kept = seed_text_item(&repository, "保留的条目");
+        let removed = seed_text_item(&repository, "待删除的条目");
+        repository.set_item_tags(&kept, &["共享".to_string()]).unwrap();
+        repository.set_item_tags(&removed, &["共享".to_string()]).unwrap();
+
+        // 软删一个条目后，计数只统计未删除条目
+        repository.delete_item(&removed).unwrap();
+        let tags = repository.list_tags().unwrap();
+        assert_eq!(tags.len(), 1);
+        assert_eq!(tags[0].name, "共享");
+        assert_eq!(tags[0].item_count, 1);
+
+        repository.delete_tag("共享").unwrap();
+        let tags = repository.list_tags().unwrap();
+        assert!(tags.is_empty());
+        let detail = repository.get_item_detail(&kept).unwrap();
+        assert!(detail.tags.is_empty());
+        // 关联行已随级联清理
+        let connection = repository.connection.lock().unwrap();
+        let rows: i64 = connection
+            .query_row("SELECT COUNT(*) FROM clip_item_tags", [], |r| r.get(0))
+            .unwrap();
+        drop(connection);
+        assert_eq!(rows, 0);
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn search_filters_by_tags_with_and_semantics() {
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+        let both = seed_text_item(&repository, "两个标签的条目");
+        let single = seed_text_item(&repository, "单个标签的条目");
+        repository
+            .set_item_tags(&both, &["工作".to_string(), "资料".to_string()])
+            .unwrap();
+        repository.set_item_tags(&single, &["工作".to_string()]).unwrap();
+
+        let filters = |tag_names: Option<Vec<String>>| SearchFilters {
+            favorited_only: None,
+            clip_type: None,
+            source_app: None,
+            include_deleted: None,
+            tag_names,
+        };
+
+        let single_tag = repository.search(SearchQuery {
+            keyword: String::new(),
+            filters: filters(Some(vec!["工作".to_string()])),
+            offset: 0,
+            limit: 10,
+            sort: SearchSort::RecentDesc,
+        }).unwrap();
+        assert_eq!(single_tag.total, 2);
+
+        let both_tags = repository.search(SearchQuery {
+            keyword: String::new(),
+            filters: filters(Some(vec!["工作".to_string(), "资料".to_string()])),
+            offset: 0,
+            limit: 10,
+            sort: SearchSort::RecentDesc,
+        }).unwrap();
+        assert_eq!(both_tags.total, 1);
+        assert_eq!(both_tags.items[0].id, both);
+
+        // 空数组等价于未筛选；None 同样
+        let empty = repository.search(SearchQuery {
+            keyword: String::new(),
+            filters: filters(Some(Vec::new())),
+            offset: 0,
+            limit: 10,
+            sort: SearchSort::RecentDesc,
+        }).unwrap();
+        assert_eq!(empty.total, 2);
+        let none = repository.search(SearchQuery {
+            keyword: String::new(),
+            filters: filters(None),
+            offset: 0,
+            limit: 10,
+            sort: SearchSort::RecentDesc,
+        }).unwrap();
+        assert_eq!(none.total, 2);
+
+        // 大小写不敏感
+        let english = seed_text_item(&repository, "english tagged item");
+        repository.set_item_tags(&english, &["Work".to_string()]).unwrap();
+        let ci = repository.search(SearchQuery {
+            keyword: String::new(),
+            filters: filters(Some(vec!["WORK".to_string()])),
+            offset: 0,
+            limit: 10,
+            sort: SearchSort::RecentDesc,
+        }).unwrap();
+        assert_eq!(ci.total, 1);
+        assert_eq!(ci.items[0].id, english);
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn keyword_hits_cjk_tag_name_via_fts() {
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+        let id = seed_text_item(&repository, "完全无关的正文内容");
+        repository.set_item_tags(&id, &["设计稿".to_string()]).unwrap();
+
+        let result = repository.search(SearchQuery {
+            keyword: "设计".to_string(),
+            filters: SearchFilters::default(),
+            offset: 0,
+            limit: 10,
+            sort: SearchSort::RelevanceDesc,
+        }).unwrap();
+        assert_eq!(result.total, 1);
+        assert_eq!(result.items[0].id, id);
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn list_recent_and_detail_carry_tags() {
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+        let id = seed_text_item(&repository, "聚合列验证");
+        repository
+            .set_item_tags(&id, &["乙标签".to_string(), "甲标签".to_string()])
+            .unwrap();
+
+        // 聚合顺序确定（NOCASE 对 CJK 即码点序：乙 U+4E59 < 甲 U+7532）
+        let recent = repository.list_recent(10).unwrap();
+        let summary = recent.iter().find(|item| item.id == id).unwrap();
+        assert_eq!(summary.tags, vec!["乙标签".to_string(), "甲标签".to_string()]);
+        let detail = repository.get_item_detail(&id).unwrap();
+        assert_eq!(detail.tags, summary.tags.clone());
 
         drop(repository);
         fs::remove_file(path).unwrap();

@@ -628,6 +628,24 @@ export function PickerShell() {
                           ) : null}
                         </span>
                       </div>
+
+                      {isSelected && item.tags.length > 0 ? (
+                        <div className="mt-1 flex flex-wrap items-center gap-1">
+                          {item.tags.slice(0, 2).map((tagName) => (
+                            <span
+                              className="rounded-full bg-pg-canvas-inset px-1.5 py-0.5 text-[10px] leading-4 text-pg-fg-muted"
+                              key={tagName}
+                            >
+                              {tagName}
+                            </span>
+                          ))}
+                          {item.tags.length > 2 ? (
+                            <span className="text-[10px] leading-4 text-pg-fg-subtle">
+                              +{item.tags.length - 2}
+                            </span>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </button>
                   );
                 })}

@@ -1,5 +1,6 @@
 export const CLIPS_CHANGED_EVENT = "clips://changed";
 export const SETTINGS_CHANGED_EVENT = "settings://changed";
+export const TAGS_CHANGED_EVENT = "tags://changed";
 export const SETTINGS_OPEN_SETTINGS_EVENT = "settings://open-settings";
 
 export const PICKER_SESSION_START_EVENT = "picker://session-start";

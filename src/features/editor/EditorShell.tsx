@@ -9,6 +9,7 @@ import { LoadingSpinner } from "../../shared/ui/LoadingSpinner";
 import { useItemDetailQuery, useUpdateTextMutation } from "../../shared/queries/clipQueries";
 import { useEditorStore, type EditorSession } from "./store";
 import { getEditorKeyboardAction, moveFocusInDialog } from "./keyboard";
+import { TagEditor } from "./tagEditor";
 
 export function EditorShell() {
   const {
@@ -241,19 +242,39 @@ export function EditorShell() {
             未找到对应条目
           </div>
         ) : isTextItem ? (
-          <textarea
-            ref={textareaRef}
-            className="h-full w-full resize-none rounded-md border border-pg-border-default bg-pg-canvas-subtle px-5 py-5 text-[14px] leading-relaxed text-pg-fg-default outline-none transition-colors focus:border-pg-accent-fg focus:bg-pg-canvas-inset focus-visible:outline-none"
-            onChange={(event) => setDraftText(event.target.value)}
-            placeholder="在此输入或修改文本..."
-            value={draftText}
-          />
+          <div className="flex h-full min-h-0 flex-col gap-3">
+            <TagEditor
+              itemId={detailQuery.data.id}
+              tags={detailQuery.data.tags}
+              onError={(message) => {
+                setNoticeMessage(null);
+                setErrorMessage(message);
+              }}
+            />
+            <textarea
+              ref={textareaRef}
+              className="h-full w-full min-h-0 flex-1 resize-none rounded-md border border-pg-border-default bg-pg-canvas-subtle px-5 py-5 text-[14px] leading-relaxed text-pg-fg-default outline-none transition-colors focus:border-pg-accent-fg focus:bg-pg-canvas-inset focus-visible:outline-none"
+              onChange={(event) => setDraftText(event.target.value)}
+              placeholder="在此输入或修改文本..."
+              value={draftText}
+            />
+          </div>
         ) : (
           <div className="rounded-lg border border-pg-border-default bg-pg-canvas-subtle p-5">
             <h2 className="text-base font-semibold text-pg-fg-muted">此条目无法编辑</h2>
             <p className="mt-2 text-sm leading-6 text-pg-fg-muted">
               只有文本类型的条目可以在这里编辑。你可以关闭当前窗口并返回来源界面继续操作。
             </p>
+            <div className="mt-4">
+              <TagEditor
+                itemId={detailQuery.data.id}
+                tags={detailQuery.data.tags}
+                onError={(message) => {
+                  setNoticeMessage(null);
+                  setErrorMessage(message);
+                }}
+              />
+            </div>
           </div>
         )}
       </main>

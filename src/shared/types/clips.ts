@@ -1,12 +1,20 @@
 export type SearchSort = "relevance_desc" | "recent_desc";
 export type ClipType = "text" | "image" | "file";
-export type SearchQuickFilter = "all" | "favorite" | ClipType;
+export type SearchQuickFilter = "all" | "favorite" | ClipType | "tag";
 
 export interface SearchFilters {
   favoritedOnly?: boolean;
   clipType?: ClipType;
   sourceApp?: string | null;
   includeDeleted?: false;
+  /** 按标签筛选，AND 语义；空数组等价于未筛选 */
+  tagNames?: string[] | null;
+}
+
+export interface TagInfo {
+  name: string;
+  itemCount: number;
+  createdAt: string;
 }
 
 export interface SearchQuery {
@@ -34,6 +42,7 @@ export interface ClipItemSummary {
   imageHeight: number | null;
   imageFormat: string | null;
   fileSize: number | null;
+  tags: string[];
 }
 
 // 所有字段都放在一个基础接口上，通过 type 区分行为
@@ -61,6 +70,7 @@ export interface ClipItemDetail {
   fileCount: number;
   directoryCount: number;
   totalSize: number | null;
+  tags: string[];
 }
 
 export interface SearchResult {

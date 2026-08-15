@@ -5,11 +5,13 @@ use crate::{
     domain::{
         clip_item::{
             ClipItemDetail, ClipItemSummary, PasteOption, PasteResult, SearchQuery, SearchResult,
+            TagInfo,
         },
-        events::CLIPS_CHANGED_EVENT,
+        events::{CLIPS_CHANGED_EVENT, TAGS_CHANGED_EVENT},
     },
     services::{
         clip_service::ClipService, paste_executor::PasteExecutor, search_service::SearchService,
+        tag_service::TagService,
     },
 };
 
@@ -81,6 +83,49 @@ pub fn set_item_favorited(
 ) -> Result<(), String> {
     ClipService::set_favorited(&state, &id, value).map_err(map_error)?;
     let _ = app.emit(CLIPS_CHANGED_EVENT, &id);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn list_tags(state: State<'_, AppState>) -> Result<Vec<TagInfo>, String> {
+    state.repository.list_tags().map_err(map_error)
+}
+
+#[tauri::command]
+pub fn set_item_tags(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    tag_names: Vec<String>,
+) -> Result<ClipItemDetail, String> {
+    let detail = TagService::set_item_tags(&state, &id, &tag_names).map_err(map_error)?;
+    let _ = app.emit(CLIPS_CHANGED_EVENT, &detail.id);
+    let _ = app.emit(TAGS_CHANGED_EVENT, ());
+    Ok(detail)
+}
+
+#[tauri::command]
+pub fn rename_tag(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    old_name: String,
+    new_name: String,
+) -> Result<(), String> {
+    TagService::rename_tag(&state, &old_name, &new_name).map_err(map_error)?;
+    let _ = app.emit(CLIPS_CHANGED_EVENT, ());
+    let _ = app.emit(TAGS_CHANGED_EVENT, ());
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_tag(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    name: String,
+) -> Result<(), String> {
+    TagService::delete_tag(&state, &name).map_err(map_error)?;
+    let _ = app.emit(CLIPS_CHANGED_EVENT, ());
+    let _ = app.emit(TAGS_CHANGED_EVENT, ());
     Ok(())
 }
 

@@ -6,19 +6,24 @@ import type {
   PasteResult,
   SearchQuery,
   SearchResult,
+  TagInfo,
 } from "../shared/types/clips";
 import type { UserSetting } from "../shared/types/settings";
 import {
   mockDeleteItem,
+  mockDeleteTag,
   mockGetItemDetail,
   mockGetSettings,
   mockListFavoriteItems,
   mockListRecentItems,
+  mockListTags,
   mockPasteItem,
   mockPauseMonitoring,
+  mockRenameTag,
   mockResumeMonitoring,
   mockSearchItems,
   mockSetItemFavorited,
+  mockSetItemTags,
   mockUpdateSettings,
   mockUpdateTextItem,
 } from "./mockBackend";
@@ -85,6 +90,37 @@ export async function pasteItem(id: string, option: PasteOption): Promise<PasteR
     return mockPasteItem(id, option);
   }
   return invoke("paste_item", { id, option });
+}
+
+export async function listTags(): Promise<TagInfo[]> {
+  if (!isTauriRuntime()) {
+    return mockListTags();
+  }
+  return invoke("list_tags");
+}
+
+export async function setItemTags(
+  id: string,
+  tagNames: string[],
+): Promise<ClipItemDetail> {
+  if (!isTauriRuntime()) {
+    return mockSetItemTags(id, tagNames);
+  }
+  return invoke("set_item_tags", { id, tagNames });
+}
+
+export async function renameTag(oldName: string, newName: string): Promise<void> {
+  if (!isTauriRuntime()) {
+    return mockRenameTag(oldName, newName);
+  }
+  return invoke("rename_tag", { oldName, newName });
+}
+
+export async function deleteTag(name: string): Promise<void> {
+  if (!isTauriRuntime()) {
+    return mockDeleteTag(name);
+  }
+  return invoke("delete_tag", { name });
 }
 
 export async function getSettings(): Promise<UserSetting> {

@@ -22,6 +22,7 @@ import { SettingsNav } from "./SettingsNav";
 import { SettingsSection } from "./SettingsSection";
 import { type SettingsSectionId } from "./settingsSections";
 import { useSettingsNavigation } from "./useSettingsNavigation";
+import { TagsSection } from "./TagsSection";
 import { useSettingsQuery, useUpdateSettingsMutation } from "./queries";
 import { invalidateSettings, settingsQueryKey } from "../../shared/queries/settingsQuery";
 
@@ -91,6 +92,7 @@ const sectionDescriptions: Record<SettingsSectionId, string> = {
   appearance: "管理界面主题与速贴窗口出现方式，保证日常使用手感一致。",
   behavior: "控制开机启动、监听状态与贴回行为，明确主次关系。",
   excludedApps: "按进程名忽略特定应用，避免敏感内容进入历史记录。",
+  tags: "统一管理剪贴记录标签：重命名、合并与删除。",
 };
 
 const FORM_INPUT =
@@ -881,6 +883,8 @@ export function SettingsShell() {
                     </label>
                   </SettingCard>
                 </SettingsSection>
+
+                <TagsSection registerSection={registerSection} />
               </div>
             </div>
           </div>

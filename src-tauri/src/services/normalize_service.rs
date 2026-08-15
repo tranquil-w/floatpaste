@@ -160,6 +160,42 @@ pub fn build_file_preview(
         .unwrap_or_else(|| format!("{file_count} 个文件"))
 }
 
+/// 判断字符是否属于 CJK 统一表意文字区段。
+///
+/// 覆盖常用中文区段（含扩展区），用于 FTS 分词预处理。
+fn is_cjk_char(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x3400..=0x4DBF    // CJK 扩展 A
+        | 0x4E00..=0x9FFF  // CJK 统一表意文字
+        | 0xF900..=0xFAFF  // CJK 兼容表意文字
+        | 0x20000..=0x2FA1F // CJK 扩展 B-G
+    )
+}
+
+/// 将连续 CJK 字符逐字空格化，供 FTS 索引与查询使用。
+///
+/// SQLite FTS5 默认的 unicode61 分词器会把一段连续中文当作单个 token，
+/// 导致前缀查询（如 "测试"*）只能命中连续中文串开头的匹配，漏掉中部子串
+/// （"这是一段测试代码" 中的 "测试" 无法命中）。逐字空格化后每个汉字成为
+/// 独立 token，配合短语查询（如 "测 试"*）即可匹配任意位置的连续中文串。
+/// 对纯 ASCII 文本不产生任何变化。
+pub fn space_cjk_text(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 8);
+    let mut prev: Option<char> = None;
+    for c in text.chars() {
+        if let Some(p) = prev {
+            // 相邻两个字符中只要有一个是 CJK 就插入空格；已处于空格后则不重复插入
+            if p != ' ' && (is_cjk_char(c) || is_cjk_char(p)) {
+                out.push(' ');
+            }
+        }
+        out.push(c);
+        prev = Some(c);
+    }
+    out
+}
+
 /// 文件选择集合的统计结果。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct FileSelectionStats {

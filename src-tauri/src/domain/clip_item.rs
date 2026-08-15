@@ -19,6 +19,7 @@ pub struct ClipItemSummary {
     pub image_height: Option<i32>,
     pub image_format: Option<String>,
     pub file_size: Option<i64>,
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,6 +47,15 @@ pub struct ClipItemDetail {
     pub file_count: i32,
     pub directory_count: i32,
     pub total_size: Option<i64>,
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagInfo {
+    pub name: String,
+    pub item_count: u32,
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone)]
@@ -115,6 +125,8 @@ pub struct SearchFilters {
     pub clip_type: Option<ClipType>,
     pub source_app: Option<String>,
     pub include_deleted: Option<bool>,
+    /// 按标签筛选，AND 语义；None 或空数组表示不筛选
+    pub tag_names: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
