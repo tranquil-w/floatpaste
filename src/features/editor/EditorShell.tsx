@@ -261,9 +261,11 @@ export function EditorShell() {
           </div>
         ) : (
           <div className="rounded-lg border border-pg-border-default bg-pg-canvas-subtle p-5">
-            <h2 className="text-base font-semibold text-pg-fg-muted">此条目无法编辑</h2>
+            <h2 className="text-base font-semibold text-pg-fg-muted">
+              此条目内容不支持编辑
+            </h2>
             <p className="mt-2 text-sm leading-6 text-pg-fg-muted">
-              只有文本类型的条目可以在这里编辑。你可以关闭当前窗口并返回来源界面继续操作。
+              只有文本类型的条目可以编辑内容。你仍可以在下方为它管理标签。
             </p>
             <div className="mt-4">
               <TagEditor

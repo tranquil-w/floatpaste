@@ -189,11 +189,6 @@ export function PickerShell() {
       return;
     }
 
-    if (item.type !== "text") {
-      setLastMessage("当前仅文本条目支持编辑");
-      return;
-    }
-
     cancelTooltip();
     await openEditorFromPicker(item.id);
   };

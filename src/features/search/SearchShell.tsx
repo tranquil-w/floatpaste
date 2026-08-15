@@ -1070,11 +1070,6 @@ export function SearchShell() {
       return;
     }
 
-    if (currentItem.type !== "text") {
-      showError("当前只支持从文本条目进入独立编辑窗口");
-      return;
-    }
-
     cancelTooltip();
     try {
       await openEditorFromSearch(currentItem.id);
