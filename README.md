@@ -19,11 +19,7 @@ pnpm install
 pnpm tauri dev
 ```
 
-构建便携版：
-
-```bash
-pnpm release:portable
-```
+发版与构建产物由 tag 驱动的 GitHub Actions 流水线生成，见[发布流程](docs/release/流程.md)。
 
 ## 系统要求
 

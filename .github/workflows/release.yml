@@ -1,0 +1,150 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  notes:
+    name: 生成发布说明骨架
+    runs-on: ubuntu-latest
+    steps:
+      - name: 拉取完整历史
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: git-cliff 提取本版变更
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --latest
+        env:
+          OUTPUT: cliff-latest.md
+          GITHUB_REPO: ${{ github.repository }}
+
+      - name: 上传变更清单
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: cliff-latest.md
+
+  release:
+    name: 检查、构建并创建草稿 Release
+    needs: notes
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v5
+
+      - name: 下载变更清单
+        uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+
+      - name: 校验 tag 与仓库版本一致
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG=$(node -p "require('./package.json').version")
+          CARGO=$(grep -m1 '^version' src-tauri/Cargo.toml | sed 's/^version *= *"\(.*\)".*/\1/' | tr -d '\r')
+          TAURI=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          echo "tag=${TAG} package=${PKG} cargo=${CARGO} tauri=${TAURI}"
+          test "${TAG}" = "${PKG}"
+          test "${TAG}" = "${CARGO}"
+          test "${TAG}" = "${TAURI}"
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: 安装 Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust 依赖缓存
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: 安装前端依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: ESLint 检查
+        run: pnpm lint
+
+      - name: Prettier 格式检查
+        run: pnpm format:check
+
+      - name: TypeScript 构建
+        run: pnpm build
+
+      - name: 前端单元测试
+        run: pnpm test
+
+      - name: Rust 测试
+        working-directory: src-tauri
+        run: cargo test --quiet
+
+      - name: 渲染发布说明
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/render-release-notes.mjs "${GITHUB_REF_NAME#v}" "$(date +%F)" cliff-latest.md release-body.md
+          {
+            echo "RELEASE_BODY<<EB_${GITHUB_RUN_ID}"
+            cat release-body.md
+            echo "EB_${GITHUB_RUN_ID}"
+          } >> "${GITHUB_ENV}"
+
+      - name: 构建并上传安装包到草稿 Release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: ${{ github.ref_name }}
+          releaseBody: ${{ env.RELEASE_BODY }}
+          releaseDraft: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          tauriScript: pnpm
+          # 预发布版本号（如 0.6.0-beta.1）不被 WiX 支持，此时只打 NSIS
+          args: ${{ contains(github.ref_name, '-') && '--bundles nsis' || '' }}
+
+      - name: 打包便携版并生成校验文件
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          STAGE="tmp/portable/FloatPaste-v${VERSION}-windows-x64-portable"
+          ZIP_NAME="FloatPaste-v${VERSION}-windows-x64-portable.zip"
+          mkdir -p "${STAGE}"
+          cp "src-tauri/target/release/floatpaste.exe" "${STAGE}/floatpaste.exe"
+          node scripts/render-release-notes.mjs "${VERSION}" "$(date +%F)" - "${STAGE}/README-使用说明.md" --template docs/release/使用说明模板.md
+          powershell -Command "Compress-Archive -Path 'tmp/portable/FloatPaste-v${VERSION}-windows-x64-portable/*' -DestinationPath 'tmp/${ZIP_NAME}' -Force"
+          mkdir -p tmp/assets
+          cp "tmp/${ZIP_NAME}" tmp/assets/
+          gh release download "${GITHUB_REF_NAME}" --dir tmp/assets --clobber
+          (cd tmp/assets && sha256sum --binary * > "../SHA256SUMS.txt")
+          gh release upload "${GITHUB_REF_NAME}" "tmp/SHA256SUMS.txt" --clobber
+
+      - name: 输出后续步骤
+        shell: bash
+        run: |
+          {
+            echo "## Release 草稿已就绪"
+            echo ""
+            echo "产物: NSIS 安装包 + 便携版 zip + SHA256SUMS.txt（预发布版本仅 NSIS 与便携版）"
+            echo "后续: 补充手动验证建议 → 本机验收 → \`gh release edit ${GITHUB_REF_NAME} --draft=false\` 正式发布"
+          } >> "${GITHUB_STEP_SUMMARY}"

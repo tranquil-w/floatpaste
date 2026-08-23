@@ -86,7 +86,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis", "msi"],
     "icon": ["icons/icon.ico"],
     "windows": {
       "wix": {
