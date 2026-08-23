@@ -3,7 +3,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Manager,
 };
-use tracing::warn;
+use tracing::{debug, warn};
 
 use crate::{
     app_bootstrap::AppState,
@@ -92,6 +92,13 @@ impl TrayService {
                         warn!("托盘切换监听时应用状态未就绪");
                         return;
                     };
+
+                    // 一次菜单点击可能触发两次事件（Windows 上游缺陷），第二次会立即
+                    // 把状态切回去，表现为"点了没反应"，用时间窗去抖过滤。
+                    if !state.should_accept_monitoring_toggle() {
+                        debug!("忽略短时间内的重复监听切换事件");
+                        return;
+                    }
 
                     match state.current_settings() {
                         Ok(previous_settings) => {

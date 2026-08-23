@@ -34,6 +34,9 @@ pub struct AppState {
     picker: PickerState,
     search: SearchState,
     editor: EditorState,
+    /// 托盘"切换监听"的最近一次受理时间。Windows 菜单存在一次点击触发两次
+    /// 事件的上游缺陷，toggle 两次会相互抵消导致状态看似不变，用时间窗去抖。
+    monitoring_toggle_gate: Arc<Mutex<DebounceGate>>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -66,6 +69,29 @@ struct EditorState {
     active: Arc<AtomicBool>,
 }
 
+/// 时间窗去抖闸门：窗口期内重复请求被拒绝。
+/// 用于过滤 Windows 托盘菜单一次点击触发两次事件的上游缺陷。
+#[derive(Default)]
+pub struct DebounceGate {
+    last_accepted: Option<Instant>,
+}
+
+impl DebounceGate {
+    pub fn try_accept(&mut self, window: Duration) -> bool {
+        match self.last_accepted {
+            Some(at) if at.elapsed() < window => false,
+            _ => {
+                self.last_accepted = Some(Instant::now());
+                true
+            }
+        }
+    }
+}
+
+/// 托盘"切换监听"的去抖窗口：双触发的第二次事件通常在首次后约 1 秒内到达，
+/// 1.5 秒窗口可覆盖，同时不影响人工连续点击（重新打开菜单已超过该间隔）。
+const MONITORING_TOGGLE_DEBOUNCE: Duration = Duration::from_millis(1500);
+
 impl AppState {
     pub fn new(
         repository: SqliteRepository,
@@ -81,7 +107,16 @@ impl AppState {
             picker: PickerState::default(),
             search: SearchState::default(),
             editor: EditorState::default(),
+            monitoring_toggle_gate: Arc::default(),
         }
+    }
+
+    /// 距上次受理不足去抖窗口的"切换监听"事件视为重复（一次菜单点击的双触发），忽略。
+    pub fn should_accept_monitoring_toggle(&self) -> bool {
+        let Ok(mut gate) = self.monitoring_toggle_gate.lock() else {
+            return false;
+        };
+        gate.try_accept(MONITORING_TOGGLE_DEBOUNCE)
     }
 
     pub fn current_settings(&self) -> Result<UserSetting, AppError> {
@@ -289,4 +324,23 @@ fn resolve_app_data_dir(app: &App) -> Result<PathBuf, AppError> {
     }
 
     Ok(std::env::current_dir()?.join(".floatpaste-data"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DebounceGate, MONITORING_TOGGLE_DEBOUNCE};
+    use std::time::Duration;
+
+    #[test]
+    fn debounce_gate_rejects_rapid_repeat_and_accepts_after_window() {
+        let mut gate = DebounceGate::default();
+
+        // 首次事件受理（对应一次菜单点击的第一次触发）
+        assert!(gate.try_accept(MONITORING_TOGGLE_DEBOUNCE));
+        // 窗口期内的第二次事件被拒绝（对应同一点击的重复触发）
+        assert!(!gate.try_accept(MONITORING_TOGGLE_DEBOUNCE));
+        assert!(!gate.try_accept(MONITORING_TOGGLE_DEBOUNCE));
+        // 窗口过期后重新受理（零窗口等价于立即过期）
+        assert!(gate.try_accept(Duration::ZERO));
+    }
 }
