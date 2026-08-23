@@ -6,6 +6,7 @@ pub mod normalize_service;
 pub mod paste_executor;
 pub mod picker_position_service;
 pub mod privacy_service;
+pub mod retention_service;
 pub mod search_service;
 pub mod settings_service;
 pub mod shortcut_manager;

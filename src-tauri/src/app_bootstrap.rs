@@ -10,15 +10,17 @@ use tracing::{info, warn};
 
 use crate::{
     domain::{
-        editor_session::EditorSession, error::AppError, events::CLIPS_CHANGED_EVENT,
-        search_session::SearchSession, settings::UserSetting,
+        editor_session::EditorSession, error::AppError,
+        events::{ClipsChangedPayload, CLIPS_CHANGED_EVENT}, search_session::SearchSession,
+        settings::UserSetting,
     },
     launch_mode::LaunchMode,
     platform::windows::clipboard_monitor::ClipboardMonitor,
     repository::sqlite_repository::SqliteRepository,
     services::{
         image_storage::ImageStorage, privacy_service::SelfWriteGuard,
-        settings_service::SettingsService, tray_service::TrayService,
+        retention_service::RetentionService, settings_service::SettingsService,
+        shortcut_manager::ShortcutManager, tray_service::TrayService,
         window_coordinator::WindowCoordinator,
     },
 };
@@ -245,14 +247,19 @@ pub fn bootstrap(app: &mut App, launch_mode: LaunchMode) -> Result<(), AppError>
         warn!("启动时同步运行设置失败，应用将继续运行，但部分系统能力暂不可用: {error}");
     }
     TrayService::setup(&app.handle())?;
-    ClipboardMonitor::start(app.handle().clone(), state)?;
+    ClipboardMonitor::start(app.handle().clone(), state.clone())?;
+    RetentionService::start(state.clone());
 
     if let Err(error) = seed_welcome_entry(&app.handle(), &repository) {
         warn!("初始化欢迎记录失败: {error}");
     }
 
+    // 正常启动显示速贴面板；静默启动（开机自启携带 --silent）仅驻留托盘，不弹任何窗口
     if !launch_mode.is_silent() {
-        WindowCoordinator::open_settings(&app.handle())?;
+        WindowCoordinator::show_picker(&app.handle(), &state)?;
+        if let Err(error) = ShortcutManager::register_picker_session_shortcuts(&app.handle()) {
+            warn!("启动时注册 Picker 会话快捷键失败: {error}");
+        }
     }
 
     info!("FloatPaste MVP 已初始化，数据库路径: {}", db_path.display());
@@ -273,7 +280,10 @@ fn seed_welcome_entry(app: &AppHandle, repository: &SqliteRepository) -> Result<
 
     let detail = repository.save_text_item(&text_item)?;
     repository.set_favorited(&detail.id, true)?;
-    let _ = app.emit(CLIPS_CHANGED_EVENT, &detail.id);
+    let _ = app.emit(
+        CLIPS_CHANGED_EVENT,
+        ClipsChangedPayload::upserted(&detail),
+    );
     Ok(())
 }
 
