@@ -30,6 +30,10 @@
 | `pnpm dev` | 启动浏览器预览（使用 `mockBackend.ts`） |
 | `pnpm tauri dev` | 启动桌面应用（连接真实 Rust 命令） |
 | `pnpm build` | TypeScript 检查 + Vite 打包 |
+| `pnpm lint` | ESLint 检查（`src/`） |
+| `pnpm format` / `pnpm format:check` | Prettier 格式化写入 / 校验 |
+| `pnpm test` | 前端单元测试（Node 内置 test runner） |
+| `pnpm preflight` | 一次执行 lint + build + test + Rust 测试 |
 | `pnpm tauri build` | 桌面应用打包 |
 | `cargo test` | 运行 Rust 测试（在 `src-tauri/` 下执行） |
 
@@ -59,7 +63,7 @@
 | `pnpm tauri:build:win` | Windows 侧桌面构建 |
 | `pnpm test:rust:win` | Windows 侧 Rust 测试 |
 
-前端改动后，至少执行一次 `./scripts/win-pnpm build`。
+前端改动后，保证 `pnpm lint`、`pnpm format:check`、`pnpm build`、`pnpm test` 全部通过（在 WSL 中用 `./scripts/win-pnpm build` 等脚本执行，lint/format 可直接用 WSL 侧 pnpm 跑）。
 涉及 Rust 或 Tauri 改动时，优先执行 `./scripts/win-cargo test`，并按需要补充 `./scripts/win-pnpm tauri dev` 或 `./scripts/win-pnpm tauri build`。
 
 ---
@@ -80,16 +84,17 @@
 - 类型：`PascalCase`
 
 ### 工具配置
-- 目前未配置 ESLint 或 Prettier
-- 提交前保持既有格式，避免无关样式改动
+- ESLint 与 Prettier 均已配置，脚本见 `package.json`
+- 提交钩子（husky + lint-staged）会对暂存的 `src/**/*.{ts,tsx}` 自动执行 Prettier
+- 提交信息与文档保持中文，避免无关样式改动
 
 ---
 
 ## 测试指南
 
 ### 前端
-- 暂无独立测试框架
-- 每次改动至少执行 `pnpm build` 验证
+- 单元测试基于 Node 内置 test runner：`pnpm test`
+- 每次改动至少执行 `pnpm build` 与 `pnpm test` 验证
 
 ### Rust
 - 建议为逻辑变更补充单元测试

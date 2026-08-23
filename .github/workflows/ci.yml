@@ -16,7 +16,7 @@ jobs:
     name: 前端 lint / 构建 / 测试
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: 安装 pnpm
         uses: pnpm/action-setup@v4
@@ -24,7 +24,7 @@ jobs:
           version: 10
 
       - name: 安装 Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: pnpm
@@ -48,7 +48,7 @@ jobs:
     name: Rust 测试
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: 安装 Rust 工具链
         uses: dtolnay/rust-toolchain@stable
