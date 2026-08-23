@@ -1,3 +1,7 @@
+use serde::Serialize;
+
+use crate::domain::clip_item::{ClipItemDetail, ClipItemSummary};
+
 pub const CLIPS_CHANGED_EVENT: &str = "clips://changed";
 pub const SETTINGS_CHANGED_EVENT: &str = "settings://changed";
 pub const TAGS_CHANGED_EVENT: &str = "tags://changed";
@@ -27,3 +31,24 @@ pub const SEARCH_INPUT_RESUME_EVENT: &str = "search://input-resume";
 // Editor 相关事件
 pub const EDITOR_SESSION_START_EVENT: &str = "editor://session-start";
 pub const EDITOR_SESSION_END_EVENT: &str = "editor://session-end";
+
+/// `clips://changed` 的载荷。前端依据 `kind` 对列表缓存做精准合并，
+/// 避免任何单条变更都触发全量重拉。
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum ClipsChangedPayload {
+    /// 单条记录新增，或内容/收藏/标签/活跃时间发生变更，携带最新快照。
+    Upserted { item: ClipItemSummary },
+    /// 单条记录被删除。
+    Deleted { id: String },
+    /// 批量或影响范围不确定的变更（如标签重命名、删除标签），前端整体刷新。
+    BulkChanged,
+}
+
+impl ClipsChangedPayload {
+    pub fn upserted(detail: &ClipItemDetail) -> Self {
+        Self::Upserted {
+            item: detail.to_summary(),
+        }
+    }
+}

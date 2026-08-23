@@ -10,6 +10,8 @@ export function buildTooltipImagePreviewStyle(): string {
 type BuildTooltipHtmlOptions = {
   imageUrl?: string | null;
   requestId?: number;
+  /** 按需请求的条目全文；缺省时退回 contentPreview（列表不再携带全文截断载荷） */
+  fullText?: string | null;
 };
 
 export function escapeHtml(text: string): string {
@@ -106,6 +108,9 @@ export function buildTooltipHtml(
 ): string {
   const metaParts: string[] = [];
   const escapedSource = escapeHtml(item.sourceApp ?? "未知来源");
+  const tooltipContent = options.fullText?.trim()
+    ? options.fullText
+    : item.contentPreview || "";
 
   metaParts.push(`<span class="meta-badge">${escapeHtml(getTooltipTypeLabel(item))}</span>`);
   if (item.type === "image" && item.imageWidth && item.imageHeight) {
@@ -121,13 +126,11 @@ export function buildTooltipHtml(
 
   if (item.type === "image" && options.imageUrl) {
     const requestId = options.requestId ?? 0;
-    const fallbackContent = item.tooltipText || item.contentPreview || "";
     return [
-      `<div class="tooltip-image-preview" style="${escapeHtmlAttribute(buildTooltipImagePreviewStyle())}"><img src="${escapeHtmlAttribute(options.imageUrl)}" alt="" data-request-id="${requestId}" data-fallback-content="${escapeHtmlAttribute(fallbackContent)}" /></div>`,
+      `<div class="tooltip-image-preview" style="${escapeHtmlAttribute(buildTooltipImagePreviewStyle())}"><img src="${escapeHtmlAttribute(options.imageUrl)}" alt="" data-request-id="${requestId}" data-fallback-content="${escapeHtmlAttribute(item.contentPreview || "")}" /></div>`,
       `<div class="tooltip-meta">${metaParts.join("")}</div>`,
     ].join("");
   }
 
-  const escapedContent = item.tooltipText || item.contentPreview || "";
-  return `<div class="tooltip-content">${escapeHtml(escapedContent)}</div><div class="tooltip-meta">${metaParts.join("")}</div>`;
+  return `<div class="tooltip-content">${escapeHtml(tooltipContent)}</div><div class="tooltip-meta">${metaParts.join("")}</div>`;
 }

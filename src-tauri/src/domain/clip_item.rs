@@ -6,7 +6,6 @@ pub struct ClipItemSummary {
     pub id: String,
     pub r#type: String,
     pub content_preview: String,
-    pub tooltip_text: Option<String>,
     pub source_app: Option<String>,
     pub is_favorited: bool,
     pub file_count: i32,
@@ -48,6 +47,29 @@ pub struct ClipItemDetail {
     pub directory_count: i32,
     pub total_size: Option<i64>,
     pub tags: Vec<String>,
+}
+
+impl ClipItemDetail {
+    pub fn to_summary(&self) -> ClipItemSummary {
+        ClipItemSummary {
+            id: self.id.clone(),
+            r#type: self.r#type.clone(),
+            content_preview: self.content_preview.clone(),
+            source_app: self.source_app.clone(),
+            is_favorited: self.is_favorited,
+            file_count: self.file_count,
+            directory_count: self.directory_count,
+            created_at: self.created_at.clone(),
+            updated_at: self.updated_at.clone(),
+            last_used_at: self.last_used_at.clone(),
+            image_path: self.image_path.clone(),
+            image_width: self.image_width,
+            image_height: self.image_height,
+            image_format: self.image_format.clone(),
+            file_size: self.file_size,
+            tags: self.tags.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

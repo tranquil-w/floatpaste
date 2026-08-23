@@ -1,6 +1,7 @@
 use std::{
-    path::Path,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use chrono::{DateTime, Utc};
@@ -32,17 +33,34 @@ const TAG_NAMES_SUBQUERY: &str = "COALESCE((
     )
   ), '')";
 
+/// Summary 查询统一的列清单。不再携带 `substr(full_text, 1, 3000)` 一类的
+/// 全文截断载荷：列表只展示 preview，长文本由前端在悬停时按需请求 detail。
+fn summary_select_columns() -> String {
+    format!(
+        "ci.id, ci.type, ci.preview_text, ci.source_app, ci.is_favorited,
+       ci.image_path, ci.image_width, ci.image_height, ci.image_format, ci.file_size,
+       ci.file_paths, ci.file_count, ci.total_size, ci.directory_count,
+       ci.created_at, ci.updated_at, ci.last_used_at,
+       {TAG_NAMES_SUBQUERY} AS tag_names"
+    )
+}
+
 #[derive(Clone)]
 pub struct SqliteRepository {
     pub(super) connection: Arc<Mutex<Connection>>,
+    /// 数据库文件路径，供 VACUUM 等独占型维护操作开独立连接使用
+    path: PathBuf,
 }
 
 impl SqliteRepository {
     pub fn new(path: &Path) -> Result<Self, AppError> {
         let connection = Connection::open(path)?;
+        // 残留进程或外部工具短暂持锁时等待重试，而不是立即 SQLITE_BUSY 失败
+        connection.busy_timeout(Duration::from_secs(5))?;
         super::schema::initialize_database(&connection)?;
         Ok(Self {
             connection: Arc::new(Mutex::new(connection)),
+            path: path.to_path_buf(),
         })
     }
 
@@ -166,15 +184,12 @@ impl SqliteRepository {
     pub fn list_recent(&self, limit: u32) -> Result<Vec<ClipItemSummary>, AppError> {
         let connection = self.connection.lock()?;
         let sql = format!(
-            "SELECT ci.id, ci.type, ci.preview_text, ci.source_app, ci.is_favorited,
-                    ci.image_path, ci.image_width, ci.image_height, ci.image_format, ci.file_size,
-                    ci.file_paths, ci.file_count, ci.total_size, ci.directory_count,
-                    ci.created_at, ci.updated_at, ci.last_used_at, substr(ci.full_text, 1, 3000),
-                    {TAG_NAMES_SUBQUERY} AS tag_names
+            "SELECT {}
              FROM clip_items ci
              WHERE ci.deleted_at IS NULL
              ORDER BY {}
              LIMIT ?1",
+            summary_select_columns(),
             activity_order_clause("ci"),
         );
         let mut statement = connection.prepare(&sql)?;
@@ -185,20 +200,39 @@ impl SqliteRepository {
     pub fn list_favorites(&self, limit: u32) -> Result<Vec<ClipItemSummary>, AppError> {
         let connection = self.connection.lock()?;
         let sql = format!(
-            "SELECT ci.id, ci.type, ci.preview_text, ci.source_app, ci.is_favorited,
-                    ci.image_path, ci.image_width, ci.image_height, ci.image_format, ci.file_size,
-                    ci.file_paths, ci.file_count, ci.total_size, ci.directory_count,
-                    ci.created_at, ci.updated_at, ci.last_used_at, substr(ci.full_text, 1, 3000),
-                    {TAG_NAMES_SUBQUERY} AS tag_names
+            "SELECT {}
              FROM clip_items ci
              WHERE ci.deleted_at IS NULL AND ci.is_favorited = 1
              ORDER BY {}
              LIMIT ?1",
+            summary_select_columns(),
             activity_order_clause("ci"),
         );
         let mut statement = connection.prepare(&sql)?;
         let rows = statement.query_map([limit], map_summary_row)?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// 按 id 读取单条 Summary，供事件载荷在变更后取最新快照。
+    pub fn get_item_summary(&self, id: &str) -> Result<ClipItemSummary, AppError> {
+        let connection = self.connection.lock()?;
+        connection
+            .query_row(
+                &format!(
+                    "SELECT {}
+                     FROM clip_items ci
+                     WHERE ci.id = ?1 AND ci.deleted_at IS NULL",
+                    summary_select_columns()
+                ),
+                [id],
+                map_summary_row,
+            )
+            .map_err(|error| match error {
+                rusqlite::Error::QueryReturnedNoRows => {
+                    AppError::Message("未找到对应剪贴记录".to_string())
+                }
+                other => AppError::Sqlite(other),
+            })
     }
 
     pub fn get_item_detail(&self, id: &str) -> Result<ClipItemDetail, AppError> {
@@ -297,6 +331,85 @@ impl SqliteRepository {
             )
             .optional()?;
         Ok(id)
+    }
+
+    /// 物理删除软删除超过保留期的记录（含 FTS 行，标签关联随外键级联），
+    /// 返回被删记录的 image_path（可能为空串）供调用方清理图片文件。
+    ///
+    /// 软删来自用户的显式删除操作，不豁免收藏；`history_limit` 溢出清理才豁免收藏。
+    pub fn purge_soft_deleted(&self, retention_ms: i64) -> Result<Vec<String>, AppError> {
+        let cutoff = Utc::now().timestamp_millis() - retention_ms;
+        let expired: Vec<(String, String)> = {
+            let connection = self.connection.lock()?;
+            let mut statement = connection.prepare(
+                "SELECT id, COALESCE(image_path, '') FROM clip_items
+                 WHERE deleted_at IS NOT NULL AND deleted_at < ?1",
+            )?;
+            let rows = statement.query_map([cutoff], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+
+        if expired.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let image_paths: Vec<String> = expired.iter().map(|(_, path)| path.clone()).collect();
+        let connection = self.connection.lock()?;
+        let transaction = connection.unchecked_transaction()?;
+        for (id, _) in &expired {
+            transaction.execute("DELETE FROM clip_items WHERE id = ?1", [id])?;
+            transaction.execute("DELETE FROM clip_items_fts WHERE item_id = ?1", [id])?;
+        }
+        transaction.commit()?;
+        Ok(image_paths)
+    }
+
+    /// 将未删除的未收藏记录压缩到 `limit` 条以内：按活跃度保留最新的前 `limit` 条，
+    /// 其余物理删除（收藏项始终豁免）。返回被删记录的 image_path 供图片文件清理。
+    pub fn enforce_history_limit(&self, limit: u32) -> Result<Vec<String>, AppError> {
+        let overflow: Vec<(String, String)> = {
+            let connection = self.connection.lock()?;
+            let mut statement = connection.prepare(&format!(
+                "SELECT id, COALESCE(image_path, '') FROM clip_items ci
+                 WHERE ci.deleted_at IS NULL AND ci.is_favorited = 0
+                 ORDER BY {}
+                 LIMIT -1 OFFSET ?1",
+                activity_order_clause("ci"),
+            ))?;
+            let rows = statement.query_map([limit], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+
+        if overflow.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let image_paths: Vec<String> = overflow.iter().map(|(_, path)| path.clone()).collect();
+        let connection = self.connection.lock()?;
+        let transaction = connection.unchecked_transaction()?;
+        for (id, _) in &overflow {
+            transaction.execute("DELETE FROM clip_items WHERE id = ?1", [id])?;
+            transaction.execute("DELETE FROM clip_items_fts WHERE item_id = ?1", [id])?;
+        }
+        transaction.commit()?;
+        Ok(image_paths)
+    }
+
+    /// 压缩数据库文件。大量物理删除后调用才有意义。
+    ///
+    /// VACUUM 是重写整个数据库的长操作，这里开独立连接执行而不持有主连接锁：
+    /// 否则压缩期间采集写入、列表查询等全部命令都会在 Mutex 上排队。
+    /// 与主连接的并发由 SQLite 层协调（busy_timeout 等待），失败只影响本次压缩。
+    pub fn vacuum(&self) -> Result<(), AppError> {
+        let connection = Connection::open(&self.path)?;
+        // 主连接的写事务都是短事务，5 秒足以等到空档；自身超时则本轮清理放弃
+        connection.busy_timeout(Duration::from_secs(5))?;
+        connection.execute("VACUUM", [])?;
+        Ok(())
     }
 
     /// 刷新指定记录的 created_at、updated_at 和 last_used_at 到当前时间，使其排到列表顶部。
@@ -453,15 +566,12 @@ impl SqliteRepository {
         values.push(Value::Integer(i64::from(query.limit)));
         values.push(Value::Integer(i64::from(query.offset)));
         let sql = format!(
-            "SELECT ci.id, ci.type, ci.preview_text, ci.source_app, ci.is_favorited,
-                    ci.image_path, ci.image_width, ci.image_height, ci.image_format, ci.file_size,
-                    ci.file_paths, ci.file_count, ci.total_size, ci.directory_count,
-                    ci.created_at, ci.updated_at, ci.last_used_at, substr(ci.full_text, 1, 3000),
-                    {TAG_NAMES_SUBQUERY} AS tag_names
+            "SELECT {}
              FROM clip_items ci
              WHERE {where_clause}
              ORDER BY {}
              LIMIT ? OFFSET ?",
+            summary_select_columns(),
             activity_order_clause("ci"),
         );
 
@@ -519,16 +629,13 @@ impl SqliteRepository {
         };
 
         let sql = format!(
-            "SELECT ci.id, ci.type, ci.preview_text, ci.source_app, ci.is_favorited,
-                    ci.image_path, ci.image_width, ci.image_height, ci.image_format, ci.file_size,
-                    ci.file_paths, ci.file_count, ci.total_size, ci.directory_count,
-                    ci.created_at, ci.updated_at, ci.last_used_at, substr(ci.full_text, 1, 3000),
-                    {TAG_NAMES_SUBQUERY} AS tag_names
+            "SELECT {}
              FROM clip_items_fts
              JOIN clip_items ci ON ci.id = clip_items_fts.item_id
              WHERE clip_items_fts MATCH ? AND {filter_clause}
              ORDER BY {order_clause}
-             LIMIT ? OFFSET ?"
+             LIMIT ? OFFSET ?",
+            summary_select_columns()
         );
         let mut statement = connection.prepare(&sql)?;
         let rows = statement.query_map(rusqlite::params_from_iter(data_values), map_summary_row)?;
@@ -738,16 +845,10 @@ fn map_summary_row(row: &Row<'_>) -> rusqlite::Result<ClipItemSummary> {
         stored_total_size,
     );
 
-    let tooltip_text: Option<String> = row
-        .get::<_, Option<String>>(17)
-        .unwrap_or_default()
-        .filter(|s| !s.is_empty());
-
     Ok(ClipItemSummary {
         id: row.get(0)?,
         r#type,
         content_preview: resolved_file_fields.content_preview.unwrap_or(preview_text),
-        tooltip_text,
         source_app: row.get(3)?,
         is_favorited: row.get::<_, i64>(4)? == 1,
         file_count: resolved_file_fields.file_count,
@@ -760,7 +861,7 @@ fn map_summary_row(row: &Row<'_>) -> rusqlite::Result<ClipItemSummary> {
         image_height: row.get(7)?,
         image_format: row.get(8)?,
         file_size: row.get(9)?,
-        tags: parse_tags(row.get::<_, String>(18)?),
+        tags: parse_tags(row.get::<_, String>(17)?),
     })
 }
 
@@ -819,6 +920,9 @@ struct ResolvedFileClipFields {
     total_size: Option<i64>,
 }
 
+/// 解析文件条目的展示字段。统计值在录入时已随 `save_file_item` 落库，
+/// 读取时不再对每个路径做文件系统探测——剪贴板文件清单在复制时刻就已固定，
+/// 事后重算既昂贵（每行多次 stat）也不会产生不同结果。
 fn resolve_file_clip_fields(
     clip_type: &str,
     file_paths: &[String],
@@ -835,28 +939,21 @@ fn resolve_file_clip_fields(
         };
     }
 
-    let analyzed = crate::services::normalize_service::analyze_file_paths(file_paths);
+    // 兜底：早期版本入库的行可能缺统计值，用路径清单长度补齐 file_count。
     let file_count = if stored_file_count > 0 {
         stored_file_count
     } else {
         file_paths.len() as i32
     };
-    let directory_count = stored_directory_count
-        .max(analyzed.directory_count)
-        .clamp(0, file_count);
+    let directory_count = stored_directory_count.clamp(0, file_count);
     let total_size = if directory_count > 0 {
         None
     } else {
-        stored_total_size.or(analyzed.total_size)
+        stored_total_size
     };
 
     ResolvedFileClipFields {
-        content_preview: Some(crate::services::normalize_service::build_file_preview(
-            file_paths,
-            file_count,
-            directory_count,
-            total_size,
-        )),
+        content_preview: None,
         file_count,
         directory_count,
         total_size,
@@ -1121,6 +1218,27 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
 
         assert_eq!(items[0].id, "new-created");
         assert_eq!(items[1].id, "older-used");
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn vacuum_runs_on_separate_connection_and_keeps_data() {
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+        seed_item(&repository, "kept-item", "vacuum 保留记录", 1, None, false);
+
+        // 持有主连接锁模拟其他命令正在使用数据库；VACUUM 必须走独立连接，
+        // 若回退为锁主连接执行，同线程重锁会在此处挂起
+        {
+            let _main_guard = repository.connection.lock().unwrap();
+            repository.vacuum().unwrap();
+        }
+
+        let items = repository.list_recent(10).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, "kept-item");
 
         drop(repository);
         fs::remove_file(path).unwrap();
@@ -2062,6 +2180,182 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
         assert_eq!(summary.tags, vec!["乙标签".to_string(), "甲标签".to_string()]);
         let detail = repository.get_item_detail(&id).unwrap();
         assert_eq!(detail.tags, summary.tags.clone());
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn get_item_summary_matches_saved_detail() {
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+        let id = seed_text_item(&repository, "快照一致性验证");
+
+        let detail = repository.get_item_detail(&id).unwrap();
+        let summary = repository.get_item_summary(&id).unwrap();
+        assert_eq!(summary.id, detail.id);
+        assert_eq!(summary.content_preview, detail.content_preview);
+        assert_eq!(summary.tags, detail.tags);
+        assert_eq!(summary.is_favorited, detail.is_favorited);
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn purge_soft_deleted_removes_only_expired_rows() {
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+        let now = Utc::now();
+        seed_item(
+            &repository,
+            "expired",
+            "expired content",
+            (now - Duration::days(40)).timestamp_millis(),
+            None,
+            false,
+        );
+        seed_item(
+            &repository,
+            "recent-soft-deleted",
+            "kept content",
+            (now - Duration::days(1)).timestamp_millis(),
+            None,
+            false,
+        );
+        repository.delete_item("expired").unwrap();
+        repository.delete_item("recent-soft-deleted").unwrap();
+        // delete_item 写入的 deleted_at 是"刚刚"，把 expired 回拨到保留期之外
+        {
+            let connection = repository.connection.lock().unwrap();
+            connection
+                .execute(
+                    "UPDATE clip_items SET deleted_at = ?1 WHERE id = 'expired'",
+                    [(now - Duration::days(40)).timestamp_millis()],
+                )
+                .unwrap();
+        }
+
+        let removed = repository.purge_soft_deleted(30 * 24 * 60 * 60 * 1000).unwrap();
+        assert_eq!(removed, vec![String::new()]); // 文本条目无 image_path
+
+        let connection = repository.connection.lock().unwrap();
+        let remaining: i64 = connection
+            .query_row("SELECT COUNT(*) FROM clip_items", [], |row| row.get(0))
+            .unwrap();
+        let fts_rows: i64 = connection
+            .query_row("SELECT COUNT(*) FROM clip_items_fts", [], |row| row.get(0))
+            .unwrap();
+        drop(connection);
+        assert_eq!(remaining, 1, "未过保留期的软删行应保留");
+        assert_eq!(fts_rows, 0, "软删时 FTS 行已清，物理删除后不应有残留");
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn enforce_history_limit_keeps_favorites_and_most_active() {
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+        let now = Utc::now();
+        let day = Duration::days(1);
+        // 未收藏从新到旧共 4 条，外加 1 条最旧的收藏
+        seed_item(
+            &repository,
+            "oldest-favorited",
+            "oldest favorite",
+            (now - day * 10).timestamp_millis(),
+            None,
+            true,
+        );
+        seed_item(
+            &repository,
+            "oldest",
+            "oldest",
+            (now - day * 5).timestamp_millis(),
+            None,
+            false,
+        );
+        seed_item(
+            &repository,
+            "older",
+            "older",
+            (now - day * 4).timestamp_millis(),
+            None,
+            false,
+        );
+        seed_item(
+            &repository,
+            "newer",
+            "newer",
+            (now - day * 3).timestamp_millis(),
+            None,
+            false,
+        );
+        seed_item(
+            &repository,
+            "newest",
+            "newest",
+            (now - day * 2).timestamp_millis(),
+            None,
+            false,
+        );
+
+        let removed = repository.enforce_history_limit(2).unwrap();
+        // 未收藏共 4 条，保留最新 2 条（newest/newer），older 与 oldest 溢出被删（收藏豁免）
+        assert_eq!(removed, vec![String::new(), String::new()]);
+
+        let connection = repository.connection.lock().unwrap();
+        let remaining_ids: Vec<String> = connection
+            .prepare("SELECT id FROM clip_items ORDER BY created_at DESC")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        drop(connection);
+        assert_eq!(remaining_ids, vec!["newest", "newer", "oldest-favorited"]);
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn enforce_history_limit_keeps_search_results_clean() {
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+        // 走真实写路径入库，验证溢出删除后 FTS 不再命中幽灵记录
+        let old_id = seed_text_item(&repository, "待清理的旧记录关键词");
+        let old_created = (Utc::now() - Duration::days(9)).timestamp_millis();
+        {
+            let connection = repository.connection.lock().unwrap();
+            connection
+                .execute(
+                    "UPDATE clip_items SET created_at = ?1, updated_at = ?1 WHERE id = ?2",
+                    params![old_created, old_id],
+                )
+                .unwrap();
+        }
+        for index in 0..3 {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            seed_text_item(&repository, &format!("新记录 {index}"));
+        }
+
+        // limit=3：保留最新 3 条未收藏，仅最旧的"待清理的旧记录"溢出
+        let removed = repository.enforce_history_limit(3).unwrap();
+        assert_eq!(removed.len(), 1);
+
+        let result = repository
+            .search(SearchQuery {
+                keyword: "旧记录".to_string(),
+                filters: SearchFilters::default(),
+                offset: 0,
+                limit: 10,
+                sort: SearchSort::RelevanceDesc,
+            })
+            .unwrap();
+        assert_eq!(result.total, 0, "溢出删除的记录不应再被搜索命中");
 
         drop(repository);
         fs::remove_file(path).unwrap();

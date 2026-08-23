@@ -7,7 +7,10 @@ use windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
 
 use crate::{
     app_bootstrap::AppState,
-    domain::{error::AppError, events::CLIPS_CHANGED_EVENT},
+    domain::{
+        error::AppError,
+        events::{ClipsChangedPayload, CLIPS_CHANGED_EVENT},
+    },
     platform::windows::{
         active_app::ActiveAppResolver, clipboard_error::{map_clipboard_error, should_retry_clipboard_read},
         file_clipboard::read_file_paths_from_clipboard,
@@ -84,7 +87,7 @@ fn process_clipboard_change(
             file_selection.total_size,
             source_app.clone(),
         )? {
-            if let Err(error) = app.emit(CLIPS_CHANGED_EVENT, &detail.id) {
+            if let Err(error) = app.emit(CLIPS_CHANGED_EVENT, ClipsChangedPayload::upserted(&detail)) {
                 debug!("广播文件剪贴记录变更失败: {error}");
             }
         }
@@ -96,7 +99,7 @@ fn process_clipboard_change(
             .image_storage
             .prepare_image(&image.rgba, image.width, image.height, image.png_bytes.as_deref())?;
         if let Some(detail) = HistoryService::ingest_image(state, prepared, source_app.clone())? {
-            if let Err(error) = app.emit(CLIPS_CHANGED_EVENT, &detail.id) {
+            if let Err(error) = app.emit(CLIPS_CHANGED_EVENT, ClipsChangedPayload::upserted(&detail)) {
                 debug!("广播图片剪贴记录变更失败: {error}");
             }
         }
@@ -108,7 +111,7 @@ fn process_clipboard_change(
     match clipboard.get_text() {
         Ok(text) => {
             if let Some(detail) = HistoryService::ingest_text(state, &text, source_app)? {
-                if let Err(error) = app.emit(CLIPS_CHANGED_EVENT, &detail.id) {
+                if let Err(error) = app.emit(CLIPS_CHANGED_EVENT, ClipsChangedPayload::upserted(&detail)) {
                     debug!("广播文本剪贴记录变更失败: {error}");
                 }
             }

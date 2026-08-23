@@ -7,7 +7,7 @@ use crate::{
             ClipItemDetail, ClipItemSummary, PasteOption, PasteResult, SearchQuery, SearchResult,
             TagInfo,
         },
-        events::{CLIPS_CHANGED_EVENT, TAGS_CHANGED_EVENT},
+        events::{ClipsChangedPayload, CLIPS_CHANGED_EVENT, TAGS_CHANGED_EVENT},
     },
     services::{
         clip_service::ClipService, paste_executor::PasteExecutor, search_service::SearchService,
@@ -63,14 +63,17 @@ pub fn update_text_item(
     text: String,
 ) -> Result<ClipItemDetail, String> {
     let detail = ClipService::update_text(&state, &id, &text).map_err(map_error)?;
-    let _ = app.emit(CLIPS_CHANGED_EVENT, &detail.id);
+    let _ = app.emit(CLIPS_CHANGED_EVENT, ClipsChangedPayload::upserted(&detail));
     Ok(detail)
 }
 
 #[tauri::command]
 pub fn delete_item(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<(), String> {
     ClipService::delete(&state, &id).map_err(map_error)?;
-    let _ = app.emit(CLIPS_CHANGED_EVENT, &id);
+    let _ = app.emit(
+        CLIPS_CHANGED_EVENT,
+        ClipsChangedPayload::Deleted { id: id.clone() },
+    );
     Ok(())
 }
 
@@ -82,7 +85,12 @@ pub fn set_item_favorited(
     value: bool,
 ) -> Result<(), String> {
     ClipService::set_favorited(&state, &id, value).map_err(map_error)?;
-    let _ = app.emit(CLIPS_CHANGED_EVENT, &id);
+    if let Ok(summary) = state.repository.get_item_summary(&id) {
+        let _ = app.emit(
+            CLIPS_CHANGED_EVENT,
+            ClipsChangedPayload::Upserted { item: summary },
+        );
+    }
     Ok(())
 }
 
@@ -99,7 +107,7 @@ pub fn set_item_tags(
     tag_names: Vec<String>,
 ) -> Result<ClipItemDetail, String> {
     let detail = TagService::set_item_tags(&state, &id, &tag_names).map_err(map_error)?;
-    let _ = app.emit(CLIPS_CHANGED_EVENT, &detail.id);
+    let _ = app.emit(CLIPS_CHANGED_EVENT, ClipsChangedPayload::upserted(&detail));
     let _ = app.emit(TAGS_CHANGED_EVENT, ());
     Ok(detail)
 }
@@ -112,7 +120,7 @@ pub fn rename_tag(
     new_name: String,
 ) -> Result<(), String> {
     TagService::rename_tag(&state, &old_name, &new_name).map_err(map_error)?;
-    let _ = app.emit(CLIPS_CHANGED_EVENT, ());
+    let _ = app.emit(CLIPS_CHANGED_EVENT, ClipsChangedPayload::BulkChanged);
     let _ = app.emit(TAGS_CHANGED_EVENT, ());
     Ok(())
 }
@@ -124,7 +132,7 @@ pub fn delete_tag(
     name: String,
 ) -> Result<(), String> {
     TagService::delete_tag(&state, &name).map_err(map_error)?;
-    let _ = app.emit(CLIPS_CHANGED_EVENT, ());
+    let _ = app.emit(CLIPS_CHANGED_EVENT, ClipsChangedPayload::BulkChanged);
     let _ = app.emit(TAGS_CHANGED_EVENT, ());
     Ok(())
 }
@@ -137,6 +145,11 @@ pub fn paste_item(
     option: PasteOption,
 ) -> Result<PasteResult, String> {
     let result = PasteExecutor::paste_item(&app, &state, &id, option).map_err(map_error)?;
-    let _ = app.emit(CLIPS_CHANGED_EVENT, &id);
+    if let Ok(summary) = state.repository.get_item_summary(&id) {
+        let _ = app.emit(
+            CLIPS_CHANGED_EVENT,
+            ClipsChangedPayload::Upserted { item: summary },
+        );
+    }
     Ok(result)
 }
