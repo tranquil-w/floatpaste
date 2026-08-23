@@ -22,7 +22,7 @@ use crate::{
         },
         settings::normalize_shortcut_for_registration,
     },
-    services::window_coordinator::{WindowCoordinator, SEARCH_WINDOW_LABEL},
+    services::window_coordinator::WindowCoordinator,
 };
 
 pub struct ShortcutManager;
@@ -193,46 +193,13 @@ impl ShortcutManager {
             }
 
             info!("命中主快捷键: {normalized}");
-            let app_handle = app.clone();
-            let state_clone = state.clone();
-
-            thread::spawn(move || {
-                thread::sleep(SHORTCUT_CALLBACK_DEFER_DELAY);
-                let app_clone = app_handle.clone();
-                let _ = app_handle.run_on_main_thread(move || {
-                    // 退出窗口期不再切换窗口，避免在退出阶段操作/创建窗口。
-                    if state_clone.is_quitting() {
-                        return;
-                    }
-                    // 实时读取激活状态，避免在工作线程提前捕获快照后，于延迟期间
-                    // 被鼠标钩子等其它路径改写（TOCTOU），从而把"打开"误判成"关闭"。
-                    if state_clone.is_picker_active() {
-                        Self::unregister_picker_session_shortcuts(&app_clone);
-                        if let Err(error) = WindowCoordinator::hide_picker_and_restore_target(
-                            &app_clone,
-                            &state_clone,
-                        ) {
-                            error!("关闭 Picker 失败: {error}");
-                        }
-                    } else {
-                        // 如果搜索窗口活跃，先隐藏它以避免焦点竞争导致闪烁
-                        if state_clone.is_search_active() {
-                            if let Err(error) = WindowCoordinator::hide_search_without_restore_target(
-                                &app_clone,
-                                &state_clone,
-                            ) {
-                                error!("隐藏搜索窗口失败: {error}");
-                            }
-                        }
-                        if let Err(error) =
-                            WindowCoordinator::show_picker(&app_clone, &state_clone)
-                        {
-                            error!("显示 Picker 失败: {error}");
-                        } else if let Err(error) = Self::register_picker_session_shortcuts(&app_clone) {
-                            warn!("打开 Picker 后注册会话快捷键失败: {error}");
-                        }
-                    }
-                });
+            defer_shortcut_main_thread_action(app.clone(), move |app_clone| {
+                // 激活状态的实时读取与 Search 竞争处理都在编排入口内完成
+                if let Err(error) =
+                    WindowCoordinator::toggle_picker_from_shortcut(&app_clone, &state)
+                {
+                    error!("切换 Picker 失败: {error}");
+                }
             });
             return;
         }
@@ -260,15 +227,9 @@ impl ShortcutManager {
             // 在 picker 活跃状态下也检查搜索快捷键
             if normalized_search_shortcut.as_deref() == Some(normalized.as_str()) {
                 info!("在 Picker 活跃时命中搜索快捷键: {normalized}");
-                let app_handle = app.clone();
-                let state_clone = state.clone();
-                defer_shortcut_main_thread_action(app_handle, move |app_clone| {
-                    // 只隐藏 picker，不恢复目标窗口焦点（焦点将交给 search）
-                    if let Err(error) = WindowCoordinator::hide_picker(&app_clone) {
-                        error!("关闭 Picker 失败: {error}");
-                    }
+                defer_shortcut_main_thread_action(app.clone(), move |app_clone| {
                     if let Err(error) =
-                        WindowCoordinator::open_search_global(&app_clone, &state_clone)
+                        WindowCoordinator::open_search_from_active_picker(&app_clone, &state)
                     {
                         error!("打开 Search 失败: {error}");
                     }
@@ -281,24 +242,14 @@ impl ShortcutManager {
                 "shift+enter" => app.emit(PICKER_CONFIRM_AS_FILE_EVENT, ()),
                 "escape" | "esc" => {
                     info!("命中 Picker 关闭快捷键: {normalized}");
-                    let app_handle = app.clone();
-                    let state_clone = state.clone();
-                    thread::spawn(move || {
-                        thread::sleep(SHORTCUT_CALLBACK_DEFER_DELAY);
-                        // 退出窗口期不再触发延迟的窗口操作。
-                        if state_clone.is_quitting() {
-                            return;
+                    defer_shortcut_main_thread_action(app.clone(), move |app_clone| {
+                        // hide_picker 内部会注销会话快捷键并结束会话
+                        if let Err(error) = WindowCoordinator::hide_picker_and_restore_target(
+                            &app_clone,
+                            &state,
+                        ) {
+                            error!("关闭 Picker 失败: {error}");
                         }
-                        let app_clone = app_handle.clone();
-                        let _ = app_handle.run_on_main_thread(move || {
-                            Self::unregister_picker_session_shortcuts(&app_clone);
-                            if let Err(error) = WindowCoordinator::hide_picker_and_restore_target(
-                                &app_clone,
-                                &state_clone,
-                            ) {
-                                error!("关闭 Picker 失败: {error}");
-                            }
-                        });
                     });
                     return;
                 }
@@ -327,29 +278,14 @@ impl ShortcutManager {
                 return;
             }
 
-            let should_toggle = should_toggle_active_search_window(app, &state);
             info!("命中搜索快捷键: {normalized}");
-            let app_handle = app.clone();
-            let state_clone = state.clone();
-
-            if should_toggle {
-                defer_shortcut_main_thread_action(app_handle, move |app_clone| {
-                    if let Err(error) = WindowCoordinator::hide_search_and_restore_target(
-                        &app_clone,
-                        &state_clone,
-                    ) {
-                        error!("关闭 Search 失败: {error}");
-                    }
-                });
-            } else {
-                defer_shortcut_main_thread_action(app_handle, move |app_clone| {
-                    if let Err(error) =
-                        WindowCoordinator::open_search_global(&app_clone, &state_clone)
-                    {
-                        error!("打开 Search 失败: {error}");
-                    }
-                });
-            }
+            defer_shortcut_main_thread_action(app.clone(), move |app_clone| {
+                if let Err(error) =
+                    WindowCoordinator::toggle_search_from_shortcut(&app_clone, &state)
+                {
+                    error!("切换 Search 失败: {error}");
+                }
+            });
             return;
         }
 
@@ -452,25 +388,6 @@ impl ShortcutManager {
     }
 }
 
-fn should_toggle_active_search_window(app: &AppHandle, state: &AppState) -> bool {
-    if !state.is_search_active() {
-        return false;
-    }
-
-    let Some(window) = app.get_webview_window(SEARCH_WINDOW_LABEL) else {
-        return false;
-    };
-
-    let is_visible = window.is_visible().unwrap_or(false);
-    #[cfg(target_os = "windows")]
-    let is_minimized =
-        crate::platform::windows::window_utils::is_window_minimized(&window).unwrap_or(false);
-
-    #[cfg(not(target_os = "windows"))]
-    let is_minimized = window.is_minimized().unwrap_or(false);
-
-    is_visible && !is_minimized
-}
 fn picker_is_active(app: &AppHandle) -> bool {
     app.try_state::<AppState>()
         .map(|state| state.is_picker_active())

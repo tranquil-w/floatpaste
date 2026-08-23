@@ -1,31 +1,22 @@
 use tauri::{AppHandle, State};
-use tracing::warn;
 use std::time::Duration;
 use std::collections::HashMap;
 
 use crate::{
     app_bootstrap::AppState,
-    services::{
-        shortcut_manager::ShortcutManager,
-        tooltip_window::TooltipWindow,
-        window_coordinator::WindowCoordinator,
-    },
+    services::{tooltip_window::TooltipWindow, window_coordinator::WindowCoordinator},
 };
 
 use super::map_error;
 
 #[tauri::command]
 pub fn show_picker(state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
-    WindowCoordinator::show_picker(&app, &state).map_err(map_error)?;
-    if let Err(error) = ShortcutManager::register_picker_session_shortcuts(&app) {
-        warn!("通过命令打开 Picker 时注册会话快捷键失败: {error}");
-    }
-    Ok(())
+    WindowCoordinator::activate_picker(&app, &state).map_err(map_error)
 }
 
 #[tauri::command]
 pub fn hide_picker(state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
-    ShortcutManager::unregister_picker_session_shortcuts(&app);
+    // hide_picker_and_restore_target 内部会注销会话快捷键
     WindowCoordinator::hide_picker_and_restore_target(&app, &state).map_err(map_error)
 }
 

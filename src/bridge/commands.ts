@@ -151,13 +151,6 @@ export async function resumeMonitoring(): Promise<UserSetting> {
   return invoke("resume_monitoring");
 }
 
-export async function showPicker(): Promise<void> {
-  if (!isTauriRuntime()) {
-    return;
-  }
-  return invoke("show_picker_from_settings");
-}
-
 export async function hidePicker(): Promise<void> {
   if (!isTauriRuntime()) {
     return;

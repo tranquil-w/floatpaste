@@ -20,8 +20,7 @@ use crate::{
     services::{
         image_storage::ImageStorage, privacy_service::SelfWriteGuard,
         retention_service::RetentionService, settings_service::SettingsService,
-        shortcut_manager::ShortcutManager, tray_service::TrayService,
-        window_coordinator::WindowCoordinator,
+        tray_service::TrayService, window_coordinator::WindowCoordinator,
     },
 };
 
@@ -256,10 +255,7 @@ pub fn bootstrap(app: &mut App, launch_mode: LaunchMode) -> Result<(), AppError>
 
     // 正常启动显示速贴面板；静默启动（开机自启携带 --silent）仅驻留托盘，不弹任何窗口
     if !launch_mode.is_silent() {
-        WindowCoordinator::show_picker(&app.handle(), &state)?;
-        if let Err(error) = ShortcutManager::register_picker_session_shortcuts(&app.handle()) {
-            warn!("启动时注册 Picker 会话快捷键失败: {error}");
-        }
+        WindowCoordinator::activate_picker(&app.handle(), &state)?;
     }
 
     info!("FloatPaste MVP 已初始化，数据库路径: {}", db_path.display());

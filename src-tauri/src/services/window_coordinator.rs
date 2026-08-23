@@ -179,6 +179,55 @@ impl WindowCoordinator {
         Ok(())
     }
 
+    /// 激活 Picker 会话：显示窗口并注册会话快捷键。
+    ///
+    /// 主快捷键、托盘菜单、启动流程与前端命令打开 Picker 的唯一入口。
+    /// 注册失败只降级为鼠标操作（保留 warn 日志），不回滚已显示的窗口。
+    pub fn activate_picker(app: &AppHandle, state: &AppState) -> Result<(), AppError> {
+        Self::show_picker(app, state)?;
+        if let Err(error) = ShortcutManager::register_picker_session_shortcuts(app) {
+            warn!("注册 Picker 会话快捷键失败，保留鼠标降级路径: {error}");
+        }
+        Ok(())
+    }
+
+    /// 主快捷键命中：Picker 活跃则关闭并恢复目标焦点，否则收起 Search 后激活 Picker。
+    ///
+    /// 激活状态在执行时实时读取，避免调用方提前捕获快照后，于延迟期间
+    /// 被鼠标钩子等其它路径改写（TOCTOU），把"打开"误判成"关闭"。
+    /// 须在主线程调用。
+    pub fn toggle_picker_from_shortcut(app: &AppHandle, state: &AppState) -> Result<(), AppError> {
+        if state.is_picker_active() {
+            return Self::hide_picker_and_restore_target(app, state);
+        }
+
+        if state.is_search_active() {
+            // 搜索窗口活跃时先收起，避免两窗口争抢焦点导致闪烁
+            Self::hide_search_without_restore_target(app, state)?;
+        }
+
+        Self::activate_picker(app, state)
+    }
+
+    /// 搜索快捷键命中：搜索窗口可见且未最小化则关闭并恢复目标，否则全局打开。
+    pub fn toggle_search_from_shortcut(app: &AppHandle, state: &AppState) -> Result<(), AppError> {
+        if is_search_window_ready_for_toggle(app) {
+            return Self::hide_search_and_restore_target(app, state);
+        }
+
+        Self::open_search_global(app, state)
+    }
+
+    /// Picker 会话中命中搜索快捷键：只收起 Picker（不恢复目标焦点，焦点交给
+    /// 搜索窗口）再打开搜索。
+    pub fn open_search_from_active_picker(
+        app: &AppHandle,
+        state: &AppState,
+    ) -> Result<(), AppError> {
+        Self::hide_picker(app)?;
+        Self::open_search_global(app, state)
+    }
+
     /// 退出前的集中收尾：置退出标志、卸载低级鼠标钩子、停止长按导航、销毁所有窗口。
     ///
     /// 关键：必须真正销毁（destroy）窗口，而非仅隐藏（SW_HIDE）。隐藏的窗口仍是存活的
@@ -806,6 +855,24 @@ fn is_window_ready_for_reuse(window: &WebviewWindow) -> Result<bool, AppError> {
         .is_minimized()?;
 
     Ok(is_visible && !is_minimized)
+}
+
+/// 搜索窗口是否处于"会话活跃且可见未最小化"的可关闭状态，作为搜索快捷键
+/// toggle 的关闭侧判定；否则快捷键语义为打开。
+fn is_search_window_ready_for_toggle(app: &AppHandle) -> bool {
+    let Some(state) = app.try_state::<AppState>() else {
+        return false;
+    };
+
+    if !state.is_search_active() {
+        return false;
+    }
+
+    let Some(window) = app.get_webview_window(SEARCH_WINDOW_LABEL) else {
+        return false;
+    };
+
+    is_window_ready_for_reuse(&window).unwrap_or(false)
 }
 
 fn show_and_focus_window(window: &WebviewWindow) -> Result<(), AppError> {
