@@ -1,7 +1,10 @@
 import { useMemo, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { listTags, setItemTags } from "../../bridge/commands";
+import { useQueryClient } from "@tanstack/react-query";
+import { setItemTags } from "../../bridge/commands";
 import { getErrorMessage } from "../../shared/utils/error";
+import { invalidateClipQueries } from "../../shared/queries/clipQueries";
+import { queryKeys } from "../../shared/queries/queryKeys";
+import { useTagsQuery } from "../../shared/queries/tagQueries";
 
 const MAX_TAGS_PER_ITEM = 20;
 const MAX_TAG_NAME_LEN = 32;
@@ -23,11 +26,7 @@ export function TagEditor({ itemId, tags, onError }: TagEditorProps) {
   const [input, setInput] = useState("");
   const current = draftTags ?? tags;
 
-  const tagsQuery = useQuery({
-    queryKey: ["tags"],
-    queryFn: () => listTags(),
-    staleTime: 0,
-  });
+  const tagsQuery = useTagsQuery();
 
   const suggestions = useMemo(() => {
     const keyword = input.trim().toLowerCase();
@@ -42,7 +41,9 @@ export function TagEditor({ itemId, tags, onError }: TagEditorProps) {
     setDraftTags(next);
     try {
       await setItemTags(itemId, next);
-      await queryClient.invalidateQueries({ queryKey: ["tags"] });
+      // 详情与列表都携带标签信息，一并失效避免编辑器外的列表/详情显示陈旧标签
+      await queryClient.invalidateQueries({ queryKey: queryKeys.tags });
+      await invalidateClipQueries();
     } catch (error) {
       setDraftTags(previous);
       onError(`标签保存失败：${getErrorMessage(error, "请稍后重试")}`);

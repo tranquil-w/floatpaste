@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { deleteTag, listTags, renameTag } from "../../bridge/commands";
+import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { deleteTag, renameTag } from "../../bridge/commands";
 import { TAGS_CHANGED_EVENT } from "../../bridge/events";
-import { isTauriRuntime } from "../../bridge/runtime";
 import { getErrorMessage } from "../../shared/utils/error";
+import { queryKeys } from "../../shared/queries/queryKeys";
+import { useTagsQuery } from "../../shared/queries/tagQueries";
+import { useAppEvent } from "../../shared/hooks/useAppEvent";
 import { SettingsSection } from "./SettingsSection";
 import type { SettingsSectionId } from "./settingsSections";
 
@@ -17,37 +18,20 @@ const FORM_INPUT =
 
 export function TagsSection({ registerSection }: Props) {
   const queryClient = useQueryClient();
-  const tagsQuery = useQuery({
-    queryKey: ["tags"],
-    queryFn: () => listTags(),
-    staleTime: 0,
-  });
+  const tagsQuery = useTagsQuery();
   const [renamingTag, setRenamingTag] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [deleteCandidate, setDeleteCandidate] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!isTauriRuntime()) {
-      return;
-    }
-
-    let offTagsChanged: (() => void) | undefined;
-    void listen(TAGS_CHANGED_EVENT, async () => {
-      await queryClient.invalidateQueries({ queryKey: ["tags"] });
-    }).then((cleanup) => {
-      offTagsChanged = cleanup;
-    });
-
-    return () => {
-      offTagsChanged?.();
-    };
-  }, [queryClient]);
+  useAppEvent(TAGS_CHANGED_EVENT, async () => {
+    await queryClient.invalidateQueries({ queryKey: queryKeys.tags });
+  });
 
   const tags = tagsQuery.data ?? [];
 
   async function refreshTags() {
-    await queryClient.invalidateQueries({ queryKey: ["tags"] });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.tags });
   }
 
   function startRename(name: string) {
@@ -111,7 +95,7 @@ export function TagsSection({ registerSection }: Props) {
           暂无标签，可在编辑窗口为条目添加标签后回到这里管理。
         </p>
       ) : (
-        <div className="overflow-hidden rounded-2xl border border-pg-border-muted bg-pg-canvas-subtle">
+        <div className="overflow-hidden rounded-xl border border-pg-border-muted bg-pg-canvas-subtle">
           {tags.map((tag) => (
             <div
               className="flex flex-wrap items-center gap-3 border-b border-pg-border-subtle px-5 py-3 last:border-b-0"

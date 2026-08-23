@@ -1,5 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
-import { listTags, searchItems } from "../../bridge/commands";
+import { keepPreviousData, useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { searchItems } from "../../bridge/commands";
+import { queryKeys } from "../../shared/queries/queryKeys";
 import type {
   SearchFilters,
   SearchQuery,
@@ -8,22 +9,22 @@ import type {
 } from "../../shared/types/clips";
 
 const SEARCH_RECENT_LIMIT = 30;
+/** 关键词搜索的单页大小：滚动到底部时按 offset 继续加载，避免一次性取回大结果集 */
+const SEARCH_PAGE_LIMIT = 50;
 
 function buildFilters(filter: SearchQuickFilter, tagNames: string[]): Partial<SearchFilters> {
+  // 类型与标签是独立维度，可任意组合；后端按 AND 语义合并
+  const filters: Partial<SearchFilters> = {};
   if (filter === "favorite") {
-    return { favoritedOnly: true } as const;
+    filters.favoritedOnly = true;
+  } else if (filter !== "all" && filter !== "tag") {
+    filters.clipType = filter;
   }
-
-  if (filter === "all") {
-    return {};
+  // 兼容旧的"标签"筛选值；空数组等价于未筛选
+  if (tagNames.length > 0 || filter === "tag") {
+    filters.tagNames = tagNames;
   }
-
-  if (filter === "tag") {
-    // 空数组等价于未筛选；后端按 AND 语义组合多标签
-    return { tagNames };
-  }
-
-  return { clipType: filter } as const;
+  return filters;
 }
 
 export function createSearchRecentQueryKey(filter: SearchQuickFilter, tagNames: string[]) {
@@ -35,7 +36,7 @@ export function createSearchRecentQueryKey(filter: SearchQuickFilter, tagNames: 
     sort: "recent_desc",
   };
 
-  return ["search-recent", query] as const;
+  return queryKeys.searchRecent(query);
 }
 
 export function createSearchSearchQueryKey(
@@ -47,12 +48,11 @@ export function createSearchSearchQueryKey(
     keyword,
     filters: buildFilters(filter, tagNames),
     offset: 0,
-    // 关键词搜索一次取回更多结果，避免匹配超过 50 条时被截断导致"漏匹配"
-    limit: 200,
+    limit: SEARCH_PAGE_LIMIT,
     sort: keyword.trim() ? "relevance_desc" : "recent_desc",
   };
 
-  return ["search-query", query] as const;
+  return queryKeys.searchQuery(query);
 }
 
 export function useSearchRecentQuery(
@@ -69,6 +69,7 @@ export function useSearchRecentQuery(
     queryFn: (): Promise<SearchResult> => searchItems(query),
     enabled,
     staleTime: 0,
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -79,20 +80,19 @@ export function useSearchSearchQuery(
   enabled: boolean,
 ) {
   const queryKey = createSearchSearchQueryKey(keyword, filter, tagNames);
+  const query = queryKey[1];
 
-  return useQuery({
+  return useInfiniteQuery({
     queryKey,
-    queryFn: () => searchItems(queryKey[1]),
+    queryFn: ({ pageParam }): Promise<SearchResult> =>
+      searchItems({ ...query, offset: pageParam }),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage: SearchResult) =>
+      lastPage.offset + lastPage.items.length < lastPage.total
+        ? lastPage.offset + lastPage.items.length
+        : undefined,
     enabled,
     staleTime: 0,
-  });
-}
-
-export function useTagsQuery(enabled: boolean) {
-  return useQuery({
-    queryKey: ["tags"],
-    queryFn: () => listTags(),
-    enabled,
-    staleTime: 0,
+    placeholderData: keepPreviousData,
   });
 }
