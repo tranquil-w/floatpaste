@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { listen } from "@tauri-apps/api/event";
 import { SETTINGS_CHANGED_EVENT, SETTINGS_OPEN_SETTINGS_EVENT } from "../../bridge/events";
 import { isTauriRuntime } from "../../bridge/runtime";
 import { hideCurrentWindow } from "../../bridge/window";
 import { queryClient } from "../../app/queryClient";
+import { useAppEvent } from "../../shared/hooks/useAppEvent";
 import type {
   CustomThemeColors,
   PickerPositionMode,
@@ -20,6 +20,7 @@ import { LoadingSpinner } from "../../shared/ui/LoadingSpinner";
 import { getErrorMessage } from "../../shared/utils/error";
 import { SettingsNav } from "./SettingsNav";
 import { SettingsSection } from "./SettingsSection";
+import { ShortcutInput } from "./ShortcutInput";
 import { type SettingsSectionId } from "./settingsSections";
 import { useSettingsNavigation } from "./useSettingsNavigation";
 import { TagsSection } from "./TagsSection";
@@ -39,6 +40,7 @@ type EditableSettings = {
   excludedAppsText: string;
   searchShortcut: string;
   searchShortcutEnabled: boolean;
+  pickerDigitShortcutsEnabled: boolean;
   customThemeColors: CustomThemeColors;
 };
 
@@ -101,7 +103,7 @@ const FORM_INPUT =
 const FORM_LABEL = "mb-1.5 block text-sm font-medium text-pg-fg-default";
 const FORM_HINT = "mt-1.5 text-xs leading-relaxed text-pg-fg-subtle";
 const CARD_CLASS =
-  "rounded-2xl border border-pg-border-muted bg-pg-canvas-subtle px-5 py-5 shadow-sm";
+  "rounded-xl border border-pg-border-muted bg-pg-canvas-subtle px-5 py-5 shadow-sm";
 
 function toEditableSettings(settings: UserSetting): EditableSettings {
   return {
@@ -117,6 +119,7 @@ function toEditableSettings(settings: UserSetting): EditableSettings {
     excludedAppsText: settings.excludedApps.join("\n"),
     searchShortcut: settings.searchShortcut,
     searchShortcutEnabled: settings.searchShortcutEnabled,
+    pickerDigitShortcutsEnabled: settings.pickerDigitShortcutsEnabled,
     customThemeColors: settings.customThemeColors,
   };
 }
@@ -138,12 +141,32 @@ function toSettingsPayload(editable: EditableSettings): UserSetting {
       .filter(Boolean),
     searchShortcut: editable.searchShortcut,
     searchShortcutEnabled: editable.searchShortcutEnabled,
+    pickerDigitShortcutsEnabled: editable.pickerDigitShortcutsEnabled,
     customThemeColors: sanitizeCustomThemeColors(editable.customThemeColors),
   };
 }
 
 function isSameSettings(left: UserSetting, right: UserSetting) {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+/** 与后端比较口径对齐的快捷键归一化：忽略大小写与修饰键顺序 */
+function normalizeShortcutValue(value: string): string {
+  return value
+    .split("+")
+    .map((part) => part.trim().toLowerCase())
+    .filter(Boolean)
+    .sort()
+    .join("+");
+}
+
+/** 数字输入钳制：越界或非法值收敛到边界/回退值，与后端约束一致 */
+function toBoundedNumber(value: string, min: number, max: number, fallback: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.min(max, Math.max(min, Math.round(parsed)));
 }
 
 function SettingCard({
@@ -168,11 +191,12 @@ function SettingCard({
         </div>
         {action ? <div className="shrink-0">{action}</div> : null}
       </div>
-      <div className="mt-4 space-y-4">{children}</div>
+      <div className="mt-3 space-y-1.5">{children}</div>
     </div>
   );
 }
 
+/** 设置行：拍平的列表行（无边框盒），悬停才有底色，消除"框中框"嵌套感 */
 function ToggleRow({
   checked,
   description,
@@ -192,29 +216,25 @@ function ToggleRow({
 }) {
   return (
     <label
-      className={`flex items-start gap-3 rounded-xl border px-4 py-3 transition-colors ${
+      className={`flex items-start gap-3 rounded-lg px-3 py-2.5 transition-colors ${
         disabled
-          ? "cursor-not-allowed border-pg-border-subtle bg-pg-canvas-default/70"
-          : "cursor-pointer border-pg-border-default bg-pg-canvas-default hover:border-pg-border-default"
-      } ${nested ? "ml-4" : ""}`}
+          ? "cursor-not-allowed opacity-60"
+          : "cursor-pointer hover:bg-pg-canvas-default"
+      } ${nested ? "ml-6" : ""}`}
       htmlFor={id}
     >
       <input
         checked={checked}
-        className="mt-0.5 h-4 w-4 rounded border-pg-border-default accent-pg-accent-fg"
+        className="mt-0.5 h-4 w-4 rounded accent-pg-accent-fg"
         disabled={disabled}
         id={id}
         onChange={(event) => onChange(event.target.checked)}
         type="checkbox"
       />
       <span className="min-w-0">
-        <span
-          className={`block text-sm font-medium ${disabled ? "text-pg-fg-subtle" : "text-pg-fg-default"}`}
-        >
-          {title}
-        </span>
+        <span className="block text-sm font-medium text-pg-fg-default">{title}</span>
         {description ? (
-          <span className="mt-1 block text-xs leading-relaxed text-pg-fg-subtle">
+          <span className="mt-0.5 block text-xs leading-relaxed text-pg-fg-subtle">
             {description}
           </span>
         ) : null}
@@ -238,10 +258,8 @@ function OptionCard({
 }) {
   return (
     <label
-      className={`flex cursor-pointer items-start gap-3 rounded-xl border px-4 py-3 transition-colors ${
-        checked
-          ? "border-pg-accent-fg bg-pg-accent-subtle"
-          : "border-pg-border-default bg-pg-canvas-default hover:border-pg-border-default"
+      className={`flex cursor-pointer items-start gap-3 rounded-lg px-3 py-2.5 transition-colors ${
+        checked ? "bg-pg-accent-subtle" : "hover:bg-pg-canvas-default"
       }`}
     >
       <input
@@ -257,26 +275,57 @@ function OptionCard({
         >
           {label}
         </span>
-        <span className="mt-1 block text-xs leading-relaxed text-pg-fg-subtle">{description}</span>
+        <span className="mt-0.5 block text-xs leading-relaxed text-pg-fg-subtle">{description}</span>
       </span>
     </label>
   );
 }
 
-function SaveStatusText({ saveStatus }: { saveStatus: "idle" | "saving" | "saved" | "error" }) {
+/** 自动保存状态指示：状态点 + 文案，空闲时提示"自动保存"语义 */
+function SaveStatusText({
+  saveBlockedReasons,
+  saveStatus,
+}: {
+  saveBlockedReasons: string[];
+  saveStatus: "idle" | "saving" | "saved" | "error";
+}) {
+  if (saveBlockedReasons.length > 0) {
+    return (
+      <span className="flex items-center gap-1.5 text-xs text-pg-danger-fg" role="alert">
+        <span className="h-1.5 w-1.5 rounded-full bg-pg-danger-fg" />
+        {`修改暂未保存：${saveBlockedReasons.join("、")}`}
+      </span>
+    );
+  }
+
   if (saveStatus === "saving") {
-    return <span className="text-xs text-pg-fg-subtle">正在保存</span>;
+    return (
+      <span className="flex items-center gap-1.5 text-xs text-pg-fg-subtle">
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-pg-accent-fg" />
+        正在保存
+      </span>
+    );
   }
 
   if (saveStatus === "saved") {
-    return <span className="text-xs text-pg-fg-subtle">已保存</span>;
+    return (
+      <span className="flex items-center gap-1.5 text-xs text-pg-fg-subtle">
+        <span className="h-1.5 w-1.5 rounded-full bg-pg-success-fg" />
+        已保存
+      </span>
+    );
   }
 
   if (saveStatus === "error") {
-    return <span className="text-xs text-pg-danger-fg">保存失败</span>;
+    return (
+      <span className="flex items-center gap-1.5 text-xs text-pg-danger-fg">
+        <span className="h-1.5 w-1.5 rounded-full bg-pg-danger-fg" />
+        保存失败
+      </span>
+    );
   }
 
-  return null;
+  return <span className="text-xs text-pg-fg-subtle">更改将自动保存</span>;
 }
 
 function ThemeColorInput({
@@ -296,10 +345,12 @@ function ThemeColorInput({
     <label className="block">
       <span className={FORM_LABEL}>{label}</span>
       <div className="flex items-center gap-3">
-        <span
-          aria-hidden="true"
-          className="h-9 w-9 shrink-0 rounded-lg border border-pg-border-default bg-pg-canvas-default"
-          style={{ backgroundColor: value }}
+        <input
+          aria-label={`${label} 拾色器`}
+          className="color-swatch h-9 w-9 shrink-0 cursor-pointer rounded-lg border border-pg-border-default bg-pg-canvas-default p-0.5"
+          onChange={(event) => onChange(event.target.value.toUpperCase())}
+          type="color"
+          value={/^#[0-9a-fA-F]{6}$/.test(value) ? value : "#000000"}
         />
         <input
           className={FORM_INPUT}
@@ -335,6 +386,7 @@ export function SettingsShell() {
   const [excludedAppsText, setExcludedAppsText] = useState("");
   const [searchShortcut, setSearchShortcut] = useState("Alt+S");
   const [searchShortcutEnabled, setSearchShortcutEnabled] = useState(true);
+  const [pickerDigitShortcutsEnabled, setPickerDigitShortcutsEnabled] = useState(true);
   const [customThemeColors, setCustomThemeColors] = useState<CustomThemeColors>(
     DEFAULT_CUSTOM_THEME_COLORS,
   );
@@ -344,6 +396,9 @@ export function SettingsShell() {
   const latestLocalPayloadRef = useRef<UserSetting | null>(null);
   const latestSaveRequestIdRef = useRef(0);
   const hydrationTimerRef = useRef<number | null>(null);
+  // Escape 关窗路径经 ref 调用，避免 keydown 监听闭包过期
+  const flushPendingSaveRef = useRef<() => Promise<void>>(async () => {});
+  const performSaveRef = useRef<(payload: UserSetting) => Promise<void>>(async () => {});
 
   const applyServerSettings = (nextSettings: UserSetting) => {
     const nextEditable = toEditableSettings(nextSettings);
@@ -368,6 +423,7 @@ export function SettingsShell() {
     setExcludedAppsText(nextEditable.excludedAppsText);
     setSearchShortcut(nextEditable.searchShortcut);
     setSearchShortcutEnabled(nextEditable.searchShortcutEnabled);
+    setPickerDigitShortcutsEnabled(nextEditable.pickerDigitShortcutsEnabled);
     setCustomThemeColors(nextEditable.customThemeColors);
 
     hydrationTimerRef.current = window.setTimeout(() => {
@@ -390,6 +446,7 @@ export function SettingsShell() {
       excludedAppsText,
       searchShortcut,
       searchShortcutEnabled,
+      pickerDigitShortcutsEnabled,
       customThemeColors,
     });
   }, [
@@ -405,11 +462,76 @@ export function SettingsShell() {
     excludedAppsText,
     searchShortcut,
     searchShortcutEnabled,
+    pickerDigitShortcutsEnabled,
     customThemeColors,
   ]);
 
   const colorErrors = getCustomThemeColorErrors(customThemeColors);
   const hasColorErrors = Object.keys(colorErrors).length > 0;
+  // 两处全局快捷键冲突时后端会强制重置搜索键，前端提前拦截保存并提示
+  const shortcutConflict =
+    searchShortcutEnabled &&
+    shortcut.trim() !== "" &&
+    normalizeShortcutValue(shortcut) === normalizeShortcutValue(searchShortcut);
+  // 存在非法输入时自动保存被拦截，头部需明示"有修改未落盘"，避免用户误以为已保存
+  const saveBlockedReasons = [
+    hasColorErrors ? "无效的颜色值" : null,
+    shortcutConflict ? "快捷键冲突" : null,
+  ].filter((reason): reason is string => reason !== null);
+
+  // 立即保存指定载荷；供 debounce 回调、失败重试与关窗前 flush 共用
+  const performSave = (payload: UserSetting) =>
+    new Promise<void>((resolve) => {
+      const requestId = latestSaveRequestIdRef.current + 1;
+      latestSaveRequestIdRef.current = requestId;
+      setSaveStatus("saving");
+      updateSettingsMutation.mutate(payload, {
+        onSuccess: (nextValue, variables) => {
+          queryClient.setQueryData(settingsQueryKey, nextValue);
+
+          if (requestId !== latestSaveRequestIdRef.current) {
+            return;
+          }
+
+          if (
+            latestLocalPayloadRef.current &&
+            isSameSettings(latestLocalPayloadRef.current, variables)
+          ) {
+            applyServerSettings(nextValue);
+            setSaveStatus("saved");
+          }
+        },
+        onError: () => {
+          if (requestId === latestSaveRequestIdRef.current) {
+            setSaveStatus("error");
+          }
+        },
+        onSettled: () => resolve(),
+      });
+    });
+
+  // 关窗前把 debounce 中尚未落盘的修改立即保存，避免最后一次改动静默丢失
+  async function flushPendingSave() {
+    const payload = latestLocalPayloadRef.current;
+    if (
+      !payload ||
+      isInitializingRef.current ||
+      hasColorErrors ||
+      shortcutConflict ||
+      !data ||
+      isSameSettings(payload, data)
+    ) {
+      return;
+    }
+
+    await performSave(payload);
+  }
+
+  // 保存/flush 走 ref 分发：debounce effect 与 Escape 监听不因每次渲染的新函数引用而重置
+  useEffect(() => {
+    performSaveRef.current = performSave;
+    flushPendingSaveRef.current = flushPendingSave;
+  });
 
   useEffect(() => {
     if (!data) return;
@@ -436,37 +558,13 @@ export function SettingsShell() {
   useEffect(() => {
     if (!data) return;
     if (isInitializingRef.current) return;
-    if (hasColorErrors) return;
+    if (hasColorErrors || shortcutConflict) return;
     const payload = latestLocalPayloadRef.current;
     if (!payload) return;
     if (isSameSettings(payload, data)) return;
 
     const timer = setTimeout(() => {
-      const requestId = latestSaveRequestIdRef.current + 1;
-      latestSaveRequestIdRef.current = requestId;
-      setSaveStatus("saving");
-      updateSettingsMutation.mutate(payload, {
-        onSuccess: (nextValue, variables) => {
-          queryClient.setQueryData(settingsQueryKey, nextValue);
-
-          if (requestId !== latestSaveRequestIdRef.current) {
-            return;
-          }
-
-          if (
-            latestLocalPayloadRef.current &&
-            isSameSettings(latestLocalPayloadRef.current, variables)
-          ) {
-            applyServerSettings(nextValue);
-            setSaveStatus("saved");
-          }
-        },
-        onError: () => {
-          if (requestId === latestSaveRequestIdRef.current) {
-            setSaveStatus("error");
-          }
-        },
-      });
+      void performSaveRef.current(payload);
     }, 800);
 
     return () => clearTimeout(timer);
@@ -483,42 +581,32 @@ export function SettingsShell() {
     excludedAppsText,
     searchShortcut,
     searchShortcutEnabled,
+    pickerDigitShortcutsEnabled,
     customThemeColors,
     hasColorErrors,
+    shortcutConflict,
     data,
-    updateSettingsMutation,
   ]);
 
-  useEffect(() => {
-    if (!isTauriRuntime()) return;
+  useAppEvent(SETTINGS_CHANGED_EVENT, async () => {
+    await invalidateSettings(queryClient);
+  });
 
-    let offSettings: (() => void) | undefined;
-    let offOpenSettings: (() => void) | undefined;
-
-    void listen(SETTINGS_CHANGED_EVENT, async () => {
-      await invalidateSettings(queryClient);
-    }).then((cleanup) => {
-      offSettings = cleanup;
-    });
-
-    void listen(SETTINGS_OPEN_SETTINGS_EVENT, async () => {
-      await invalidateSettings(queryClient);
-    }).then((cleanup) => {
-      offOpenSettings = cleanup;
-    });
-
-    return () => {
-      offSettings?.();
-      offOpenSettings?.();
-    };
-  }, []);
+  useAppEvent(SETTINGS_OPEN_SETTINGS_EVENT, async () => {
+    await invalidateSettings(queryClient);
+  });
 
   useEffect(() => {
     if (!isTauriRuntime()) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        void hideCurrentWindow().catch(console.error);
+        event.preventDefault();
+        // 先保存 debounce 中未落盘的修改再关窗，避免最后一次改动静默丢失
+        void flushPendingSaveRef
+          .current()
+          .then(() => hideCurrentWindow())
+          .catch(console.error);
       }
     };
 
@@ -549,39 +637,45 @@ export function SettingsShell() {
 
   return (
     <main className="flex min-h-screen flex-col bg-pg-canvas-default">
-      <div className="mx-auto w-full max-w-[1080px] px-6 py-8" ref={registerContainer}>
-        <header className="mb-8 flex flex-col gap-4 border-b border-pg-border-muted pb-6 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-pg-fg-subtle">
-              FloatPaste
-            </p>
-            <h1 className="mt-2 text-2xl font-semibold text-pg-fg-default">设置</h1>
-            <p className="mt-2 text-sm text-pg-fg-muted">偏好设置会自动保存。</p>
-          </div>
-          <div className="flex items-center">
-            <SaveStatusText saveStatus={saveStatus} />
-          </div>
+      <div className="mx-auto w-full max-w-[1080px] px-6 py-6" ref={registerContainer}>
+        <header className="sticky top-0 z-20 -mx-6 mb-6 flex items-center justify-between border-b border-pg-border-muted bg-pg-canvas-default px-6 py-3.5">
+          <h1 className="text-xl font-semibold text-pg-fg-default">设置</h1>
+          <SaveStatusText saveBlockedReasons={saveBlockedReasons} saveStatus={saveStatus} />
         </header>
 
         {saveError ? (
           <div className="mb-6 flex items-start justify-between gap-3 rounded-xl border border-pg-danger-fg/40 bg-pg-danger-subtle px-4 py-3 text-sm text-pg-danger-fg">
             <p>{saveError}</p>
-            <button
-              className="shrink-0 text-xs font-semibold uppercase tracking-wider transition-opacity hover:opacity-80"
-              onClick={() => updateSettingsMutation.reset()}
-              type="button"
-            >
-              关闭
-            </button>
+            <div className="flex shrink-0 items-center gap-3">
+              <button
+                className="text-xs font-semibold uppercase tracking-wider transition-opacity hover:opacity-80"
+                onClick={() => {
+                  const payload = latestLocalPayloadRef.current;
+                  if (payload) {
+                    void performSave(payload);
+                  }
+                }}
+                type="button"
+              >
+                重试
+              </button>
+              <button
+                className="text-xs font-semibold uppercase tracking-wider transition-opacity hover:opacity-80"
+                onClick={() => updateSettingsMutation.reset()}
+                type="button"
+              >
+                关闭
+              </button>
+            </div>
           </div>
         ) : null}
 
         {settings.isLoading && !data ? (
-          <div className="flex min-h-[320px] items-center justify-center rounded-2xl border border-pg-border-muted bg-pg-canvas-subtle">
+          <div className="flex min-h-[320px] items-center justify-center rounded-xl border border-pg-border-muted bg-pg-canvas-subtle">
             <LoadingSpinner size="sm" text="正在加载设置..." />
           </div>
         ) : loadError ? (
-          <div className="rounded-2xl border border-pg-danger-fg/40 bg-pg-danger-subtle px-5 py-5">
+          <div className="rounded-xl border border-pg-danger-fg/40 bg-pg-danger-subtle px-5 py-5">
             <h2 className="text-sm font-semibold text-pg-danger-fg">设置加载失败</h2>
             <p className="mt-2 text-sm leading-relaxed text-pg-fg-muted">{loadError}</p>
             <button
@@ -596,7 +690,7 @@ export function SettingsShell() {
           </div>
         ) : (
           <div
-            className={layoutMode === "sidebar" ? "grid grid-cols-[240px_minmax(0,1fr)] gap-8" : ""}
+            className={layoutMode === "sidebar" ? "grid grid-cols-[200px_minmax(0,1fr)] gap-6" : ""}
           >
             {layoutMode === "sidebar" ? (
               <SettingsNav
@@ -615,7 +709,53 @@ export function SettingsShell() {
                 />
               ) : null}
 
-              <div className="space-y-10">
+              <div className="space-y-8">
+                <SettingsSection
+                  description={sectionDescriptions.general}
+                  id="general"
+                  registerSection={registerSection}
+                  title="通用"
+                >
+                  <SettingCard
+                    description="控制历史记录保留规模与速贴面板的一次性浏览密度。"
+                    title="历史与列表"
+                  >
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <label className="block">
+                        <span className={FORM_LABEL}>历史记录上限</span>
+                        <input
+                          className={FORM_INPUT}
+                          max={10000}
+                          min={100}
+                          onChange={(event) =>
+                            setHistoryLimit(toBoundedNumber(event.target.value, 100, 10000, 1000))
+                          }
+                          step={100}
+                          type="number"
+                          value={historyLimit}
+                        />
+                      </label>
+
+                      <label className="block">
+                        <span className={FORM_LABEL}>速贴窗口记录数</span>
+                        <input
+                          className={FORM_INPUT}
+                          max={1000}
+                          min={9}
+                          onChange={(event) =>
+                            setPickerRecordLimit(toBoundedNumber(event.target.value, 9, 1000, 50))
+                          }
+                          type="number"
+                          value={pickerRecordLimit}
+                        />
+                        <p className={FORM_HINT}>
+                          控制速贴面板一次可滚动浏览的记录数，数字快捷键仍只覆盖前 9 条。
+                        </p>
+                      </label>
+                    </div>
+                  </SettingCard>
+                </SettingsSection>
+
                 <SettingsSection
                   description={sectionDescriptions.shortcuts}
                   id="shortcuts"
@@ -623,15 +763,11 @@ export function SettingsShell() {
                   title="快捷键"
                 >
                   <SettingCard description="控制速贴面板的全局唤起方式。" title="速贴唤起">
-                    <label className="block">
-                      <span className={FORM_LABEL}>全局快捷键</span>
-                      <input
-                        className={FORM_INPUT}
-                        onChange={(event) => setShortcut(event.target.value)}
-                        value={shortcut}
-                      />
-                      <p className={FORM_HINT}>在任意位置快速唤起 FloatPaste 速贴面板。</p>
-                    </label>
+                    <ShortcutInput
+                      hint="点击后直接按下组合键录制，例如 Alt+Q。"
+                      onChange={setShortcut}
+                      value={shortcut}
+                    />
                   </SettingCard>
 
                   <SettingCard
@@ -653,60 +789,16 @@ export function SettingsShell() {
                     description="为搜索窗口单独保留一组更适合检索场景的快捷键。"
                     title="搜索窗口"
                   >
-                    <label className="block">
-                      <span className={FORM_LABEL}>搜索窗口快捷键</span>
-                      <input
-                        className={FORM_INPUT}
-                        disabled={!searchShortcutEnabled}
-                        onChange={(event) => setSearchShortcut(event.target.value)}
-                        placeholder="Alt+S"
-                        value={searchShortcut}
-                      />
-                      <p className={FORM_HINT}>关闭启用开关后会保留当前快捷键值，但暂时不响应。</p>
-                    </label>
-                  </SettingCard>
-                </SettingsSection>
-
-                <SettingsSection
-                  description={sectionDescriptions.general}
-                  id="general"
-                  registerSection={registerSection}
-                  title="通用"
-                >
-                  <SettingCard
-                    description="控制历史记录保留规模与速贴面板的一次性浏览密度。"
-                    title="历史与列表"
-                  >
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <label className="block">
-                        <span className={FORM_LABEL}>历史记录上限</span>
-                        <input
-                          className={FORM_INPUT}
-                          min={100}
-                          onChange={(event) => setHistoryLimit(Number(event.target.value) || 1000)}
-                          step={100}
-                          type="number"
-                          value={historyLimit}
-                        />
-                      </label>
-
-                      <label className="block">
-                        <span className={FORM_LABEL}>速贴窗口记录数</span>
-                        <input
-                          className={FORM_INPUT}
-                          max={1000}
-                          min={9}
-                          onChange={(event) =>
-                            setPickerRecordLimit(Number(event.target.value) || 50)
-                          }
-                          type="number"
-                          value={pickerRecordLimit}
-                        />
-                        <p className={FORM_HINT}>
-                          控制速贴面板一次可滚动浏览的记录数，数字快捷键仍只覆盖前 9 条。
-                        </p>
-                      </label>
-                    </div>
+                    <ShortcutInput
+                      disabled={!searchShortcutEnabled}
+                      hint={
+                        shortcutConflict
+                          ? "与主快捷键相同，请换一组组合；冲突时不会保存。"
+                          : "关闭启用开关后会保留当前快捷键值，但暂时不响应。"
+                      }
+                      onChange={setSearchShortcut}
+                      value={searchShortcut}
+                    />
                   </SettingCard>
                 </SettingsSection>
 
@@ -717,7 +809,7 @@ export function SettingsShell() {
                   title="外观"
                 >
                   <SettingCard description="选择日常使用的界面主题。" title="界面主题">
-                    <div className="space-y-2">
+                    <div className="space-y-0.5">
                       {themeModeOptions.map((option) => (
                         <OptionCard
                           checked={themeMode === option.value}
@@ -790,7 +882,7 @@ export function SettingsShell() {
                     description="决定速贴窗口在唤起时更贴近哪里的上下文。"
                     title="速贴窗口显示位置"
                   >
-                    <div className="space-y-2">
+                    <div className="space-y-0.5">
                       {pickerPositionOptions.map((option) => (
                         <OptionCard
                           checked={pickerPositionMode === option.value}
@@ -855,6 +947,13 @@ export function SettingsShell() {
                       id="pause-monitoring"
                       onChange={setPauseMonitoring}
                       title="暂停监听"
+                    />
+                    <ToggleRow
+                      checked={pickerDigitShortcutsEnabled}
+                      description="速贴面板打开时按 1-9 直接粘贴对应条目。数字键是无修饰全局热键，若与其他软件冲突可关闭。"
+                      id="picker-digit-shortcuts"
+                      onChange={setPickerDigitShortcutsEnabled}
+                      title="速贴面板数字键直达"
                     />
                   </SettingCard>
                 </SettingsSection>

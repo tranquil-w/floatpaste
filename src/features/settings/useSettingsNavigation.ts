@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
 import { isTauriRuntime } from "../../bridge/runtime";
 import { SETTINGS_SECTIONS, type SettingsSectionId } from "./settingsSections";
+import { SCROLL_OFFSET, getActiveSectionId } from "./settingsScrollSpy";
 
 const SIDEBAR_BREAKPOINT = 880;
-const SCROLL_OFFSET = 96;
 const PROGRAMMATIC_SCROLL_UNLOCK_DELAY = 120;
+const SECTION_IDS = SETTINGS_SECTIONS.map((section) => section.id);
 
 type LayoutMode = "sidebar" | "compact";
 
@@ -22,32 +23,6 @@ function getLayoutMode(width: number): LayoutMode {
   }
 
   return width >= SIDEBAR_BREAKPOINT ? "sidebar" : "compact";
-}
-
-function getActiveSectionId(sectionElements: Map<SettingsSectionId, HTMLElement>) {
-  const firstSectionId = SETTINGS_SECTIONS[0]?.id ?? "shortcuts";
-  let candidateId: SettingsSectionId | null = null;
-  let candidateDistance = Number.POSITIVE_INFINITY;
-
-  for (const section of SETTINGS_SECTIONS) {
-    const element = sectionElements.get(section.id);
-    if (!element) continue;
-
-    const top = element.getBoundingClientRect().top;
-    if (top <= SCROLL_OFFSET) {
-      const distance = Math.abs(SCROLL_OFFSET - top);
-      if (distance < candidateDistance) {
-        candidateDistance = distance;
-        candidateId = section.id;
-      }
-    }
-  }
-
-  if (candidateId) {
-    return candidateId;
-  }
-
-  return firstSectionId;
 }
 
 export function useSettingsNavigation(): UseSettingsNavigationResult {
@@ -72,6 +47,14 @@ export function useSettingsNavigation(): UseSettingsNavigationResult {
     setLayoutMode(getLayoutMode(width));
   });
 
+  const measureActiveSection = useEffectEvent(() => {
+    return getActiveSectionId(SECTION_IDS, sectionElementsRef.current, {
+      scrollY: window.scrollY,
+      viewportHeight: window.innerHeight,
+      scrollHeight: document.documentElement.scrollHeight,
+    });
+  });
+
   const syncActiveSection = useEffectEvent(() => {
     if (programmaticScrollTargetRef.current) {
       if (unlockTimerRef.current !== null) {
@@ -81,12 +64,12 @@ export function useSettingsNavigation(): UseSettingsNavigationResult {
       unlockTimerRef.current = window.setTimeout(() => {
         programmaticScrollTargetRef.current = null;
         unlockTimerRef.current = null;
-        setActiveSectionId(getActiveSectionId(sectionElementsRef.current));
+        setActiveSectionId(measureActiveSection());
       }, PROGRAMMATIC_SCROLL_UNLOCK_DELAY);
       return;
     }
 
-    setActiveSectionId(getActiveSectionId(sectionElementsRef.current));
+    setActiveSectionId(measureActiveSection());
   });
 
   useEffect(() => {
@@ -145,7 +128,13 @@ export function useSettingsNavigation(): UseSettingsNavigationResult {
     }
 
     if (!programmaticScrollTargetRef.current) {
-      setActiveSectionId(getActiveSectionId(sectionElementsRef.current));
+      setActiveSectionId(
+        getActiveSectionId(SECTION_IDS, sectionElementsRef.current, {
+          scrollY: window.scrollY,
+          viewportHeight: window.innerHeight,
+          scrollHeight: document.documentElement.scrollHeight,
+        }),
+      );
     }
   }, []);
 
