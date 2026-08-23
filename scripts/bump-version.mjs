@@ -68,4 +68,4 @@ writeFileSync(files.cargoLock, cargoLockAfter, "utf8");
 
 console.log(`版本已升级: ${packageVersion} -> ${newVersion}`);
 console.log("已更新: package.json, src-tauri/Cargo.toml, src-tauri/tauri.conf.json, src-tauri/Cargo.lock");
-console.log(`后续步骤:\n  git add -A && git commit -m "chore: 升级版本至 ${newVersion}"\n  git tag v${newVersion} && git push --follow-tags`);
+console.log(`后续步骤:\n  git add -A && git commit -m "chore: 升级版本至 ${newVersion}"\n  git tag -a v${newVersion} -m "v${newVersion}" && git push --follow-tags`);

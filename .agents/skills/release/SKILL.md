@@ -29,7 +29,7 @@ description: 发布新版本并上传到 GitHub Release。当用户说"发版"�
 ```bash
 node scripts/bump-version.mjs <新版本号>
 git add -A && git commit -m "chore: 升级版本至 <新版本号>"
-git tag v<新版本号> && git push --follow-tags
+git tag -a v<新版本号> -m "v<新版本号>" && git push --follow-tags
 ```
 
 脚本会统一更新 `package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.lock`，不要手工改版本号。
