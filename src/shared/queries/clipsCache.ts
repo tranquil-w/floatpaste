@@ -1,10 +1,6 @@
 import type { InfiniteData } from "@tanstack/react-query";
 import { queryClient } from "../../app/queryClient";
-import type {
-  ClipItemSummary,
-  ClipsChangedPayload,
-  SearchResult,
-} from "../types/clips";
+import type { ClipItemSummary, ClipsChangedPayload, SearchResult } from "../types/clips";
 import { invalidateClipQueries } from "./clipQueries";
 import { queryKeys } from "./queryKeys";
 
@@ -33,13 +29,8 @@ function mergeUpsertedSummary(
   return [incoming, ...items.filter((item) => item.id !== incoming.id)];
 }
 
-function removeDeletedSummary(
-  items: ClipItemSummary[],
-  id: string,
-): ClipItemSummary[] {
-  return items.some((item) => item.id === id)
-    ? items.filter((item) => item.id !== id)
-    : items;
+function removeDeletedSummary(items: ClipItemSummary[], id: string): ClipItemSummary[] {
+  return items.some((item) => item.id === id) ? items.filter((item) => item.id !== id) : items;
 }
 
 /** search-recent 缓存 queryKey 的第二段（SearchQuery）是否带筛选条件；带筛选时无法判断新条目是否命中。 */
@@ -51,9 +42,9 @@ function searchRecentHasFilters(queryKey: readonly unknown[]): boolean {
   }
   return Boolean(
     active.favoritedOnly ||
-      active.clipType ||
-      active.sourceApp ||
-      (Array.isArray(active.tagNames) && active.tagNames.length > 0),
+    active.clipType ||
+    active.sourceApp ||
+    (Array.isArray(active.tagNames) && active.tagNames.length > 0),
   );
 }
 
@@ -71,9 +62,8 @@ export function applyClipsChanged(payload: ClipsChangedPayload): void {
   if (payload.kind === "upserted") {
     const incoming = payload.item;
 
-    queryClient.setQueriesData<ClipItemSummary[]>(
-      { queryKey: queryKeys.pickerRecents },
-      (items) => (items ? mergeUpsertedSummary(items, incoming) : items),
+    queryClient.setQueriesData<ClipItemSummary[]>({ queryKey: queryKeys.pickerRecents }, (items) =>
+      items ? mergeUpsertedSummary(items, incoming) : items,
     );
 
     for (const [key, data] of queryClient.getQueriesData<SearchResult>({
@@ -103,9 +93,8 @@ export function applyClipsChanged(payload: ClipsChangedPayload): void {
   }
 
   const deletedId = payload.id;
-  queryClient.setQueriesData<ClipItemSummary[]>(
-    { queryKey: queryKeys.pickerRecents },
-    (items) => (items ? removeDeletedSummary(items, deletedId) : items),
+  queryClient.setQueriesData<ClipItemSummary[]>({ queryKey: queryKeys.pickerRecents }, (items) =>
+    items ? removeDeletedSummary(items, deletedId) : items,
   );
   // 删除在任何筛选/排序下都成立，可以安全地从所有缓存中移除
   queryClient.setQueriesData<SearchResult>({ queryKey: queryKeys.searchRecents }, (data) =>
@@ -125,9 +114,7 @@ export function applyClipsChanged(payload: ClipsChangedPayload): void {
         return data;
       }
 
-      const removed = data.pages.some((page) =>
-        page.items.some((item) => item.id === deletedId),
-      );
+      const removed = data.pages.some((page) => page.items.some((item) => item.id === deletedId));
       if (!removed) {
         return data;
       }

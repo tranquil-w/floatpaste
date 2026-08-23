@@ -217,9 +217,7 @@ function ToggleRow({
   return (
     <label
       className={`flex items-start gap-3 rounded-lg px-3 py-2.5 transition-colors ${
-        disabled
-          ? "cursor-not-allowed opacity-60"
-          : "cursor-pointer hover:bg-pg-canvas-default"
+        disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer hover:bg-pg-canvas-default"
       } ${nested ? "ml-6" : ""}`}
       htmlFor={id}
     >
@@ -275,7 +273,9 @@ function OptionCard({
         >
           {label}
         </span>
-        <span className="mt-0.5 block text-xs leading-relaxed text-pg-fg-subtle">{description}</span>
+        <span className="mt-0.5 block text-xs leading-relaxed text-pg-fg-subtle">
+          {description}
+        </span>
       </span>
     </label>
   );
@@ -548,9 +548,7 @@ export function SettingsShell() {
     const isOwnWriteEcho =
       lastOwnWriteRef.current !== null && isSameSettings(lastOwnWriteRef.current, data);
     const isExternalChange =
-      previousServer !== null &&
-      !isSameSettings(previousServer, data) &&
-      !isOwnWriteEcho;
+      previousServer !== null && !isSameSettings(previousServer, data) && !isOwnWriteEcho;
     if (
       !isExternalChange &&
       hasHydratedFromServerRef.current &&

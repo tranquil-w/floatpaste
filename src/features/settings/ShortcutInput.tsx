@@ -113,7 +113,9 @@ export function ShortcutInput({ value, onChange, disabled = false, hint }: Short
         type="button"
       >
         {recording ? (
-          <span className="text-[13px] text-pg-accent-fg">按下新的组合键，Esc 取消，Backspace 清除</span>
+          <span className="text-[13px] text-pg-accent-fg">
+            按下新的组合键，Esc 取消，Backspace 清除
+          </span>
         ) : value ? (
           value.split("+").map((part) => (
             <kbd className={KBD_BADGE} key={part}>

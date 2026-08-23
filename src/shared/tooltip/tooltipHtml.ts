@@ -108,9 +108,7 @@ export function buildTooltipHtml(
 ): string {
   const metaParts: string[] = [];
   const escapedSource = escapeHtml(item.sourceApp ?? "未知来源");
-  const tooltipContent = options.fullText?.trim()
-    ? options.fullText
-    : item.contentPreview || "";
+  const tooltipContent = options.fullText?.trim() ? options.fullText : item.contentPreview || "";
 
   metaParts.push(`<span class="meta-badge">${escapeHtml(getTooltipTypeLabel(item))}</span>`);
   if (item.type === "image" && item.imageWidth && item.imageHeight) {

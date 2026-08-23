@@ -31,9 +31,7 @@ export async function toggleFavoriteSelection({
     await setItemFavorited(item.id, nextFavorited);
     await refreshItems?.();
     setLastMessage(
-      nextFavorited
-        ? { text: "已收藏", tone: "success" }
-        : { text: "已取消收藏", tone: "success" },
+      nextFavorited ? { text: "已收藏", tone: "success" } : { text: "已取消收藏", tone: "success" },
     );
     return true;
   } catch (error) {

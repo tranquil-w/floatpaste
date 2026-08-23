@@ -235,7 +235,10 @@ function formatFileSize(bytes: number | null): string | null {
 
 function getItemDetailMeta(detail: ClipItemDetail | ClipItemSummary): string[] {
   // 类型由左侧图标表达，meta 行不重复类型文字
-  const meta = [detail.sourceApp ?? "未知来源", formatDateTime(detail.lastUsedAt ?? detail.createdAt)];
+  const meta = [
+    detail.sourceApp ?? "未知来源",
+    formatDateTime(detail.lastUsedAt ?? detail.createdAt),
+  ];
 
   if (detail.type === "image" && detail.imageWidth && detail.imageHeight) {
     meta.push(`${detail.imageWidth} × ${detail.imageHeight}`);
@@ -323,7 +326,12 @@ export function SearchShell() {
   });
   const hasKeyword = debouncedKeyword.trim().length > 0;
   const recentQuery = useSearchRecentQuery(activeFilter, activeTagNames, !hasKeyword);
-  const searchQuery = useSearchSearchQuery(debouncedKeyword, activeFilter, activeTagNames, hasKeyword);
+  const searchQuery = useSearchSearchQuery(
+    debouncedKeyword,
+    activeFilter,
+    activeTagNames,
+    hasKeyword,
+  );
   // 标签 chip 行常驻可组合筛选，不再依赖类型下拉的"标签"选项
   const tagsQuery = useTagsQuery(true);
   const settingsQuery = useSettingsQuery({ staleTime: 0 });
@@ -780,9 +788,13 @@ export function SearchShell() {
     handleEventListenError,
   );
 
-  useAppEvent<ClipsChangedPayload>(CLIPS_CHANGED_EVENT, (payload) => {
-    applyClipsChanged(payload);
-  }, handleEventListenError);
+  useAppEvent<ClipsChangedPayload>(
+    CLIPS_CHANGED_EVENT,
+    (payload) => {
+      applyClipsChanged(payload);
+    },
+    handleEventListenError,
+  );
 
   useAppEvent(
     SEARCH_SESSION_END_EVENT,
@@ -861,11 +873,15 @@ export function SearchShell() {
     handleEventListenError,
   );
 
-  useAppEvent(TAGS_CHANGED_EVENT, () => {
-    void refreshSearchQueries().catch((error) => {
-      console.error("刷新标签数据失败", error);
-    });
-  }, handleEventListenError);
+  useAppEvent(
+    TAGS_CHANGED_EVENT,
+    () => {
+      void refreshSearchQueries().catch((error) => {
+        console.error("刷新标签数据失败", error);
+      });
+    },
+    handleEventListenError,
+  );
 
   // handler 内的选中项/列表读取全部走 ref，依赖只需覆盖直接读取的挂起与筛选状态；
   // 缩减依赖避免每次输入/导航都重挂 window 监听
@@ -1092,27 +1108,30 @@ export function SearchShell() {
         const activeQueryKey = hasKeyword
           ? createSearchSearchQueryKey(debouncedKeyword, activeFilter, activeTagNames)
           : createSearchRecentQueryKey(activeFilter, activeTagNames);
-        queryClient.setQueryData(activeQueryKey, (data: SearchResult | InfiniteData<SearchResult> | undefined) => {
-          if (!data) {
-            return data;
-          }
-          if ("pages" in data) {
-            return {
-              ...data,
-              pages: data.pages.map(
-                (page) =>
-                  setFavoritedOnSearchResult(page, id, nextFavorited, {
-                    removeUnfavoritedItem: true,
-                  }) ?? page,
-              ),
-            };
-          }
-          return (
-            setFavoritedOnSearchResult(data, id, nextFavorited, {
-              removeUnfavoritedItem: true,
-            }) ?? data
-          );
-        });
+        queryClient.setQueryData(
+          activeQueryKey,
+          (data: SearchResult | InfiniteData<SearchResult> | undefined) => {
+            if (!data) {
+              return data;
+            }
+            if ("pages" in data) {
+              return {
+                ...data,
+                pages: data.pages.map(
+                  (page) =>
+                    setFavoritedOnSearchResult(page, id, nextFavorited, {
+                      removeUnfavoritedItem: true,
+                    }) ?? page,
+                ),
+              };
+            }
+            return (
+              setFavoritedOnSearchResult(data, id, nextFavorited, {
+                removeUnfavoritedItem: true,
+              }) ?? data
+            );
+          },
+        );
       }
       await refreshSearchQueries();
     } catch (error) {
@@ -1137,7 +1156,9 @@ export function SearchShell() {
   const emptyState = getEmptyState(
     hasKeyword,
     activeFilter,
-    searchOpenShortcut ? `复制内容后使用 ${searchOpenShortcut} 打开此窗口` : "复制内容后即可在此查看",
+    searchOpenShortcut
+      ? `复制内容后使用 ${searchOpenShortcut} 打开此窗口`
+      : "复制内容后即可在此查看",
   );
   const activeFilterLabel = getFilterLabel(activeFilter);
 
@@ -1376,14 +1397,14 @@ export function SearchShell() {
             <span>{getSectionLabel(hasKeyword)}</span>
             <span>{resultCountLabel}</span>
           </div>
-          {activeFilter === "tag" || (tagsQuery.data ?? []).length > 0 || activeTagNames.length > 0 ? (
+          {activeFilter === "tag" ||
+          (tagsQuery.data ?? []).length > 0 ||
+          activeTagNames.length > 0 ? (
             <div className={STYLES.tagChipRow} data-no-window-drag="true">
               {tagsQuery.isLoading ? (
                 <span className="text-xs text-pg-fg-subtle">加载标签...</span>
               ) : (tagsQuery.data ?? []).length === 0 ? (
-                <span className="text-xs text-pg-fg-subtle">
-                  暂无标签，可在编辑窗口为条目添加
-                </span>
+                <span className="text-xs text-pg-fg-subtle">暂无标签，可在编辑窗口为条目添加</span>
               ) : (
                 (tagsQuery.data ?? []).map((tag) => {
                   const selected = activeTagNames.some(
@@ -1418,9 +1439,7 @@ export function SearchShell() {
             ) : loadError ? (
               <div className="flex min-h-[160px] flex-col items-center justify-center gap-1 px-4 py-12 text-center text-sm text-pg-fg-subtle">
                 <span>记录加载失败</span>
-                <span className="text-xs">
-                  {getErrorMessage(loadError, "请稍后重试")}
-                </span>
+                <span className="text-xs">{getErrorMessage(loadError, "请稍后重试")}</span>
                 <button
                   className="mt-2 rounded-md border border-pg-border-default px-2.5 py-1 text-xs text-pg-fg-muted transition-colors hover:bg-pg-canvas-subtle"
                   onClick={() => void activeQuery.refetch()}
@@ -1705,9 +1724,7 @@ export function SearchShell() {
                               </button>
                               <button
                                 aria-label={
-                                  deleteArmedId === item.id
-                                    ? "确认删除当前条目"
-                                    : "删除当前条目"
+                                  deleteArmedId === item.id ? "确认删除当前条目" : "删除当前条目"
                                 }
                                 className={STYLES.actionButtonDanger(deleteArmedId === item.id)}
                                 onMouseDown={(event) => {

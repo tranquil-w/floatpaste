@@ -99,10 +99,7 @@ export async function listTags(): Promise<TagInfo[]> {
   return invoke("list_tags");
 }
 
-export async function setItemTags(
-  id: string,
-  tagNames: string[],
-): Promise<ClipItemDetail> {
+export async function setItemTags(id: string, tagNames: string[]): Promise<ClipItemDetail> {
   if (!isTauriRuntime()) {
     return mockSetItemTags(id, tagNames);
   }

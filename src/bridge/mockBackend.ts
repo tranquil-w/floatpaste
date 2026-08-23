@@ -332,17 +332,12 @@ export async function mockListTags(): Promise<TagInfo[]> {
       itemCount: items.filter((item) =>
         item.tags.some((candidate) => candidate.toLowerCase() === name.toLowerCase()),
       ).length,
-      createdAt: items
-        .map((item) => item.createdAt)
-        .sort()[0] ?? new Date().toISOString(),
+      createdAt: items.map((item) => item.createdAt).sort()[0] ?? new Date().toISOString(),
     }))
     .sort((left, right) => right.itemCount - left.itemCount || left.name.localeCompare(right.name));
 }
 
-export async function mockSetItemTags(
-  id: string,
-  tagNames: string[],
-): Promise<ClipItemDetail> {
+export async function mockSetItemTags(id: string, tagNames: string[]): Promise<ClipItemDetail> {
   const item = items.find((entry) => entry.id === id);
   if (!item) {
     throw new Error("未找到对应剪贴记录");
@@ -370,23 +365,23 @@ export async function mockRenameTag(oldName: string, newName: string): Promise<v
   }
 
   for (const item of items) {
-    item.tags = item.tags.flatMap((tagName) => {
-      if (tagName.toLowerCase() !== oldName.toLowerCase()) {
-        return [tagName];
-      }
-      return [target];
-    }).filter(
-      (tagName, index, all) =>
-        all.findIndex((other) => other.toLowerCase() === tagName.toLowerCase()) === index,
-    );
+    item.tags = item.tags
+      .flatMap((tagName) => {
+        if (tagName.toLowerCase() !== oldName.toLowerCase()) {
+          return [tagName];
+        }
+        return [target];
+      })
+      .filter(
+        (tagName, index, all) =>
+          all.findIndex((other) => other.toLowerCase() === tagName.toLowerCase()) === index,
+      );
   }
 }
 
 export async function mockDeleteTag(name: string): Promise<void> {
   for (const item of items) {
-    item.tags = item.tags.filter(
-      (tagName) => tagName.toLowerCase() !== name.toLowerCase(),
-    );
+    item.tags = item.tags.filter((tagName) => tagName.toLowerCase() !== name.toLowerCase());
   }
 }
 

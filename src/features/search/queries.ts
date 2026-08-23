@@ -84,8 +84,7 @@ export function useSearchSearchQuery(
 
   return useInfiniteQuery({
     queryKey,
-    queryFn: ({ pageParam }): Promise<SearchResult> =>
-      searchItems({ ...query, offset: pageParam }),
+    queryFn: ({ pageParam }): Promise<SearchResult> => searchItems({ ...query, offset: pageParam }),
     initialPageParam: 0,
     getNextPageParam: (lastPage: SearchResult) =>
       lastPage.offset + lastPage.items.length < lastPage.total

@@ -20,13 +20,11 @@ export function getActiveSectionId(
   viewport: ScrollSpyViewport,
 ) {
   const firstSectionId = orderedSectionIds[0] ?? "general";
-  const lastSectionId =
-    orderedSectionIds[orderedSectionIds.length - 1] ?? firstSectionId;
+  const lastSectionId = orderedSectionIds[orderedSectionIds.length - 1] ?? firstSectionId;
 
   // 滚动到底时最后一个分组可能没有空间越过偏移线（点击它会被钳制在文档底部），
   // 此时直接高亮最后一个分组，避免高亮被上一分组抢占
-  const isAtBottom =
-    viewport.scrollY + viewport.viewportHeight >= viewport.scrollHeight - 1;
+  const isAtBottom = viewport.scrollY + viewport.viewportHeight >= viewport.scrollHeight - 1;
   if (isAtBottom && sectionElements.has(lastSectionId)) {
     return lastSectionId;
   }

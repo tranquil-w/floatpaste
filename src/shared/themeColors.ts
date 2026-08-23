@@ -165,10 +165,7 @@ export function buildThemeCssVariables(
   // 用户自定义了底色（与内置默认不同）时，前景/中性色按底色实际亮度派生，
   // 避免"浅色主题配深色卡底"等组合下正文不可读；默认配色保持 Primer 观感不变
   const defaultPalette = DEFAULT_CUSTOM_THEME_COLORS[resolvedTheme];
-  if (
-    palette.windowBg === defaultPalette.windowBg &&
-    palette.cardBg === defaultPalette.cardBg
-  ) {
+  if (palette.windowBg === defaultPalette.windowBg && palette.cardBg === defaultPalette.cardBg) {
     return baseVars;
   }
 

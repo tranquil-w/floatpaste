@@ -118,9 +118,7 @@ export function TagsSection({ registerSection }: Props) {
                     value={renameDraft}
                   />
                   {renameConflict ? (
-                    <span className="text-xs text-pg-fg-subtle">
-                      与现有标签同名，保存后将合并
-                    </span>
+                    <span className="text-xs text-pg-fg-subtle">与现有标签同名，保存后将合并</span>
                   ) : null}
                   <button
                     className="rounded-lg bg-pg-accent-emphasis px-3 py-1.5 text-xs font-semibold text-pg-fg-on-emphasis"
