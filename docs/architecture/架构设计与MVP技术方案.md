@@ -1391,7 +1391,6 @@ floatpaste/
 
 ### 20.3 已知实现取舍
 
-- 剪贴监听当前采用轮询方式，而非更底层的原生事件监听
 - Picker 已采用”无焦点窗口 + 会话期全局快捷键 + 鼠标移出关闭”的实现，在不同输入法与前台应用中基本稳定
 - 原先的 Manager 窗口已拆分为 Search + Editor + Settings 三个独立窗口，各自有独立的 WebviewWindow 和 capability 配置
 - 所有窗口切换通过 Rust 侧 WindowCoordinator 统一编排，隐藏后加入适当延迟以规避窗口切换竞态

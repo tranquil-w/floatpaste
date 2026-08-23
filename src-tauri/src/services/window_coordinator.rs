@@ -239,6 +239,10 @@ impl WindowCoordinator {
             state.begin_quit();
         }
 
+        // 停止剪贴板监听线程，避免退出阶段继续采集并 emit 到即将销毁的窗口。
+        #[cfg(target_os = "windows")]
+        crate::platform::windows::clipboard_monitor::ClipboardMonitor::stop();
+
         #[cfg(target_os = "windows")]
         {
             crate::platform::windows::picker_mouse_monitor::PickerMouseMonitor::end_session();
