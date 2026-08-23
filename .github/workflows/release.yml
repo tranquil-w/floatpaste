@@ -116,7 +116,7 @@ jobs:
           releaseBody: ${{ env.RELEASE_BODY }}
           releaseDraft: true
           prerelease: ${{ contains(github.ref_name, '-') }}
-          tauriScript: pnpm
+          tauriScript: pnpm tauri
           # 预发布版本号（如 0.6.0-beta.1）不被 WiX 支持，此时只打 NSIS
           args: ${{ contains(github.ref_name, '-') && '--bundles nsis' || '' }}
 
