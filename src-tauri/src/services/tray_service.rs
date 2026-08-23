@@ -1,5 +1,5 @@
 use tauri::{
-    menu::{MenuBuilder, MenuItemBuilder},
+    menu::{Menu, MenuBuilder, MenuItemBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Manager,
 };
@@ -16,32 +16,48 @@ use crate::{
 
 pub struct TrayService;
 
+/// 监听菜单文案跟随当前状态，避免用户误判监听是否已暂停
+fn monitoring_menu_label(paused: bool) -> &'static str {
+    if paused {
+        "恢复监听（当前已暂停）"
+    } else {
+        "暂停监听"
+    }
+}
+
+fn build_menu(app: &AppHandle, monitoring_paused: bool) -> Result<Menu<tauri::Wry>, AppError> {
+    let open_settings = MenuItemBuilder::with_id("open-settings", "打开设置").build(app)?;
+    let open_picker = MenuItemBuilder::with_id("open-picker", "打开速贴面板").build(app)?;
+    let open_search = MenuItemBuilder::with_id("open-search", "打开搜索").build(app)?;
+    let toggle_monitoring =
+        MenuItemBuilder::with_id("toggle-monitoring", monitoring_menu_label(monitoring_paused))
+            .build(app)?;
+    let quit = MenuItemBuilder::with_id("quit", "退出").build(app)?;
+
+    Ok(MenuBuilder::new(app)
+        .items(&[&open_picker, &open_search, &open_settings, &toggle_monitoring, &quit])
+        .build()?)
+}
+
+/// 托盘固定 id：refresh_menu 通过 tray_by_id 定位重建菜单
+const TRAY_ID: &str = "floatpaste-tray";
+
 impl TrayService {
     pub fn setup(app: &AppHandle) -> Result<(), AppError> {
-        let open_settings = MenuItemBuilder::with_id("open-settings", "打开设置")
-            .build(app)?;
-        let open_picker = MenuItemBuilder::with_id("open-picker", "打开速贴面板")
-            .build(app)?;
-        let toggle_monitoring = MenuItemBuilder::with_id("toggle-monitoring", "暂停 / 恢复监听")
-            .build(app)?;
-        let quit = MenuItemBuilder::with_id("quit", "退出")
-            .build(app)?;
+        let monitoring_paused = app
+            .try_state::<AppState>()
+            .and_then(|state| state.current_settings().ok())
+            .map(|settings| settings.pause_monitoring)
+            .unwrap_or(false);
 
-        let menu = MenuBuilder::new(app)
-            .items(&[
-                &open_settings,
-                &open_picker,
-                &toggle_monitoring,
-                &quit,
-            ])
-            .build()?;
+        let menu = build_menu(app, monitoring_paused)?;
 
         let icon = app
             .default_window_icon()
             .cloned()
             .ok_or_else(|| AppError::Message("缺少默认窗口图标".to_string()))?;
 
-        TrayIconBuilder::new()
+        TrayIconBuilder::with_id(TRAY_ID)
             .icon(icon)
             .menu(&menu)
             .show_menu_on_left_click(false)
@@ -49,6 +65,15 @@ impl TrayService {
                 "open-settings" => {
                     if let Err(error) = WindowCoordinator::open_settings(app) {
                         warn!("托盘打开设置失败: {error}");
+                    }
+                }
+                "open-search" => {
+                    let Some(state) = app.try_state::<AppState>() else {
+                        warn!("托盘打开搜索时应用状态未就绪");
+                        return;
+                    };
+                    if let Err(error) = WindowCoordinator::open_search_global(app, &state) {
+                        warn!("托盘打开搜索失败: {error}");
                     }
                 }
                 "open-picker" => {
@@ -118,5 +143,27 @@ impl TrayService {
             .build(app)?;
 
         Ok(())
+    }
+
+    /// 设置变更后刷新托盘菜单文案（如监听状态切换）。
+    pub fn refresh_menu(app: &AppHandle) {
+        let Some(tray) = app.tray_by_id(TRAY_ID) else {
+            return;
+        };
+
+        let monitoring_paused = app
+            .try_state::<AppState>()
+            .and_then(|state| state.current_settings().ok())
+            .map(|settings| settings.pause_monitoring)
+            .unwrap_or(false);
+
+        match build_menu(app, monitoring_paused) {
+            Ok(menu) => {
+                if let Err(error) = tray.set_menu(Some(menu)) {
+                    warn!("刷新托盘菜单失败: {error}");
+                }
+            }
+            Err(error) => warn!("重建托盘菜单失败: {error}"),
+        }
     }
 }

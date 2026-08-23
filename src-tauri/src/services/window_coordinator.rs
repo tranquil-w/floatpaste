@@ -89,6 +89,14 @@ impl WindowCoordinator {
     }
 
     pub fn open_settings(app: &AppHandle) -> Result<(), AppError> {
+        // 先结束 picker 会话：会话快捷键（Esc/Enter/数字键等）是全局热键，
+        // 不先解除会劫持设置窗口的键盘输入，导致设置页无法用 Esc 关闭
+        if let Some(state) = app.try_state::<AppState>() {
+            if state.is_picker_active() {
+                Self::hide_picker(app)?;
+            }
+        }
+
         let window = ensure_settings_window(app)?;
 
         window
@@ -528,7 +536,7 @@ fn ensure_picker_window(app: &AppHandle) -> Result<WebviewWindow, AppError> {
         .always_on_top(true)
         .skip_taskbar(true)
         .transparent(true)
-        .shadow(false)
+        .shadow(true)
         .build()
         .map_err(|error| AppError::Message(format!("创建 picker 窗口失败: {error}")))?;
 
@@ -555,7 +563,7 @@ fn ensure_search_window(app: &AppHandle) -> Result<WebviewWindow, AppError> {
         .visible(false)
         .decorations(false)
         .always_on_top(true)
-        .skip_taskbar(false)
+        .skip_taskbar(true)
         .center()
         .build()
         .map_err(|error| AppError::Message(format!("创建 search 窗口失败: {error}")))?;
