@@ -82,10 +82,10 @@ pub fn run() {
             Ok(Some(guard)) => Some(guard),
             Ok(None) => return,
             Err(error) => {
-                tracing::warn!(
-                    "单实例检查或唤醒已有实例失败，将继续启动当前实例作为恢复路径: {error}"
-                );
-                None
+                // 已有实例存在但唤醒失败（或互斥量创建失败）时必须退出当前进程：
+                // 继续启动会形成双实例并发写同一 SQLite 库，数据风险远大于本次启动失败
+                tracing::error!("单实例检查失败，退出当前实例: {error}");
+                return;
             }
         };
 

@@ -56,26 +56,44 @@ impl ShortcutManager {
     pub fn register_picker_session_shortcuts(app: &AppHandle) -> Result<(), AppError> {
         let manager = app.global_shortcut();
         Self::unregister_picker_session_shortcuts(app);
-        let mut failures = Vec::new();
+        // 数字键 1-9 是无修饰全局热键，冲突面大，可由设置关闭；
+        // 关闭后不注册，Picker 侧同步隐藏对应的 kbd 徽标。
+        let digit_shortcuts_enabled = app
+            .try_state::<AppState>()
+            .and_then(|state| state.current_settings().ok())
+            .map(|settings| settings.picker_digit_shortcuts_enabled)
+            .unwrap_or(true);
+        let mut registered: Vec<&str> = Vec::new();
 
         for shortcut in PICKER_SESSION_SHORTCUTS {
-            if let Err(error) = manager.register(shortcut) {
-                failures.push(format!("{shortcut}: {error}"));
+            if !digit_shortcuts_enabled && picker_digit_shortcut(shortcut) {
+                continue;
             }
-        }
-
-        if !failures.is_empty() {
-            set_picker_shortcuts_registered(app, false);
-            return Err(AppError::Message(format!(
-                "注册 Picker 会话快捷键失败: {}",
-                failures.join("; ")
-            )));
+            match manager.register(shortcut) {
+                Ok(()) => registered.push(shortcut),
+                Err(error) => {
+                    // 立即回滚已注册项：部分注册的全局热键会劫持全系统按键，
+                    // 宁可让本次会话无键盘快捷键（保留鼠标降级路径）也不能残留
+                    for done in registered {
+                        let _ = manager.unregister(done);
+                    }
+                    set_picker_shortcuts_registered(app, false);
+                    return Err(AppError::Message(format!(
+                        "注册 Picker 会话快捷键失败: {shortcut}: {error}"
+                    )));
+                }
+            }
         }
 
         set_picker_shortcuts_registered(app, true);
         info!(
             "已注册 Picker 会话快捷键: {}",
-            PICKER_SESSION_SHORTCUTS.join(", ")
+            PICKER_SESSION_SHORTCUTS
+                .iter()
+                .filter(|shortcut| digit_shortcuts_enabled || !picker_digit_shortcut(shortcut))
+                .copied()
+                .collect::<Vec<_>>()
+                .join(", ")
         );
         Ok(())
     }
@@ -457,6 +475,10 @@ fn picker_is_active(app: &AppHandle) -> bool {
     app.try_state::<AppState>()
         .map(|state| state.is_picker_active())
         .unwrap_or(false)
+}
+
+fn picker_digit_shortcut(shortcut: &str) -> bool {
+    matches!(shortcut, "Digit1" | "Digit2" | "Digit3" | "Digit4" | "Digit5" | "Digit6" | "Digit7" | "Digit8" | "Digit9")
 }
 
 #[cfg(test)]

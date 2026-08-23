@@ -24,37 +24,47 @@ const CLIP_ITEMS_DIRECTORY_COUNT_COLUMN: (&str, &str) =
 /// 兼容历史上未记录 `user_version` 的已有数据库：当检测到 media 列缺失但
 /// `user_version` 已是最新时，仍会补齐 media 列迁移。
 pub(super) fn initialize_database(connection: &Connection) -> Result<(), AppError> {
+    // 0001 含 PRAGMA journal_mode 赋值，不能包进事务；幂等靠 IF NOT EXISTS
     connection.execute_batch(include_str!("../../migrations/0001_init.sql"))?;
 
     let schema_version = current_schema_version(connection)?;
     if schema_version < CURRENT_SCHEMA_VERSION {
         apply_schema_upgrades(connection, schema_version)?;
     } else if !clip_items_has_media_columns(connection)? {
-        apply_media_columns_migration(connection)?;
-        set_schema_version(connection, CURRENT_SCHEMA_VERSION)?;
+        // 补列迁移同样整体原子：中途崩溃不会留下"列已加但版本未写"的半迁移状态
+        let transaction = connection.unchecked_transaction()?;
+        apply_media_columns_migration(&transaction)?;
+        set_schema_version(&transaction, CURRENT_SCHEMA_VERSION)?;
+        transaction.commit()?;
     }
 
     Ok(())
 }
 
 fn apply_schema_upgrades(connection: &Connection, current_version: i32) -> Result<(), AppError> {
+    // 全部增量迁移在一个事务内原子完成：表结构与 user_version 要么都生效要么都不生效，
+    // 避免重建 FTS 等多步骤迁移中途崩溃后留下半迁移库
+    let transaction = connection.unchecked_transaction()?;
+
     if current_version < 2 {
-        apply_media_columns_migration(connection)?;
+        apply_media_columns_migration(&transaction)?;
     }
 
     if current_version < 3 {
-        apply_directory_count_migration(connection)?;
+        apply_directory_count_migration(&transaction)?;
     }
 
     if current_version < 4 {
-        apply_fts_cjk_index_migration(connection)?;
+        apply_fts_cjk_index_migration(&transaction)?;
     }
 
     if current_version < 5 {
-        apply_tags_migration(connection)?;
+        apply_tags_migration(&transaction)?;
     }
 
-    set_schema_version(connection, CURRENT_SCHEMA_VERSION)
+    set_schema_version(&transaction, CURRENT_SCHEMA_VERSION)?;
+    transaction.commit()?;
+    Ok(())
 }
 
 /// v4：重建 FTS 索引，将索引内容切换为 CJK 逐字空格化文本。
