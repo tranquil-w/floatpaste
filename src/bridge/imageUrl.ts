@@ -34,6 +34,8 @@ export function createImageUrlResolver({
 }
 
 export const getImageUrl = createImageUrlResolver({
+  // 内联检测而非 import runtime.ts：本模块被 node --test 直接加载，
+  // 无扩展名导入无法被 node ESM 解析
   isTauriRuntime: () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window,
   resolveImagePath: (imagePath) => invoke("resolve_image_path", { imagePath }),
   convertFileSrc,

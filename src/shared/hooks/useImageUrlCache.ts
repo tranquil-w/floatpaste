@@ -4,51 +4,93 @@ import { getImageUrl } from "../../bridge/imageUrl";
 
 type ImageUrlCache = Map<string, string | null>;
 
+/** 同时进行的图片解析 IPC 上限：大列表一次性发起上百个并发请求会拖垮 IPC 通道 */
+const MAX_CONCURRENT_RESOLUTIONS = 4;
+
 /**
  * 管理剪辑项图片 URL 的解析缓存。
  *
- * - 自动对传入 `items` 中的图片项预取 URL（失败则缓存为 null 以便渲染降级）。
+ * - 列表图片按并发上限排队预取（失败则缓存为 null 以便渲染降级）。
+ * - 同一轮微任务内完成的多个解析合并为一次重渲染，避免逐张图触发全列表 re-render。
  * - `getCached` 同步读取缓存供 JSX 渲染使用。
- * - `resolve` 异步解析单个项（tooltip 等延迟场景），命中缓存直接返回。
+ * - `resolve` 异步解析单个项（tooltip 等即时场景，不排队），命中缓存直接返回。
  * - `markError` 在 `<img onError>` 时标记失败（带幂等保护）。
  * - `version` 在缓存变化时自增，驱动组件重渲染。
- *
- * 内部以 ref 持有可变缓存、以 version state 触发刷新，避免每次解析都引发重渲染。
  */
 export function useImageUrlCache(items: ClipItemSummary[]) {
   const cacheRef = useRef<ImageUrlCache>(new Map());
   const pendingRef = useRef<Set<string>>(new Set());
+  const queueRef = useRef<Array<() => void>>([]);
+  const activeCountRef = useRef(0);
+  const flushScheduledRef = useRef(false);
+  const mountedRef = useRef(true);
   const [version, bumpVersion] = useState(0);
 
   useEffect(() => {
-    let disposed = false;
-    const pending = pendingRef.current;
-    const cache = cacheRef.current;
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      queueRef.current = [];
+    };
+  }, []);
 
+  const scheduleFlush = () => {
+    if (flushScheduledRef.current || !mountedRef.current) {
+      return;
+    }
+    flushScheduledRef.current = true;
+    queueMicrotask(() => {
+      flushScheduledRef.current = false;
+      if (mountedRef.current) {
+        bumpVersion((current) => current + 1);
+      }
+    });
+  };
+
+  const pumpQueue = () => {
+    while (activeCountRef.current < MAX_CONCURRENT_RESOLUTIONS) {
+      const start = queueRef.current.shift();
+      if (!start) {
+        return;
+      }
+      start();
+    }
+  };
+
+  const enqueueResolve = (item: ClipItemSummary) => {
+    pendingRef.current.add(item.id);
+    queueRef.current.push(() => {
+      activeCountRef.current += 1;
+      void getImageUrl(item.imagePath as string)
+        .then((imageUrl) => {
+          cacheRef.current.set(item.id, imageUrl);
+        })
+        .catch(() => {
+          cacheRef.current.set(item.id, null);
+        })
+        .finally(() => {
+          pendingRef.current.delete(item.id);
+          activeCountRef.current -= 1;
+          scheduleFlush();
+          pumpQueue();
+        });
+    });
+  };
+
+  useEffect(() => {
     for (const item of items) {
-      if (item.type !== "image" || !item.imagePath || cache.has(item.id) || pending.has(item.id)) {
+      if (
+        item.type !== "image" ||
+        !item.imagePath ||
+        cacheRef.current.has(item.id) ||
+        pendingRef.current.has(item.id)
+      ) {
         continue;
       }
 
-      pending.add(item.id);
-      void getImageUrl(item.imagePath)
-        .then((imageUrl) => {
-          cache.set(item.id, imageUrl);
-        })
-        .catch(() => {
-          cache.set(item.id, null);
-        })
-        .finally(() => {
-          pending.delete(item.id);
-          if (!disposed) {
-            bumpVersion((current) => current + 1);
-          }
-        });
+      enqueueResolve(item);
     }
-
-    return () => {
-      disposed = true;
-    };
+    pumpQueue();
   }, [items]);
 
   const getCached = (id: string): string | null => cacheRef.current.get(id) ?? null;
@@ -66,11 +108,11 @@ export function useImageUrlCache(items: ClipItemSummary[]) {
     try {
       const imageUrl = await getImageUrl(item.imagePath);
       cacheRef.current.set(item.id, imageUrl);
-      bumpVersion((current) => current + 1);
+      scheduleFlush();
       return imageUrl;
     } catch {
       cacheRef.current.set(item.id, null);
-      bumpVersion((current) => current + 1);
+      scheduleFlush();
       return null;
     }
   };
@@ -80,7 +122,7 @@ export function useImageUrlCache(items: ClipItemSummary[]) {
       return;
     }
     cacheRef.current.set(id, null);
-    bumpVersion((current) => current + 1);
+    scheduleFlush();
   };
 
   return { getCached, resolve, markError, version };

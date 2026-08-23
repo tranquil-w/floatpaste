@@ -16,7 +16,6 @@ function createSummary(isFavorited: boolean): ClipItemSummary {
     id: "clip-1",
     type: "text",
     contentPreview: "hello",
-    tooltipText: null,
     sourceApp: "FloatPaste",
     isFavorited,
     fileCount: 0,

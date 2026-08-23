@@ -1,4 +1,5 @@
 import type { ClipItemSummary } from "../../shared/types/clips";
+import type { PickerMessage } from "./PickerShell";
 
 interface ToggleFavoriteSelectionOptions {
   item: ClipItemSummary | null | undefined;
@@ -6,7 +7,7 @@ interface ToggleFavoriteSelectionOptions {
   setPending?: (pending: boolean) => void;
   setItemFavorited: (id: string, value: boolean) => Promise<void>;
   refreshItems?: () => Promise<void>;
-  setLastMessage: (message: string) => void;
+  setLastMessage: (message: PickerMessage) => void;
   onError?: (error: unknown) => void;
 }
 
@@ -29,10 +30,14 @@ export async function toggleFavoriteSelection({
   try {
     await setItemFavorited(item.id, nextFavorited);
     await refreshItems?.();
-    setLastMessage(nextFavorited ? "已收藏" : "已取消收藏");
+    setLastMessage(
+      nextFavorited
+        ? { text: "已收藏", tone: "success" }
+        : { text: "已取消收藏", tone: "success" },
+    );
     return true;
   } catch (error) {
-    setLastMessage("更新收藏状态失败，请稍后重试");
+    setLastMessage({ text: "更新收藏状态失败，请稍后重试", tone: "error" });
     onError?.(error);
     return false;
   } finally {

@@ -1,5 +1,12 @@
 export type SearchKeyboardAction =
-  "navigate-up" | "navigate-down" | "paste" | "edit-item" | "toggle-favorite" | "close" | null;
+  | "navigate-up"
+  | "navigate-down"
+  | "paste"
+  | "edit-item"
+  | "toggle-favorite"
+  | "delete-item"
+  | "close"
+  | null;
 
 export function getSearchKeyboardAction({
   key,
@@ -33,6 +40,8 @@ export function getSearchKeyboardAction({
       return "navigate-down";
     case "Enter":
       return "paste";
+    case "Delete":
+      return "delete-item";
     case "Escape":
       return "close";
     default:

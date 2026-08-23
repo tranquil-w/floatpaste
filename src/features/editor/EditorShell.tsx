@@ -1,10 +1,12 @@
 import { useEffect, useRef } from "react";
-import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { hideEditor as hideEditorWindow } from "../../bridge/commands";
+import { deleteItem, hideEditor as hideEditorWindow } from "../../bridge/commands";
+import { applyClipsChanged } from "../../shared/queries/clipsCache";
 import { EDITOR_SESSION_END_EVENT, EDITOR_SESSION_START_EVENT } from "../../bridge/events";
 import { getErrorMessage } from "../../shared/utils/error";
 import { isTauriRuntime } from "../../bridge/runtime";
+import { useAppEvent } from "../../shared/hooks/useAppEvent";
+import { useArmedConfirm } from "../../shared/hooks/useArmedConfirm";
 import { LoadingSpinner } from "../../shared/ui/LoadingSpinner";
 import { useItemDetailQuery, useUpdateTextMutation } from "../../shared/queries/clipQueries";
 import { useEditorStore, type EditorSession } from "./store";
@@ -38,32 +40,42 @@ export function EditorShell() {
   const saveCurrentTextRef = useRef<() => Promise<boolean>>(async () => false);
   const handleSaveAndCloseRef = useRef<() => Promise<void>>(async () => {});
   const closeConfirmOpenRef = useRef(closeConfirmOpen);
+  const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 两段式删除：待确认目标为当前条目 id，渲染为“确认删除”，超时或切换条目自动撤销
+  const {
+    armedTarget: deleteArmedItemId,
+    request: requestArmedDelete,
+    reset: resetDeleteArmed,
+  } = useArmedConfirm<string>(async (id) => {
+    try {
+      await deleteItem(id);
+      applyClipsChanged({ kind: "deleted", id });
+      await closeEditor();
+    } catch (error) {
+      setNoticeMessage(null);
+      setErrorMessage(`删除失败：${getErrorMessage(error, "请稍后重试。")}`);
+    }
+  });
+  const deleteArmed = session ? deleteArmedItemId === session.itemId : false;
+
+  useAppEvent<EditorSession>(EDITOR_SESSION_START_EVENT, (payload) => {
+    initializeSession({
+      itemId: payload.itemId,
+      source: payload.source,
+      returnTo: payload.returnTo,
+    });
+  });
+
+  useAppEvent(EDITOR_SESSION_END_EVENT, () => {
+    reset();
+  });
 
   useEffect(() => {
     if (!isTauriRuntime()) {
       return;
     }
 
-    let offStart: (() => void) | undefined;
-    let offEnd: (() => void) | undefined;
     let offCloseRequested: (() => void) | undefined;
-
-    void listen<EditorSession>(EDITOR_SESSION_START_EVENT, (event) => {
-      initializeSession({
-        itemId: event.payload.itemId,
-        source: event.payload.source,
-        returnTo: event.payload.returnTo,
-      });
-    }).then((cleanup) => {
-      offStart = cleanup;
-    });
-
-    void listen(EDITOR_SESSION_END_EVENT, () => {
-      reset();
-    }).then((cleanup) => {
-      offEnd = cleanup;
-    });
-
     void getCurrentWindow()
       .onCloseRequested((event) => {
         event.preventDefault();
@@ -74,12 +86,11 @@ export function EditorShell() {
       });
 
     return () => {
-      offStart?.();
-      offEnd?.();
       offCloseRequested?.();
     };
-  }, [initializeSession, reset]);
+  }, []);
 
+  // handler 只读 ref 与稳定的 store setter，依赖为空避免每轮渲染重挂监听
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const action = getEditorKeyboardAction({
@@ -124,7 +135,7 @@ export function EditorShell() {
 
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  });
+  }, []);
 
   useEffect(() => {
     if (!detailQuery.data || detailQuery.data.id !== session?.itemId) {
@@ -143,18 +154,56 @@ export function EditorShell() {
     }
   }, [detailQuery.data, isDirty, savedText, session?.itemId, syncText]);
 
+  const caretPlacedItemIdRef = useRef<string | null>(null);
+
+  // 仅在条目首次载入时把光标定位到末尾；依赖里不能含 draftText，
+  // 否则编辑过程中每次按键都会把光标强制甩到末尾
   useEffect(() => {
-    if (detailQuery.data?.type === "text" && textareaRef.current) {
-      textareaRef.current.focus();
-      textareaRef.current.setSelectionRange(draftText.length, draftText.length);
+    if (detailQuery.data?.type !== "text" || !textareaRef.current) {
+      return;
     }
-  }, [detailQuery.data?.id, detailQuery.data?.type, draftText.length]);
+    if (caretPlacedItemIdRef.current === detailQuery.data.id) {
+      return;
+    }
+    caretPlacedItemIdRef.current = detailQuery.data.id;
+    const textarea = textareaRef.current;
+    // 等文本同步 effect 触发的 re-render commit 后再定位，避免读到上一条目的旧文本
+    requestAnimationFrame(() => {
+      textarea.focus();
+      textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    });
+  }, [detailQuery.data?.id, detailQuery.data?.type]);
 
   useEffect(() => {
     if (closeConfirmOpen) {
       saveAndCloseButtonRef.current?.focus();
     }
   }, [closeConfirmOpen]);
+
+  // 顶部通知（如"已保存"）短暂展示后自动消失，避免长期占用顶部空间
+  useEffect(() => {
+    if (noticeTimerRef.current) {
+      clearTimeout(noticeTimerRef.current);
+      noticeTimerRef.current = null;
+    }
+    if (!noticeMessage) {
+      return;
+    }
+    noticeTimerRef.current = setTimeout(() => {
+      setNoticeMessage(null);
+    }, 3000);
+    return () => {
+      if (noticeTimerRef.current) {
+        clearTimeout(noticeTimerRef.current);
+        noticeTimerRef.current = null;
+      }
+    };
+  }, [noticeMessage, setNoticeMessage]);
+
+  // 切换条目时撤销待确认删除，避免新条目首次点击被旧确认态直接放行
+  useEffect(() => {
+    resetDeleteArmed();
+  }, [session?.itemId]);
 
   async function saveCurrentText() {
     if (!session || detailQuery.data?.type !== "text") {
@@ -196,8 +245,15 @@ export function EditorShell() {
     await closeEditor();
   }
 
-  requestCloseRef.current = requestClose;
-  saveCurrentTextRef.current = saveCurrentText;
+  // 两段式删除：首次点击进入待确认态，超时自动退出；确认后删除条目并关闭编辑器
+  function handleDeleteItem() {
+    if (!session) {
+      return;
+    }
+
+    requestArmedDelete(session.itemId);
+  }
+
   async function handleSaveAndClose() {
     const success = await saveCurrentText();
     if (!success) {
@@ -207,20 +263,25 @@ export function EditorShell() {
     await closeEditor();
   }
 
-  handleSaveAndCloseRef.current = handleSaveAndClose;
-  closeConfirmOpenRef.current = closeConfirmOpen;
+  // 回调依赖当轮渲染的 state，渲染后统一同步到 ref 供键盘监听读取
+  useEffect(() => {
+    requestCloseRef.current = requestClose;
+    saveCurrentTextRef.current = saveCurrentText;
+    handleSaveAndCloseRef.current = handleSaveAndClose;
+    closeConfirmOpenRef.current = closeConfirmOpen;
+  });
 
   const isTextItem = detailQuery.data?.type === "text";
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-pg-canvas-default text-pg-fg-default">
       {noticeMessage ? (
-        <div className="bg-pg-success-subtle px-5 py-2 text-sm text-pg-success-fg">
+        <div className="bg-pg-success-subtle px-5 py-2 text-sm text-pg-success-fg" role="status">
           {noticeMessage}
         </div>
       ) : null}
       {errorMessage ? (
-        <div className="bg-pg-danger-subtle px-5 py-2 text-sm text-pg-danger-fg">
+        <div className="bg-pg-danger-subtle px-5 py-2 text-sm text-pg-danger-fg" role="alert">
           {errorMessage}
         </div>
       ) : null}
@@ -282,7 +343,21 @@ export function EditorShell() {
       </main>
 
       <footer className="flex shrink-0 items-center justify-between border-t border-pg-border-muted px-5 py-3">
-        <div className="text-sm text-pg-fg-subtle">Ctrl+S 保存 · Esc 关闭</div>
+        <div className="flex items-center gap-3">
+          <button
+            className={`rounded-md border px-3 py-2 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+              deleteArmed
+                ? "border-pg-danger-fg bg-pg-danger-subtle text-pg-danger-fg"
+                : "border-pg-border-default text-pg-fg-muted hover:border-pg-danger-fg hover:text-pg-danger-fg"
+            }`}
+            disabled={!session}
+            onClick={() => void handleDeleteItem()}
+            type="button"
+          >
+            {deleteArmed ? "确认删除" : "删除条目"}
+          </button>
+          <span className="text-sm text-pg-fg-subtle">Ctrl+S 保存 · Esc 关闭</span>
+        </div>
         <div className="flex items-center gap-2">
           <button
             className="rounded-md border border-pg-border-default px-4 py-2 text-sm hover:bg-pg-canvas-subtle"
@@ -308,7 +383,7 @@ export function EditorShell() {
             ref={dialogRef}
             aria-labelledby="editor-close-confirm-title"
             aria-modal="true"
-            className="w-full max-w-sm rounded-2xl bg-pg-canvas-default p-6 shadow-pg-xl"
+            className="w-full max-w-sm rounded-xl bg-pg-canvas-default p-6 shadow-pg-xl"
             role="dialog"
           >
             <h2

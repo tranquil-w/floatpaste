@@ -1,13 +1,12 @@
 import { useEffect, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
 import { queryClient } from "./queryClient";
 import { SettingsShell } from "../features/settings/SettingsShell";
 import { EditorShell } from "../features/editor";
 import { PickerShell } from "../features/picker/PickerShell";
 import { SearchShell } from "../features/search/SearchShell";
 import { SETTINGS_CHANGED_EVENT } from "../bridge/events";
-import { isTauriRuntime } from "../bridge/runtime";
 import { getCurrentWindowLabel } from "../bridge/window";
+import { useAppEvent } from "../shared/hooks/useAppEvent";
 import { DEFAULT_THEME_MODE, useAppliedTheme } from "../shared/theme";
 import { DEFAULT_CUSTOM_THEME_COLORS } from "../shared/themeColors";
 import { invalidateSettings, useSettingsQuery } from "../shared/queries/settingsQuery";
@@ -21,22 +20,9 @@ export function App() {
     settingsQuery.data?.customThemeColors ?? DEFAULT_CUSTOM_THEME_COLORS,
   );
 
-  useEffect(() => {
-    if (!isTauriRuntime()) {
-      return;
-    }
-
-    let unlistenSettings: (() => void) | undefined;
-    void listen(SETTINGS_CHANGED_EVENT, async () => {
-      await invalidateSettings(queryClient);
-    }).then((cleanup) => {
-      unlistenSettings = cleanup;
-    });
-
-    return () => {
-      unlistenSettings?.();
-    };
-  }, []);
+  useAppEvent(SETTINGS_CHANGED_EVENT, async () => {
+    await invalidateSettings(queryClient);
+  });
 
   useEffect(() => {
     const label = getCurrentWindowLabel();

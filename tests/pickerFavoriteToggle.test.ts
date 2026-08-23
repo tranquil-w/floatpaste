@@ -8,7 +8,6 @@ function createItem(isFavorited: boolean): ClipItemSummary {
     id: "clip-1",
     type: "text",
     contentPreview: "hello",
-    tooltipText: null,
     sourceApp: "FloatPaste",
     isFavorited,
     fileCount: 0,
@@ -26,7 +25,7 @@ function createItem(isFavorited: boolean): ClipItemSummary {
 
 test("toggleFavoriteSelection 在成功时会刷新列表并提示已收藏", async () => {
   const calls: Array<{ id: string; value: boolean }> = [];
-  const messages: string[] = [];
+  const messages: Array<{ text: string; tone: string }> = [];
   let refreshed = 0;
   let errorCount = 0;
 
@@ -48,12 +47,12 @@ test("toggleFavoriteSelection 在成功时会刷新列表并提示已收藏", as
 
   assert.deepEqual(calls, [{ id: "clip-1", value: true }]);
   assert.equal(refreshed, 1);
-  assert.deepEqual(messages, ["已收藏"]);
+  assert.deepEqual(messages, [{ text: "已收藏", tone: "success" }]);
   assert.equal(errorCount, 0);
 });
 
 test("toggleFavoriteSelection 在失败时会兜底提示并上报错误", async () => {
-  const messages: string[] = [];
+  const messages: Array<{ text: string; tone: string }> = [];
   const errors: unknown[] = [];
 
   const result = await toggleFavoriteSelection({
@@ -73,7 +72,9 @@ test("toggleFavoriteSelection 在失败时会兜底提示并上报错误", async
   });
 
   assert.equal(result, false);
-  assert.deepEqual(messages, ["更新收藏状态失败，请稍后重试"]);
+  assert.deepEqual(messages, [
+    { text: "更新收藏状态失败，请稍后重试", tone: "error" },
+  ]);
   assert.equal(errors.length, 1);
   assert.match(String(errors[0]), /boom/);
 });

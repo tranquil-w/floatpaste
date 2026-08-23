@@ -245,7 +245,6 @@ test("图片 tooltip 会转义属性值并携带 requestId", () => {
       id: "demo-3",
       type: "image",
       contentPreview: '图片 <预览>',
-      tooltipText: null,
       sourceApp: '微信 "桌面端"',
       isFavorited: false,
       fileCount: 0,
@@ -279,7 +278,6 @@ test("图片 tooltip 在没有图片 URL 时回退为纯文本内容", () => {
       id: "demo-3",
       type: "image",
       contentPreview: "图片 (1920 × 1080, 2.4 MB)",
-      tooltipText: "图片预览暂不可用",
       sourceApp: "微信",
       isFavorited: false,
       fileCount: 0,
@@ -292,15 +290,46 @@ test("图片 tooltip 在没有图片 URL 时回退为纯文本内容", () => {
       imageHeight: 1080,
       imageFormat: "png",
       fileSize: 2400000,
+      tags: [],
     },
     {
       imageUrl: null,
       requestId: 8,
+      fullText: null,
     },
   );
 
-  assert.match(html, /tooltip-content">图片预览暂不可用</);
+  // 列表不再携带全文截断，缺省回退到 contentPreview
+  assert.match(html, /tooltip-content">图片 \(1920 × 1080, 2\.4 MB\)</);
   assert.doesNotMatch(html, /<img/);
+});
+
+test("tooltip 优先展示按需请求的全文", () => {
+  const html = buildTooltipHtml(
+    {
+      id: "demo-text",
+      type: "text",
+      contentPreview: "截断的预览...",
+      sourceApp: "记事本",
+      isFavorited: false,
+      fileCount: 0,
+      directoryCount: 0,
+      createdAt: "2026-04-02T10:00:00.000Z",
+      updatedAt: "2026-04-02T10:00:00.000Z",
+      lastUsedAt: null,
+      imagePath: null,
+      imageWidth: null,
+      imageHeight: null,
+      imageFormat: null,
+      fileSize: null,
+      tags: [],
+    },
+    {
+      fullText: "这是悬停时按需请求的完整文本内容",
+    },
+  );
+
+  assert.match(html, /tooltip-content">这是悬停时按需请求的完整文本内容</);
 });
 
 test("escapeHtmlAttribute 会转义属性敏感字符", () => {
@@ -319,7 +348,6 @@ test("图片 tooltip 加载失败后会回退为纯文本并重新测量", () =>
       id: "demo-3",
       type: "image",
       contentPreview: "图片预览摘要",
-      tooltipText: "图片加载失败时的回退文本",
       sourceApp: "微信",
       isFavorited: false,
       fileCount: 0,
@@ -332,6 +360,7 @@ test("图片 tooltip 加载失败后会回退为纯文本并重新测量", () =>
       imageHeight: 1080,
       imageFormat: "png",
       fileSize: 2400000,
+      tags: [],
     },
     {
       imageUrl: "asset://demo-3",
@@ -348,7 +377,7 @@ test("图片 tooltip 加载失败后会回退为纯文本并重新测量", () =>
 
   assert.equal(harness.tooltip.previewRemoved, true);
   assert.equal(harness.tooltip.insertedContent?.className, "tooltip-content");
-  assert.equal(harness.tooltip.insertedContent?.textContent, "图片加载失败时的回退文本");
+  assert.equal(harness.tooltip.insertedContent?.textContent, "图片预览摘要");
   assert.equal(harness.tooltipReadyCalls.at(-1)?.requestId, 9);
 });
 

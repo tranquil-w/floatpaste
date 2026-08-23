@@ -1,16 +1,15 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import { emitTo, listen } from "@tauri-apps/api/event";
-import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { emitTo } from "@tauri-apps/api/event";
+import type { InfiniteData } from "@tanstack/react-query";
 import { queryClient } from "../../app/queryClient";
 import {
+  deleteItem,
   hidePicker,
   hideSearch,
-  hideTooltip,
   openEditorFromSearch,
   pasteItem,
   prepareSearchWindowDrag,
   setItemFavorited,
-  showTooltip,
 } from "../../bridge/commands";
 import {
   CLIPS_CHANGED_EVENT,
@@ -31,6 +30,9 @@ import {
   TAGS_CHANGED_EVENT,
 } from "../../bridge/events";
 import { isTauriRuntime } from "../../bridge/runtime";
+import { useAppEvent } from "../../shared/hooks/useAppEvent";
+import { useArmedConfirm } from "../../shared/hooks/useArmedConfirm";
+import { useHoverTooltip } from "../../shared/hooks/useHoverTooltip";
 import { useImageUrlCache } from "../../shared/hooks/useImageUrlCache";
 import {
   setCurrentWindowLogicalSizeBounds,
@@ -38,18 +40,21 @@ import {
   startCurrentWindowDragging,
 } from "../../bridge/window";
 import { invalidateSettings, useSettingsQuery } from "../../shared/queries/settingsQuery";
-import { useItemDetailQuery } from "../../shared/queries/clipQueries";
+import { invalidateClipQueries, useItemDetailQuery } from "../../shared/queries/clipQueries";
+import { queryKeys } from "../../shared/queries/queryKeys";
+import { useTagsQuery } from "../../shared/queries/tagQueries";
+import { applyClipsChanged } from "../../shared/queries/clipsCache";
 import type {
   ClipItemDetail,
   ClipItemSummary,
+  ClipsChangedPayload,
   SearchQuickFilter,
   SearchResult,
 } from "../../shared/types/clips";
-import { getClipTypeLabel } from "../../shared/utils/clipDisplay";
 import { formatDateTime } from "../../shared/utils/time";
+import { getErrorMessage } from "../../shared/utils/error";
+import { ClipTypeIcon } from "../../shared/ui/icons";
 import { LoadingSpinner } from "../../shared/ui/LoadingSpinner";
-import { TOOLTIP_SHOW_DELAY_MS } from "../../shared/ui/tooltipConfig";
-import { buildThemeCssVariables, DEFAULT_CUSTOM_THEME_COLORS } from "../../shared/themeColors";
 import { getSearchKeyboardAction } from "./keyboard";
 import {
   getSearchFilterCommitFocusTarget,
@@ -63,13 +68,11 @@ import {
   setFavoritedOnSearchResult,
 } from "./favoritedState";
 import { buildTooltipHtml } from "../../shared/tooltip/tooltipHtml";
-import { resolveTooltipShowPosition } from "../../shared/tooltip/tooltipState";
 import {
   createSearchRecentQueryKey,
   createSearchSearchQueryKey,
   useSearchRecentQuery,
   useSearchSearchQuery,
-  useTagsQuery,
 } from "./queries";
 import { getNextSearchNavigationIndex } from "./state";
 import { useSearchStore } from "./store";
@@ -81,8 +84,12 @@ const STYLES = {
   panel:
     "flex h-full w-full flex-col overflow-hidden border border-pg-border-default bg-pg-canvas-default shadow-[0_20px_60px_rgba(var(--pg-shadow-color),0.18)]",
   searchHeader: "flex items-center gap-3 border-b border-pg-border-subtle px-3 py-3",
-  searchControl:
-    "relative flex flex-1 items-center rounded-md border border-pg-border-subtle bg-pg-canvas-default px-2",
+  searchControl: (suspended: boolean) =>
+    `relative flex flex-1 items-center rounded-md border px-2 transition-colors ${
+      suspended
+        ? "border-pg-accent-fg bg-pg-canvas-subtle"
+        : "border-pg-border-subtle bg-pg-canvas-default"
+    }`,
   searchControlIcon:
     "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-pg-fg-muted",
   searchInput:
@@ -98,7 +105,7 @@ const STYLES = {
       active ? "bg-pg-canvas-subtle text-pg-fg-default" : "text-pg-fg-muted"
     } ${selected ? "text-pg-accent-fg" : ""}`,
   listItemShell: (selected: boolean) =>
-    `rounded-[9px] border transition-[border-color,background-color,box-shadow] ${
+    `rounded-lg border transition-[border-color,background-color,box-shadow] ${
       selected
         ? "border-pg-accent-fg bg-pg-accent-subtle shadow-[inset_0_0_0_1px_rgba(var(--pg-shadow-color),0.04)]"
         : "border-pg-border-subtle bg-pg-canvas-subtle"
@@ -108,11 +115,12 @@ const STYLES = {
       selected ? "grid-cols-[auto,minmax(0,1fr),auto]" : "grid-cols-[auto,minmax(0,1fr)]"
     } ${selected ? "" : "hover:bg-pg-canvas-inset"}`,
   glyphBox: (selected: boolean) =>
-    `flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] text-sm font-semibold transition-colors ${
+    `flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors ${
       selected
         ? "bg-pg-neutral-5 text-pg-fg-default shadow-[inset_0_0_0_1px_rgba(var(--pg-shadow-color),0.06)] dark:bg-pg-neutral-6"
         : "bg-pg-canvas-subtle text-pg-fg-muted group-hover:text-pg-fg-default"
     }`,
+  glyphIcon: "h-[18px] w-[18px]",
   selectedActions: "col-start-3 row-start-1 flex justify-end self-start pt-1",
   selectedActionStack: "flex items-center gap-1.5",
   inlineMetaRow: "mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-pg-fg-subtle",
@@ -132,48 +140,40 @@ const STYLES = {
     "flex h-8 w-8 items-center justify-center rounded-md bg-pg-accent-emphasis text-pg-fg-on-emphasis transition-colors hover:opacity-90",
   actionButtonSecondary:
     "flex h-8 w-8 items-center justify-center rounded-md border border-pg-border-default text-pg-fg-default transition-colors hover:bg-pg-canvas-subtle",
+  actionButtonDanger: (armed: boolean) =>
+    `flex h-8 items-center justify-center rounded-md border px-2 transition-colors ${
+      armed
+        ? "border-pg-danger-fg bg-pg-danger-subtle text-pg-danger-fg"
+        : "border-pg-border-default text-pg-fg-muted hover:border-pg-danger-fg hover:text-pg-danger-fg"
+    }`,
 };
 
 const SEARCH_WINDOW_FIXED_WIDTH = 780;
 const SEARCH_WINDOW_MAX_HEIGHT = 620;
 const SEARCH_FILTER_PANEL_WINDOW_MARGIN = 8;
+/** 关键词进入查询的防抖：连击/IME 拼写期间不逐键触发 FTS 查询 */
+const SEARCH_INPUT_DEBOUNCE_MS = 200;
+/** 触底前预加载下一页的距离 */
+const SEARCH_LOAD_MORE_ROOT_MARGIN_PX = 240;
 const SEARCH_IMAGE_THUMBNAIL_STYLE = {
   width: 36,
   height: 36,
 } as const;
 
+/** 类型筛选；标签是独立维度，通过常驻 chip 行组合使用，不占类型下拉位 */
 const FILTER_OPTIONS: Array<{ value: SearchQuickFilter; label: string }> = [
   { value: "all", label: "全部" },
   { value: "favorite", label: "收藏" },
   { value: "text", label: "文本" },
   { value: "image", label: "图片" },
   { value: "file", label: "文件" },
-  { value: "tag", label: "标签" },
 ];
 
 async function refreshSearchQueries() {
   await Promise.all([
-    queryClient.invalidateQueries({ queryKey: ["detail"] }),
-    queryClient.invalidateQueries({ queryKey: ["search-recent"] }),
-    queryClient.invalidateQueries({ queryKey: ["search-query"] }),
-    queryClient.invalidateQueries({ queryKey: ["tags"] }),
+    invalidateClipQueries(),
+    queryClient.invalidateQueries({ queryKey: queryKeys.tags }),
   ]);
-}
-
-function getClipTypeGlyph(item: Pick<ClipItemSummary, "type">): string {
-  if (item.type === "text") {
-    return "Aa";
-  }
-
-  if (item.type === "image") {
-    return "图";
-  }
-
-  if (item.type === "file") {
-    return "档";
-  }
-
-  return "?";
 }
 
 function getSectionLabel(hasKeyword: boolean) {
@@ -193,6 +193,7 @@ function getAdjacentFilter(current: SearchQuickFilter, direction: 1 | -1): Searc
 function getEmptyState(
   hasKeyword: boolean,
   activeFilter: SearchQuickFilter,
+  openHint: string,
 ): { title: string; description: string } {
   if (hasKeyword) {
     return {
@@ -210,7 +211,7 @@ function getEmptyState(
 
   return {
     title: "暂无剪贴板记录",
-    description: "复制内容后使用 Alt+S 打开此窗口",
+    description: openHint,
   };
 }
 
@@ -233,11 +234,8 @@ function formatFileSize(bytes: number | null): string | null {
 }
 
 function getItemDetailMeta(detail: ClipItemDetail | ClipItemSummary): string[] {
-  const meta = [
-    getClipTypeLabel(detail),
-    detail.sourceApp ?? "未知来源",
-    formatDateTime(detail.lastUsedAt ?? detail.createdAt),
-  ];
+  // 类型由左侧图标表达，meta 行不重复类型文字
+  const meta = [detail.sourceApp ?? "未知来源", formatDateTime(detail.lastUsedAt ?? detail.createdAt)];
 
   if (detail.type === "image" && detail.imageWidth && detail.imageHeight) {
     meta.push(`${detail.imageWidth} × ${detail.imageHeight}`);
@@ -291,52 +289,66 @@ export function SearchShell() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<SearchQuickFilter>("all");
   const [activeTagNames, setActiveTagNames] = useState<string[]>([]);
+  // 防抖后的关键词才进查询：输入框展示即时值 keyword，查询与列表切换依据 debouncedKeyword
+  const [debouncedKeyword, setDebouncedKeyword] = useState(keyword);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [highlightedFilter, setHighlightedFilter] = useState<SearchQuickFilter>("all");
+  const isComposingRef = useRef(false);
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const filterRootRef = useRef<HTMLDivElement>(null);
   const filterPanelRef = useRef<HTMLDivElement>(null);
   const filterTriggerRef = useRef<HTMLButtonElement>(null);
   const filterOptionRefs = useRef<Partial<Record<SearchQuickFilter, HTMLDivElement | null>>>({});
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const filterCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const tooltipRequestIdRef = useRef(0);
   const resizeFrameRef = useRef<number | null>(null);
   const lastAppliedWindowHeightRef = useRef<number | null>(null);
+  // 窗口高度棘轮：结构性变化（关键词/筛选/条目数/会话）时允许收缩重算，
+  // 选中态展开等局部变化只允许增长，避免上下键导航时窗口反复抖动
+  const allowWindowShrinkRef = useRef(true);
   const favoriteTogglePendingRef = useRef(false);
-  const hasKeyword = keyword.trim().length > 0;
+  // 两段式删除：待确认目标渲染为“再次点击确认删除”，3 秒未确认自动撤销
+  const {
+    armedTarget: deleteArmedId,
+    request: requestArmedDelete,
+    reset: resetDeleteArmed,
+  } = useArmedConfirm<string>(async (id) => {
+    try {
+      await deleteItem(id);
+      applyClipsChanged({ kind: "deleted", id });
+    } catch (error) {
+      showError("删除条目失败，请稍后重试");
+      console.error("删除条目失败", error);
+    }
+  });
+  const hasKeyword = debouncedKeyword.trim().length > 0;
   const recentQuery = useSearchRecentQuery(activeFilter, activeTagNames, !hasKeyword);
-  const searchQuery = useSearchSearchQuery(keyword, activeFilter, activeTagNames, hasKeyword);
-  const tagsQuery = useTagsQuery(activeFilter === "tag");
+  const searchQuery = useSearchSearchQuery(debouncedKeyword, activeFilter, activeTagNames, hasKeyword);
+  // 标签 chip 行常驻可组合筛选，不再依赖类型下拉的"标签"选项
+  const tagsQuery = useTagsQuery(true);
   const settingsQuery = useSettingsQuery({ staleTime: 0 });
   const items = useMemo<ClipItemSummary[]>(
-    () => (hasKeyword ? (searchQuery.data?.items ?? []) : (recentQuery.data?.items ?? [])),
-    [hasKeyword, recentQuery.data?.items, searchQuery.data?.items],
+    () =>
+      hasKeyword
+        ? (searchQuery.data?.pages.flatMap((page) => page.items) ?? [])
+        : (recentQuery.data?.items ?? []),
+    [hasKeyword, recentQuery.data?.items, searchQuery.data],
   );
   const imageCache = useImageUrlCache(items);
   const itemsRef = useRef<ClipItemSummary[]>(items);
   const restoreClipboardRef = useRef(settingsQuery.data?.restoreClipboardAfterPaste ?? true);
   const detailQuery = useItemDetailQuery(selectedItemId);
 
-  const clearTooltipTimer = () => {
-    if (tooltipTimerRef.current) {
-      clearTimeout(tooltipTimerRef.current);
-      tooltipTimerRef.current = null;
-    }
-  };
-
-  const invalidateTooltipRequest = () => {
-    tooltipRequestIdRef.current += 1;
-    return tooltipRequestIdRef.current;
-  };
-
-  const cancelTooltip = () => {
-    clearTooltipTimer();
-    invalidateTooltipRequest();
-    if (tauriRuntime) {
-      void hideTooltip();
-    }
-  };
+  // 搜索窗口仅图片条目提供悬停预览
+  const { cancelTooltip, handleMouseMove: handleItemMouseMove } = useHoverTooltip({
+    enabled: tauriRuntime,
+    customThemeColors: settingsQuery.data?.customThemeColors,
+    shouldShow: (item) => item.type === "image",
+    buildHtml: async (item, requestId) => {
+      const imageUrl = await imageCache.resolve(item);
+      return buildTooltipHtml(item, { imageUrl, requestId });
+    },
+  });
 
   // 清理错误定时器
   useEffect(() => {
@@ -346,9 +358,6 @@ export function SearchShell() {
       }
       if (filterCloseTimerRef.current) {
         clearTimeout(filterCloseTimerRef.current);
-      }
-      if (tooltipTimerRef.current) {
-        clearTimeout(tooltipTimerRef.current);
       }
       if (resizeFrameRef.current) {
         cancelAnimationFrame(resizeFrameRef.current);
@@ -407,60 +416,53 @@ export function SearchShell() {
     selectedItemIdRef.current = selectedItemId;
   }, [items, selectedItemId]);
 
+  // 关键词防抖：IME 组合期间不更新（拼写过程中的每个拼音字母不触发查询），
+  // 组合结束后下一帧读取 store 的最终值，随后恢复常规防抖节奏
+  useEffect(() => {
+    if (isComposingRef.current) {
+      return;
+    }
+    const timer = setTimeout(() => setDebouncedKeyword(keyword), SEARCH_INPUT_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [keyword]);
+
+  // 关键词搜索结果渐进加载：滚动接近底部时预取下一页
+  const searchHasNextPage = hasKeyword && searchQuery.hasNextPage;
+  const searchIsFetchingNextPage = searchQuery.isFetchingNextPage;
+  const searchFetchNextPage = searchQuery.fetchNextPage;
+  useEffect(() => {
+    if (!searchHasNextPage) {
+      return;
+    }
+
+    const sentinel = loadMoreRef.current;
+    if (!sentinel || typeof IntersectionObserver === "undefined") {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting) && !searchIsFetchingNextPage) {
+          void searchFetchNextPage();
+        }
+      },
+      {
+        root: listScrollRef.current,
+        rootMargin: `${SEARCH_LOAD_MORE_ROOT_MARGIN_PX}px`,
+      },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [searchHasNextPage, searchIsFetchingNextPage, searchFetchNextPage, items.length]);
+
   useEffect(() => {
     restoreClipboardRef.current = settingsQuery.data?.restoreClipboardAfterPaste ?? true;
   }, [settingsQuery.data?.restoreClipboardAfterPaste]);
 
-  const handleItemMouseMove = (event: React.MouseEvent, item: ClipItemSummary) => {
-    if (!tauriRuntime || item.type !== "image") {
-      return;
-    }
-
-    const requestId = invalidateTooltipRequest();
-    const clientPosition = { x: event.clientX, y: event.clientY };
-    clearTooltipTimer();
-    tooltipTimerRef.current = setTimeout(() => {
-      tooltipTimerRef.current = null;
-      void (async () => {
-        const imageUrl = await imageCache.resolve(item);
-        if (tooltipRequestIdRef.current !== requestId) {
-          return;
-        }
-
-        const tooltipHtml = buildTooltipHtml(item, { imageUrl, requestId });
-        const currentWindow = getCurrentWebviewWindow();
-        const [outerPosition, scaleFactor] = await Promise.all([
-          currentWindow.outerPosition(),
-          currentWindow.scaleFactor(),
-        ]);
-        const position = resolveTooltipShowPosition({
-          activeRequestId: tooltipRequestIdRef.current,
-          requestId,
-          outerPosition,
-          scaleFactor,
-          clientPosition,
-        });
-
-        if (!position) {
-          return;
-        }
-
-        await showTooltip(
-          requestId,
-          position.x,
-          position.y,
-          tooltipHtml,
-          (document.documentElement.dataset.theme as "dark" | "light") ?? "dark",
-          buildThemeCssVariables(
-            (document.documentElement.dataset.theme as "dark" | "light") ?? "dark",
-            settingsQuery.data?.customThemeColors ?? DEFAULT_CUSTOM_THEME_COLORS,
-          ),
-        );
-      })().catch((error) => {
-        console.warn("[FloatPaste] Search tooltip 定位或显示失败:", error);
-      });
-    }, TOOLTIP_SHOW_DELAY_MS);
-  };
+  // 关键词/筛选/条目数/错误条属于结构性变化，允许下一次高度同步收缩重算
+  useEffect(() => {
+    allowWindowShrinkRef.current = true;
+  }, [debouncedKeyword, activeFilter, activeTagNames, errorMessage, items.length]);
 
   const handleItemMouseLeave = () => {
     if (!tauriRuntime) {
@@ -487,6 +489,13 @@ export function SearchShell() {
   useEffect(() => {
     cancelTooltip();
   }, [activeFilter, items, selectedItemId]);
+
+  // 选中项变化时，若待确认目标是其他条目则立即撤销
+  useEffect(() => {
+    if (deleteArmedId && deleteArmedId !== selectedItemId) {
+      resetDeleteArmed();
+    }
+  }, [selectedItemId]);
 
   useEffect(() => {
     return () => {
@@ -539,6 +548,16 @@ export function SearchShell() {
           return;
         }
 
+        // 非结构性变化（如选中态展开）只允许窗口增高，避免键盘导航时高度反复抖动
+        if (
+          !allowWindowShrinkRef.current &&
+          lastAppliedWindowHeightRef.current !== null &&
+          targetHeight < lastAppliedWindowHeightRef.current
+        ) {
+          return;
+        }
+
+        allowWindowShrinkRef.current = false;
         lastAppliedWindowHeightRef.current = targetHeight;
         const targetWidth = SEARCH_WINDOW_FIXED_WIDTH;
         void (async () => {
@@ -722,103 +741,66 @@ export function SearchShell() {
     }
   }
 
-  useEffect(() => {
-    if (!isTauriRuntime()) {
-      return;
-    }
+  const handleEventListenError = (error: unknown) => {
+    console.error("注册搜索窗口事件监听失败", error);
+    showError("搜索窗口初始化失败，部分快捷操作可能不可用");
+  };
 
-    let disposed = false;
-    let offStart: (() => void) | undefined;
-    let offClipsChanged: (() => void) | undefined;
-    let offEnd: (() => void) | undefined;
-    let offNavigate: (() => void) | undefined;
-    let offEdit: (() => void) | undefined;
-    let offPaste: (() => void) | undefined;
-    let offSuspend: (() => void) | undefined;
-    let offResume: (() => void) | undefined;
-    let offSettingsChanged: (() => void) | undefined;
-    let offTagsChanged: (() => void) | undefined;
-
-    const handleListenError = (eventName: string, error: unknown) => {
-      console.error(`注册搜索窗口事件监听失败: ${eventName}`, error);
-      if (!disposed) {
-        showError("搜索窗口初始化失败，部分快捷操作可能不可用");
-      }
-    };
-
-    void listen<{
-      source: string;
-      itemId?: string;
-      initialKeyword?: string;
-    }>(SEARCH_SESSION_START_EVENT, async (event) => {
+  useAppEvent<{
+    source: string;
+    itemId?: string;
+    initialKeyword?: string;
+  }>(
+    SEARCH_SESSION_START_EVENT,
+    async (payload) => {
       await invalidateSettings(queryClient);
 
+      const initialKeyword = payload.initialKeyword ?? "";
       setSession({
         source: "global" as const,
-        initialItemId: event.payload.itemId,
-        initialKeyword: event.payload.initialKeyword,
+        initialItemId: payload.itemId,
+        initialKeyword: payload.initialKeyword,
       } as SearchSession);
       setIsFilterOpen(false);
       setActiveFilter("all");
       setHighlightedFilter("all");
       setActiveTagNames([]);
-      setKeyword(event.payload.initialKeyword ?? "");
-      setSelectedItemId(event.payload.itemId ?? null);
+      setKeyword(initialKeyword);
+      // 会话初始关键词直接生效，不经防抖
+      setDebouncedKeyword(initialKeyword);
+      setSelectedItemId(payload.itemId ?? null);
       setInputSuspended(false);
+      // 新会话重新按内容自适应高度
+      allowWindowShrinkRef.current = true;
+      lastAppliedWindowHeightRef.current = null;
       // 窗口通过 hide/show 复用，DOM 滚动位置会被保留。
       // 每次打开都把列表滚回顶部，避免停留在上次关闭时的位置。
       listScrollRef.current?.scrollTo({ top: 0 });
-    })
-      .then((cleanup) => {
-        if (disposed) {
-          cleanup();
-          return;
-        }
-        offStart = cleanup;
-      })
-      .catch((error) => {
-        handleListenError(SEARCH_SESSION_START_EVENT, error);
-      });
+    },
+    handleEventListenError,
+  );
 
-    void listen(CLIPS_CHANGED_EVENT, () => {
-      void refreshSearchQueries().catch((error) => {
-        console.error("刷新搜索结果失败", error);
-        if (!disposed) {
-          showError("刷新搜索结果失败，请稍后重试");
-        }
-      });
-    })
-      .then((cleanup) => {
-        if (disposed) {
-          cleanup();
-          return;
-        }
-        offClipsChanged = cleanup;
-      })
-      .catch((error) => {
-        handleListenError(CLIPS_CHANGED_EVENT, error);
-      });
+  useAppEvent<ClipsChangedPayload>(CLIPS_CHANGED_EVENT, (payload) => {
+    applyClipsChanged(payload);
+  }, handleEventListenError);
 
-    void listen(SEARCH_SESSION_END_EVENT, () => {
+  useAppEvent(
+    SEARCH_SESSION_END_EVENT,
+    () => {
       setInputSuspended(false);
       setIsFilterOpen(false);
       setActiveFilter("all");
       setHighlightedFilter("all");
       setActiveTagNames([]);
       reset();
-    })
-      .then((cleanup) => {
-        if (disposed) {
-          cleanup();
-          return;
-        }
-        offEnd = cleanup;
-      })
-      .catch((error) => {
-        handleListenError(SEARCH_SESSION_END_EVENT, error);
-      });
+      setDebouncedKeyword("");
+    },
+    handleEventListenError,
+  );
 
-    void listen<string>(SEARCH_NAVIGATE_EVENT, (event) => {
+  useAppEvent<string>(
+    SEARCH_NAVIGATE_EVENT,
+    (direction) => {
       const currentItems = itemsRef.current;
       if (!currentItems.length) {
         return;
@@ -827,132 +809,77 @@ export function SearchShell() {
       const nextIndex = getNextSearchNavigationIndex(
         currentItems,
         selectedItemIdRef.current,
-        event.payload === "up" ? "up" : "down",
+        direction === "up" ? "up" : "down",
       );
 
       if (nextIndex >= 0) {
         setSelectedItemId(currentItems[nextIndex]?.id ?? null);
       }
-    })
-      .then((cleanup) => {
-        if (disposed) {
-          cleanup();
-          return;
-        }
-        offNavigate = cleanup;
-      })
-      .catch((error) => {
-        handleListenError(SEARCH_NAVIGATE_EVENT, error);
-      });
+    },
+    handleEventListenError,
+  );
 
-    void listen(SEARCH_EDIT_ITEM_EVENT, () => {
+  useAppEvent(
+    SEARCH_EDIT_ITEM_EVENT,
+    () => {
       void handleOpenEditor();
-    })
-      .then((cleanup) => {
-        if (disposed) {
-          cleanup();
-          return;
-        }
-        offEdit = cleanup;
-      })
-      .catch((error) => {
-        handleListenError(SEARCH_EDIT_ITEM_EVENT, error);
-      });
+    },
+    handleEventListenError,
+  );
 
-    void listen(SEARCH_PASTE_EVENT, () => {
+  useAppEvent(
+    SEARCH_PASTE_EVENT,
+    () => {
       void handlePasteSelected();
-    })
-      .then((cleanup) => {
-        if (disposed) {
-          cleanup();
-          return;
-        }
-        offPaste = cleanup;
-      })
-      .catch((error) => {
-        handleListenError(SEARCH_PASTE_EVENT, error);
-      });
+    },
+    handleEventListenError,
+  );
 
-    void listen(SEARCH_INPUT_SUSPEND_EVENT, () => {
+  useAppEvent(
+    SEARCH_INPUT_SUSPEND_EVENT,
+    () => {
       setInputSuspended(true);
       searchInputRef.current?.blur();
-    })
-      .then((cleanup) => {
-        if (disposed) {
-          cleanup();
-          return;
-        }
-        offSuspend = cleanup;
-      })
-      .catch((error) => {
-        handleListenError(SEARCH_INPUT_SUSPEND_EVENT, error);
-      });
+    },
+    handleEventListenError,
+  );
 
-    void listen(SEARCH_INPUT_RESUME_EVENT, () => {
+  useAppEvent(
+    SEARCH_INPUT_RESUME_EVENT,
+    () => {
       setInputSuspended(false);
       searchInputRef.current?.focus();
-    })
-      .then((cleanup) => {
-        if (disposed) {
-          cleanup();
-          return;
-        }
-        offResume = cleanup;
-      })
-      .catch((error) => {
-        handleListenError(SEARCH_INPUT_RESUME_EVENT, error);
-      });
+    },
+    handleEventListenError,
+  );
 
-    void listen(SETTINGS_CHANGED_EVENT, async () => {
+  useAppEvent(
+    SETTINGS_CHANGED_EVENT,
+    async () => {
       await invalidateSettings(queryClient);
-    })
-      .then((cleanup) => {
-        if (disposed) {
-          cleanup();
-          return;
-        }
-        offSettingsChanged = cleanup;
-      })
-      .catch((error) => {
-        handleListenError(SETTINGS_CHANGED_EVENT, error);
-      });
+    },
+    handleEventListenError,
+  );
 
-    void listen(TAGS_CHANGED_EVENT, () => {
-      void refreshSearchQueries().catch((error) => {
-        console.error("刷新标签数据失败", error);
-      });
-    })
-      .then((cleanup) => {
-        if (disposed) {
-          cleanup();
-          return;
-        }
-        offTagsChanged = cleanup;
-      })
-      .catch((error) => {
-        handleListenError(TAGS_CHANGED_EVENT, error);
-      });
+  useAppEvent(TAGS_CHANGED_EVENT, () => {
+    void refreshSearchQueries().catch((error) => {
+      console.error("刷新标签数据失败", error);
+    });
+  }, handleEventListenError);
 
-    return () => {
-      disposed = true;
-      offStart?.();
-      offClipsChanged?.();
-      offEnd?.();
-      offNavigate?.();
-      offEdit?.();
-      offPaste?.();
-      offSuspend?.();
-      offResume?.();
-      offSettingsChanged?.();
-      offTagsChanged?.();
-    };
-  }, [reset, setKeyword, setSelectedItemId, setSession]);
-
+  // handler 内的选中项/列表读取全部走 ref，依赖只需覆盖直接读取的挂起与筛选状态；
+  // 缩减依赖避免每次输入/导航都重挂 window 监听
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
-      // 下拉菜单自己处理方向键、Tab 和 Enter，避免被全局搜索快捷键抢走。
-      if (target?.closest("[data-search-filter-root='true']") && !event.ctrlKey && !event.metaKey) {
+      // 下拉菜单打开时方向键、Tab 和 Enter 由菜单自己处理，避免被全局搜索快捷键抢走；
+      // 菜单收起时放行（如 trigger 上的 Esc 仍应关闭搜索窗口）
+      if (
+        isFilterOpen &&
+        target?.closest("[data-search-filter-root='true']") &&
+        !event.ctrlKey &&
+        !event.metaKey
+      ) {
         return;
       }
 
@@ -1045,6 +972,9 @@ export function SearchShell() {
         case "toggle-favorite":
           void handleToggleFavorited();
           return;
+        case "delete-item":
+          void handleDeleteSelected();
+          return;
         case "close":
           void handleClose();
           return;
@@ -1053,7 +983,17 @@ export function SearchShell() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [inputSuspended, keyword, selectedItemId]);
+  }, [inputSuspended, isFilterOpen]);
+
+  // 两段式删除：首次触发进入待确认态，3 秒内再次触发同一目标才真正删除
+  function handleDeleteSelected() {
+    const id = selectedItemIdRef.current;
+    if (!id) {
+      return;
+    }
+
+    requestArmedDelete(id);
+  }
 
   async function handleClose() {
     cancelTooltip();
@@ -1135,19 +1075,44 @@ export function SearchShell() {
         { queryKey: ["search-recent"] },
         (result) => setFavoritedOnSearchResult(result, id, nextFavorited),
       );
-      queryClient.setQueriesData<SearchResult | undefined>(
+      // search-query 为分页缓存（InfiniteData），逐页应用同一乐观更新
+      queryClient.setQueriesData<InfiniteData<SearchResult>>(
         { queryKey: ["search-query"] },
-        (result) => setFavoritedOnSearchResult(result, id, nextFavorited),
+        (data) =>
+          data
+            ? {
+                ...data,
+                pages: data.pages.map(
+                  (page) => setFavoritedOnSearchResult(page, id, nextFavorited) ?? page,
+                ),
+              }
+            : data,
       );
       if (!nextFavorited && activeFilter === "favorite") {
         const activeQueryKey = hasKeyword
-          ? createSearchSearchQueryKey(keyword, activeFilter, activeTagNames)
+          ? createSearchSearchQueryKey(debouncedKeyword, activeFilter, activeTagNames)
           : createSearchRecentQueryKey(activeFilter, activeTagNames);
-        queryClient.setQueryData<SearchResult | undefined>(activeQueryKey, (result) =>
-          setFavoritedOnSearchResult(result, id, nextFavorited, {
-            removeUnfavoritedItem: true,
-          }),
-        );
+        queryClient.setQueryData(activeQueryKey, (data: SearchResult | InfiniteData<SearchResult> | undefined) => {
+          if (!data) {
+            return data;
+          }
+          if ("pages" in data) {
+            return {
+              ...data,
+              pages: data.pages.map(
+                (page) =>
+                  setFavoritedOnSearchResult(page, id, nextFavorited, {
+                    removeUnfavoritedItem: true,
+                  }) ?? page,
+              ),
+            };
+          }
+          return (
+            setFavoritedOnSearchResult(data, id, nextFavorited, {
+              removeUnfavoritedItem: true,
+            }) ?? data
+          );
+        });
       }
       await refreshSearchQueries();
     } catch (error) {
@@ -1158,9 +1123,22 @@ export function SearchShell() {
     }
   }
 
-  const isLoading = hasKeyword ? searchQuery.isLoading : recentQuery.isLoading;
-  const resultCountLabel = `${items.length} 条`;
-  const emptyState = getEmptyState(hasKeyword, activeFilter);
+  const activeQuery = hasKeyword ? searchQuery : recentQuery;
+  const isLoading = activeQuery.isLoading;
+  // 加载失败且没有可展示的缓存数据时给错误态；有旧数据时继续展示列表
+  const loadError = activeQuery.isError && items.length === 0 ? activeQuery.error : null;
+  const totalCount = hasKeyword
+    ? (searchQuery.data?.pages[0]?.total ?? items.length)
+    : (recentQuery.data?.total ?? items.length);
+  const resultCountLabel = `${items.length}/${totalCount} 条`;
+  const searchOpenShortcut = settingsQuery.data?.searchShortcutEnabled
+    ? settingsQuery.data.searchShortcut
+    : null;
+  const emptyState = getEmptyState(
+    hasKeyword,
+    activeFilter,
+    searchOpenShortcut ? `复制内容后使用 ${searchOpenShortcut} 打开此窗口` : "复制内容后即可在此查看",
+  );
   const activeFilterLabel = getFilterLabel(activeFilter);
 
   return (
@@ -1173,7 +1151,7 @@ export function SearchShell() {
             void handleSearchWindowDragStart(event);
           }}
         >
-          <div className={STYLES.searchControl} data-no-window-drag="true">
+          <div className={STYLES.searchControl(inputSuspended)} data-no-window-drag="true">
             <div className={STYLES.searchControlIcon}>
               <svg
                 aria-hidden="true"
@@ -1193,7 +1171,17 @@ export function SearchShell() {
               ref={searchInputRef}
               className={STYLES.searchInput}
               onChange={(event) => setKeyword(event.target.value)}
-              placeholder="开始键入..."
+              onCompositionEnd={() => {
+                isComposingRef.current = false;
+                // Chrome 中 compositionend 先于最后一次 input 事件，延后一帧再取最终值
+                requestAnimationFrame(() => {
+                  setDebouncedKeyword(useSearchStore.getState().keyword);
+                });
+              }}
+              onCompositionStart={() => {
+                isComposingRef.current = true;
+              }}
+              placeholder={inputSuspended ? "键盘已交给速贴面板，按 Esc 返回" : "开始键入..."}
               aria-label="搜索剪贴板记录"
               value={keyword}
             />
@@ -1377,6 +1365,7 @@ export function SearchShell() {
           <div
             ref={errorRef}
             className="border-b border-pg-danger-fg/20 bg-pg-danger-subtle px-5 py-2 text-sm text-pg-danger-fg"
+            role="alert"
           >
             {errorMessage}
           </div>
@@ -1387,12 +1376,14 @@ export function SearchShell() {
             <span>{getSectionLabel(hasKeyword)}</span>
             <span>{resultCountLabel}</span>
           </div>
-          {activeFilter === "tag" ? (
+          {activeFilter === "tag" || (tagsQuery.data ?? []).length > 0 || activeTagNames.length > 0 ? (
             <div className={STYLES.tagChipRow} data-no-window-drag="true">
               {tagsQuery.isLoading ? (
                 <span className="text-xs text-pg-fg-subtle">加载标签...</span>
               ) : (tagsQuery.data ?? []).length === 0 ? (
-                <span className="text-xs text-pg-fg-subtle">暂无标签，可在编辑窗口为条目添加</span>
+                <span className="text-xs text-pg-fg-subtle">
+                  暂无标签，可在编辑窗口为条目添加
+                </span>
               ) : (
                 (tagsQuery.data ?? []).map((tag) => {
                   const selected = activeTagNames.some(
@@ -1424,10 +1415,47 @@ export function SearchShell() {
               <div className="flex min-h-[160px] items-center justify-center py-12">
                 <LoadingSpinner size="sm" text="加载中..." />
               </div>
+            ) : loadError ? (
+              <div className="flex min-h-[160px] flex-col items-center justify-center gap-1 px-4 py-12 text-center text-sm text-pg-fg-subtle">
+                <span>记录加载失败</span>
+                <span className="text-xs">
+                  {getErrorMessage(loadError, "请稍后重试")}
+                </span>
+                <button
+                  className="mt-2 rounded-md border border-pg-border-default px-2.5 py-1 text-xs text-pg-fg-muted transition-colors hover:bg-pg-canvas-subtle"
+                  onClick={() => void activeQuery.refetch()}
+                  type="button"
+                >
+                  重试
+                </button>
+              </div>
             ) : items.length === 0 ? (
               <div className="flex min-h-[160px] flex-col items-center justify-center gap-1 px-4 py-12 text-center text-sm text-pg-fg-subtle">
                 <span>{emptyState.title}</span>
                 <span>{emptyState.description}</span>
+                {hasKeyword ? (
+                  <button
+                    className="mt-2 rounded-md border border-pg-border-default px-2.5 py-1 text-xs text-pg-fg-muted transition-colors hover:bg-pg-canvas-subtle"
+                    onClick={() => {
+                      setKeyword("");
+                      setDebouncedKeyword("");
+                    }}
+                    type="button"
+                  >
+                    清除关键词
+                  </button>
+                ) : activeFilter !== "all" || activeTagNames.length > 0 ? (
+                  <button
+                    className="mt-2 rounded-md border border-pg-border-default px-2.5 py-1 text-xs text-pg-fg-muted transition-colors hover:bg-pg-canvas-subtle"
+                    onClick={() => {
+                      setActiveFilter("all");
+                      setActiveTagNames([]);
+                    }}
+                    type="button"
+                  >
+                    清除筛选
+                  </button>
+                ) : null}
               </div>
             ) : (
               <div className="space-y-1">
@@ -1484,11 +1512,13 @@ export function SearchShell() {
                           {imageUrl ? (
                             <img
                               alt=""
-                              className={`shrink-0 rounded-[8px] border object-cover ${
+                              className={`shrink-0 rounded-lg border object-cover ${
                                 isSelected
                                   ? "border-pg-border-default bg-pg-canvas-default"
                                   : "border-pg-border-subtle bg-pg-canvas-subtle"
                               }`}
+                              decoding="async"
+                              loading="lazy"
                               onError={() => {
                                 imageCache.markError(item.id);
                               }}
@@ -1497,7 +1527,7 @@ export function SearchShell() {
                             />
                           ) : (
                             <div className={STYLES.glyphBox(isSelected)}>
-                              {getClipTypeGlyph(item)}
+                              <ClipTypeIcon className={STYLES.glyphIcon} type={item.type} />
                             </div>
                           )}
                         </div>
@@ -1673,6 +1703,41 @@ export function SearchShell() {
                                   </svg>
                                 )}
                               </button>
+                              <button
+                                aria-label={
+                                  deleteArmedId === item.id
+                                    ? "确认删除当前条目"
+                                    : "删除当前条目"
+                                }
+                                className={STYLES.actionButtonDanger(deleteArmedId === item.id)}
+                                onMouseDown={(event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                }}
+                                onClick={() => void handleDeleteSelected()}
+                                title={deleteArmedId === item.id ? "再次点击确认删除" : "删除"}
+                                type="button"
+                              >
+                                {deleteArmedId === item.id ? (
+                                  "确认删除"
+                                ) : (
+                                  <svg
+                                    aria-hidden="true"
+                                    className="h-4 w-4"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth="1.8"
+                                    viewBox="0 0 24 24"
+                                  >
+                                    <path d="M4 7h16" />
+                                    <path d="M9.5 4.75h5V7h-5z" />
+                                    <path d="M6.5 7l.8 12.25h9.4L17.5 7" />
+                                    <path d="M10 10.5v6M14 10.5v6" />
+                                  </svg>
+                                )}
+                              </button>
                             </div>
                           </div>
                         ) : null}
@@ -1682,6 +1747,14 @@ export function SearchShell() {
                 })}
               </div>
             )}
+            {hasKeyword && searchQuery.hasNextPage ? (
+              <div
+                className="flex items-center justify-center py-3 text-xs text-pg-fg-subtle"
+                ref={loadMoreRef}
+              >
+                {searchQuery.isFetchingNextPage ? "正在加载更多..." : ""}
+              </div>
+            ) : null}
           </div>
         </main>
       </div>
