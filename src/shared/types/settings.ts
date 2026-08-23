@@ -24,5 +24,7 @@ export interface UserSetting {
   themeMode: ThemeMode;
   searchShortcut: string;
   searchShortcutEnabled: boolean;
+  /** Picker 会话期数字键 1-9 直达；无修饰全局热键冲突面大，可关闭 */
+  pickerDigitShortcutsEnabled: boolean;
   customThemeColors: CustomThemeColors;
 }

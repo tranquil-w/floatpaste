@@ -94,6 +94,7 @@ function sanitizeSettings(payload: UserSetting): UserSetting {
     themeMode,
     searchShortcut: normalizeSearchShortcut(payload.searchShortcut),
     searchShortcutEnabled: payload.searchShortcutEnabled,
+    pickerDigitShortcutsEnabled: payload.pickerDigitShortcutsEnabled ?? true,
     customThemeColors: sanitizeCustomThemeColors(payload.customThemeColors),
   };
 }
@@ -516,5 +517,6 @@ let settings: UserSetting = {
   themeMode: "system",
   searchShortcut: DEFAULT_SEARCH_SHORTCUT,
   searchShortcutEnabled: true,
+  pickerDigitShortcutsEnabled: true,
   customThemeColors: DEFAULT_CUSTOM_THEME_COLORS,
 };

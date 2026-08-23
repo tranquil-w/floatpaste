@@ -176,6 +176,10 @@ pub struct UserSetting {
     pub search_shortcut: String,
     #[serde(alias = "workbench_shortcut_enabled")]
     pub search_shortcut_enabled: bool,
+    /// Picker 会话期间的数字键 1-9 直达选择。数字键是无修饰全局热键，
+    /// 与其他应用的快捷键冲突面大，允许用户关闭后仅保留方向/回车/Escape 等核心键。
+    #[serde(default = "default_true")]
+    pub picker_digit_shortcuts_enabled: bool,
     #[serde(default)]
     pub custom_theme_colors: CustomThemeColors,
 }
@@ -199,6 +203,7 @@ impl Default for UserSetting {
             theme_mode: ThemeMode::System,
             search_shortcut: DEFAULT_SEARCH_SHORTCUT.to_string(),
             search_shortcut_enabled: true,
+            picker_digit_shortcuts_enabled: true,
             custom_theme_colors: CustomThemeColors::default(),
         }
     }
@@ -291,6 +296,10 @@ fn sanitize_hex_color(value: String, fallback: &str) -> String {
     } else {
         fallback.to_string()
     }
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn is_valid_hex_color(value: &str) -> bool {
@@ -518,6 +527,33 @@ mod tests {
 
         assert_eq!(settings.search_shortcut, "Alt+S");
         assert!(settings.search_shortcut_enabled);
+    }
+
+    #[test]
+    fn deserialize_old_settings_defaults_picker_digit_shortcuts_to_enabled() {
+        let settings: UserSetting = serde_json::from_str(
+            r#"{
+                "shortcut":"Alt+Q",
+                "launchOnStartup":false,
+                "historyLimit":1000,
+                "pickerRecordLimit":50,
+                "excludedApps":[],
+                "restoreClipboardAfterPaste":true,
+                "pauseMonitoring":false
+            }"#,
+        )
+        .unwrap();
+
+        assert!(settings.picker_digit_shortcuts_enabled);
+
+        let disabled: UserSetting = serde_json::from_str(
+            r#"{
+                "shortcut":"Alt+Q",
+                "pickerDigitShortcutsEnabled":false
+            }"#,
+        )
+        .unwrap();
+        assert!(!disabled.picker_digit_shortcuts_enabled);
     }
 
     #[test]
