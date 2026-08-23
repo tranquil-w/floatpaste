@@ -2,7 +2,9 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "editor-capability",
   "description": "独立编辑窗口权限",
-  "windows": ["editor"],
+  "windows": [
+    "editor"
+  ],
   "permissions": [
     "core:default",
     "core:event:default",
@@ -14,6 +16,7 @@
     "core:window:allow-maximize",
     "core:window:allow-unmaximize",
     "core:window:allow-unminimize",
-    "core:window:allow-start-dragging"
+    "core:window:allow-start-dragging",
+    "core:window:allow-set-theme"
   ]
 }

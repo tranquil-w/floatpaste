@@ -52,6 +52,23 @@ function toRgba(value: string, alpha: number): string {
   return `rgba(${toRgbChannels(value)}, ${alpha})`;
 }
 
+/**
+ * 强调色上的前景色按亮度自动翻转：深色强调配白字、浅色强调配深字，
+ * 保证用户自定义任意 accent 时按钮文字仍有可读对比度。
+ */
+function pickForegroundOn(accent: string): string {
+  const [red, green, blue] = parseHexColor(accent);
+  // ITU-R BT.601 加权亮度的简化形式，阈值 0.6 偏向保留白字
+  const brightness = (0.299 * red + 0.587 * green + 0.114 * blue) / 255;
+  return brightness >= 0.6 ? "#1F2328" : "#FFFFFF";
+}
+
+/** 底色明暗判定：用于自定义底色时决定前景文字方向（深底配浅字、浅底配深字） */
+function isColorLight(value: string): boolean {
+  const [red, green, blue] = parseHexColor(value);
+  return (0.299 * red + 0.587 * green + 0.114 * blue) / 255 >= 0.5;
+}
+
 function sanitizePalette(
   palette: ThemeColorPalette | undefined,
   fallback: ThemeColorPalette,
@@ -122,7 +139,7 @@ export function buildThemeCssVariables(
   const borderSubtle = mixHexColors(palette.cardBg, palette.windowBg, 0.4);
   const accentHover = mixHexColors(palette.accent, "#FFFFFF", isLightTheme ? 0.08 : 0.12);
 
-  return {
+  const baseVars: Record<string, string> = {
     "--pg-user-window-bg": palette.windowBg,
     "--pg-user-card-bg": palette.cardBg,
     "--pg-user-accent": palette.accent,
@@ -139,8 +156,31 @@ export function buildThemeCssVariables(
     "--pg-accent-hover": accentHover,
     "--pg-accent-subtle": toRgba(palette.accent, isLightTheme ? 0.14 : 0.18),
     "--pg-accent-rgb": accentRgb,
+    "--pg-fg-on-emphasis": pickForegroundOn(palette.accent),
     "--pg-blue-5": palette.accent,
     "--pg-blue-4": accentHover,
     "--pg-blue-5-rgb": accentRgb,
+  };
+
+  // 用户自定义了底色（与内置默认不同）时，前景/中性色按底色实际亮度派生，
+  // 避免"浅色主题配深色卡底"等组合下正文不可读；默认配色保持 Primer 观感不变
+  const defaultPalette = DEFAULT_CUSTOM_THEME_COLORS[resolvedTheme];
+  if (
+    palette.windowBg === defaultPalette.windowBg &&
+    palette.cardBg === defaultPalette.cardBg
+  ) {
+    return baseVars;
+  }
+
+  const ink = isColorLight(palette.windowBg) ? "#1F2328" : "#E8ECF2";
+  return {
+    ...baseVars,
+    "--pg-fg-default": ink,
+    "--pg-fg-muted": mixHexColors(ink, palette.windowBg, 0.35),
+    "--pg-fg-subtle": mixHexColors(ink, palette.windowBg, 0.5),
+    "--pg-neutral-3": mixHexColors(palette.cardBg, ink, 0.08),
+    "--pg-neutral-5": mixHexColors(palette.cardBg, ink, 0.14),
+    "--pg-neutral-6": mixHexColors(palette.cardBg, ink, 0.2),
+    "--pg-shadow-color": toRgbChannels(mixHexColors(ink, palette.windowBg, 0.85)),
   };
 }
