@@ -396,6 +396,12 @@ export function SettingsShell() {
   const latestLocalPayloadRef = useRef<UserSetting | null>(null);
   const latestSaveRequestIdRef = useRef(0);
   const hydrationTimerRef = useRef<number | null>(null);
+  // 上一份服务端设置：用于区分"数据变化来自外部（托盘等）"与"本地未保存编辑导致的差异"。
+  // 外部变更必须强制水合，否则防抖自动保存会把本地旧值写回、覆盖外部修改。
+  const lastServerSettingsRef = useRef<UserSetting | null>(null);
+  // 自己最近一次保存成功写入的值：保存回显不算外部变更，
+  // 否则强制水合会回滚保存在途期间的新编辑，且保存状态卡在"正在保存"。
+  const lastOwnWriteRef = useRef<UserSetting | null>(null);
   // Escape 关窗路径经 ref 调用，避免 keydown 监听闭包过期
   const flushPendingSaveRef = useRef<() => Promise<void>>(async () => {});
   const performSaveRef = useRef<(payload: UserSetting) => Promise<void>>(async () => {});
@@ -488,6 +494,7 @@ export function SettingsShell() {
       updateSettingsMutation.mutate(payload, {
         onSuccess: (nextValue, variables) => {
           queryClient.setQueryData(settingsQueryKey, nextValue);
+          lastOwnWriteRef.current = nextValue;
 
           if (requestId !== latestSaveRequestIdRef.current) {
             return;
@@ -536,7 +543,16 @@ export function SettingsShell() {
   useEffect(() => {
     if (!data) return;
     const currentLocalPayload = latestLocalPayloadRef.current;
+    const previousServer = lastServerSettingsRef.current;
+    lastServerSettingsRef.current = data;
+    const isOwnWriteEcho =
+      lastOwnWriteRef.current !== null && isSameSettings(lastOwnWriteRef.current, data);
+    const isExternalChange =
+      previousServer !== null &&
+      !isSameSettings(previousServer, data) &&
+      !isOwnWriteEcho;
     if (
+      !isExternalChange &&
       hasHydratedFromServerRef.current &&
       currentLocalPayload &&
       !isSameSettings(currentLocalPayload, data)
