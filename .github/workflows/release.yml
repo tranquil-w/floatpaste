@@ -137,7 +137,7 @@ jobs:
           cp "tmp/${ZIP_NAME}" tmp/assets/
           gh release download "${GITHUB_REF_NAME}" --dir tmp/assets --clobber
           (cd tmp/assets && sha256sum --binary * > "../SHA256SUMS.txt")
-          gh release upload "${GITHUB_REF_NAME}" "tmp/SHA256SUMS.txt" --clobber
+          gh release upload "${GITHUB_REF_NAME}" "tmp/${ZIP_NAME}" "tmp/SHA256SUMS.txt" --clobber
 
       - name: 输出后续步骤
         shell: bash
