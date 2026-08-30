@@ -1,4 +1,4 @@
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State, Theme, WebviewWindow};
 use std::time::Duration;
 use std::collections::HashMap;
 
@@ -63,6 +63,23 @@ pub fn prepare_search_window_drag(state: State<'_, AppState>) -> Result<(), Stri
     state
         .mark_search_focus_loss_ignored_for(Duration::from_millis(1500))
         .map_err(map_error)
+}
+
+/// 把应用解析出的明暗主题同步到所有窗口的原生层。
+/// 无边框窗口（速贴/搜索）的 DWM 边框与圆角颜色跟随窗口 preferred theme，
+/// 从不设置时会跟随系统明暗，与应用主题相反（深色窗口 + 浅色系统）时，
+/// 弹出瞬间会先闪现浅色边框。null 表示"跟随系统"，清除窗口级覆盖。
+#[tauri::command]
+pub fn sync_window_theme(app: AppHandle, theme: Option<String>) -> Result<(), String> {
+    let resolved = theme.map(|value| match value.as_str() {
+        "dark" => Theme::Dark,
+        _ => Theme::Light,
+    });
+    let windows: HashMap<String, WebviewWindow> = app.webview_windows();
+    for window in windows.values() {
+        let _ = window.set_theme(resolved);
+    }
+    Ok(())
 }
 
 #[tauri::command]

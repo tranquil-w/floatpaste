@@ -8,27 +8,33 @@ import type {
   TagInfo,
 } from "../shared/types/clips";
 import type { UserSetting } from "../shared/types/settings";
+import { ACCENT_CHOICE_IDS } from "../shared/theme/accents.ts";
+import { DEFAULT_THEME_PRESET, isThemePresetId } from "../shared/theme/presets.ts";
+
+const HEX_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
+
+/** 与派生层回退规则一致：安全列表 id 或迁移 hex 之外的强调色值回退"跟随预设" */
+function sanitizeThemeAccent(value: string | undefined): string {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed || trimmed === "default") {
+    return "default";
+  }
+  if (ACCENT_CHOICE_IDS.includes(trimmed)) {
+    return trimmed;
+  }
+  if (HEX_COLOR_PATTERN.test(trimmed)) {
+    return trimmed.toUpperCase();
+  }
+  return "default";
+}
 
 const now = Date.now();
 const pickerPositionModes = new Set(["mouse", "lastPosition", "caret"]);
 const themeModes = new Set(["system", "light", "dark"]);
-const HEX_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
 const DEFAULT_MAIN_SHORTCUT = "Alt+Q";
 const DEFAULT_SEARCH_SHORTCUT = "Alt+S";
 const LEGACY_MAIN_SHORTCUT = "Ctrl+`";
 const LEGACY_SEARCH_SHORTCUTS = new Set(["win+f", "windows+f", "super+f"]);
-const DEFAULT_CUSTOM_THEME_COLORS = {
-  light: {
-    windowBg: "#EFF2F5",
-    cardBg: "#E6EAEF",
-    accent: "#0969DA",
-  },
-  dark: {
-    windowBg: "#282C34",
-    cardBg: "#2E333C",
-    accent: "#478BE6",
-  },
-} as const;
 
 function normalizeMainShortcut(shortcut: string): string {
   const trimmed = shortcut.trim();
@@ -51,34 +57,6 @@ function normalizeSearchShortcut(shortcut: string): string {
   return trimmed;
 }
 
-function sanitizeHexColor(value: string | undefined, fallback: string): string {
-  const trimmed = value?.trim() ?? "";
-  return HEX_COLOR_PATTERN.test(trimmed) ? trimmed.toUpperCase() : fallback;
-}
-
-function sanitizeCustomThemeColors(
-  payload: UserSetting["customThemeColors"],
-): UserSetting["customThemeColors"] {
-  return {
-    light: {
-      windowBg: sanitizeHexColor(
-        payload?.light?.windowBg,
-        DEFAULT_CUSTOM_THEME_COLORS.light.windowBg,
-      ),
-      cardBg: sanitizeHexColor(payload?.light?.cardBg, DEFAULT_CUSTOM_THEME_COLORS.light.cardBg),
-      accent: sanitizeHexColor(payload?.light?.accent, DEFAULT_CUSTOM_THEME_COLORS.light.accent),
-    },
-    dark: {
-      windowBg: sanitizeHexColor(
-        payload?.dark?.windowBg,
-        DEFAULT_CUSTOM_THEME_COLORS.dark.windowBg,
-      ),
-      cardBg: sanitizeHexColor(payload?.dark?.cardBg, DEFAULT_CUSTOM_THEME_COLORS.dark.cardBg),
-      accent: sanitizeHexColor(payload?.dark?.accent, DEFAULT_CUSTOM_THEME_COLORS.dark.accent),
-    },
-  };
-}
-
 function sanitizeSettings(payload: UserSetting): UserSetting {
   const pickerPositionMode = pickerPositionModes.has(payload.pickerPositionMode)
     ? payload.pickerPositionMode
@@ -92,10 +70,11 @@ function sanitizeSettings(payload: UserSetting): UserSetting {
     pickerRecordLimit: Math.min(1000, Math.max(9, Math.trunc(payload.pickerRecordLimit || 50))),
     pickerPositionMode,
     themeMode,
+    themePreset: isThemePresetId(payload.themePreset) ? payload.themePreset : DEFAULT_THEME_PRESET,
+    themeAccent: sanitizeThemeAccent(payload.themeAccent),
     searchShortcut: normalizeSearchShortcut(payload.searchShortcut),
     searchShortcutEnabled: payload.searchShortcutEnabled,
     pickerDigitShortcutsEnabled: payload.pickerDigitShortcutsEnabled ?? true,
-    customThemeColors: sanitizeCustomThemeColors(payload.customThemeColors),
   };
 }
 
@@ -510,8 +489,9 @@ let settings: UserSetting = {
   restoreClipboardAfterPaste: true,
   pauseMonitoring: false,
   themeMode: "system",
+  themePreset: DEFAULT_THEME_PRESET,
+  themeAccent: "default",
   searchShortcut: DEFAULT_SEARCH_SHORTCUT,
   searchShortcutEnabled: true,
   pickerDigitShortcutsEnabled: true,
-  customThemeColors: DEFAULT_CUSTOM_THEME_COLORS,
 };

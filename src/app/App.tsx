@@ -7,17 +7,22 @@ import { SearchShell } from "../features/search/SearchShell";
 import { SETTINGS_CHANGED_EVENT } from "../bridge/events";
 import { getCurrentWindowLabel } from "../bridge/window";
 import { useAppEvent } from "../shared/hooks/useAppEvent";
-import { DEFAULT_THEME_MODE, useAppliedTheme } from "../shared/theme";
-import { DEFAULT_CUSTOM_THEME_COLORS } from "../shared/themeColors";
+import {
+  DEFAULT_THEME_ACCENT,
+  DEFAULT_THEME_MODE,
+  DEFAULT_THEME_PRESET,
+  useAppliedTheme,
+} from "../shared/theme";
 import { invalidateSettings, useSettingsQuery } from "../shared/queries/settingsQuery";
 
 export function App() {
   const [windowLabel, setWindowLabel] = useState(() => getCurrentWindowLabel());
   const settingsQuery = useSettingsQuery({ staleTime: 0 });
 
-  useAppliedTheme(
+  const resolvedTheme = useAppliedTheme(
     settingsQuery.data?.themeMode ?? DEFAULT_THEME_MODE,
-    settingsQuery.data?.customThemeColors ?? DEFAULT_CUSTOM_THEME_COLORS,
+    settingsQuery.data?.themePreset ?? DEFAULT_THEME_PRESET,
+    settingsQuery.data?.themeAccent ?? DEFAULT_THEME_ACCENT,
   );
 
   useAppEvent(SETTINGS_CHANGED_EVENT, async () => {
@@ -64,5 +69,5 @@ export function App() {
   if (windowLabel === "editor") {
     return <EditorShell />;
   }
-  return <SettingsShell />;
+  return <SettingsShell resolvedTheme={resolvedTheme} />;
 }

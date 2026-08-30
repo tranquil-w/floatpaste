@@ -7,12 +7,11 @@ const DEFAULT_MAIN_SHORTCUT: &str = "Alt+Q";
 const DEFAULT_SEARCH_SHORTCUT: &str = "Alt+S";
 const LEGACY_MAIN_SHORTCUT: &str = "Ctrl+`";
 const LEGACY_SEARCH_SHORTCUTS: [&str; 2] = ["Win+F", "Super+F"];
-const DEFAULT_LIGHT_WINDOW_BG: &str = "#EFF2F5";
-const DEFAULT_LIGHT_CARD_BG: &str = "#E6EAEF";
-const DEFAULT_LIGHT_ACCENT: &str = "#0969DA";
-const DEFAULT_DARK_WINDOW_BG: &str = "#282C34";
-const DEFAULT_DARK_CARD_BG: &str = "#2E333C";
-const DEFAULT_DARK_ACCENT: &str = "#478BE6";
+const DEFAULT_THEME_PRESET: &str = "default";
+const DEFAULT_THEME_ACCENT: &str = "default";
+/// 旧版自定义颜色的默认强调色；迁移时仅保留与默认不同的自定义值
+const LEGACY_DEFAULT_LIGHT_ACCENT: &str = "#0969DA";
+const LEGACY_DEFAULT_DARK_ACCENT: &str = "#478BE6";
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -81,6 +80,9 @@ pub struct StoredWindowPosition {
     pub height: Option<u32>,
 }
 
+/// 旧版自定义三色（窗口底/卡片底/强调色）。
+/// 仅用于反序列化旧配置文件以迁移强调色，字段不再写回磁盘；
+/// 底色一律由主题预设接管，不再持久化。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ThemeColorPalette {
@@ -89,57 +91,13 @@ pub struct ThemeColorPalette {
     pub accent: String,
 }
 
-impl ThemeColorPalette {
-    fn light_default() -> Self {
-        Self {
-            window_bg: DEFAULT_LIGHT_WINDOW_BG.to_string(),
-            card_bg: DEFAULT_LIGHT_CARD_BG.to_string(),
-            accent: DEFAULT_LIGHT_ACCENT.to_string(),
-        }
-    }
-
-    fn dark_default() -> Self {
-        Self {
-            window_bg: DEFAULT_DARK_WINDOW_BG.to_string(),
-            card_bg: DEFAULT_DARK_CARD_BG.to_string(),
-            accent: DEFAULT_DARK_ACCENT.to_string(),
-        }
-    }
-
-    fn sanitized(self, fallback: &Self) -> Self {
-        Self {
-            window_bg: sanitize_hex_color(self.window_bg, &fallback.window_bg),
-            card_bg: sanitize_hex_color(self.card_bg, &fallback.card_bg),
-            accent: sanitize_hex_color(self.accent, &fallback.accent),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct CustomThemeColors {
-    #[serde(default = "ThemeColorPalette::light_default")]
-    pub light: ThemeColorPalette,
-    #[serde(default = "ThemeColorPalette::dark_default")]
-    pub dark: ThemeColorPalette,
-}
-
-impl Default for CustomThemeColors {
-    fn default() -> Self {
-        Self {
-            light: ThemeColorPalette::light_default(),
-            dark: ThemeColorPalette::dark_default(),
-        }
-    }
-}
-
-impl CustomThemeColors {
-    fn sanitized(self) -> Self {
-        Self {
-            light: self.light.sanitized(&ThemeColorPalette::light_default()),
-            dark: self.dark.sanitized(&ThemeColorPalette::dark_default()),
-        }
-    }
+    #[serde(default)]
+    pub light: Option<ThemeColorPalette>,
+    #[serde(default)]
+    pub dark: Option<ThemeColorPalette>,
 }
 
 /// 用户设置结构
@@ -180,7 +138,14 @@ pub struct UserSetting {
     /// 与其他应用的快捷键冲突面大，允许用户关闭后仅保留方向/回车/Escape 等核心键。
     #[serde(default = "default_true")]
     pub picker_digit_shortcuts_enabled: bool,
-    #[serde(default)]
+    #[serde(default = "default_theme_preset")]
+    pub theme_preset: String,
+    /// "default"=跟随预设 | 安全列表 id | 旧版迁移保留的 #RRGGBB；
+    /// 合法性由前端派生层回退兜底，这里只做存储
+    #[serde(default = "default_theme_accent")]
+    pub theme_accent: String,
+    /// 旧版自定义三色，仅反序列化旧配置时读取，见 [CustomThemeColors]
+    #[serde(default, skip_serializing)]
     pub custom_theme_colors: CustomThemeColors,
 }
 
@@ -204,6 +169,8 @@ impl Default for UserSetting {
             search_shortcut: DEFAULT_SEARCH_SHORTCUT.to_string(),
             search_shortcut_enabled: true,
             picker_digit_shortcuts_enabled: true,
+            theme_preset: default_theme_preset(),
+            theme_accent: default_theme_accent(),
             custom_theme_colors: CustomThemeColors::default(),
         }
     }
@@ -243,7 +210,11 @@ impl UserSetting {
             self.search_shortcut = DEFAULT_SEARCH_SHORTCUT.to_string();
         }
 
-        self.custom_theme_colors = self.custom_theme_colors.sanitized();
+        self.theme_preset = default_theme_preset_if_blank(self.theme_preset);
+        self.theme_accent = default_theme_accent_if_blank(self.theme_accent);
+        if self.theme_accent == DEFAULT_THEME_ACCENT {
+            self.theme_accent = migrate_legacy_theme_accent(&self.custom_theme_colors);
+        }
         self.resolve_search_shortcut_conflict();
         self
     }
@@ -302,6 +273,53 @@ fn default_true() -> bool {
     true
 }
 
+fn default_theme_preset() -> String {
+    DEFAULT_THEME_PRESET.to_string()
+}
+
+fn default_theme_accent() -> String {
+    DEFAULT_THEME_ACCENT.to_string()
+}
+
+fn default_theme_preset_if_blank(value: String) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        default_theme_preset()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn default_theme_accent_if_blank(value: String) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        default_theme_accent()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// 旧 customThemeColors -> themeAccent 的迁移：底色由预设接管，
+/// 仅当亮/暗强调色与旧默认不同（合法 hex）时保留一个作为自定义值。
+fn migrate_legacy_theme_accent(legacy: &CustomThemeColors) -> String {
+    let light = legacy.light.as_ref();
+    let dark = legacy.dark.as_ref();
+
+    if let Some(light_palette) = light {
+        let accent = sanitize_hex_color(light_palette.accent.clone(), "");
+        if !accent.is_empty() && accent != LEGACY_DEFAULT_LIGHT_ACCENT {
+            return accent;
+        }
+    }
+    if let Some(dark_palette) = dark {
+        let accent = sanitize_hex_color(dark_palette.accent.clone(), "");
+        if !accent.is_empty() && accent != LEGACY_DEFAULT_DARK_ACCENT {
+            return accent;
+        }
+    }
+    DEFAULT_THEME_ACCENT.to_string()
+}
+
 fn is_valid_hex_color(value: &str) -> bool {
     value.len() == 7
         && value.starts_with('#')
@@ -311,8 +329,7 @@ fn is_valid_hex_color(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        CustomThemeColors, PickerPositionMode, ThemeColorPalette, ThemeMode, UserSetting,
-        normalize_shortcut_for_compare,
+        PickerPositionMode, ThemeMode, UserSetting, normalize_shortcut_for_compare,
     };
 
     #[test]
@@ -596,19 +613,15 @@ mod tests {
     }
 
     #[test]
-    fn custom_theme_colors_defaults_are_available() {
+    fn theme_fields_default_to_preset_following() {
         let settings = UserSetting::default();
 
-        assert_eq!(settings.custom_theme_colors.light.window_bg, "#EFF2F5");
-        assert_eq!(settings.custom_theme_colors.light.card_bg, "#E6EAEF");
-        assert_eq!(settings.custom_theme_colors.light.accent, "#0969DA");
-        assert_eq!(settings.custom_theme_colors.dark.window_bg, "#282C34");
-        assert_eq!(settings.custom_theme_colors.dark.card_bg, "#2E333C");
-        assert_eq!(settings.custom_theme_colors.dark.accent, "#478BE6");
+        assert_eq!(settings.theme_preset, "default");
+        assert_eq!(settings.theme_accent, "default");
     }
 
     #[test]
-    fn deserialize_old_settings_without_custom_theme_colors_uses_defaults() {
+    fn deserialize_old_settings_without_theme_fields_uses_defaults() {
         let settings: UserSetting = serde_json::from_str(
             r#"{
                 "shortcut":"Alt+Q",
@@ -622,34 +635,102 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(settings.custom_theme_colors.light.window_bg, "#EFF2F5");
-        assert_eq!(settings.custom_theme_colors.dark.card_bg, "#2E333C");
+        assert_eq!(settings.theme_preset, "default");
+        assert_eq!(settings.theme_accent, "default");
     }
 
     #[test]
-    fn sanitized_custom_theme_colors_fall_back_when_hex_is_invalid() {
-        let settings = UserSetting {
-            custom_theme_colors: CustomThemeColors {
-                light: ThemeColorPalette {
-                    window_bg: "blue".to_string(),
-                    card_bg: "#EEF2F5".to_string(),
-                    accent: "#123456".to_string(),
-                },
-                dark: ThemeColorPalette {
-                    window_bg: "#151515".to_string(),
-                    card_bg: "#22".to_string(),
-                    accent: "orange".to_string(),
-                },
-            },
-            ..UserSetting::default()
-        }
-        .sanitized();
+    fn sanitized_fills_blank_theme_fields_with_defaults() {
+        let settings: UserSetting = serde_json::from_str(
+            r#"{
+                "themePreset":"",
+                "themeAccent":" "
+            }"#,
+        )
+        .unwrap();
 
-        assert_eq!(settings.custom_theme_colors.light.window_bg, "#EFF2F5");
-        assert_eq!(settings.custom_theme_colors.light.card_bg, "#EEF2F5");
-        assert_eq!(settings.custom_theme_colors.light.accent, "#123456");
-        assert_eq!(settings.custom_theme_colors.dark.window_bg, "#151515");
-        assert_eq!(settings.custom_theme_colors.dark.card_bg, "#2E333C");
-        assert_eq!(settings.custom_theme_colors.dark.accent, "#478BE6");
+        let settings = settings.sanitized();
+        assert_eq!(settings.theme_preset, "default");
+        assert_eq!(settings.theme_accent, "default");
+    }
+
+    #[test]
+    fn sanitized_migrates_custom_legacy_accent_to_theme_accent() {
+        let settings: UserSetting = serde_json::from_str(
+            r##"{
+                "customThemeColors":{
+                    "light":{"windowBg":"#EFF2F5","cardBg":"#E6EAEF","accent":"#8250DF"},
+                    "dark":{"windowBg":"#282C34","cardBg":"#2E333C","accent":"#478BE6"}
+                }
+            }"##,
+        )
+        .unwrap();
+
+        let settings = settings.sanitized();
+        assert_eq!(settings.theme_accent, "#8250DF");
+    }
+
+    #[test]
+    fn sanitized_keeps_default_when_legacy_accent_matches_old_defaults() {
+        let settings: UserSetting = serde_json::from_str(
+            r##"{
+                "customThemeColors":{
+                    "light":{"windowBg":"#EFF2F5","cardBg":"#E6EAEF","accent":"#0969DA"},
+                    "dark":{"windowBg":"#282C34","cardBg":"#2E333C","accent":"#478BE6"}
+                }
+            }"##,
+        )
+        .unwrap();
+
+        let settings = settings.sanitized();
+        assert_eq!(settings.theme_accent, "default");
+    }
+
+    #[test]
+    fn sanitized_ignores_invalid_legacy_accent_hex() {
+        let settings: UserSetting = serde_json::from_str(
+            r##"{
+                "customThemeColors":{
+                    "light":{"windowBg":"#EFF2F5","cardBg":"#E6EAEF","accent":"blue"},
+                    "dark":{"windowBg":"#282C34","cardBg":"#2E333C","accent":"#22"}
+                }
+            }"##,
+        )
+        .unwrap();
+
+        let settings = settings.sanitized();
+        assert_eq!(settings.theme_accent, "default");
+    }
+
+    #[test]
+    fn explicit_theme_accent_is_not_overridden_by_legacy_migration() {
+        let settings: UserSetting = serde_json::from_str(
+            r##"{
+                "themeAccent":"purple",
+                "customThemeColors":{
+                    "light":{"windowBg":"#EFF2F5","cardBg":"#E6EAEF","accent":"#8250DF"}
+                }
+            }"##,
+        )
+        .unwrap();
+
+        let settings = settings.sanitized();
+        assert_eq!(settings.theme_accent, "purple");
+    }
+
+    #[test]
+    fn serialized_settings_omit_legacy_custom_theme_colors() {
+        let settings: UserSetting = serde_json::from_str(
+            r##"{
+                "customThemeColors":{
+                    "light":{"windowBg":"#EFF2F5","cardBg":"#E6EAEF","accent":"#8250DF"}
+                }
+            }"##,
+        )
+        .unwrap();
+
+        let serialized = serde_json::to_string(&settings).unwrap();
+        assert!(!serialized.contains("customThemeColors"));
+        assert!(serialized.contains("themeAccent"));
     }
 }

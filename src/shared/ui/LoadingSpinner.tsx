@@ -18,7 +18,7 @@ export function LoadingSpinner({ size = "md", text }: LoadingSpinnerProps) {
       aria-busy="true"
     >
       <div
-        className={`${sizeClasses[size]} animate-spin rounded-full border-pg-neutral-6 border-t-pg-accent-fg`}
+        className={`${sizeClasses[size]} animate-spin rounded-full border-pg-border-muted border-t-pg-accent-fg`}
         aria-hidden="true"
       />
       {text && <span className="text-sm font-medium text-pg-fg-muted">{text}</span>}

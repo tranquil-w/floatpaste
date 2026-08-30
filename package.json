@@ -28,6 +28,7 @@
   "dependencies": {
     "@tanstack/react-query": "^5.80.7",
     "@tauri-apps/api": "^2.8.0",
+    "culori": "^4.0.2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "zustand": "^5.0.6"
@@ -35,6 +36,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@tauri-apps/cli": "^2.10.1",
+    "@types/culori": "^4.0.1",
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
     "@vitejs/plugin-react": "^4.5.0",

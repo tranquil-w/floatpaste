@@ -4,24 +4,16 @@ import { isTauriRuntime } from "../../bridge/runtime";
 import { hideCurrentWindow } from "../../bridge/window";
 import { queryClient } from "../../app/queryClient";
 import { useAppEvent } from "../../shared/hooks/useAppEvent";
-import type {
-  CustomThemeColors,
-  PickerPositionMode,
-  ThemeColorPalette,
-  ThemeMode,
-  UserSetting,
-} from "../../shared/types/settings";
-import {
-  DEFAULT_CUSTOM_THEME_COLORS,
-  getCustomThemeColorErrors,
-  sanitizeCustomThemeColors,
-} from "../../shared/themeColors";
+import type { PickerPositionMode, ThemeMode, UserSetting } from "../../shared/types/settings";
+import { DEFAULT_THEME_ACCENT, DEFAULT_THEME_PRESET } from "../../shared/theme";
+import type { ResolvedTheme } from "../../shared/theme";
 import { LoadingSpinner } from "../../shared/ui/LoadingSpinner";
 import { getErrorMessage } from "../../shared/utils/error";
 import { SettingsNav } from "./SettingsNav";
 import { SettingsSection } from "./SettingsSection";
 import { ShortcutInput } from "./ShortcutInput";
 import { type SettingsSectionId } from "./settingsSections";
+import { ThemeAccentPicker, ThemePresetPicker } from "./ThemePresetPicker";
 import { useSettingsNavigation } from "./useSettingsNavigation";
 import { TagsSection } from "./TagsSection";
 import { useSettingsQuery, useUpdateSettingsMutation } from "./queries";
@@ -37,11 +29,12 @@ type EditableSettings = {
   restoreClipboardAfterPaste: boolean;
   pauseMonitoring: boolean;
   themeMode: ThemeMode;
+  themePreset: UserSetting["themePreset"];
+  themeAccent: string;
   excludedAppsText: string;
   searchShortcut: string;
   searchShortcutEnabled: boolean;
   pickerDigitShortcutsEnabled: boolean;
-  customThemeColors: CustomThemeColors;
 };
 
 const pickerPositionOptions: Array<{
@@ -79,12 +72,12 @@ const themeModeOptions: Array<{
   {
     value: "light",
     label: "浅色",
-    description: "中性浅色基底，跨设备观感更稳定。",
+    description: "固定使用浅色界面，不受系统外观影响。",
   },
   {
     value: "dark",
     label: "深色",
-    description: "冷调深色主题，适合夜间使用。",
+    description: "固定使用深色界面，适合夜间与暗光环境。",
   },
 ];
 
@@ -116,11 +109,12 @@ function toEditableSettings(settings: UserSetting): EditableSettings {
     restoreClipboardAfterPaste: settings.restoreClipboardAfterPaste,
     pauseMonitoring: settings.pauseMonitoring,
     themeMode: settings.themeMode,
+    themePreset: settings.themePreset,
+    themeAccent: settings.themeAccent,
     excludedAppsText: settings.excludedApps.join("\n"),
     searchShortcut: settings.searchShortcut,
     searchShortcutEnabled: settings.searchShortcutEnabled,
     pickerDigitShortcutsEnabled: settings.pickerDigitShortcutsEnabled,
-    customThemeColors: settings.customThemeColors,
   };
 }
 
@@ -135,6 +129,8 @@ function toSettingsPayload(editable: EditableSettings): UserSetting {
     restoreClipboardAfterPaste: editable.restoreClipboardAfterPaste,
     pauseMonitoring: editable.pauseMonitoring,
     themeMode: editable.themeMode,
+    themePreset: editable.themePreset,
+    themeAccent: editable.themeAccent,
     excludedApps: editable.excludedAppsText
       .split(/\r?\n/)
       .map((value) => value.trim())
@@ -142,7 +138,6 @@ function toSettingsPayload(editable: EditableSettings): UserSetting {
     searchShortcut: editable.searchShortcut,
     searchShortcutEnabled: editable.searchShortcutEnabled,
     pickerDigitShortcutsEnabled: editable.pickerDigitShortcutsEnabled,
-    customThemeColors: sanitizeCustomThemeColors(editable.customThemeColors),
   };
 }
 
@@ -328,45 +323,7 @@ function SaveStatusText({
   return <span className="text-xs text-pg-fg-subtle">更改将自动保存</span>;
 }
 
-function ThemeColorInput({
-  error,
-  hint,
-  label,
-  onChange,
-  value,
-}: {
-  error?: string;
-  hint: string;
-  label: string;
-  onChange: (value: string) => void;
-  value: string;
-}) {
-  return (
-    <label className="block">
-      <span className={FORM_LABEL}>{label}</span>
-      <div className="flex items-center gap-3">
-        <input
-          aria-label={`${label} 拾色器`}
-          className="color-swatch h-9 w-9 shrink-0 cursor-pointer rounded-lg border border-pg-border-default bg-pg-canvas-default p-0.5"
-          onChange={(event) => onChange(event.target.value.toUpperCase())}
-          type="color"
-          value={/^#[0-9a-fA-F]{6}$/.test(value) ? value : "#000000"}
-        />
-        <input
-          className={FORM_INPUT}
-          onChange={(event) => onChange(event.target.value)}
-          placeholder="#RRGGBB"
-          value={value}
-        />
-      </div>
-      <p className={error ? "mt-1.5 text-xs leading-relaxed text-pg-danger-fg" : FORM_HINT}>
-        {error ?? hint}
-      </p>
-    </label>
-  );
-}
-
-export function SettingsShell() {
+export function SettingsShell({ resolvedTheme }: { resolvedTheme: ResolvedTheme }) {
   const settings = useSettingsQuery();
   const updateSettingsMutation = useUpdateSettingsMutation();
   const { layoutMode, activeSectionId, registerContainer, registerSection, scrollToSection } =
@@ -387,9 +344,8 @@ export function SettingsShell() {
   const [searchShortcut, setSearchShortcut] = useState("Alt+S");
   const [searchShortcutEnabled, setSearchShortcutEnabled] = useState(true);
   const [pickerDigitShortcutsEnabled, setPickerDigitShortcutsEnabled] = useState(true);
-  const [customThemeColors, setCustomThemeColors] = useState<CustomThemeColors>(
-    DEFAULT_CUSTOM_THEME_COLORS,
-  );
+  const [themePreset, setThemePreset] = useState<UserSetting["themePreset"]>(DEFAULT_THEME_PRESET);
+  const [themeAccent, setThemeAccent] = useState(DEFAULT_THEME_ACCENT);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const isInitializingRef = useRef(true);
   const hasHydratedFromServerRef = useRef(false);
@@ -426,11 +382,12 @@ export function SettingsShell() {
     setRestoreClipboardAfterPaste(nextEditable.restoreClipboardAfterPaste);
     setPauseMonitoring(nextEditable.pauseMonitoring);
     setThemeMode(nextEditable.themeMode);
+    setThemePreset(nextEditable.themePreset);
+    setThemeAccent(nextEditable.themeAccent);
     setExcludedAppsText(nextEditable.excludedAppsText);
     setSearchShortcut(nextEditable.searchShortcut);
     setSearchShortcutEnabled(nextEditable.searchShortcutEnabled);
     setPickerDigitShortcutsEnabled(nextEditable.pickerDigitShortcutsEnabled);
-    setCustomThemeColors(nextEditable.customThemeColors);
 
     hydrationTimerRef.current = window.setTimeout(() => {
       isInitializingRef.current = false;
@@ -449,11 +406,12 @@ export function SettingsShell() {
       restoreClipboardAfterPaste,
       pauseMonitoring,
       themeMode,
+      themePreset,
+      themeAccent,
       excludedAppsText,
       searchShortcut,
       searchShortcutEnabled,
       pickerDigitShortcutsEnabled,
-      customThemeColors,
     });
   }, [
     shortcut,
@@ -465,25 +423,23 @@ export function SettingsShell() {
     restoreClipboardAfterPaste,
     pauseMonitoring,
     themeMode,
+    themePreset,
+    themeAccent,
     excludedAppsText,
     searchShortcut,
     searchShortcutEnabled,
     pickerDigitShortcutsEnabled,
-    customThemeColors,
   ]);
 
-  const colorErrors = getCustomThemeColorErrors(customThemeColors);
-  const hasColorErrors = Object.keys(colorErrors).length > 0;
   // 两处全局快捷键冲突时后端会强制重置搜索键，前端提前拦截保存并提示
   const shortcutConflict =
     searchShortcutEnabled &&
     shortcut.trim() !== "" &&
     normalizeShortcutValue(shortcut) === normalizeShortcutValue(searchShortcut);
   // 存在非法输入时自动保存被拦截，头部需明示"有修改未落盘"，避免用户误以为已保存
-  const saveBlockedReasons = [
-    hasColorErrors ? "无效的颜色值" : null,
-    shortcutConflict ? "快捷键冲突" : null,
-  ].filter((reason): reason is string => reason !== null);
+  const saveBlockedReasons = [shortcutConflict ? "快捷键冲突" : null].filter(
+    (reason): reason is string => reason !== null,
+  );
 
   // 立即保存指定载荷；供 debounce 回调、失败重试与关窗前 flush 共用
   const performSave = (payload: UserSetting) =>
@@ -523,7 +479,6 @@ export function SettingsShell() {
     if (
       !payload ||
       isInitializingRef.current ||
-      hasColorErrors ||
       shortcutConflict ||
       !data ||
       isSameSettings(payload, data)
@@ -572,7 +527,7 @@ export function SettingsShell() {
   useEffect(() => {
     if (!data) return;
     if (isInitializingRef.current) return;
-    if (hasColorErrors || shortcutConflict) return;
+    if (shortcutConflict) return;
     const payload = latestLocalPayloadRef.current;
     if (!payload) return;
     if (isSameSettings(payload, data)) return;
@@ -592,12 +547,12 @@ export function SettingsShell() {
     restoreClipboardAfterPaste,
     pauseMonitoring,
     themeMode,
+    themePreset,
+    themeAccent,
     excludedAppsText,
     searchShortcut,
     searchShortcutEnabled,
     pickerDigitShortcutsEnabled,
-    customThemeColors,
-    hasColorErrors,
     shortcutConflict,
     data,
   ]);
@@ -635,19 +590,6 @@ export function SettingsShell() {
   const saveError = updateSettingsMutation.error
     ? getErrorMessage(updateSettingsMutation.error, "保存设置失败，请稍后重试。")
     : null;
-  const updateThemeColor = (
-    themeKey: keyof CustomThemeColors,
-    field: keyof ThemeColorPalette,
-    value: string,
-  ) => {
-    setCustomThemeColors((current) => ({
-      ...current,
-      [themeKey]: {
-        ...current[themeKey],
-        [field]: value,
-      },
-    }));
-  };
 
   return (
     <main className="flex min-h-screen flex-col bg-pg-canvas-default">
@@ -822,7 +764,7 @@ export function SettingsShell() {
                   registerSection={registerSection}
                   title="外观"
                 >
-                  <SettingCard description="选择日常使用的界面主题。" title="界面主题">
+                  <SettingCard description="选择日常使用的界面主题。" title="模式">
                     <div className="space-y-0.5">
                       {themeModeOptions.map((option) => (
                         <OptionCard
@@ -838,58 +780,24 @@ export function SettingsShell() {
                   </SettingCard>
 
                   <SettingCard
-                    action={
-                      <button
-                        className="rounded-lg border border-pg-border-default px-3 py-2 text-xs font-medium text-pg-fg-muted transition-colors hover:bg-pg-canvas-default hover:text-pg-fg-default"
-                        onClick={() => setCustomThemeColors(DEFAULT_CUSTOM_THEME_COLORS)}
-                        type="button"
-                      >
-                        恢复默认
-                      </button>
-                    }
-                    description="分别为浅色与深色主题输入窗口背景、卡片背景与强调色，Tooltip 会自动同步。"
-                    title="自定义颜色"
+                    description="配色方案基于经过验证的公开色板，全部通过对比度门禁，跨设备观感一致。"
+                    title="主题预设"
                   >
-                    <div className="grid gap-6 lg:grid-cols-2">
-                      {(["light", "dark"] as const).map((themeKey) => (
-                        <div
-                          className="rounded-xl border border-pg-border-default bg-pg-canvas-default px-4 py-4"
-                          key={themeKey}
-                        >
-                          <div className="mb-4">
-                            <h4 className="text-sm font-semibold text-pg-fg-default">
-                              {themeKey === "light" ? "浅色主题" : "深色主题"}
-                            </h4>
-                            <p className="mt-1 text-xs leading-relaxed text-pg-fg-subtle">
-                              输入 `#RRGGBB`，例如 `#EFF2F5`。
-                            </p>
-                          </div>
-                          <div className="space-y-4">
-                            <ThemeColorInput
-                              error={colorErrors[`${themeKey}.windowBg`]}
-                              hint="控制窗口主体背景。"
-                              label="窗口背景色"
-                              onChange={(value) => updateThemeColor(themeKey, "windowBg", value)}
-                              value={customThemeColors[themeKey].windowBg}
-                            />
-                            <ThemeColorInput
-                              error={colorErrors[`${themeKey}.cardBg`]}
-                              hint="用于卡片、列表项和 tooltip 主体。"
-                              label="卡片背景色"
-                              onChange={(value) => updateThemeColor(themeKey, "cardBg", value)}
-                              value={customThemeColors[themeKey].cardBg}
-                            />
-                            <ThemeColorInput
-                              error={colorErrors[`${themeKey}.accent`]}
-                              hint="用于选中态、按钮、焦点与高亮。"
-                              label="强调色"
-                              onChange={(value) => updateThemeColor(themeKey, "accent", value)}
-                              value={customThemeColors[themeKey].accent}
-                            />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                    <ThemePresetPicker
+                      onSelectPreset={setThemePreset}
+                      resolvedTheme={resolvedTheme}
+                      themeAccent={themeAccent}
+                      themePreset={themePreset}
+                    />
+                  </SettingCard>
+
+                  <SettingCard description="选中态、按钮与高亮使用的颜色。" title="强调色">
+                    <ThemeAccentPicker
+                      onSelectAccent={setThemeAccent}
+                      resolvedTheme={resolvedTheme}
+                      themeAccent={themeAccent}
+                      themePreset={themePreset}
+                    />
                   </SettingCard>
 
                   <SettingCard

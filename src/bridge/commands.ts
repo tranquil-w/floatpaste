@@ -204,6 +204,13 @@ export async function prepareSearchWindowDrag(): Promise<void> {
   return invoke("prepare_search_window_drag");
 }
 
+export async function syncWindowTheme(theme: "light" | "dark" | null): Promise<void> {
+  if (!isTauriRuntime()) {
+    return;
+  }
+  return invoke("sync_window_theme", { theme });
+}
+
 export type TooltipTheme = "dark" | "light";
 
 export async function showTooltip(

@@ -125,6 +125,7 @@ pub fn run() {
             commands::windows::open_search_global,
             commands::windows::hide_search,
             commands::windows::prepare_search_window_drag,
+            commands::windows::sync_window_theme,
             commands::windows::show_tooltip,
             commands::windows::tooltip_ready,
             commands::windows::hide_tooltip

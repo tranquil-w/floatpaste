@@ -2,16 +2,17 @@ import { useEffect, useRef, type MouseEvent } from "react";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { hideTooltip, showTooltip } from "../../bridge/commands";
 import { resolveTooltipShowPosition } from "../tooltip/tooltipState";
-import { buildThemeCssVariables, DEFAULT_CUSTOM_THEME_COLORS } from "../themeColors";
+import { DEFAULT_THEME_ACCENT, DEFAULT_THEME_PRESET, resolveSemanticTokens } from "../theme";
+import { SHADOW_TOKENS, toCssVariableName } from "../theme/derive.ts";
 import { TOOLTIP_SHOW_DELAY_MS } from "../ui/tooltipConfig";
-import type { CustomThemeColors } from "../types/settings";
 import type { ClipItemSummary } from "../types/clips";
 
 type UseHoverTooltipOptions = {
   /** 仅 Tauri 运行时启用；浏览器预览保持 no-op */
   enabled: boolean;
-  /** 自定义主题色，随 tooltip 内容一并传给 tooltip 窗口派生变量 */
-  customThemeColors?: CustomThemeColors;
+  /** 主题预设与强调色，随 tooltip 内容一并传给 tooltip 窗口派生变量 */
+  themePreset?: string;
+  themeAccent?: string;
   /** 悬停延迟到点后构建 tooltip HTML；数据加载失败时抛错即可放弃本次显示 */
   buildHtml: (item: ClipItemSummary, requestId: number) => Promise<string>;
   /** 可选过滤：返回 false 的条目不触发 tooltip */
@@ -89,17 +90,17 @@ export function useHoverTooltip(options: UseHoverTooltipOptions) {
         }
 
         const theme = (document.documentElement.dataset.theme as "dark" | "light") ?? "dark";
-        await showTooltip(
-          requestId,
-          position.x,
-          position.y,
-          html,
+        // tooltip 是独立窗口，token 以完整 CSS 变量名注入其 :root
+        const tokens = resolveSemanticTokens(
+          optionsRef.current.themePreset ?? DEFAULT_THEME_PRESET,
+          optionsRef.current.themeAccent ?? DEFAULT_THEME_ACCENT,
           theme,
-          buildThemeCssVariables(
-            theme,
-            optionsRef.current.customThemeColors ?? DEFAULT_CUSTOM_THEME_COLORS,
-          ),
         );
+        const themeVars = Object.fromEntries([
+          ...Object.entries(tokens).map(([key, value]) => [toCssVariableName(key), value]),
+          ...Object.entries(SHADOW_TOKENS).map(([key, value]) => [toCssVariableName(key), value]),
+        ]);
+        await showTooltip(requestId, position.x, position.y, html, theme, themeVars);
       })().catch((error) => {
         console.warn("[FloatPaste] tooltip 定位或显示失败:", error);
       });
