@@ -13,7 +13,7 @@ type SettingsNavProps = {
 export function SettingsNav({ activeSectionId, layoutMode, onSelect }: SettingsNavProps) {
   if (layoutMode === "compact") {
     return (
-      <nav aria-label="设置分组" className="mb-6">
+      <nav aria-label="设置分组" className="mb-4">
         <div className="flex flex-wrap gap-1">
           {SETTINGS_SECTIONS.map((section) => {
             const isActive = section.id === activeSectionId;
@@ -40,7 +40,7 @@ export function SettingsNav({ activeSectionId, layoutMode, onSelect }: SettingsN
   }
 
   return (
-    <nav aria-label="设置分组" className="sticky top-20 self-start">
+    <nav aria-label="设置分组" className="sticky top-16 self-start">
       <p className="px-3 pb-2 text-xs font-medium text-pg-fg-subtle">偏好设置</p>
       <div className="space-y-0.5">
         {SETTINGS_SECTIONS.map((section) => {
@@ -49,7 +49,7 @@ export function SettingsNav({ activeSectionId, layoutMode, onSelect }: SettingsN
           return (
             <button
               aria-current={isActive ? "true" : undefined}
-              className={`relative flex w-full items-center rounded-md px-3 py-2 text-left text-sm transition-colors ${
+              className={`relative flex w-full items-center rounded-md px-3 py-1.5 text-left text-sm transition-colors ${
                 isActive
                   ? "bg-pg-accent-subtle font-medium text-pg-fg-default"
                   : "text-pg-fg-muted hover:bg-pg-canvas-subtle hover:text-pg-fg-default"

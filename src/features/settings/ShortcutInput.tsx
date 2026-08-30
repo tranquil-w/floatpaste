@@ -100,7 +100,7 @@ export function ShortcutInput({ value, onChange, disabled = false, hint }: Short
     <div ref={rootRef}>
       <button
         aria-label={recording ? "正在录制快捷键" : "录制快捷键"}
-        className={`flex h-[42px] w-full items-center gap-1.5 rounded-xl border px-4 text-left text-sm transition-colors ${
+        className={`flex h-[34px] w-full items-center gap-1.5 rounded-xl border px-3 text-left text-sm transition-colors ${
           recording
             ? "border-pg-accent-fg bg-pg-canvas-default ring-1 ring-pg-accent-fg"
             : "border-pg-border-default bg-pg-canvas-default hover:border-pg-accent-fg"
@@ -113,8 +113,12 @@ export function ShortcutInput({ value, onChange, disabled = false, hint }: Short
         type="button"
       >
         {recording ? (
-          <span className="text-[13px] text-pg-accent-fg">
-            按下新的组合键，Esc 取消，Backspace 清除
+          <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-pg-accent-fg">
+            <span className="truncate">按下新组合键</span>
+            <kbd className={`${KBD_BADGE} shrink-0`}>Esc</kbd>
+            <span className="shrink-0">取消</span>
+            <kbd className={`${KBD_BADGE} shrink-0`}>⌫</kbd>
+            <span className="shrink-0">清除</span>
           </span>
         ) : value ? (
           value.split("+").map((part) => (

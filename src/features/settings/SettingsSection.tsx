@@ -24,12 +24,12 @@ export function SettingsSection({
   );
 
   return (
-    <section className="scroll-mt-20 space-y-3" id={id} ref={handleRef}>
-      <header className="space-y-1">
-        <h2 className="text-lg font-semibold text-pg-fg-default">{title}</h2>
-        <p className="text-sm text-pg-fg-muted">{description}</p>
+    <section className="scroll-mt-16 space-y-1.5" id={id} ref={handleRef}>
+      <header className="space-y-0.5">
+        <h2 className="text-base font-semibold text-pg-fg-default">{title}</h2>
+        <p className="text-xs leading-relaxed text-pg-fg-muted">{description}</p>
       </header>
-      <div className="space-y-3">{children}</div>
+      <div className="space-y-2.5">{children}</div>
     </section>
   );
 }

@@ -24,7 +24,7 @@ export function ThemePresetPicker({
   onSelectPreset: (id: ThemePresetId) => void;
 }) {
   return (
-    <div className="grid gap-3 sm:grid-cols-3">
+    <div className="grid gap-2.5 sm:grid-cols-3">
       {THEME_PRESETS.map((preset) => {
         const tokens = resolveSemanticTokens(preset.id, themeAccent, resolvedTheme);
         const selected = themePreset === preset.id;
@@ -41,11 +41,11 @@ export function ThemePresetPicker({
             type="button"
           >
             <span
-              className="block rounded-lg p-2.5"
+              className="block rounded-lg p-2"
               style={{ backgroundColor: tokens["canvas-default"] }}
             >
               <span
-                className="block rounded-md border p-2"
+                className="block rounded-md border p-1.5"
                 style={{
                   backgroundColor: tokens["canvas-subtle"],
                   borderColor: tokens["border-muted"],
@@ -56,22 +56,22 @@ export function ThemePresetPicker({
                   style={{ backgroundColor: tokens["fg-default"] }}
                 />
                 <span
-                  className="mt-1.5 block h-1.5 w-3/5 rounded-full"
+                  className="mt-1 block h-1.5 w-3/5 rounded-full"
                   style={{ backgroundColor: tokens["fg-muted"] }}
                 />
                 <span
-                  className="mt-2 inline-block h-4 w-12 rounded-[4px]"
+                  className="mt-1.5 inline-block h-3.5 w-10 rounded-[4px]"
                   style={{ backgroundColor: tokens["accent-emphasis"] }}
                 >
                   <span
-                    className="mx-1.5 mt-[7px] block h-1 rounded-full"
+                    className="mx-1.5 mt-[6px] block h-1 rounded-full"
                     style={{ backgroundColor: tokens["fg-on-emphasis"] }}
                   />
                 </span>
               </span>
             </span>
             <span
-              className={`mt-2 block text-sm font-medium ${
+              className={`mt-1.5 block text-sm font-medium ${
                 selected ? "text-pg-fg-default" : "text-pg-fg-muted"
               }`}
             >
@@ -116,14 +116,14 @@ export function ThemeAccentPicker({
   const selectedId = options.some((option) => option.id === themeAccent) ? themeAccent : null;
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex flex-wrap items-center gap-1.5">
       {options.map((option) => {
         const selected = selectedId === option.id;
         return (
           <button
             aria-label={option.label}
             aria-pressed={selected}
-            className={`flex h-9 w-9 items-center justify-center rounded-full border-2 transition-transform hover:scale-105 ${
+            className={`flex h-7 w-7 items-center justify-center rounded-full border-2 transition-transform hover:scale-105 ${
               selected ? "border-pg-accent-fg" : "border-transparent"
             }`}
             key={option.id}
@@ -132,7 +132,7 @@ export function ThemeAccentPicker({
             type="button"
           >
             <span
-              className="block h-6 w-6 rounded-full border"
+              className="block h-5 w-5 rounded-full border"
               style={{ backgroundColor: option.hex, borderColor: "rgba(0, 0, 0, 0.08)" }}
             />
           </button>

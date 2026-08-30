@@ -1,7 +1,7 @@
 import type { SettingsSectionId } from "./settingsSections";
 
 /** 分组标题滚动定位时与视口顶保持的距离，同时是 scrollspy 的偏移线 */
-export const SCROLL_OFFSET = 96;
+export const SCROLL_OFFSET = 80;
 
 /** 分组元素只需能报告自身顶部位置即可，便于在无 DOM 环境下测试 */
 export type SectionElementBox = {

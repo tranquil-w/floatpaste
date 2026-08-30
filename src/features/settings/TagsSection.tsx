@@ -14,7 +14,7 @@ type Props = {
 };
 
 const FORM_INPUT =
-  "w-full rounded-xl border border-pg-border-default bg-pg-canvas-default px-4 py-2.5 text-sm outline-none transition-colors placeholder:text-pg-fg-subtle focus:border-pg-accent-fg focus:ring-1 focus:ring-pg-accent-fg focus-visible:outline-none";
+  "rounded-xl border border-pg-border-default bg-pg-canvas-default px-3 py-1.5 text-sm outline-none transition-colors placeholder:text-pg-fg-subtle focus:border-pg-accent-fg focus:ring-1 focus:ring-pg-accent-fg focus-visible:outline-none";
 
 export function TagsSection({ registerSection }: Props) {
   const queryClient = useQueryClient();
@@ -98,7 +98,7 @@ export function TagsSection({ registerSection }: Props) {
         <div className="overflow-hidden rounded-xl border border-pg-border-muted bg-pg-canvas-subtle">
           {tags.map((tag) => (
             <div
-              className="flex flex-wrap items-center gap-3 border-b border-pg-border-subtle px-5 py-3 last:border-b-0"
+              className="flex flex-wrap items-center gap-3 border-b border-pg-border-subtle px-4 py-2 last:border-b-0"
               key={tag.name}
             >
               {renamingTag === tag.name ? (
