@@ -38,3 +38,7 @@ tmp/
 .playwright-mcp/
 docs/superpowers/*-comparison.html
 .brv/
+
+# 图标生成脚本的本地产物
+scripts/__pycache__/
+src-tauri/icons/_preview_pngs/

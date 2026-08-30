@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FloatPaste — Logo 方案探索</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: "Segoe UI", "Microsoft YaHei", -apple-system, sans-serif;
+    background: #0F1115; color: #E8EAED;
+    -webkit-font-smoothing: antialiased;
+    padding: 56px 40px 80px;
+  }
+  .mono { font-family: "Cascadia Code", Consolas, monospace; }
+  header { max-width: 1200px; margin: 0 auto 44px; }
+  header .kicker { font-size: 12px; letter-spacing: .22em; color: #5E7CE2; text-transform: uppercase; }
+  header h1 { font-size: 34px; font-weight: 600; margin: 10px 0 12px; }
+  header p { color: #9AA0A6; font-size: 14.5px; line-height: 1.75; max-width: 760px; }
+  header p b { color: #C6CBD4; font-weight: 600; }
+  .grid {
+    max-width: 1200px; margin: 0 auto;
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 28px;
+  }
+  .card {
+    background: #161A21; border: 1px solid #232833; border-radius: 18px;
+    padding: 22px; transition: transform .5s cubic-bezier(.16,1,.3,1), border-color .3s;
+  }
+  .card:hover { transform: translateY(-4px); border-color: #32405F; }
+  .card .tag {
+    display: inline-block; font-size: 11px; letter-spacing: .12em;
+    color: #7EA6FF; background: rgba(0,144,255,.1);
+    padding: 3px 10px; border-radius: 99px; margin-bottom: 6px;
+  }
+  .card h2 { font-size: 18px; font-weight: 600; margin: 4px 0 14px; }
+  .stage {
+    position: relative; border-radius: 22px; overflow: hidden;
+    background: linear-gradient(135deg, #3FA3FF, #0A49B8);
+    aspect-ratio: 1; display: grid; place-items: center;
+  }
+  .stage svg { width: 62%; height: 62%; color: #fff; }
+  .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-top: 12px; }
+  .cell { border-radius: 12px; aspect-ratio: 1; display: grid; place-items: center; }
+  .cell.light { background: #F3F5F8; } .cell.light svg { color: #0090FF; }
+  .cell.dark  { background: #1B1F27; } .cell.dark svg  { color: #4FA3FF; }
+  .cell.small { background: #12151B; place-items: center end; padding-right: 12px; }
+  .cell.small svg { width: 32px; height: 32px; color: #0090FF; }
+  .cell.small .s16 { width: 16px; height: 16px; margin-left: 8px; color: #4FA3FF; }
+  .why { margin-top: 14px; font-size: 13px; line-height: 1.8; color: #A8AEB8; }
+  .why b { color: #D6DAE1; font-weight: 600; }
+  .pick {
+    margin-top: 14px; font-size: 12px; color: #6B7280; line-height: 1.7;
+    border-top: 1px dashed #2A303C; padding-top: 12px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="kicker mono">LOGO EXPLORATION · PHASE 2</div>
+  <h1>FloatPaste · 浮贴 — 6 个图形方向</h1>
+  <p>产品内核：<b>全局快捷键唤起速贴面板 → 挑选历史条目 → 无打断回贴</b>。
+  本轮 6 个方案按不同图案类型生成（纯几何 / 符号 / 聚焦框 / 浮层线条 / 胶囊流 / 节点网络），
+  全部避开已否决的记事本、字母与双色块方向。每张卡片含品牌底、浅色、深色与 16/32px 小尺寸效果。</p>
+</header>
+
+<div class="grid">
+
+  <div class="card">
+    <span class="tag mono">PURE GEOMETRIC</span>
+    <h2>V1 一贴即中</h2>
+    <div class="stage">
+      <svg viewBox="0 0 100 100"><g fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"><path d="M 50 18 L 50 54"/><path d="M 33 41 L 50 58 L 67 41"/></g><rect x="24" y="76" width="52" height="9" rx="4.5" fill="currentColor"/></svg>
+    </div>
+    <div class="row3">
+      <div class="cell light"><svg viewBox="0 0 100 100" style="width:70%;height:70%"><g fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"><path d="M 50 18 L 50 54"/><path d="M 33 41 L 50 58 L 67 41"/></g><rect x="24" y="76" width="52" height="9" rx="4.5" fill="currentColor"/></svg></div>
+      <div class="cell dark"><svg viewBox="0 0 100 100" style="width:70%;height:70%"><g fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"><path d="M 50 18 L 50 54"/><path d="M 33 41 L 50 58 L 67 41"/></g><rect x="24" y="76" width="52" height="9" rx="4.5" fill="currentColor"/></svg></div>
+      <div class="cell small"><svg viewBox="0 0 100 100"><g fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"><path d="M 50 18 L 50 54"/><path d="M 33 41 L 50 58 L 67 41"/></g><rect x="24" y="76" width="52" height="9" rx="4.5" fill="currentColor"/></svg><svg class="s16" viewBox="0 0 100 100"><g fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"><path d="M 50 18 L 50 54"/><path d="M 33 41 L 50 58 L 67 41"/></g><rect x="24" y="76" width="52" height="9" rx="4.5" fill="currentColor"/></svg></div>
+    </div>
+    <p class="why"><b>寓意</b>：内容从剪贴板「贴入」当前输入位——箭头落入槽位，粘贴动作的最直接抽象。笔画 8 单位，全圆端点。</p>
+    <p class="pick mono">风险：远看略近「下载」类图标，靠槽位的圆角短棒做区分。</p>
+  </div>
+
+  <div class="card">
+    <span class="tag mono">GEOMETRY + SYMBOL</span>
+    <h2>V2 速贴键帽</h2>
+    <div class="stage">
+      <svg viewBox="0 0 100 100"><rect x="22" y="26" width="56" height="48" rx="12" fill="none" stroke="currentColor" stroke-width="5.5"/><path d="M 55 36 L 42 54 L 50 54 L 47 64 L 60 46 L 52 46 Z" fill="currentColor"/></svg>
+    </div>
+    <div class="row3">
+      <div class="cell light"><svg viewBox="0 0 100 100" style="width:70%;height:70%"><rect x="22" y="26" width="56" height="48" rx="12" fill="none" stroke="currentColor" stroke-width="5.5"/><path d="M 55 36 L 42 54 L 50 54 L 47 64 L 60 46 L 52 46 Z" fill="currentColor"/></svg></div>
+      <div class="cell dark"><svg viewBox="0 0 100 100" style="width:70%;height:70%"><rect x="22" y="26" width="56" height="48" rx="12" fill="none" stroke="currentColor" stroke-width="5.5"/><path d="M 55 36 L 42 54 L 50 54 L 47 64 L 60 46 L 52 46 Z" fill="currentColor"/></svg></div>
+      <div class="cell small"><svg viewBox="0 0 100 100"><rect x="22" y="26" width="56" height="48" rx="12" fill="none" stroke="currentColor" stroke-width="5.5"/><path d="M 55 36 L 42 54 L 50 54 L 47 64 L 60 46 L 52 46 Z" fill="currentColor"/></svg><svg class="s16" viewBox="0 0 100 100"><rect x="22" y="26" width="56" height="48" rx="12" fill="none" stroke="currentColor" stroke-width="5.5"/><path d="M 55 36 L 42 54 L 50 54 L 47 64 L 60 46 L 52 46 Z" fill="currentColor"/></svg></div>
+    </div>
+    <p class="why"><b>寓意</b>：整个产品的核心交互是一颗<b>全局快捷键</b>——键帽 + 闪电，速度感与热键心智合体。</p>
+    <p class="pick mono">优势：叙事最贴产品；闪电符号常见，靠键帽语境建立差异。</p>
+  </div>
+
+  <div class="card">
+    <span class="tag mono">GEOMETRIC · RETICLE</span>
+    <h2>V3 光标聚焦</h2>
+    <div class="stage">
+      <svg viewBox="0 0 100 100"><g fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round"><path d="M 26 38 L 26 30 Q 26 26 30 26 L 38 26"/><path d="M 62 26 L 70 26 Q 74 26 74 30 L 74 38"/><path d="M 74 62 L 74 70 Q 74 74 70 74 L 62 74"/><path d="M 38 74 L 30 74 Q 26 74 26 70 L 26 62"/></g><circle cx="50" cy="51" r="7.5" fill="currentColor"/></svg>
+    </div>
+    <div class="row3">
+      <div class="cell light"><svg viewBox="0 0 100 100" style="width:70%;height:70%"><g fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round"><path d="M 26 38 L 26 30 Q 26 26 30 26 L 38 26"/><path d="M 62 26 L 70 26 Q 74 26 74 30 L 74 38"/><path d="M 74 62 L 74 70 Q 74 74 70 74 L 62 74"/><path d="M 38 74 L 30 74 Q 26 74 26 70 L 26 62"/></g><circle cx="50" cy="51" r="7.5" fill="currentColor"/></svg></div>
+      <div class="cell dark"><svg viewBox="0 0 100 100" style="width:70%;height:70%"><g fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round"><path d="M 26 38 L 26 30 Q 26 26 30 26 L 38 26"/><path d="M 62 26 L 70 26 Q 74 26 74 30 L 74 38"/><path d="M 74 62 L 74 70 Q 74 74 70 74 L 62 74"/><path d="M 38 74 L 30 74 Q 26 74 26 70 L 26 62"/></g><circle cx="50" cy="51" r="7.5" fill="currentColor"/></svg></div>
+      <div class="cell small"><svg viewBox="0 0 100 100"><g fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round"><path d="M 26 38 L 26 30 Q 26 26 30 26 L 38 26"/><path d="M 62 26 L 70 26 Q 74 26 74 30 L 74 38"/><path d="M 74 62 L 74 70 Q 74 74 70 74 L 62 74"/><path d="M 38 74 L 30 74 Q 26 74 26 70 L 26 62"/></g><circle cx="50" cy="51" r="7.5" fill="currentColor"/></svg><svg class="s16" viewBox="0 0 100 100"><g fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round"><path d="M 26 38 L 26 30 Q 26 26 30 26 L 38 26"/><path d="M 62 26 L 70 26 Q 74 26 74 30 L 74 38"/><path d="M 74 62 L 74 70 Q 74 74 70 74 L 62 74"/><path d="M 38 74 L 30 74 Q 26 74 26 70 L 26 62"/></g><circle cx="50" cy="51" r="7.5" fill="currentColor"/></svg></div>
+    </div>
+    <p class="why"><b>寓意</b>：聚焦框锁定光标位置，圆点「落贴」——<b>精准、无打断地贴到光标处</b>。落点刻意下移 1 单位制造落定张力。</p>
+    <p class="pick mono">优势：辨识度高、16px 极稳；语言偏「工具/精确」，气质冷静。</p>
+  </div>
+
+  <div class="card">
+    <span class="tag mono">GEOMETRY + MOTION LINES</span>
+    <h2>V4 浮层升起</h2>
+    <div class="stage">
+      <svg viewBox="0 0 100 100"><rect x="29" y="22" width="42" height="30" rx="9" fill="currentColor"/><g fill="none" stroke="currentColor" stroke-linecap="round"><path d="M 30 66 Q 50 74, 70 66" stroke-width="4.5"/><path d="M 38 80 Q 50 85, 62 80" stroke-width="4" opacity="0.55"/></g></svg>
+    </div>
+    <div class="row3">
+      <div class="cell light"><svg viewBox="0 0 100 100" style="width:70%;height:70%"><rect x="29" y="22" width="42" height="30" rx="9" fill="currentColor"/><g fill="none" stroke="currentColor" stroke-linecap="round"><path d="M 30 66 Q 50 74, 70 66" stroke-width="4.5"/><path d="M 38 80 Q 50 85, 62 80" stroke-width="4" opacity="0.55"/></g></svg></div>
+      <div class="cell dark"><svg viewBox="0 0 100 100" style="width:70%;height:70%"><rect x="29" y="22" width="42" height="30" rx="9" fill="currentColor"/><g fill="none" stroke="currentColor" stroke-linecap="round"><path d="M 30 66 Q 50 74, 70 66" stroke-width="4.5"/><path d="M 38 80 Q 50 85, 62 80" stroke-width="4" opacity="0.55"/></g></svg></div>
+      <div class="cell small"><svg viewBox="0 0 100 100"><rect x="29" y="22" width="42" height="30" rx="9" fill="currentColor"/><g fill="none" stroke="currentColor" stroke-linecap="round"><path d="M 30 66 Q 50 74, 70 66" stroke-width="4.5"/><path d="M 38 80 Q 50 85, 62 80" stroke-width="4" opacity="0.55"/></g></svg><svg class="s16" viewBox="0 0 100 100"><rect x="29" y="22" width="42" height="30" rx="9" fill="currentColor"/><g fill="none" stroke="currentColor" stroke-linecap="round"><path d="M 30 66 Q 50 74, 70 66" stroke-width="4.5"/><path d="M 38 80 Q 50 85, 62 80" stroke-width="4" opacity="0.55"/></g></svg></div>
+    </div>
+    <p class="why"><b>寓意</b>：速贴面板「浮」在任何工作之上——实心面板 + 两道悬浮波，名字里的 Float 直译成图形。</p>
+    <p class="pick mono">优势：与产品名强绑定；悬浮波在 16px 会简化成一条弧，需小尺寸专用稿。</p>
+  </div>
+
+  <div class="card">
+    <span class="tag mono">DOT MATRIX · CAPSULES</span>
+    <h2>V5 胶囊流</h2>
+    <div class="stage">
+      <svg viewBox="0 0 100 100"><g fill="currentColor"><rect x="14" y="66" width="13" height="6" rx="3" transform="rotate(-18 20.5 69)"/><rect x="30" y="54" width="15" height="6.5" rx="3.25" transform="rotate(-26 37.5 57.25)"/><rect x="47" y="43" width="16" height="7" rx="3.5" transform="rotate(-33 55 46.5)"/><rect x="65" y="34" width="14" height="6.5" rx="3.25" transform="rotate(-40 72 37.25)"/><circle cx="84" cy="27" r="6"/></g></svg>
+    </div>
+    <div class="row3">
+      <div class="cell light"><svg viewBox="0 0 100 100" style="width:70%;height:70%"><g fill="currentColor"><rect x="14" y="66" width="13" height="6" rx="3" transform="rotate(-18 20.5 69)"/><rect x="30" y="54" width="15" height="6.5" rx="3.25" transform="rotate(-26 37.5 57.25)"/><rect x="47" y="43" width="16" height="7" rx="3.5" transform="rotate(-33 55 46.5)"/><rect x="65" y="34" width="14" height="6.5" rx="3.25" transform="rotate(-40 72 37.25)"/><circle cx="84" cy="27" r="6"/></g></svg></div>
+      <div class="cell dark"><svg viewBox="0 0 100 100" style="width:70%;height:70%"><g fill="currentColor"><rect x="14" y="66" width="13" height="6" rx="3" transform="rotate(-18 20.5 69)"/><rect x="30" y="54" width="15" height="6.5" rx="3.25" transform="rotate(-26 37.5 57.25)"/><rect x="47" y="43" width="16" height="7" rx="3.5" transform="rotate(-33 55 46.5)"/><rect x="65" y="34" width="14" height="6.5" rx="3.25" transform="rotate(-40 72 37.25)"/><circle cx="84" cy="27" r="6"/></g></svg></div>
+      <div class="cell small"><svg viewBox="0 0 100 100"><g fill="currentColor"><rect x="14" y="66" width="13" height="6" rx="3" transform="rotate(-18 20.5 69)"/><rect x="30" y="54" width="15" height="6.5" rx="3.25" transform="rotate(-26 37.5 57.25)"/><rect x="47" y="43" width="16" height="7" rx="3.5" transform="rotate(-33 55 46.5)"/><rect x="65" y="34" width="14" height="6.5" rx="3.25" transform="rotate(-40 72 37.25)"/><circle cx="84" cy="27" r="6"/></g></svg><svg class="s16" viewBox="0 0 100 100"><g fill="currentColor"><rect x="14" y="66" width="13" height="6" rx="3" transform="rotate(-18 20.5 69)"/><rect x="30" y="54" width="15" height="6.5" rx="3.25" transform="rotate(-26 37.5 57.25)"/><rect x="47" y="43" width="16" height="7" rx="3.5" transform="rotate(-33 55 46.5)"/><rect x="65" y="34" width="14" height="6.5" rx="3.25" transform="rotate(-40 72 37.25)"/><circle cx="84" cy="27" r="6"/></g></svg></div>
+    </div>
+    <p class="why"><b>寓意</b>：历史条目沿轨迹加速飞行、汇入落点——「从历史到光标」的<b>速度感</b>。胶囊沿切线旋转，动能自左下指向右上。</p>
+    <p class="pick mono">风险：16px 下只剩斜向虚线，动势在、语义弱。</p>
+  </div>
+
+  <div class="card">
+    <span class="tag mono">NODE NETWORK</span>
+    <h2>V6 节点汇入</h2>
+    <div class="stage">
+      <svg viewBox="0 0 100 100"><g fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M 31 31 Q 52 33, 63 45" opacity="0.55"/><path d="M 25 50 L 61 50"/><path d="M 31 69 Q 52 67, 63 55" opacity="0.55"/></g><g fill="currentColor"><circle cx="24" cy="30" r="5.5"/><circle cx="18" cy="50" r="4.5" opacity="0.75"/><circle cx="24" cy="70" r="5.5"/><circle cx="72" cy="50" r="8"/></g></svg>
+    </div>
+    <div class="row3">
+      <div class="cell light"><svg viewBox="0 0 100 100" style="width:70%;height:70%"><g fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M 31 31 Q 52 33, 63 45" opacity="0.55"/><path d="M 25 50 L 61 50"/><path d="M 31 69 Q 52 67, 63 55" opacity="0.55"/></g><g fill="currentColor"><circle cx="24" cy="30" r="5.5"/><circle cx="18" cy="50" r="4.5" opacity="0.75"/><circle cx="24" cy="70" r="5.5"/><circle cx="72" cy="50" r="8"/></g></svg></div>
+      <div class="cell dark"><svg viewBox="0 0 100 100" style="width:70%;height:70%"><g fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M 31 31 Q 52 33, 63 45" opacity="0.55"/><path d="M 25 50 L 61 50"/><path d="M 31 69 Q 52 67, 63 55" opacity="0.55"/></g><g fill="currentColor"><circle cx="24" cy="30" r="5.5"/><circle cx="18" cy="50" r="4.5" opacity="0.75"/><circle cx="24" cy="70" r="5.5"/><circle cx="72" cy="50" r="8"/></g></svg></div>
+      <div class="cell small"><svg viewBox="0 0 100 100"><g fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M 31 31 Q 52 33, 63 45" opacity="0.55"/><path d="M 25 50 L 61 50"/><path d="M 31 69 Q 52 67, 63 55" opacity="0.55"/></g><g fill="currentColor"><circle cx="24" cy="30" r="5.5"/><circle cx="18" cy="50" r="4.5" opacity="0.75"/><circle cx="24" cy="70" r="5.5"/><circle cx="72" cy="50" r="8"/></g></svg><svg class="s16" viewBox="0 0 100 100"><g fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M 31 31 Q 52 33, 63 45" opacity="0.55"/><path d="M 25 50 L 61 50"/><path d="M 31 69 Q 52 67, 63 55" opacity="0.55"/></g><g fill="currentColor"><circle cx="24" cy="30" r="5.5"/><circle cx="18" cy="50" r="4.5" opacity="0.75"/><circle cx="24" cy="70" r="5.5"/><circle cx="72" cy="50" r="8"/></g></svg></div>
+    </div>
+    <p class="why"><b>寓意</b>：多条历史（左列大小节点）经由曲线<b>汇入唯一落点</b>（右实心大节点）——多选一的粘贴决策瞬间。</p>
+    <p class="pick mono">优势：叙事完整；节点网络图形在效率工具里不常见，差异化好。</p>
+  </div>
+
+<div style="max-width:1200px;margin:64px auto 24px;">
+  <div class="kicker mono" style="font-size:12px;letter-spacing:.22em;color:#5E7CE2;text-transform:uppercase;">ROUND 2 · FLOAT PANEL FAMILY</div>
+  <h1 style="font-size:26px;font-weight:600;margin-top:10px;">浮层系延伸 — V4 方向的 5 种「浮」法</h1>
+  <p style="color:#9AA0A6;font-size:14px;line-height:1.75;margin-top:8px;">统一气质：<b style="color:#C6CBD4">实心圆润面板、无内部线条</b>；差异只在表达「浮」的语言——波、影、轨迹、尾巴、渐隐、倾斜。</p>
+</div>
+
+<div class="grid">
+
+  <div class="card">
+    <span class="tag mono">BASELINE</span>
+    <h2>V4 原型 · 悬浮波</h2>
+    <div class="stage">
+      <svg viewBox="0 0 100 100"><rect x="29" y="22" width="42" height="30" rx="9" fill="currentColor"/><g fill="none" stroke="currentColor" stroke-linecap="round"><path d="M 30 66 Q 50 74, 70 66" stroke-width="4.5"/><path d="M 38 80 Q 50 85, 62 80" stroke-width="4" opacity="0.55"/></g></svg>
+    </div>
+    <p class="why"><b>浮 = 两道悬浮波</b>。面板与波之间的大间隙制造高度，波是「悬浮力场」。</p>
+  </div>
+
+  <div class="card">
+    <span class="tag mono">SHADOW DOCK</span>
+    <h2>V7 影托</h2>
+    <div class="stage">
+      <svg viewBox="0 0 100 100"><rect x="28" y="18" width="44" height="36" rx="10" fill="currentColor"/><ellipse cx="50" cy="79" rx="20" ry="5" fill="currentColor"/></svg>
+    </div>
+    <p class="why"><b>浮 = 大间距 + 地面影</b>。元素最少（仅 2 个），扁椭圆是「地面」，间距即悬浮高度。最极简的一版。</p>
+  </div>
+
+  <div class="card">
+    <span class="tag mono">LIFT TRAIL</span>
+    <h2>V8 升起轨迹</h2>
+    <div class="stage">
+      <svg viewBox="0 0 100 100"><rect x="34" y="18" width="44" height="34" rx="10" fill="currentColor"/><g fill="none" stroke="currentColor" stroke-linecap="round"><path d="M 20 74 L 33 61" stroke-width="5.5"/><path d="M 33 85 L 44 74" stroke-width="5" opacity="0.55"/></g></svg>
+    </div>
+    <p class="why"><b>浮 = 刚弹出的瞬间</b>。两道斜向运动线记录面板「从输入位弹起」的路径，定格快捷键按下后的那 100ms。动势最强。</p>
+  </div>
+
+  <div class="card">
+    <span class="tag mono">TOOLTIP TIP</span>
+    <h2>V9 气泡尾巴</h2>
+    <div class="stage">
+      <svg viewBox="0 0 100 100"><path d="M 34 20 L 66 20 Q 76 20 76 30 L 76 44 Q 76 54 66 54 L 57 54 L 50 64 L 43 54 L 34 54 Q 24 54 24 44 L 24 30 Q 24 20 34 20 Z" fill="currentColor"/></svg>
+    </div>
+    <p class="why"><b>浮 = 指向输入位的尾巴</b>。tooltip 是「悬浮在你工作上方的小窗」的原生符号，尾巴指向当前光标。单连通轮廓，小尺寸最整。</p>
+  </div>
+
+  <div class="card">
+    <span class="tag mono">FADE LADDER</span>
+    <h2>V10 浮梯残影</h2>
+    <div class="stage">
+      <svg viewBox="0 0 100 100"><rect x="28" y="16" width="44" height="34" rx="10" fill="currentColor"/><rect x="36" y="62" width="28" height="7" rx="3.5" fill="currentColor"/><rect x="42" y="77" width="16" height="6" rx="3" fill="currentColor" opacity="0.55"/></svg>
+    </div>
+    <p class="why"><b>浮 = 渐隐的历史序列</b>。面板下方两道递减圆角条是「上浮时留下的旧条目」——剪贴板历史的层叠感，但不做成复制图标。</p>
+  </div>
+
+  <div class="card">
+    <span class="tag mono">TILT + SPARK</span>
+    <h2>V11 微倾 + 光点</h2>
+    <div class="stage">
+      <svg viewBox="0 0 100 100"><rect x="26" y="26" width="48" height="34" rx="10" fill="currentColor" transform="rotate(-7 50 43)"/><path d="M 78 10 Q 79.5 16.5 86 18 Q 79.5 19.5 78 26 Q 76.5 19.5 70 18 Q 76.5 16.5 78 10 Z" fill="currentColor"/></svg>
+    </div>
+    <p class="why"><b>浮 = 轻、随手一贴</b>。-7° 微倾打破呆板，右上角四角光点是「轻盈闪现」。六案中气质最活泼。</p>
+  </div>
+
+<div style="max-width:1200px;margin:64px auto 24px;">
+  <div class="kicker mono" style="font-size:12px;letter-spacing:.22em;color:#5E7CE2;text-transform:uppercase;">ROUND 3 · SOFT TEXTURE · FLOAT PANEL</div>
+  <h1 style="font-size:26px;font-weight:600;margin-top:10px;">质感浮层 — 已锁定的赛道</h1>
+  <p style="color:#9AA0A6;font-size:14px;line-height:1.75;margin-top:8px;">
+  统一质感语言：<b style="color:#C6CBD4">对角三段渐变底板 + 左上光斑 + 边缘提亮 + 柔和投影 + 渐变内容条</b>；
+  差异在浮层的形态与细节叙事。V9 / V4 为首批样张。</p>
+</div>
+
+<div class="grid">
+
+  <div class="card">
+    <span class="tag mono">SOFT · TOOLTIP</span>
+    <h2>V9 气泡尾巴（质感）</h2>
+    <div class="stage">
+      <svg viewBox="0 0 100 100"><defs><linearGradient id="t9" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5AA5FF"/><stop offset="0.5" stop-color="#1D6FF0"/><stop offset="1" stop-color="#0938B8"/></linearGradient><radialGradient id="g9" cx="0.28" cy="0.16" r="0.9"><stop offset="0" stop-color="#A7CDFF" stop-opacity="0.9"/><stop offset="0.55" stop-color="#A7CDFF" stop-opacity="0.12"/><stop offset="1" stop-color="#A7CDFF" stop-opacity="0"/></radialGradient><linearGradient id="p9" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#DCE9FB"/></linearGradient><linearGradient id="l9" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2E8BFF"/><stop offset="1" stop-color="#0A5ED7"/></linearGradient><filter id="s9" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#062B7A" flood-opacity="0.5"/></filter></defs><rect x="2" y="2" width="96" height="96" rx="22" fill="url(#t9)"/><rect x="2" y="2" width="96" height="96" rx="22" fill="url(#g9)"/><path d="M 34 18 L 66 18 Q 77 18 77 29 L 77 42 Q 77 53 66 53 L 57 53 L 50 64 L 43 53 L 34 53 Q 23 53 23 42 L 23 29 Q 23 18 34 18 Z" fill="url(#p9)" filter="url(#s9)"/><rect x="33" y="28.5" width="34" height="6" rx="3" fill="url(#l9)"/><rect x="33" y="39.5" width="21" height="6" rx="3" fill="url(#l9)" opacity="0.55"/></svg>
+    </div>
+    <p class="why"><b>速贴面板本体</b>：tooltip 指向光标，两条渐变内容条 = 历史条目。16px 轮廓最整，语义最准。</p>
+  </div>
+
+  <div class="card">
+    <span class="tag mono">SOFT · HOVER WAVES</span>
+    <h2>V4 悬浮波（质感）</h2>
+    <div class="stage">
+      <svg viewBox="0 0 100 100"><defs><linearGradient id="t4" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5AA5FF"/><stop offset="0.5" stop-color="#1D6FF0"/><stop offset="1" stop-color="#0938B8"/></linearGradient><radialGradient id="g4" cx="0.28" cy="0.16" r="0.9"><stop offset="0" stop-color="#A7CDFF" stop-opacity="0.9"/><stop offset="0.55" stop-color="#A7CDFF" stop-opacity="0.12"/><stop offset="1" stop-color="#A7CDFF" stop-opacity="0"/></radialGradient><linearGradient id="p4" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#DCE9FB"/></linearGradient><filter id="s4" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="4.5" stdDeviation="4.5" flood-color="#062B7A" flood-opacity="0.5"/></filter></defs><rect x="2" y="2" width="96" height="96" rx="22" fill="url(#t4)"/><rect x="2" y="2" width="96" height="96" rx="22" fill="url(#g4)"/><rect x="25" y="20" width="50" height="35" rx="11" fill="url(#p4)" filter="url(#s4)"/><path d="M 30 68 Q 50 76, 70 68" fill="none" stroke="#BFD9FF" stroke-width="5" stroke-linecap="round"/><path d="M 38 82 Q 50 87, 62 82" fill="none" stroke="#BFD9FF" stroke-width="4.5" stroke-linecap="round" opacity="0.55"/></svg>
+    </div>
+    <p class="why"><b>「浮」的直译</b>：面板下方两道半透明悬浮波。元素最少、气质最轻盈。</p>
+  </div>
+
+  <div class="card">
+    <span class="tag mono">SOFT · FADE LADDER</span>
+    <h2>V12 渐隐浮梯</h2>
+    <div class="stage">
+      <svg viewBox="0 0 100 100"><defs><linearGradient id="t12" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5AA5FF"/><stop offset="0.5" stop-color="#1D6FF0"/><stop offset="1" stop-color="#0938B8"/></linearGradient><radialGradient id="g12" cx="0.28" cy="0.16" r="0.9"><stop offset="0" stop-color="#A7CDFF" stop-opacity="0.9"/><stop offset="0.55" stop-color="#A7CDFF" stop-opacity="0.12"/><stop offset="1" stop-color="#A7CDFF" stop-opacity="0"/></radialGradient><linearGradient id="p12" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#DCE9FB"/></linearGradient><filter id="s12" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#062B7A" flood-opacity="0.5"/></filter></defs><rect x="2" y="2" width="96" height="96" rx="22" fill="url(#t12)"/><rect x="2" y="2" width="96" height="96" rx="22" fill="url(#g12)"/><rect x="26" y="16" width="48" height="35" rx="11" fill="url(#p12)" filter="url(#s12)"/><rect x="34" y="62" width="32" height="7.5" rx="3.75" fill="#FFFFFF" opacity="0.5"/><rect x="40" y="77" width="20" height="6.5" rx="3.25" fill="#FFFFFF" opacity="0.28"/></svg>
+    </div>
+    <p class="why"><b>历史渐隐</b>：面板下方两道渐淡的白条是「上浮时留下的旧条目」，剪贴板历史的层叠叙事。</p>
+  </div>
+
+  <div class="card">
+    <span class="tag mono">GLASS · DARK</span>
+    <h2>V13 深色玻璃</h2>
+    <div class="stage">
+      <svg viewBox="0 0 100 100"><defs><linearGradient id="t13" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2A3F6B"/><stop offset="0.55" stop-color="#16224A"/><stop offset="1" stop-color="#0A1230"/></linearGradient><radialGradient id="g13" cx="0.28" cy="0.16" r="0.9"><stop offset="0" stop-color="#4F8FFF" stop-opacity="0.55"/><stop offset="1" stop-color="#4F8FFF" stop-opacity="0"/></radialGradient><linearGradient id="l13" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#6FB2FF"/><stop offset="1" stop-color="#2E7BFF"/></linearGradient><filter id="s13" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000000" flood-opacity="0.45"/></filter></defs><rect x="2" y="2" width="96" height="96" rx="22" fill="url(#t13)"/><rect x="2" y="2" width="96" height="96" rx="22" fill="url(#g13)"/><path d="M 34 18 L 66 18 Q 77 18 77 29 L 77 42 Q 77 53 66 53 L 57 53 L 50 64 L 43 53 L 34 53 Q 23 53 23 42 L 23 29 Q 23 18 34 18 Z" fill="#FFFFFF" fill-opacity="0.14" stroke="#FFFFFF" stroke-opacity="0.4" stroke-width="1.6" filter="url(#s13)"/><rect x="33" y="28.5" width="34" height="6" rx="3" fill="url(#l13)"/><rect x="33" y="39.5" width="21" height="6" rx="3" fill="url(#l13)" opacity="0.5"/></svg>
+    </div>
+    <p class="why"><b>深夜磨砂浮窗</b>：半透明玻璃面板 + 亮边描边 + 亮蓝内容条。七案中唯一深色底，与浅色系形成两极。</p>
+  </div>
+
+  <div class="card">
+    <span class="tag mono">SOFT · CARET</span>
+    <h2>V14 光标贴入</h2>
+    <div class="stage">
+      <svg viewBox="0 0 100 100"><defs><linearGradient id="t14" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5AA5FF"/><stop offset="0.5" stop-color="#1D6FF0"/><stop offset="1" stop-color="#0938B8"/></linearGradient><radialGradient id="g14" cx="0.28" cy="0.16" r="0.9"><stop offset="0" stop-color="#A7CDFF" stop-opacity="0.9"/><stop offset="0.55" stop-color="#A7CDFF" stop-opacity="0.12"/><stop offset="1" stop-color="#A7CDFF" stop-opacity="0"/></radialGradient><linearGradient id="p14" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#DCE9FB"/></linearGradient><linearGradient id="l14" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2E8BFF"/><stop offset="1" stop-color="#0A5ED7"/></linearGradient><filter id="s14" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#062B7A" flood-opacity="0.5"/></filter></defs><rect x="2" y="2" width="96" height="96" rx="22" fill="url(#t14)"/><rect x="2" y="2" width="96" height="96" rx="22" fill="url(#g14)"/><rect x="24" y="18" width="52" height="36" rx="11" fill="url(#p14)" filter="url(#s14)"/><rect x="34" y="29" width="4.5" height="15" rx="2.25" fill="url(#l14)"/><rect x="43" y="32" width="23" height="6" rx="3" fill="url(#l14)" opacity="0.5"/><path d="M 30 68 Q 50 76, 70 68" fill="none" stroke="#BFD9FF" stroke-width="5" stroke-linecap="round" opacity="0.9"/><path d="M 38 82 Q 50 87, 62 82" fill="none" stroke="#BFD9FF" stroke-width="4.5" stroke-linecap="round" opacity="0.5"/></svg>
+    </div>
+    <p class="why"><b>贴到光标处</b>：面板内竖形光标 + 文本条，下方悬浮波。叙事最具体——「内容正贴进输入位」。</p>
+  </div>
+
+  <div class="card">
+    <span class="tag mono">SOFT · DUO WINDOWS</span>
+    <h2>V15 双浮窗</h2>
+    <div class="stage">
+      <svg viewBox="0 0 100 100"><defs><linearGradient id="t15" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5AA5FF"/><stop offset="0.5" stop-color="#1D6FF0"/><stop offset="1" stop-color="#0938B8"/></linearGradient><radialGradient id="g15" cx="0.28" cy="0.16" r="0.9"><stop offset="0" stop-color="#A7CDFF" stop-opacity="0.9"/><stop offset="0.55" stop-color="#A7CDFF" stop-opacity="0.12"/><stop offset="1" stop-color="#A7CDFF" stop-opacity="0"/></radialGradient><linearGradient id="p15" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#DCE9FB"/></linearGradient><linearGradient id="l15" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2E8BFF"/><stop offset="1" stop-color="#0A5ED7"/></linearGradient><filter id="s15" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#062B7A" flood-opacity="0.5"/></filter></defs><rect x="2" y="2" width="96" height="96" rx="22" fill="url(#t15)"/><rect x="2" y="2" width="96" height="96" rx="22" fill="url(#g15)"/><rect x="32" y="13" width="40" height="27" rx="9" fill="#FFFFFF" opacity="0.45"/><rect x="24" y="30" width="52" height="36" rx="11" fill="url(#p15)" filter="url(#s15)"/><rect x="34" y="41" width="24" height="6" rx="3" fill="url(#l15)"/><rect x="34" y="52" width="32" height="6" rx="3" fill="url(#l15)" opacity="0.5"/></svg>
+    </div>
+    <p class="why"><b>新旧两窗</b>：半透明旧条目退居后方，实心新条目在前——「浮起最新一条」的层次感。</p>
+  </div>
+
+  <div class="card">
+    <span class="tag mono">SOFT · GLOW ARC</span>
+    <h2>V16 升起弧光</h2>
+    <div class="stage">
+      <svg viewBox="0 0 100 100"><defs><linearGradient id="t16" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5AA5FF"/><stop offset="0.5" stop-color="#1D6FF0"/><stop offset="1" stop-color="#0938B8"/></linearGradient><radialGradient id="g16" cx="0.28" cy="0.16" r="0.9"><stop offset="0" stop-color="#A7CDFF" stop-opacity="0.9"/><stop offset="0.55" stop-color="#A7CDFF" stop-opacity="0.12"/><stop offset="1" stop-color="#A7CDFF" stop-opacity="0"/></radialGradient><linearGradient id="p16" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#DCE9FB"/></linearGradient><linearGradient id="a16" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#CFE4FF"/><stop offset="1" stop-color="#7FB6FF"/></linearGradient><filter id="s16f" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#062B7A" flood-opacity="0.5"/></filter><filter id="b16" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="1.4"/></filter></defs><rect x="2" y="2" width="96" height="96" rx="22" fill="url(#t16)"/><rect x="2" y="2" width="96" height="96" rx="22" fill="url(#g16)"/><rect x="27" y="19" width="46" height="35" rx="11" fill="url(#p16)" filter="url(#s16f)"/><path d="M 22 68 Q 50 79, 78 68" fill="none" stroke="url(#a16)" stroke-width="6" stroke-linecap="round" filter="url(#b16)" opacity="0.95"/></svg>
+    </div>
+    <p class="why"><b>悬浮力场</b>：面板下一道发光托弧（高斯模糊发光），比双波更凝练。</p>
+  </div>
+
+</div>
+</body>
+</html>
