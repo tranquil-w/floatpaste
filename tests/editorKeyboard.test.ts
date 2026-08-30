@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { getEditorKeyboardAction } from "../src/features/editor/keyboard.ts";
+import { getEditorKeyboardAction, isLocalEscapeTarget } from "../src/features/editor/keyboard.ts";
 
 test("编辑窗口在未弹出确认框时仍保留 Esc 请求关闭", () => {
   const action = getEditorKeyboardAction({
@@ -40,5 +40,13 @@ test("未保存确认框打开后，Esc 应取消弹窗，Enter 应触发主操�
 
   assert.equal(cancelAction, "confirm-cancel");
   assert.equal(primaryAction, "confirm-primary");
+});
+
+test("带 local 标记的聚焦元素让窗口级 Esc 关闭让位", () => {
+  const localInput = { dataset: { escScope: "local" } };
+  const plainElement = { dataset: {} };
+  assert.equal(isLocalEscapeTarget(localInput as unknown as HTMLElement), true);
+  assert.equal(isLocalEscapeTarget(plainElement as unknown as HTMLElement), false);
+  assert.equal(isLocalEscapeTarget(null), false);
 });
 

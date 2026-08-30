@@ -1,16 +1,20 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { deleteItem, hideEditor as hideEditorWindow } from "../../bridge/commands";
+import { getImageUrl } from "../../bridge/imageUrl";
 import { applyClipsChanged } from "../../shared/queries/clipsCache";
 import { EDITOR_SESSION_END_EVENT, EDITOR_SESSION_START_EVENT } from "../../bridge/events";
 import { getErrorMessage } from "../../shared/utils/error";
+import { formatFileSize } from "../../shared/utils/clipDisplay";
+import { formatDateTime } from "../../shared/utils/time";
 import { isTauriRuntime } from "../../bridge/runtime";
 import { useAppEvent } from "../../shared/hooks/useAppEvent";
 import { useArmedConfirm } from "../../shared/hooks/useArmedConfirm";
 import { LoadingSpinner } from "../../shared/ui/LoadingSpinner";
 import { useItemDetailQuery, useUpdateTextMutation } from "../../shared/queries/clipQueries";
+import type { ClipItemDetail } from "../../shared/types/clips";
 import { useEditorStore, type EditorSession } from "./store";
-import { getEditorKeyboardAction, moveFocusInDialog } from "./keyboard";
+import { getEditorKeyboardAction, isLocalEscapeTarget, moveFocusInDialog } from "./keyboard";
 import { TagEditor } from "./tagEditor";
 
 export function EditorShell() {
@@ -41,7 +45,7 @@ export function EditorShell() {
   const handleSaveAndCloseRef = useRef<() => Promise<void>>(async () => {});
   const closeConfirmOpenRef = useRef(closeConfirmOpen);
   const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // 两段式删除：待确认目标为当前条目 id，渲染为“确认删除”，超时或切换条目自动撤销
+  // 两段式删除：待确认目标为当前条目 id，渲染为"确认删除"，超时或切换条目自动撤销
   const {
     armedTarget: deleteArmedItemId,
     request: requestArmedDelete,
@@ -101,6 +105,11 @@ export function EditorShell() {
       });
 
       if (!action) {
+        return;
+      }
+
+      // 本地组件（如标签输入框）正在消费 Esc（清空输入/收起浮层）时，窗口级关闭让位
+      if (action === "request-close" && isLocalEscapeTarget(document.activeElement)) {
         return;
       }
 
@@ -205,6 +214,34 @@ export function EditorShell() {
     resetDeleteArmed();
   }, [session?.itemId]);
 
+  // 图片条目的大图预览地址：resolve + asset 协议转换与搜索窗口共用同一实现，
+  // 浏览器预览模式返回内置占位图，解析失败（文件丢失等）降级为占位文案
+  const imageDetail = detailQuery.data?.type === "image" ? detailQuery.data : null;
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const [imagePreviewFailed, setImagePreviewFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setImagePreviewUrl(null);
+    setImagePreviewFailed(false);
+    if (!imageDetail?.imagePath) {
+      return;
+    }
+    void getImageUrl(imageDetail.imagePath).then((url) => {
+      if (cancelled) {
+        return;
+      }
+      if (url) {
+        setImagePreviewUrl(url);
+      } else {
+        setImagePreviewFailed(true);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [imageDetail?.id, imageDetail?.imagePath]);
+
   async function saveCurrentText() {
     if (!session || detailQuery.data?.type !== "text") {
       return false;
@@ -271,7 +308,8 @@ export function EditorShell() {
     closeConfirmOpenRef.current = closeConfirmOpen;
   });
 
-  const isTextItem = detailQuery.data?.type === "text";
+  const detail = detailQuery.data;
+  const isTextItem = detail?.type === "text";
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-pg-canvas-default text-pg-fg-default">
@@ -286,79 +324,164 @@ export function EditorShell() {
         </div>
       ) : null}
 
-      <main className="flex min-h-0 flex-1 flex-col px-5 py-4">
+      <main className="flex min-h-0 flex-1 flex-col">
         {!session ? (
-          <div className="flex h-full flex-col items-center justify-center gap-1">
-            <p className="text-sm text-pg-fg-muted">选择一个文本条目开始编辑</p>
-            <p className="text-xs text-pg-fg-subtle">
-              在速贴面板或搜索结果中，选中文本后按 Ctrl+Enter
-            </p>
+          <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
+            <svg
+              aria-hidden="true"
+              className="h-10 w-10 text-pg-fg-subtle"
+              fill="none"
+              stroke="currentColor"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="1.5"
+              viewBox="0 0 24 24"
+            >
+              <rect height="4" rx="1" width="8" x="8" y="3" />
+              <path d="M16 5h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2" />
+            </svg>
+            <div>
+              <p className="text-sm text-pg-fg-muted">选择一个文本条目开始编辑</p>
+              <p className="mt-1.5 flex items-center justify-center gap-1 text-xs text-pg-fg-subtle">
+                在速贴面板或搜索结果中选中文本后按
+                <Kbd>Ctrl</Kbd>
+                <span aria-hidden="true">+</span>
+                <Kbd>Enter</Kbd>
+              </p>
+            </div>
           </div>
         ) : detailQuery.isLoading ? (
           <div className="flex h-full items-center justify-center">
             <LoadingSpinner size="sm" text="正在加载条目内容..." />
           </div>
-        ) : !detailQuery.data ? (
+        ) : !detail ? (
           <div className="flex h-full items-center justify-center text-sm text-pg-fg-muted">
             未找到对应条目
           </div>
-        ) : isTextItem ? (
-          <div className="flex h-full min-h-0 flex-col gap-3">
-            <TagEditor
-              itemId={detailQuery.data.id}
-              tags={detailQuery.data.tags}
-              onError={(message) => {
-                setNoticeMessage(null);
-                setErrorMessage(message);
-              }}
-            />
-            <textarea
-              ref={textareaRef}
-              className="h-full w-full min-h-0 flex-1 resize-none rounded-md border border-pg-border-default bg-pg-canvas-subtle px-5 py-5 text-[14px] leading-relaxed text-pg-fg-default outline-none transition-colors focus:border-pg-accent-fg focus:bg-pg-canvas-inset focus-visible:outline-none"
-              onChange={(event) => setDraftText(event.target.value)}
-              placeholder="在此输入或修改文本..."
-              value={draftText}
-            />
-          </div>
         ) : (
-          <div className="rounded-lg border border-pg-border-default bg-pg-canvas-subtle p-5">
-            <h2 className="text-base font-semibold text-pg-fg-muted">此条目内容不支持编辑</h2>
-            <p className="mt-2 text-sm leading-6 text-pg-fg-muted">
-              只有文本类型的条目可以编辑内容。你仍可以在下方为它管理标签。
-            </p>
-            <div className="mt-4">
+          <div className="flex h-full min-h-0 flex-col px-5 pb-3 pt-4">
+            <header className="flex shrink-0 items-center justify-between gap-3">
+              <div className="flex min-w-0 flex-wrap items-center gap-x-2 text-xs text-pg-fg-subtle">
+                {buildEditorMeta(detail, draftText).map((meta, index) => (
+                  <span className="min-w-0" key={`${index}-${meta}`}>
+                    {index > 0 ? <span aria-hidden="true">· </span> : null}
+                    {meta}
+                  </span>
+                ))}
+              </div>
+              <button
+                aria-label={deleteArmed ? "再次点击确认删除条目" : "删除条目"}
+                className={`flex h-7 shrink-0 items-center justify-center rounded-md text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                  deleteArmed
+                    ? "min-w-[4.25rem] bg-pg-danger-subtle px-2 text-pg-danger-fg"
+                    : "w-7 text-pg-fg-muted hover:bg-pg-danger-subtle hover:text-pg-danger-fg"
+                }`}
+                disabled={!session}
+                onClick={handleDeleteItem}
+                title={deleteArmed ? "再次点击确认删除" : "删除条目"}
+                type="button"
+              >
+                {deleteArmed ? (
+                  "确认删除"
+                ) : (
+                  <svg
+                    aria-hidden="true"
+                    className="h-4 w-4"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="1.8"
+                    viewBox="0 0 24 24"
+                  >
+                    <path d="M4 7h16" />
+                    <path d="M10 4h4a1 1 0 0 1 1 1v2H9V5a1 1 0 0 1 1-1Z" />
+                    <path d="M6.5 7l.8 11.2A2 2 0 0 0 9.3 20h5.4a2 2 0 0 0 2-1.8L17.5 7" />
+                    <path d="M10 11v5M14 11v5" />
+                  </svg>
+                )}
+              </button>
+            </header>
+            {/* 标签区固定在主内容上方：建议浮层向下弹出时始终有内容区可覆盖 */}
+            <div className="mt-2.5 shrink-0">
               <TagEditor
-                itemId={detailQuery.data.id}
-                tags={detailQuery.data.tags}
+                itemId={detail.id}
                 onError={(message) => {
                   setNoticeMessage(null);
                   setErrorMessage(message);
                 }}
+                tags={detail.tags}
               />
             </div>
+            {isTextItem ? (
+              <textarea
+                ref={textareaRef}
+                className="mt-2.5 h-full min-h-0 w-full flex-1 resize-none rounded-lg border border-transparent bg-pg-canvas-subtle px-5 py-4 text-[14px] leading-relaxed text-pg-fg-default outline-none transition-colors placeholder:text-pg-fg-subtle focus:border-pg-border-accent focus:bg-pg-canvas-inset focus-visible:outline-none"
+                onChange={(event) => setDraftText(event.target.value)}
+                placeholder="在此输入或修改文本..."
+                value={draftText}
+              />
+            ) : (
+              <div className="mt-2.5 flex min-h-0 flex-1 flex-col items-center justify-center gap-3 overflow-y-auto rounded-lg bg-pg-canvas-subtle p-4">
+                {detail.type === "image" ? (
+                  imagePreviewUrl ? (
+                    <img
+                      alt="条目图片预览"
+                      className="max-h-full max-w-full rounded-md border border-pg-border-subtle object-contain"
+                      decoding="async"
+                      src={imagePreviewUrl}
+                    />
+                  ) : imagePreviewFailed ? (
+                    <p className="text-sm text-pg-fg-subtle">图片预览不可用</p>
+                  ) : (
+                    <LoadingSpinner size="sm" text="正在加载图片..." />
+                  )
+                ) : detail.type === "file" && detail.filePaths.length > 0 ? (
+                  <ul
+                    className="w-full space-y-1 text-left text-[13px] text-pg-fg-muted"
+                    role="list"
+                  >
+                    {detail.filePaths.map((path) => (
+                      <li
+                        className="truncate rounded-md bg-pg-canvas-default px-3 py-1.5"
+                        key={path}
+                        title={path}
+                      >
+                        {path}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-pg-fg-subtle">此条目内容不支持预览</p>
+                )}
+              </div>
+            )}
           </div>
         )}
       </main>
 
-      <footer className="flex shrink-0 items-center justify-between border-t border-pg-border-muted px-5 py-3">
-        <div className="flex items-center gap-3">
-          <button
-            className={`rounded-md border px-3 py-2 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-              deleteArmed
-                ? "border-pg-danger-fg bg-pg-danger-subtle text-pg-danger-fg"
-                : "border-pg-border-default text-pg-fg-muted hover:border-pg-danger-fg hover:text-pg-danger-fg"
-            }`}
-            disabled={!session}
-            onClick={() => void handleDeleteItem()}
-            type="button"
-          >
-            {deleteArmed ? "确认删除" : "删除条目"}
-          </button>
-          <span className="text-sm text-pg-fg-subtle">Ctrl+S 保存 · Esc 关闭</span>
+      <footer className="flex shrink-0 items-center justify-between bg-pg-canvas-subtle px-5 py-2">
+        <div className="flex min-w-0 items-center gap-3">
+          {isDirty ? (
+            <span className="flex shrink-0 items-center gap-1.5 text-xs font-medium text-pg-warning-fg">
+              <span
+                aria-hidden="true"
+                className="h-1.5 w-1.5 rounded-full bg-pg-warning-emphasis"
+              />
+              未保存
+            </span>
+          ) : null}
+          <span className="flex min-w-0 items-center gap-1 whitespace-nowrap text-[11px] text-pg-fg-muted">
+            <Kbd>Ctrl+S</Kbd> 保存
+            <span aria-hidden="true" className="px-0.5 text-pg-fg-subtle">
+              ·
+            </span>
+            <Kbd>Esc</Kbd> 关闭
+          </span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           <button
-            className="rounded-md border border-pg-border-default px-4 py-2 text-sm hover:bg-pg-canvas-subtle"
+            className="rounded-md border border-pg-border-default px-4 py-2 text-sm hover:bg-pg-canvas-default"
             onClick={() => void requestClose()}
             type="button"
           >
@@ -420,5 +543,38 @@ export function EditorShell() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+/** 顶部元信息行：来源 · 时间，文本附字数、图片附尺寸、文件附个数与大小 */
+function buildEditorMeta(detail: ClipItemDetail, draftText: string): string[] {
+  const meta = [detail.sourceApp ?? "未知来源", formatDateTime(detail.createdAt)];
+
+  if (detail.type === "text") {
+    meta.push(`${Array.from(draftText).length} 字`);
+    return meta;
+  }
+
+  if (detail.type === "image" && detail.imageWidth && detail.imageHeight) {
+    meta.push(`${detail.imageWidth} × ${detail.imageHeight}`);
+  }
+
+  if (detail.type === "file" && detail.fileCount > 0) {
+    meta.push(`${detail.fileCount} 个文件`);
+  }
+
+  const sizeLabel = formatFileSize(detail.fileSize ?? detail.totalSize);
+  if (sizeLabel) {
+    meta.push(sizeLabel);
+  }
+
+  return meta;
+}
+
+function Kbd({ children }: { children: ReactNode }) {
+  return (
+    <kbd className="rounded border border-pg-border-subtle bg-pg-canvas-default px-1 font-mono text-[10px] leading-3 text-pg-fg-muted">
+      {children}
+    </kbd>
   );
 }

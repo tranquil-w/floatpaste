@@ -48,6 +48,16 @@ export function getEditorKeyboardAction({
   return null;
 }
 
+/**
+ * 窗口级快捷键监听在 capture 阶段先于组件触发，无法被组件的
+ * stopPropagation 拦截。本地组件（如标签输入框）需要自行消费 Esc 时，
+ * 在聚焦元素上标记 data-esc-scope="local"，让窗口级关闭让位。
+ */
+export function isLocalEscapeTarget(element: Element | null): boolean {
+  const dataset = (element as Partial<HTMLElement> | null)?.dataset;
+  return dataset?.escScope === "local";
+}
+
 export function moveFocusInDialog({
   activeElement,
   container,

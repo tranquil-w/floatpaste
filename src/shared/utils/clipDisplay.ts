@@ -35,3 +35,22 @@ export function getClipTypeLabel(clip: FileLikeClip): string {
   }
   return "文件";
 }
+
+/** 文件大小的人读格式；非正数返回 null，由调用方决定是否省略该字段 */
+export function formatFileSize(bytes: number | null | undefined): string | null {
+  if (!bytes || bytes <= 0) {
+    return null;
+  }
+
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unitIndex = 0;
+
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+
+  const digits = unitIndex === 0 ? 0 : value >= 100 ? 0 : value >= 10 ? 1 : 2;
+  return `${value.toFixed(digits)} ${units[unitIndex]}`;
+}
