@@ -7,6 +7,11 @@ export type WindowResizeDirection =
 
 export function getCurrentWindowLabel(): "picker" | "search" | "editor" | "settings" {
   if (!isTauriRuntime()) {
+    // 浏览器预览（pnpm dev）可用 ?window=search / picker / editor 指定要预览的窗口
+    const requested = new URLSearchParams(window.location.search).get("window");
+    if (requested === "picker" || requested === "search" || requested === "editor") {
+      return requested;
+    }
     return "settings";
   }
 

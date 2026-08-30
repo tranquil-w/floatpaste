@@ -44,7 +44,7 @@ import { applyClipsChanged } from "../../shared/queries/clipsCache";
 
 const STYLES = {
   container:
-    "flex h-screen w-screen flex-col overflow-hidden rounded-lg border border-pg-border-muted bg-pg-canvas-default",
+    "flex h-screen w-screen flex-col overflow-hidden rounded-lg border border-pg-border-window bg-pg-canvas-default",
   header:
     "flex shrink-0 items-center justify-between border-b border-pg-border-subtle bg-pg-canvas-default px-3 py-1.5",
   headerDot:
@@ -69,11 +69,11 @@ const STYLES = {
     `inline-flex h-[18px] min-w-[18px] px-1.5 items-center justify-center rounded-[4px] font-mono text-[9px] font-bold transition-colors ${
       selected
         ? "bg-pg-accent-fg text-pg-fg-on-emphasis shadow-[inset_0_0_0_1px_rgba(255,255,255,0.10)]"
-        : "bg-pg-canvas-subtle text-pg-fg-subtle group-hover:bg-pg-neutral-3 group-hover:text-pg-fg-muted"
+        : "bg-pg-canvas-subtle text-pg-fg-subtle group-hover:bg-pg-canvas-inset group-hover:text-pg-fg-muted"
     }`,
   typeBadge: (selected: boolean) =>
     `shrink-0 rounded-[4px] px-1.5 py-0.5 text-[10px] font-medium ${
-      selected ? "bg-pg-canvas-default text-pg-fg-muted" : "bg-pg-neutral-3 text-pg-fg-subtle"
+      selected ? "bg-pg-canvas-default text-pg-fg-muted" : "bg-pg-canvas-inset text-pg-fg-subtle"
     }`,
 };
 
@@ -162,7 +162,8 @@ export function PickerShell() {
 
   const { cancelTooltip, handleMouseMove: handleItemMouseMove } = useHoverTooltip({
     enabled: tauriRuntime,
-    customThemeColors: settings.data?.customThemeColors,
+    themePreset: settings.data?.themePreset,
+    themeAccent: settings.data?.themeAccent,
     buildHtml: async (item, requestId) => {
       // 列表载荷不含全文截断，tooltip 显示前按需请求 detail（React Query 缓存复用）
       const [imageUrl, detail] = await Promise.all([

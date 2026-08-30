@@ -1,4 +1,4 @@
-import { keepPreviousData, useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery } from "@tanstack/react-query";
 import { searchItems } from "../../bridge/commands";
 import { queryKeys } from "../../shared/queries/queryKeys";
 import type {
@@ -8,8 +8,7 @@ import type {
   SearchResult,
 } from "../../shared/types/clips";
 
-const SEARCH_RECENT_LIMIT = 30;
-/** 关键词搜索的单页大小：滚动到底部时按 offset 继续加载，避免一次性取回大结果集 */
+/** 最近条目与关键词搜索共用同一分页大小：触底自动加载更久远的记录 */
 const SEARCH_PAGE_LIMIT = 50;
 
 function buildFilters(filter: SearchQuickFilter, tagNames: string[]): Partial<SearchFilters> {
@@ -32,7 +31,7 @@ export function createSearchRecentQueryKey(filter: SearchQuickFilter, tagNames: 
     keyword: "",
     filters: buildFilters(filter, tagNames),
     offset: 0,
-    limit: SEARCH_RECENT_LIMIT,
+    limit: SEARCH_PAGE_LIMIT,
     sort: "recent_desc",
   };
 
@@ -63,10 +62,16 @@ export function useSearchRecentQuery(
   const queryKey = createSearchRecentQueryKey(filter, tagNames);
   const query = queryKey[1];
 
-  return useQuery({
+  return useInfiniteQuery({
     queryKey,
-    // 空关键字时后端会回落到 search_recent 分支，这样最近记录与关键词搜索共用同一套筛选语义。
-    queryFn: (): Promise<SearchResult> => searchItems(query),
+    // 空关键字时后端会回落到 search_recent 分支，这样最近记录与关键词搜索共用同一套筛选语义；
+    // 分页让"最近条目"可以一直向下滚动加载更久远的记录，而不是只看到前一页
+    queryFn: ({ pageParam }): Promise<SearchResult> => searchItems({ ...query, offset: pageParam }),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage: SearchResult) =>
+      lastPage.offset + lastPage.items.length < lastPage.total
+        ? lastPage.offset + lastPage.items.length
+        : undefined,
     enabled,
     staleTime: 0,
     placeholderData: keepPreviousData,

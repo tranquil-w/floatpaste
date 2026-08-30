@@ -56,11 +56,6 @@ import { getErrorMessage } from "../../shared/utils/error";
 import { ClipTypeIcon } from "../../shared/ui/icons";
 import { LoadingSpinner } from "../../shared/ui/LoadingSpinner";
 import { getSearchKeyboardAction } from "./keyboard";
-import {
-  getSearchFilterCommitFocusTarget,
-  getSearchFilterOptionAction,
-  getSearchFilterTriggerAction,
-} from "./filterKeyboard";
 import { shouldPreventSearchItemMouseFocus } from "./itemPointer";
 import {
   getSearchItemFavoritedState,
@@ -82,75 +77,83 @@ const STYLES = {
   shell:
     "relative flex h-screen w-screen flex-col overflow-hidden bg-pg-canvas-default text-pg-fg-default",
   panel:
-    "flex h-full w-full flex-col overflow-hidden border border-pg-border-default bg-pg-canvas-default shadow-[0_20px_60px_rgba(var(--pg-shadow-color),0.18)]",
-  searchHeader: "flex items-center gap-3 border-b border-pg-border-subtle px-3 py-3",
+    "flex h-full w-full flex-col overflow-hidden border border-pg-border-window bg-pg-canvas-default shadow-[0_20px_60px_rgba(var(--pg-shadow-color),0.18)]",
+  searchHeader: "flex items-center gap-3 px-4 py-3",
   searchControl: (suspended: boolean) =>
-    `relative flex flex-1 items-center rounded-md border px-2 transition-colors ${
-      suspended
-        ? "border-pg-accent-fg bg-pg-canvas-subtle"
-        : "border-pg-border-subtle bg-pg-canvas-default"
+    `relative flex flex-1 items-center rounded-md px-2 transition-colors ${
+      // 无边框设计：键盘交出速贴面板时仅用底色差异提示状态
+      suspended ? "bg-pg-canvas-subtle" : ""
     }`,
   searchControlIcon:
     "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-pg-fg-muted",
   searchInput:
     "w-full appearance-none border-0 bg-transparent p-0 text-[17px] leading-6 outline-none shadow-none ring-0 placeholder:text-pg-fg-subtle focus:border-0 focus:outline-none focus:ring-0 focus-visible:border-0 focus-visible:outline-none focus-visible:ring-0",
-  searchFilterDivider: "mx-2 h-5 w-px shrink-0 bg-pg-border-subtle",
-  searchFilterButton:
-    "flex h-9 shrink-0 items-center gap-2 rounded-md px-2.5 text-[13px] font-medium leading-5 text-pg-fg-default transition-colors hover:bg-pg-canvas-subtle focus:bg-pg-canvas-subtle focus:outline-none",
-  searchFilterChevron: "h-3.5 w-3.5 text-pg-fg-subtle transition-transform duration-150",
-  searchFilterPanel:
-    "absolute right-0 top-[calc(100%+0.5rem)] z-30 min-w-[156px] overflow-hidden rounded-md border border-pg-border-default bg-pg-canvas-default shadow-[0_16px_40px_rgba(var(--pg-shadow-color),0.18)]",
-  searchFilterOption: (active: boolean, selected: boolean) =>
-    `flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-[13px] font-medium leading-5 transition-colors ${
-      active ? "bg-pg-canvas-subtle text-pg-fg-default" : "text-pg-fg-muted"
-    } ${selected ? "text-pg-accent-fg" : ""}`,
-  listItemShell: (selected: boolean) =>
-    `rounded-lg border transition-[border-color,background-color,box-shadow] ${
+  searchClearButton:
+    "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-pg-fg-subtle transition-colors hover:bg-pg-canvas-subtle hover:text-pg-fg-default",
+  searchFilterDivider: "mx-1 h-5 w-px shrink-0 bg-pg-border-subtle",
+  resultCount: "shrink-0 whitespace-nowrap text-xs tabular-nums text-pg-fg-subtle",
+  // 全窗口仅存的分隔线：列表区的上边界
+  filterRow:
+    "flex shrink-0 items-center gap-1 overflow-x-auto border-b border-pg-border-subtle px-4 py-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+  filterChip: (selected: boolean) =>
+    `shrink-0 rounded-md px-2.5 py-1 text-xs font-medium leading-4 transition-colors ${
       selected
-        ? "border-pg-accent-fg bg-pg-accent-subtle shadow-[inset_0_0_0_1px_rgba(var(--pg-shadow-color),0.04)]"
-        : "border-pg-border-subtle bg-pg-canvas-subtle"
+        ? "bg-pg-accent-subtle text-pg-accent-fg"
+        : "text-pg-fg-muted hover:bg-pg-canvas-subtle hover:text-pg-fg-default"
     }`,
-  listItemLayout: (selected: boolean) =>
-    `group grid w-full items-start gap-2.5 px-2 py-3 text-left transition-colors ${
-      selected ? "grid-cols-[auto,minmax(0,1fr),auto]" : "grid-cols-[auto,minmax(0,1fr)]"
-    } ${selected ? "" : "hover:bg-pg-canvas-inset"}`,
-  glyphBox: (selected: boolean) =>
-    `flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors ${
-      selected
-        ? "bg-pg-neutral-5 text-pg-fg-default shadow-[inset_0_0_0_1px_rgba(var(--pg-shadow-color),0.06)] dark:bg-pg-neutral-6"
-        : "bg-pg-canvas-subtle text-pg-fg-muted group-hover:text-pg-fg-default"
-    }`,
-  glyphIcon: "h-[18px] w-[18px]",
-  selectedActions: "col-start-3 row-start-1 flex justify-end self-start pt-1",
-  selectedActionStack: "flex items-center gap-1.5",
-  inlineMetaRow: "mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-pg-fg-subtle",
-  tagChipRow:
-    "flex items-center gap-1.5 overflow-x-auto border-b border-pg-border-subtle px-3 py-2",
+  filterRowDivider: "mx-1 h-4 w-px shrink-0 bg-pg-border-subtle",
   tagChip: (selected: boolean) =>
     `shrink-0 rounded-full px-2.5 py-1 text-[12px] leading-4 transition-colors focus:outline-none ${
       selected
         ? "bg-pg-accent-subtle text-pg-accent-fg"
-        : "bg-pg-canvas-subtle text-pg-fg-muted hover:bg-pg-canvas-inset"
+        : "text-pg-fg-muted hover:bg-pg-canvas-subtle hover:text-pg-fg-default"
     }`,
+  listItemShell: (selected: boolean) =>
+    `group relative rounded-lg border-l-2 transition-colors ${
+      selected
+        ? "border-l-pg-accent-fg bg-pg-accent-subtle"
+        : "border-l-transparent hover:bg-pg-canvas-subtle"
+    }`,
+  listItemLayout: () =>
+    "grid w-full grid-cols-[auto,minmax(0,1fr)] items-start gap-3 py-2.5 pl-3 pr-3 text-left",
+  glyphBox: (selected: boolean) =>
+    `flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-pg-canvas-inset transition-colors ${
+      selected ? "text-pg-fg-default" : "text-pg-fg-muted group-hover:text-pg-fg-default"
+    }`,
+  glyphIcon: "h-[18px] w-[18px]",
+  imageThumb: (selected: boolean) =>
+    `shrink-0 rounded-md border object-cover ${
+      selected ? "border-pg-border-default" : "border-pg-border-subtle"
+    }`,
+  imagePreviewLarge:
+    "mt-1.5 max-h-[120px] max-w-full rounded-md border border-pg-border-subtle object-contain",
+  selectedActions:
+    "absolute right-2.5 top-1.5 z-10 flex items-center gap-1 rounded-md border border-pg-border-subtle bg-pg-canvas-default p-0.5 shadow-pg-md",
+  hoverPasteButton:
+    "absolute right-2.5 top-1.5 z-10 flex h-7 items-center gap-1 rounded-md border border-pg-border-default bg-pg-canvas-default px-2 text-xs font-medium text-pg-fg-default opacity-0 shadow-pg-sm transition-opacity focus-visible:opacity-100 group-hover:opacity-100",
+  inlineMetaRow: "mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-pg-fg-subtle",
   itemTagChips: "mt-1 flex flex-wrap items-center gap-1",
   itemTagChip:
     "rounded-full bg-pg-canvas-inset px-1.5 py-0.5 text-[11px] leading-4 text-pg-fg-muted",
   itemTagOverflow: "text-[11px] leading-4 text-pg-fg-subtle",
   actionButton:
-    "flex h-8 w-8 items-center justify-center rounded-md bg-pg-accent-emphasis text-pg-fg-on-emphasis transition-colors hover:opacity-90",
+    "flex h-7 w-7 items-center justify-center rounded-md bg-pg-accent-emphasis text-pg-fg-on-emphasis transition-colors hover:opacity-90",
   actionButtonSecondary:
-    "flex h-8 w-8 items-center justify-center rounded-md border border-pg-border-default text-pg-fg-default transition-colors hover:bg-pg-canvas-subtle",
+    "flex h-7 w-7 items-center justify-center rounded-md text-pg-fg-default transition-colors hover:bg-pg-canvas-subtle",
   actionButtonDanger: (armed: boolean) =>
-    `flex h-8 items-center justify-center rounded-md border px-2 transition-colors ${
+    `flex h-7 items-center justify-center rounded-md px-2 text-xs font-medium transition-colors ${
       armed
-        ? "border-pg-danger-fg bg-pg-danger-subtle text-pg-danger-fg"
-        : "border-pg-border-default text-pg-fg-muted hover:border-pg-danger-fg hover:text-pg-danger-fg"
+        ? "bg-pg-danger-subtle text-pg-danger-fg"
+        : "text-pg-fg-muted hover:bg-pg-danger-subtle hover:text-pg-danger-fg"
     }`,
+  footer:
+    "flex shrink-0 items-center justify-center gap-x-3 overflow-x-auto bg-pg-canvas-subtle px-3 py-1.5 text-[11px] leading-4 text-pg-fg-muted [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+  footerHint: "flex shrink-0 items-center gap-1 whitespace-nowrap",
+  kbd: "rounded border border-pg-border-subtle bg-pg-canvas-default px-1 font-mono text-[10px] leading-3 text-pg-fg-muted",
 };
 
 const SEARCH_WINDOW_FIXED_WIDTH = 780;
 const SEARCH_WINDOW_MAX_HEIGHT = 620;
-const SEARCH_FILTER_PANEL_WINDOW_MARGIN = 8;
 /** 关键词进入查询的防抖：连击/IME 拼写期间不逐键触发 FTS 查询 */
 const SEARCH_INPUT_DEBOUNCE_MS = 200;
 /** 触底前预加载下一页的距离 */
@@ -174,20 +177,6 @@ async function refreshSearchQueries() {
     invalidateClipQueries(),
     queryClient.invalidateQueries({ queryKey: queryKeys.tags }),
   ]);
-}
-
-function getSectionLabel(hasKeyword: boolean) {
-  return hasKeyword ? "搜索结果" : "最近条目";
-}
-
-function getFilterLabel(filter: SearchQuickFilter) {
-  return FILTER_OPTIONS.find((option) => option.value === filter)?.label ?? "全部";
-}
-
-function getAdjacentFilter(current: SearchQuickFilter, direction: 1 | -1): SearchQuickFilter {
-  const currentIndex = FILTER_OPTIONS.findIndex((option) => option.value === current);
-  const nextIndex = (currentIndex + direction + FILTER_OPTIONS.length) % FILTER_OPTIONS.length;
-  return FILTER_OPTIONS[nextIndex]?.value ?? "all";
 }
 
 function getEmptyState(
@@ -294,16 +283,10 @@ export function SearchShell() {
   const [activeTagNames, setActiveTagNames] = useState<string[]>([]);
   // 防抖后的关键词才进查询：输入框展示即时值 keyword，查询与列表切换依据 debouncedKeyword
   const [debouncedKeyword, setDebouncedKeyword] = useState(keyword);
-  const [isFilterOpen, setIsFilterOpen] = useState(false);
-  const [highlightedFilter, setHighlightedFilter] = useState<SearchQuickFilter>("all");
   const isComposingRef = useRef(false);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
-  const filterRootRef = useRef<HTMLDivElement>(null);
-  const filterPanelRef = useRef<HTMLDivElement>(null);
-  const filterTriggerRef = useRef<HTMLButtonElement>(null);
-  const filterOptionRefs = useRef<Partial<Record<SearchQuickFilter, HTMLDivElement | null>>>({});
+  const footerRef = useRef<HTMLElement>(null);
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const filterCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resizeFrameRef = useRef<number | null>(null);
   const lastAppliedWindowHeightRef = useRef<number | null>(null);
   // 窗口高度棘轮：结构性变化（关键词/筛选/条目数/会话）时允许收缩重算，
@@ -335,12 +318,10 @@ export function SearchShell() {
   // 标签 chip 行常驻可组合筛选，不再依赖类型下拉的"标签"选项
   const tagsQuery = useTagsQuery(true);
   const settingsQuery = useSettingsQuery({ staleTime: 0 });
+  const activeQuery = hasKeyword ? searchQuery : recentQuery;
   const items = useMemo<ClipItemSummary[]>(
-    () =>
-      hasKeyword
-        ? (searchQuery.data?.pages.flatMap((page) => page.items) ?? [])
-        : (recentQuery.data?.items ?? []),
-    [hasKeyword, recentQuery.data?.items, searchQuery.data],
+    () => activeQuery.data?.pages.flatMap((page) => page.items) ?? [],
+    [activeQuery.data],
   );
   const imageCache = useImageUrlCache(items);
   const itemsRef = useRef<ClipItemSummary[]>(items);
@@ -350,7 +331,8 @@ export function SearchShell() {
   // 搜索窗口仅图片条目提供悬停预览
   const { cancelTooltip, handleMouseMove: handleItemMouseMove } = useHoverTooltip({
     enabled: tauriRuntime,
-    customThemeColors: settingsQuery.data?.customThemeColors,
+    themePreset: settingsQuery.data?.themePreset,
+    themeAccent: settingsQuery.data?.themeAccent,
     shouldShow: (item) => item.type === "image",
     buildHtml: async (item, requestId) => {
       const imageUrl = await imageCache.resolve(item);
@@ -364,42 +346,11 @@ export function SearchShell() {
       if (errorTimerRef.current) {
         clearTimeout(errorTimerRef.current);
       }
-      if (filterCloseTimerRef.current) {
-        clearTimeout(filterCloseTimerRef.current);
-      }
       if (resizeFrameRef.current) {
         cancelAnimationFrame(resizeFrameRef.current);
       }
     };
   }, []);
-
-  useEffect(() => {
-    if (!isFilterOpen) {
-      return;
-    }
-
-    const handlePointerDown = (event: globalThis.MouseEvent) => {
-      const target = event.target as Node | null;
-      if (filterRootRef.current && target && !filterRootRef.current.contains(target)) {
-        setIsFilterOpen(false);
-      }
-    };
-
-    document.addEventListener("mousedown", handlePointerDown);
-    return () => document.removeEventListener("mousedown", handlePointerDown);
-  }, [isFilterOpen]);
-
-  useEffect(() => {
-    if (!isFilterOpen) {
-      return;
-    }
-
-    const frame = requestAnimationFrame(() => {
-      filterOptionRefs.current[highlightedFilter]?.focus();
-    });
-
-    return () => cancelAnimationFrame(frame);
-  }, [highlightedFilter, isFilterOpen]);
 
   // 显示临时错误消息（3秒后自动消失）
   const showError = (message: string) => {
@@ -410,13 +361,6 @@ export function SearchShell() {
     errorTimerRef.current = setTimeout(() => {
       setErrorMessage(null);
     }, 3000);
-  };
-
-  const clearFilterCloseTimer = () => {
-    if (filterCloseTimerRef.current) {
-      clearTimeout(filterCloseTimerRef.current);
-      filterCloseTimerRef.current = null;
-    }
   };
 
   useEffect(() => {
@@ -434,12 +378,12 @@ export function SearchShell() {
     return () => clearTimeout(timer);
   }, [keyword]);
 
-  // 关键词搜索结果渐进加载：滚动接近底部时预取下一页
-  const searchHasNextPage = hasKeyword && searchQuery.hasNextPage;
-  const searchIsFetchingNextPage = searchQuery.isFetchingNextPage;
-  const searchFetchNextPage = searchQuery.fetchNextPage;
+  // 搜索结果渐进加载：滚动接近底部时预取下一页（最近条目与关键词搜索共用）
+  const hasNextPage = activeQuery.hasNextPage;
+  const isFetchingNextPage = activeQuery.isFetchingNextPage;
+  const fetchNextPage = activeQuery.fetchNextPage;
   useEffect(() => {
-    if (!searchHasNextPage) {
+    if (!hasNextPage) {
       return;
     }
 
@@ -450,8 +394,8 @@ export function SearchShell() {
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries.some((entry) => entry.isIntersecting) && !searchIsFetchingNextPage) {
-          void searchFetchNextPage();
+        if (entries.some((entry) => entry.isIntersecting) && !isFetchingNextPage) {
+          void fetchNextPage();
         }
       },
       {
@@ -461,7 +405,7 @@ export function SearchShell() {
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [searchHasNextPage, searchIsFetchingNextPage, searchFetchNextPage, items.length]);
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage, items.length]);
 
   useEffect(() => {
     restoreClipboardRef.current = settingsQuery.data?.restoreClipboardAfterPaste ?? true;
@@ -529,28 +473,18 @@ export function SearchShell() {
         const headerHeight = headerRef.current?.offsetHeight ?? 0;
         const errorHeight = errorRef.current?.offsetHeight ?? 0;
         const sectionHeight = sectionBarRef.current?.offsetHeight ?? 0;
+        const footerHeight = footerRef.current?.offsetHeight ?? 0;
         const listContentHeight = Math.ceil(
           listContentRef.current?.getBoundingClientRect().height ?? 0,
         );
-        const filterPanelBottom =
-          isFilterOpen && shellRect && filterPanelRef.current
-            ? Math.ceil(
-                filterPanelRef.current.getBoundingClientRect().bottom -
-                  shellRect.top +
-                  SEARCH_FILTER_PANEL_WINDOW_MARGIN,
-              )
-            : 0;
 
-        if (!headerHeight || !sectionHeight || (!listContentHeight && !filterPanelBottom)) {
+        if (!headerHeight || !sectionHeight || !listContentHeight) {
           return;
         }
 
-        const chromeHeight = 5 + headerHeight + errorHeight + sectionHeight;
+        const chromeHeight = 5 + headerHeight + errorHeight + sectionHeight + footerHeight;
         const contentHeight = chromeHeight + listContentHeight;
-        const targetHeight = Math.min(
-          SEARCH_WINDOW_MAX_HEIGHT,
-          Math.max(contentHeight, filterPanelBottom),
-        );
+        const targetHeight = Math.min(SEARCH_WINDOW_MAX_HEIGHT, contentHeight);
 
         if (lastAppliedWindowHeightRef.current === targetHeight && shellHeight === targetHeight) {
           return;
@@ -596,8 +530,8 @@ export function SearchShell() {
       headerRef.current,
       errorRef.current,
       sectionBarRef.current,
+      footerRef.current,
       listContentRef.current,
-      filterPanelRef.current,
     ].filter((node): node is HTMLElement => node !== null);
 
     observedElements.forEach((node) => observer.observe(node));
@@ -614,7 +548,6 @@ export function SearchShell() {
     detailQuery.dataUpdatedAt,
     detailQuery.isLoading,
     errorMessage,
-    isFilterOpen,
     items.length,
     selectedItemId,
     tauriRuntime,
@@ -663,35 +596,6 @@ export function SearchShell() {
     }
   };
 
-  const closeFilterMenu = (focusTrigger: boolean) => {
-    clearFilterCloseTimer();
-    setIsFilterOpen(false);
-    setHighlightedFilter(activeFilter);
-    if (focusTrigger) {
-      requestAnimationFrame(() => {
-        filterTriggerRef.current?.focus();
-      });
-    }
-  };
-
-  const openFilterMenu = (initialFilter: SearchQuickFilter = activeFilter) => {
-    clearFilterCloseTimer();
-    setHighlightedFilter(initialFilter);
-    setIsFilterOpen(true);
-  };
-
-  const commitFilter = (nextFilter: SearchQuickFilter) => {
-    clearFilterCloseTimer();
-    setActiveFilter(nextFilter);
-    setHighlightedFilter(nextFilter);
-    setIsFilterOpen(false);
-    requestAnimationFrame(() => {
-      if (getSearchFilterCommitFocusTarget() === "search-input") {
-        searchInputRef.current?.focus();
-      }
-    });
-  };
-
   // 标签芯片多选（AND 语义）；按忽略大小写比对，与后端 NOCASE 行为一致
   const toggleActiveTag = (tagName: string) => {
     setActiveTagNames((current) =>
@@ -699,6 +603,12 @@ export function SearchShell() {
         ? current.filter((name) => name.toLowerCase() !== tagName.toLowerCase())
         : [...current, tagName],
     );
+  };
+
+  const clearKeyword = () => {
+    setKeyword("");
+    setDebouncedKeyword("");
+    searchInputRef.current?.focus();
   };
 
   async function forwardPickerNavigate(direction: "up" | "down") {
@@ -769,9 +679,7 @@ export function SearchShell() {
         initialItemId: payload.itemId,
         initialKeyword: payload.initialKeyword,
       } as SearchSession);
-      setIsFilterOpen(false);
       setActiveFilter("all");
-      setHighlightedFilter("all");
       setActiveTagNames([]);
       setKeyword(initialKeyword);
       // 会话初始关键词直接生效，不经防抖
@@ -800,9 +708,7 @@ export function SearchShell() {
     SEARCH_SESSION_END_EVENT,
     () => {
       setInputSuspended(false);
-      setIsFilterOpen(false);
       setActiveFilter("all");
-      setHighlightedFilter("all");
       setActiveTagNames([]);
       reset();
       setDebouncedKeyword("");
@@ -887,18 +793,6 @@ export function SearchShell() {
   // 缩减依赖避免每次输入/导航都重挂 window 监听
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      // 下拉菜单打开时方向键、Tab 和 Enter 由菜单自己处理，避免被全局搜索快捷键抢走；
-      // 菜单收起时放行（如 trigger 上的 Esc 仍应关闭搜索窗口）
-      if (
-        isFilterOpen &&
-        target?.closest("[data-search-filter-root='true']") &&
-        !event.ctrlKey &&
-        !event.metaKey
-      ) {
-        return;
-      }
-
       if (inputSuspended && !event.isComposing) {
         if (event.key === "Escape") {
           event.preventDefault();
@@ -999,7 +893,7 @@ export function SearchShell() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [inputSuspended, isFilterOpen]);
+  }, [inputSuspended]);
 
   // 两段式删除：首次触发进入待确认态，3 秒内再次触发同一目标才真正删除
   function handleDeleteSelected() {
@@ -1035,14 +929,9 @@ export function SearchShell() {
     }
   }
 
-  async function handlePasteSelected() {
-    const currentItem = itemsRef.current.find((item) => item.id === selectedItemIdRef.current);
-    if (!currentItem) {
-      return;
-    }
-
+  async function handlePasteItem(item: ClipItemSummary) {
     try {
-      await pasteItem(currentItem.id, {
+      await pasteItem(item.id, {
         restoreClipboardAfterPaste: restoreClipboardRef.current,
         pasteToTarget: true,
       });
@@ -1050,6 +939,15 @@ export function SearchShell() {
       showError("执行粘贴失败，请稍后重试");
       console.error("执行粘贴失败", error);
     }
+  }
+
+  async function handlePasteSelected() {
+    const currentItem = itemsRef.current.find((item) => item.id === selectedItemIdRef.current);
+    if (!currentItem) {
+      return;
+    }
+
+    await handlePasteItem(currentItem);
   }
 
   async function handlePasteSelectedAsFile() {
@@ -1087,9 +985,18 @@ export function SearchShell() {
       queryClient.setQueryData<ClipItemDetail | undefined>(["detail", id], (detail) =>
         setFavoritedOnDetail(detail, id, nextFavorited),
       );
-      queryClient.setQueriesData<SearchResult | undefined>(
+      // search-recent 为分页缓存（InfiniteData），逐页应用同一乐观更新
+      queryClient.setQueriesData<InfiniteData<SearchResult>>(
         { queryKey: ["search-recent"] },
-        (result) => setFavoritedOnSearchResult(result, id, nextFavorited),
+        (data) =>
+          data
+            ? {
+                ...data,
+                pages: data.pages.map(
+                  (page) => setFavoritedOnSearchResult(page, id, nextFavorited) ?? page,
+                ),
+              }
+            : data,
       );
       // search-query 为分页缓存（InfiniteData），逐页应用同一乐观更新
       queryClient.setQueriesData<InfiniteData<SearchResult>>(
@@ -1142,13 +1049,10 @@ export function SearchShell() {
     }
   }
 
-  const activeQuery = hasKeyword ? searchQuery : recentQuery;
-  const isLoading = activeQuery.isLoading;
+  const activeQueryIsLoading = activeQuery.isLoading;
   // 加载失败且没有可展示的缓存数据时给错误态；有旧数据时继续展示列表
   const loadError = activeQuery.isError && items.length === 0 ? activeQuery.error : null;
-  const totalCount = hasKeyword
-    ? (searchQuery.data?.pages[0]?.total ?? items.length)
-    : (recentQuery.data?.total ?? items.length);
+  const totalCount = activeQuery.data?.pages[0]?.total ?? items.length;
   const resultCountLabel = `${items.length}/${totalCount} 条`;
   const searchOpenShortcut = settingsQuery.data?.searchShortcutEnabled
     ? settingsQuery.data.searchShortcut
@@ -1160,7 +1064,6 @@ export function SearchShell() {
       ? `复制内容后使用 ${searchOpenShortcut} 打开此窗口`
       : "复制内容后即可在此查看",
   );
-  const activeFilterLabel = getFilterLabel(activeFilter);
 
   return (
     <div className={STYLES.shell} ref={shellRef}>
@@ -1206,179 +1109,32 @@ export function SearchShell() {
               aria-label="搜索剪贴板记录"
               value={keyword}
             />
-            <span aria-hidden="true" className={STYLES.searchFilterDivider} />
-            <div
-              ref={filterRootRef}
-              className="relative ml-0.5 flex shrink-0 items-center"
-              data-search-filter-root="true"
-            >
+            {keyword ? (
               <button
-                ref={filterTriggerRef}
-                aria-controls="search-filter-listbox"
-                aria-expanded={isFilterOpen}
-                aria-haspopup="listbox"
-                aria-label={`筛选剪贴板记录，当前为${activeFilterLabel}`}
-                className={STYLES.searchFilterButton}
-                onClick={() => {
-                  if (isFilterOpen) {
-                    closeFilterMenu(false);
-                    return;
-                  }
-                  openFilterMenu(activeFilter);
-                }}
-                onKeyDown={(event) => {
-                  const action = getSearchFilterTriggerAction({
-                    key: event.key,
-                    ctrlKey: event.ctrlKey,
-                    metaKey: event.metaKey,
-                  });
-
-                  if (!action) {
-                    return;
-                  }
-
-                  event.preventDefault();
-
-                  if (action === "open-next") {
-                    openFilterMenu(getAdjacentFilter(activeFilter, 1));
-                    return;
-                  }
-
-                  if (action === "open-prev") {
-                    openFilterMenu(getAdjacentFilter(activeFilter, -1));
-                    return;
-                  }
-
-                  if (isFilterOpen) {
-                    closeFilterMenu(false);
-                    return;
-                  }
-
-                  openFilterMenu(activeFilter);
-                }}
+                aria-label="清除搜索关键词"
+                className={STYLES.searchClearButton}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={clearKeyword}
+                title="清除"
                 type="button"
               >
-                <span>{activeFilterLabel}</span>
                 <svg
                   aria-hidden="true"
-                  className={STYLES.searchFilterChevron}
-                  style={{ transform: isFilterOpen ? "rotate(180deg)" : undefined }}
+                  className="h-4 w-4"
                   fill="none"
                   stroke="currentColor"
                   strokeLinecap="round"
-                  strokeLinejoin="round"
                   strokeWidth="1.8"
                   viewBox="0 0 24 24"
                 >
-                  <path d="m7 10 5 5 5-5" />
+                  <path d="M6 6l12 12M18 6 6 18" />
                 </svg>
               </button>
-              {isFilterOpen ? (
-                <div
-                  className={STYLES.searchFilterPanel}
-                  id="search-filter-listbox"
-                  ref={filterPanelRef}
-                  role="listbox"
-                >
-                  {FILTER_OPTIONS.map((option) => {
-                    const isActive = highlightedFilter === option.value;
-                    const isSelected = activeFilter === option.value;
-
-                    return (
-                      <div
-                        key={option.value}
-                        ref={(node) => {
-                          filterOptionRefs.current[option.value] = node;
-                        }}
-                        aria-selected={isSelected}
-                        className={STYLES.searchFilterOption(isActive, isSelected)}
-                        onClick={() => commitFilter(option.value)}
-                        onFocus={() => setHighlightedFilter(option.value)}
-                        onKeyDown={(event) => {
-                          const action = getSearchFilterOptionAction({
-                            key: event.key,
-                            ctrlKey: event.ctrlKey,
-                            metaKey: event.metaKey,
-                          });
-
-                          if (action === null) {
-                            if (event.key === "Tab") {
-                              clearFilterCloseTimer();
-                              filterCloseTimerRef.current = globalThis.setTimeout(() => {
-                                setIsFilterOpen(false);
-                              }, 0);
-                            }
-                            return;
-                          }
-
-                          event.preventDefault();
-
-                          if (action === "next") {
-                            setHighlightedFilter(getAdjacentFilter(option.value, 1));
-                            return;
-                          }
-
-                          if (action === "prev") {
-                            setHighlightedFilter(getAdjacentFilter(option.value, -1));
-                            return;
-                          }
-
-                          if (action === "first") {
-                            setHighlightedFilter(FILTER_OPTIONS[0]?.value ?? "all");
-                            return;
-                          }
-
-                          if (action === "last") {
-                            setHighlightedFilter(
-                              FILTER_OPTIONS[FILTER_OPTIONS.length - 1]?.value ?? "all",
-                            );
-                            return;
-                          }
-
-                          if (action === "commit") {
-                            commitFilter(option.value);
-                            return;
-                          }
-
-                          if (action === "close") {
-                            closeFilterMenu(true);
-                            return;
-                          }
-
-                          if (event.key === "Tab") {
-                            clearFilterCloseTimer();
-                            filterCloseTimerRef.current = globalThis.setTimeout(() => {
-                              setIsFilterOpen(false);
-                            }, 0);
-                          }
-                        }}
-                        onMouseEnter={() => setHighlightedFilter(option.value)}
-                        role="option"
-                        tabIndex={isActive ? 0 : -1}
-                      >
-                        {isSelected ? (
-                          <svg
-                            aria-hidden="true"
-                            className="h-3.5 w-3.5 shrink-0"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth="2"
-                            viewBox="0 0 24 24"
-                          >
-                            <path d="M5 13l4 4L19 7" />
-                          </svg>
-                        ) : (
-                          <span className="h-3.5 w-3.5 shrink-0" />
-                        )}
-                        <span>{option.label}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : null}
-            </div>
+            ) : null}
+            <span aria-hidden="true" className={STYLES.searchFilterDivider} />
+            {activeQueryIsLoading ? null : (
+              <span className={STYLES.resultCount}>{resultCountLabel}</span>
+            )}
           </div>
         </header>
 
@@ -1393,20 +1149,22 @@ export function SearchShell() {
         ) : null}
 
         <div ref={sectionBarRef}>
-          <div className="flex items-center justify-between border-b border-pg-border-subtle px-5 py-3 text-xs font-medium text-pg-fg-muted">
-            <span>{getSectionLabel(hasKeyword)}</span>
-            <span>{resultCountLabel}</span>
-          </div>
-          {activeFilter === "tag" ||
-          (tagsQuery.data ?? []).length > 0 ||
-          activeTagNames.length > 0 ? (
-            <div className={STYLES.tagChipRow} data-no-window-drag="true">
-              {tagsQuery.isLoading ? (
-                <span className="text-xs text-pg-fg-subtle">加载标签...</span>
-              ) : (tagsQuery.data ?? []).length === 0 ? (
-                <span className="text-xs text-pg-fg-subtle">暂无标签，可在编辑窗口为条目添加</span>
-              ) : (
-                (tagsQuery.data ?? []).map((tag) => {
+          <div className={STYLES.filterRow} data-no-window-drag="true">
+            {FILTER_OPTIONS.map((option) => (
+              <button
+                aria-pressed={activeFilter === option.value}
+                className={STYLES.filterChip(activeFilter === option.value)}
+                key={option.value}
+                onClick={() => setActiveFilter(option.value)}
+                type="button"
+              >
+                {option.label}
+              </button>
+            ))}
+            {(tagsQuery.data ?? []).length > 0 ? (
+              <>
+                <div aria-hidden="true" className={STYLES.filterRowDivider} />
+                {(tagsQuery.data ?? []).map((tag) => {
                   const selected = activeTagNames.some(
                     (name) => name.toLowerCase() === tag.name.toLowerCase(),
                   );
@@ -1421,10 +1179,10 @@ export function SearchShell() {
                       {tag.name}
                     </button>
                   );
-                })
-              )}
-            </div>
-          ) : null}
+                })}
+              </>
+            ) : null}
+          </div>
         </div>
 
         <main
@@ -1432,7 +1190,7 @@ export function SearchShell() {
           className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]"
         >
           <div ref={listContentRef} className="px-0.5 pb-1 pt-1.5">
-            {isLoading ? (
+            {activeQueryIsLoading ? (
               <div className="flex min-h-[160px] items-center justify-center py-12">
                 <LoadingSpinner size="sm" text="加载中..." />
               </div>
@@ -1477,7 +1235,12 @@ export function SearchShell() {
                 ) : null}
               </div>
             ) : (
-              <div className="space-y-1">
+              <div
+                aria-activedescendant={selectedItemId ? `search-item-${selectedItemId}` : undefined}
+                aria-label="剪贴板记录列表"
+                className="px-1 pb-1 pt-0.5"
+                role="listbox"
+              >
                 {items.map((item, index) => {
                   const isSelected = selectedItemId === item.id;
                   const inlineDetail = isSelected ? (detailQuery.data ?? item) : null;
@@ -1496,11 +1259,13 @@ export function SearchShell() {
 
                   return (
                     <div
+                      aria-selected={isSelected}
+                      className={STYLES.listItemShell(isSelected)}
+                      id={`search-item-${item.id}`}
+                      key={item.id}
                       ref={(el) => {
                         itemRefs.current[index] = el;
                       }}
-                      className={STYLES.listItemShell(isSelected)}
-                      key={item.id}
                       onMouseDown={(event) => {
                         if (shouldPreventSearchItemMouseFocus(event.button)) {
                           event.preventDefault();
@@ -1521,21 +1286,17 @@ export function SearchShell() {
                       onDoubleClick={() => {
                         setSelectedItemId(item.id);
                         selectedItemIdRef.current = item.id;
-                        void handlePasteSelected();
+                        void handlePasteItem(item);
                       }}
-                      role="button"
+                      role="option"
                       tabIndex={-1}
                     >
-                      <div className={STYLES.listItemLayout(isSelected)}>
+                      <div className={STYLES.listItemLayout()}>
                         <div>
                           {imageUrl ? (
                             <img
                               alt=""
-                              className={`shrink-0 rounded-lg border object-cover ${
-                                isSelected
-                                  ? "border-pg-border-default bg-pg-canvas-default"
-                                  : "border-pg-border-subtle bg-pg-canvas-subtle"
-                              }`}
+                              className={STYLES.imageThumb(isSelected)}
                               decoding="async"
                               loading="lazy"
                               onError={() => {
@@ -1550,22 +1311,26 @@ export function SearchShell() {
                             </div>
                           )}
                         </div>
-                        <div className="min-w-0 flex-1">
+                        <div className="min-w-0">
                           <div className="flex min-w-0 items-start gap-2">
                             <p
                               className={`min-w-0 flex-1 text-[15px] leading-6 ${
                                 isSelected
-                                  ? "line-clamp-3 whitespace-pre-wrap break-words font-medium text-pg-fg-default"
-                                  : "truncate text-pg-fg-default"
+                                  ? "line-clamp-3 whitespace-pre-wrap break-words pr-[148px] font-medium text-pg-fg-default"
+                                  : "truncate pr-1 text-pg-fg-default"
                               }`}
                             >
                               {previewText}
                             </p>
-                            <div className="flex shrink-0 items-center gap-2">
-                              {isFavorited && !isSelected ? (
-                                <span className="text-[12px] text-pg-favorite">★</span>
-                              ) : null}
-                            </div>
+                            {isFavorited && !isSelected ? (
+                              <span
+                                aria-label="已收藏"
+                                className="shrink-0 text-[12px] text-pg-favorite"
+                                role="img"
+                              >
+                                ★
+                              </span>
+                            ) : null}
                           </div>
                           <div className={STYLES.inlineMetaRow}>
                             {itemMeta.map((meta, metaIndex) => (
@@ -1574,7 +1339,6 @@ export function SearchShell() {
                                 {meta}
                               </span>
                             ))}
-                            {isFavorited ? <span aria-hidden="true">• 已收藏</span> : null}
                           </div>
                           {item.tags.length > 0 ? (
                             <div className={STYLES.itemTagChips}>
@@ -1590,190 +1354,260 @@ export function SearchShell() {
                               ) : null}
                             </div>
                           ) : null}
+                          {isSelected && item.type === "image" && imageUrl ? (
+                            <img
+                              alt=""
+                              className={STYLES.imagePreviewLarge}
+                              decoding="async"
+                              src={imageUrl}
+                            />
+                          ) : null}
                         </div>
-                        {isSelected ? (
-                          <div
-                            className={STYLES.selectedActions}
-                            onMouseMove={(event) => {
-                              event.stopPropagation();
-                              cancelTooltip();
-                            }}
-                          >
-                            <div
-                              className={STYLES.selectedActionStack}
-                              onClick={(event) => event.stopPropagation()}
-                              onDoubleClick={(event) => event.stopPropagation()}
-                            >
-                              <button
-                                aria-label="粘贴当前条目"
-                                className={STYLES.actionButton}
-                                onMouseDown={(event) => {
-                                  event.preventDefault();
-                                  event.stopPropagation();
-                                }}
-                                onClick={() => void handlePasteSelected()}
-                                title="粘贴"
-                                type="button"
-                              >
-                                <svg
-                                  aria-hidden="true"
-                                  className="h-4 w-4"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  strokeWidth="1.8"
-                                  viewBox="0 0 24 24"
-                                >
-                                  <path d="M9.75 3h4.5A1.75 1.75 0 0 1 16 4.75V6H8V4.75A1.75 1.75 0 0 1 9.75 3Z" />
-                                  <rect x="5" y="6" width="14" height="15" rx="2.75" />
-                                  <path d="M9 11h6" />
-                                  <path d="M9 15h6" />
-                                </svg>
-                              </button>
-                              {(detailQuery.data?.type ?? item.type) === "image" ? (
-                                <button
-                                  aria-label="粘贴为文件路径"
-                                  className={STYLES.actionButtonSecondary}
-                                  onMouseDown={(event) => {
-                                    event.preventDefault();
-                                    event.stopPropagation();
-                                  }}
-                                  onClick={() => void handlePasteSelectedAsFile()}
-                                  title="粘贴为路径"
-                                  type="button"
-                                >
-                                  <svg
-                                    aria-hidden="true"
-                                    className="h-4 w-4"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth="1.8"
-                                    viewBox="0 0 24 24"
-                                  >
-                                    <path d="M4 7V4h16v3" />
-                                    <path d="M9 20h6" />
-                                    <path d="M12 4v16" />
-                                  </svg>
-                                </button>
-                              ) : null}
-                              {(detailQuery.data?.type ?? item.type) === "text" ? (
-                                <button
-                                  aria-label="编辑当前条目"
-                                  className={STYLES.actionButtonSecondary}
-                                  onMouseDown={(event) => {
-                                    event.preventDefault();
-                                    event.stopPropagation();
-                                  }}
-                                  onClick={() => void handleOpenEditor()}
-                                  title="编辑"
-                                  type="button"
-                                >
-                                  <svg
-                                    aria-hidden="true"
-                                    className="h-4 w-4"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth="1.8"
-                                    viewBox="0 0 24 24"
-                                  >
-                                    <path d="M4.75 19.25h3.5L18.5 9 15 5.5 4.75 15.75v3.5Z" />
-                                    <path d="m13.75 6.75 3.5 3.5" />
-                                    <path d="M4.75 19.25 8 19.2" />
-                                  </svg>
-                                </button>
-                              ) : null}
-                              <button
-                                aria-label={isFavorited ? "取消收藏当前条目" : "收藏当前条目"}
-                                className={STYLES.actionButtonSecondary}
-                                onMouseDown={(event) => {
-                                  event.preventDefault();
-                                  event.stopPropagation();
-                                }}
-                                onClick={() => void handleToggleFavorited()}
-                                title={isFavorited ? "取消收藏" : "收藏"}
-                                type="button"
-                              >
-                                {isFavorited ? (
-                                  <svg
-                                    aria-hidden="true"
-                                    className="h-4 w-4 text-pg-favorite"
-                                    fill="currentColor"
-                                    viewBox="0 0 24 24"
-                                  >
-                                    <path d="m12 3.85 2.55 5.17 5.71.83-4.13 4.03.98 5.69L12 16.89 6.89 19.57l.98-5.69-4.13-4.03 5.71-.83L12 3.85Z" />
-                                  </svg>
-                                ) : (
-                                  <svg
-                                    aria-hidden="true"
-                                    className="h-4 w-4"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth="1.8"
-                                    viewBox="0 0 24 24"
-                                  >
-                                    <path d="m12 3.85 2.55 5.17 5.71.83-4.13 4.03.98 5.69L12 16.89 6.89 19.57l.98-5.69-4.13-4.03 5.71-.83L12 3.85Z" />
-                                  </svg>
-                                )}
-                              </button>
-                              <button
-                                aria-label={
-                                  deleteArmedId === item.id ? "确认删除当前条目" : "删除当前条目"
-                                }
-                                className={STYLES.actionButtonDanger(deleteArmedId === item.id)}
-                                onMouseDown={(event) => {
-                                  event.preventDefault();
-                                  event.stopPropagation();
-                                }}
-                                onClick={() => void handleDeleteSelected()}
-                                title={deleteArmedId === item.id ? "再次点击确认删除" : "删除"}
-                                type="button"
-                              >
-                                {deleteArmedId === item.id ? (
-                                  "确认删除"
-                                ) : (
-                                  <svg
-                                    aria-hidden="true"
-                                    className="h-4 w-4"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth="1.8"
-                                    viewBox="0 0 24 24"
-                                  >
-                                    <path d="M4 7h16" />
-                                    <path d="M9.5 4.75h5V7h-5z" />
-                                    <path d="M6.5 7l.8 12.25h9.4L17.5 7" />
-                                    <path d="M10 10.5v6M14 10.5v6" />
-                                  </svg>
-                                )}
-                              </button>
-                            </div>
-                          </div>
-                        ) : null}
                       </div>
+                      {isSelected ? (
+                        <div
+                          className={STYLES.selectedActions}
+                          onClick={(event) => event.stopPropagation()}
+                          onDoubleClick={(event) => event.stopPropagation()}
+                          onMouseMove={(event) => {
+                            event.stopPropagation();
+                            cancelTooltip();
+                          }}
+                        >
+                          <button
+                            aria-label="粘贴当前条目"
+                            className={STYLES.actionButton}
+                            onMouseDown={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                            }}
+                            onClick={() => void handlePasteItem(item)}
+                            title="粘贴"
+                            type="button"
+                          >
+                            <svg
+                              aria-hidden="true"
+                              className="h-4 w-4"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth="1.8"
+                              viewBox="0 0 24 24"
+                            >
+                              <path d="M9.75 3h4.5A1.75 1.75 0 0 1 16 4.75V6H8V4.75A1.75 1.75 0 0 1 9.75 3Z" />
+                              <rect x="5" y="6" width="14" height="15" rx="2.75" />
+                              <path d="M9 11h6" />
+                              <path d="M9 15h6" />
+                            </svg>
+                          </button>
+                          {(detailQuery.data?.type ?? item.type) === "image" ? (
+                            <button
+                              aria-label="粘贴为文件路径"
+                              className={STYLES.actionButtonSecondary}
+                              onMouseDown={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                              }}
+                              onClick={() => void handlePasteSelectedAsFile()}
+                              title="粘贴为路径"
+                              type="button"
+                            >
+                              <svg
+                                aria-hidden="true"
+                                className="h-4 w-4"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth="1.8"
+                                viewBox="0 0 24 24"
+                              >
+                                <path d="M4 7V4h16v3" />
+                                <path d="M9 20h6" />
+                                <path d="M12 4v16" />
+                              </svg>
+                            </button>
+                          ) : null}
+                          {(detailQuery.data?.type ?? item.type) === "text" ? (
+                            <button
+                              aria-label="编辑当前条目"
+                              className={STYLES.actionButtonSecondary}
+                              onMouseDown={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                              }}
+                              onClick={() => void handleOpenEditor()}
+                              title="编辑"
+                              type="button"
+                            >
+                              <svg
+                                aria-hidden="true"
+                                className="h-4 w-4"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth="1.8"
+                                viewBox="0 0 24 24"
+                              >
+                                <path d="M4.75 19.25h3.5L18.5 9 15 5.5 4.75 15.75v3.5Z" />
+                                <path d="m13.75 6.75 3.5 3.5" />
+                                <path d="M4.75 19.25 8 19.2" />
+                              </svg>
+                            </button>
+                          ) : null}
+                          <button
+                            aria-label={isFavorited ? "取消收藏当前条目" : "收藏当前条目"}
+                            className={STYLES.actionButtonSecondary}
+                            onMouseDown={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                            }}
+                            onClick={() => void handleToggleFavorited()}
+                            title={isFavorited ? "取消收藏" : "收藏"}
+                            type="button"
+                          >
+                            {isFavorited ? (
+                              <svg
+                                aria-hidden="true"
+                                className="h-4 w-4 text-pg-favorite"
+                                fill="currentColor"
+                                viewBox="0 0 24 24"
+                              >
+                                <path d="m12 3.85 2.55 5.17 5.71.83-4.13 4.03.98 5.69L12 16.89 6.89 19.57l.98-5.69-4.13-4.03 5.71-.83L12 3.85Z" />
+                              </svg>
+                            ) : (
+                              <svg
+                                aria-hidden="true"
+                                className="h-4 w-4"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth="1.8"
+                                viewBox="0 0 24 24"
+                              >
+                                <path d="m12 3.85 2.55 5.17 5.71.83-4.13 4.03.98 5.69L12 16.89 6.89 19.57l.98-5.69-4.13-4.03 5.71-.83L12 3.85Z" />
+                              </svg>
+                            )}
+                          </button>
+                          <button
+                            aria-label={
+                              deleteArmedId === item.id ? "确认删除当前条目" : "删除当前条目"
+                            }
+                            className={STYLES.actionButtonDanger(deleteArmedId === item.id)}
+                            onMouseDown={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                            }}
+                            onClick={() => void handleDeleteSelected()}
+                            title={deleteArmedId === item.id ? "再次点击确认删除" : "删除"}
+                            type="button"
+                          >
+                            {deleteArmedId === item.id ? (
+                              "确认删除"
+                            ) : (
+                              <svg
+                                aria-hidden="true"
+                                className="h-4 w-4"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth="1.8"
+                                viewBox="0 0 24 24"
+                              >
+                                <path d="M4 7h16" />
+                                <path d="M9.5 4.75h5V7h-5z" />
+                                <path d="M6.5 7l.8 12.25h9.4L17.5 7" />
+                                <path d="M10 10.5v6M14 10.5v6" />
+                              </svg>
+                            )}
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          aria-label={`粘贴：${item.contentPreview.slice(0, 20)}`}
+                          className={STYLES.hoverPasteButton}
+                          onMouseDown={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                          }}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void handlePasteItem(item);
+                          }}
+                          title="粘贴"
+                          type="button"
+                        >
+                          <svg
+                            aria-hidden="true"
+                            className="h-3.5 w-3.5"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth="1.8"
+                            viewBox="0 0 24 24"
+                          >
+                            <path d="M9.75 3h4.5A1.75 1.75 0 0 1 16 4.75V6H8V4.75A1.75 1.75 0 0 1 9.75 3Z" />
+                            <rect x="5" y="6" width="14" height="15" rx="2.75" />
+                          </svg>
+                          粘贴
+                        </button>
+                      )}
                     </div>
                   );
                 })}
               </div>
             )}
-            {hasKeyword && searchQuery.hasNextPage ? (
+            {hasNextPage ? (
               <div
                 className="flex items-center justify-center py-3 text-xs text-pg-fg-subtle"
                 ref={loadMoreRef}
               >
-                {searchQuery.isFetchingNextPage ? "正在加载更多..." : ""}
+                {isFetchingNextPage ? "正在加载更多..." : ""}
               </div>
             ) : null}
           </div>
         </main>
+        <footer className={STYLES.footer} ref={footerRef}>
+          {inputSuspended ? (
+            <>
+              <span className={STYLES.footerHint}>
+                <kbd className={STYLES.kbd}>↑↓</kbd>选择
+              </span>
+              <span className={STYLES.footerHint}>
+                <kbd className={STYLES.kbd}>Enter</kbd>粘贴
+              </span>
+              <span className={STYLES.footerHint}>
+                <kbd className={STYLES.kbd}>1-9</kbd>直达
+              </span>
+              <span className={STYLES.footerHint}>
+                <kbd className={STYLES.kbd}>Esc</kbd>返回搜索
+              </span>
+            </>
+          ) : (
+            <>
+              <span className={STYLES.footerHint}>
+                <kbd className={STYLES.kbd}>↑↓</kbd>选择
+              </span>
+              <span className={STYLES.footerHint}>
+                <kbd className={STYLES.kbd}>Enter</kbd>粘贴
+              </span>
+              <span className={STYLES.footerHint}>
+                <kbd className={STYLES.kbd}>Ctrl+Enter</kbd>编辑
+              </span>
+              <span className={STYLES.footerHint}>
+                <kbd className={STYLES.kbd}>Del</kbd>删除
+              </span>
+              <span className={STYLES.footerHint}>
+                <kbd className={STYLES.kbd}>Esc</kbd>关闭
+              </span>
+            </>
+          )}
+        </footer>
       </div>
     </div>
   );
