@@ -64,13 +64,20 @@ WAVE_COLOR = "#BFD9FF"
 WAVE1_W, WAVE2_W = 51.2, 46.1
 
 # ---- 小尺寸专用稿：按比例自动布局（全浮点、严格同心），矢量质感渲染 ----
-SMALL_TEXT = "#A9CBF8"  # 文本条（白底上的半透明亮蓝 → 浅蓝）
+SMALL_TEXT = "#5D9BE0"  # 文本条：白底上保持可读对比，过浅（如 #A9CBF8）在小尺寸会发虚
 SMALL_WAVE = "#8FB7E8"
 SMALL_WAVE_DIM = "#5F86C4"
 
 
 def _small_spec(px: int) -> dict:
     """按面板/底板几何中心比例生成小尺寸布局，保证所有元素严格同心。"""
+
+    def _snap_v(y0: float, y1: float) -> tuple[float, float]:
+        # 垂直方向对齐整数像素栅格：位置取整、尺寸取整，半像素框会在
+        # 降采样后把一条实线摊成 2~3 行半透明（发虚）
+        y = float(round(y0))
+        return (y, y + round(y1 - y0))
+
     tile = float(px)
     radius = tile * 0.22
     panel_w = round(tile * 0.5)
@@ -81,13 +88,18 @@ def _small_spec(px: int) -> dict:
     cy = panel_y0 + panel_h / 2
 
     inset = round(panel_w * 0.18)
-    caret_w = max(2.0, round(panel_w * 0.09))
+    # 线条宽度的下限按"任务栏 0.75x 缩放后仍 ≥2px"反推：源图 3px 缩后 2.25px。
+    # 光标竖线 0.17：16px 档 2px、32px 档 3px
+    caret_w = max(2.0, round(panel_w * 0.17))
     gap = round(panel_w * 0.09)
     caret_h = round(panel_h * 0.44)
-    text_h = max(1.0, round(panel_h * 0.18))
+    # 文本条高度 0.28：16px 档 1px，24px 档 2px、32px 档 3px
+    text_h = max(1.0, round(panel_h * 0.28))
     text_w = panel_w - 2 * inset - caret_w - gap
     caret_x0 = panel_x0 + inset
     text_x0 = caret_x0 + caret_w + gap
+    caret_y0, caret_y1 = _snap_v(cy - caret_h / 2, cy + caret_h / 2)
+    text_y0, text_y1 = _snap_v(cy - text_h / 2, cy + text_h / 2)
 
     wave1_span = round(tile * 0.4)
     wave1_x0 = (tile - wave1_span) / 2
@@ -102,8 +114,8 @@ def _small_spec(px: int) -> dict:
         radius=radius,
         panel=(panel_x0, panel_y0, panel_x0 + panel_w, panel_y0 + panel_h),
         panel_r=panel_r,
-        caret=(caret_x0, cy - caret_h / 2, caret_x0 + caret_w, cy + caret_h / 2),
-        text=(text_x0, cy - text_h / 2, text_x0 + text_w, cy + text_h / 2),
+        caret=(caret_x0, caret_y0, caret_x0 + caret_w, caret_y1),
+        text=(text_x0, text_y0, text_x0 + text_w, text_y1),
         wave1=((wave1_x0, wave1_y), (tile / 2, wave1_y + 2 * sag1), (wave1_x0 + wave1_span, wave1_y)),
         wave2=(
             ((wave2_x0, wave2_y), (tile / 2, wave2_y + 2 * sag2), (wave2_x0 + wave2_span, wave2_y))
@@ -386,7 +398,8 @@ def render_small_canvas(px: int, supersample: int = 8) -> Image.Image:
         if not spec[key]:
             continue
         (x0, y0), (cx, cy), (x1, y1) = spec[key]
-        width = max(1.4, 0.055 * px)
+        # 线宽下限 2px：更细的波浪线在降采样后只剩半透明残影
+        width = max(2.0, round(0.09 * px))
         _draw_quad_wave(img, (x0, y0), (cx, cy), (x1, y1), width, _rgba(color), px)
 
     return img
