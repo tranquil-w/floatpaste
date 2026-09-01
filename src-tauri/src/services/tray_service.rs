@@ -51,10 +51,17 @@ impl TrayService {
 
         let menu = build_menu(app, monitoring_paused)?;
 
-        let icon = app
-            .default_window_icon()
-            .cloned()
-            .ok_or_else(|| AppError::Message("缺少默认窗口图标".to_string()))?;
+        // 按 DPI 精确尺寸加载托盘图标，避免单一 RGBA 位图被系统拉伸导致模糊；
+        // 加载失败时回退 Tauri 默认窗口图标
+        let icon = match crate::platform::windows::app_icon::tray_icon_image() {
+            Ok(icon) => icon,
+            Err(error) => {
+                warn!("按 DPI 加载托盘图标失败，回退默认窗口图标: {error}");
+                app.default_window_icon()
+                    .cloned()
+                    .ok_or_else(|| AppError::Message("缺少默认窗口图标".to_string()))?
+            }
+        };
 
         TrayIconBuilder::with_id(TRAY_ID)
             .icon(icon)

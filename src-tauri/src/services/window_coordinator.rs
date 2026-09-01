@@ -653,6 +653,11 @@ fn configure_search_window(window: &WebviewWindow) {
     }
 
     #[cfg(target_os = "windows")]
+    if let Err(error) = crate::platform::windows::app_icon::apply_window_icon(window) {
+        warn!("应用搜索窗口图标失败: {error}");
+    }
+
+    #[cfg(target_os = "windows")]
     if let Err(error) = crate::platform::windows::window_utils::remove_window_system_menu(window) {
         warn!("移除搜索窗口系统菜单失败: {error}");
     }
@@ -717,9 +722,19 @@ fn configure_search_window(window: &WebviewWindow) {
     });
 }
 
-fn configure_editor_window(_window: &WebviewWindow) {}
+fn configure_editor_window(window: &WebviewWindow) {
+    #[cfg(target_os = "windows")]
+    if let Err(error) = crate::platform::windows::app_icon::apply_window_icon(window) {
+        warn!("应用编辑窗口图标失败: {error}");
+    }
+}
 
 fn configure_settings_window(window: &WebviewWindow) {
+    #[cfg(target_os = "windows")]
+    if let Err(error) = crate::platform::windows::app_icon::apply_window_icon(window) {
+        warn!("应用设置窗口图标失败: {error}");
+    }
+
     let app = window.app_handle().clone();
     let handle = window.clone();
     window.on_window_event(move |event| {
@@ -1035,6 +1050,11 @@ fn should_restore_picker_after_search_close(_session: &SearchSession) -> bool {
 }
 
 fn configure_picker_window(window: &WebviewWindow) {
+    #[cfg(target_os = "windows")]
+    if let Err(error) = crate::platform::windows::app_icon::apply_window_icon(window) {
+        warn!("应用 Picker 窗口图标失败: {error}");
+    }
+
     #[cfg(target_os = "windows")]
     if let Err(error) = crate::platform::windows::window_utils::apply_picker_window_shape(window) {
         warn!("初始化 picker 圆角窗口失败: {error}");

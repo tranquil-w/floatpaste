@@ -257,6 +257,11 @@ impl TooltipWindow {
 
 pub(crate) fn configure_tooltip_window(window: &WebviewWindow) {
     #[cfg(target_os = "windows")]
+    if let Err(error) = crate::platform::windows::app_icon::apply_window_icon(window) {
+        warn!("应用 tooltip 窗口图标失败: {error}");
+    }
+
+    #[cfg(target_os = "windows")]
     if let Err(error) = crate::platform::windows::window_utils::remove_window_system_menu(window) {
         warn!("移除 tooltip 系统菜单失败: {error}");
     }

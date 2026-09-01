@@ -1,4 +1,5 @@
 pub mod active_app;
+pub mod app_icon;
 pub mod clipboard_error;
 pub mod clipboard_monitor;
 pub mod file_clipboard;

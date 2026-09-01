@@ -267,11 +267,12 @@ def draw_icon(px: int, supersample: int = 4) -> Image.Image:
 
 
 def _rounded_mask_px(size: int, box: tuple[float, float, float, float], radius: float, px: int) -> Image.Image:
-    """px 空间坐标的圆角 mask（spec 坐标为含端点整数，故 x1/y1 各 +1）。"""
+    """px 空间坐标的圆角 mask。box 为几何右开区间 [x0, x1)，覆盖列 x0..x1-1；
+    PIL rounded_rectangle 含端点，故右/下各减 1px 再缩放。"""
     k = size / px
     mask = Image.new("L", (size, size), 0)
     ImageDraw.Draw(mask).rounded_rectangle(
-        [box[0] * k, box[1] * k, box[2] * k, box[3] * k],
+        [box[0] * k, box[1] * k, box[2] * k - 1, box[3] * k - 1],
         radius=radius * k,
         fill=255,
     )
@@ -316,33 +317,18 @@ def _draw_quad_wave(
     img.alpha_composite(layer)
 
 
-def draw_small(px: int, supersample: int = 8) -> Image.Image:
-    """小尺寸专用稿：沿用小尺寸布局（元素占比大、锐利），渲染走向量质感
-    （渐变底板 + 光斑 + 硬投影 + 渐变内容条），保证与大图同一气质。"""
+def render_small_canvas(px: int, supersample: int = 8) -> Image.Image:
+    """小尺寸规格的超采样画布（未降采样）。16px 档免光斑/投影的规则在此生效，
+    托盘等常驻小图标的源图应取本画布，避免把母图的强光斑带进小尺寸造成明暗失衡。"""
     spec = SMALL_SPECS[px]
     size = px * supersample
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
 
-    # 底板：深夜渐变 + 光斑（16px 免光斑，保持底板干净）+ 亮边
+    # 底板：深夜渐变 + 亮边。小尺寸一律免光斑——左上亮斑会把白色面板左缘
+    # 融进背景、右缘对比过强，几何居中的内容也会被看成右偏
     tile = _multi_stop_gradient(size).convert("RGBA")
     tile.putalpha(_rounded_mask_px(size, (0, 0, px, px), spec["radius"], px))
     img.alpha_composite(tile)
-
-    if px >= 24:
-        nx = np.linspace(0.0, 1.0, size, dtype=np.float32)
-        gx, gy = np.meshgrid(nx, nx)
-        dist = np.sqrt(((gx - GLOW_CX) ** 2 + (gy - GLOW_CY) ** 2) / GLOW_R**2)
-        glow_a = (np.clip(1.0 - dist, 0.0, 1.0) * GLOW_ALPHA * 0.55 * 255).astype(np.uint8)
-        glow = Image.fromarray(
-            np.dstack([np.full((size, size, 3), _rgba(GLOW_COLOR)[:3], dtype=np.uint8), glow_a]),
-            "RGBA",
-        )
-        glow.putalpha(
-            ImageChops.multiply(
-                glow.getchannel("A"), _rounded_mask_px(size, (0, 0, px, px), spec["radius"], px)
-            )
-        )
-        img.alpha_composite(glow)
 
     # 边缘提亮描边：与底板圆角同心，且用底板 mask 裁剪——
     # 否则圆角弧上描边会凸出底板轮廓，在透明角区漏白
@@ -359,8 +345,10 @@ def draw_small(px: int, supersample: int = 8) -> Image.Image:
     edge.putalpha(ImageChops.multiply(edge.getchannel("A"), tile_mask))
     img.alpha_composite(edge)
 
-    # 面板：硬投影（仅 24px+，16/20px 会与波粘连）+ 白渐变
-    panel_box = (spec["panel"][0], spec["panel"][1], spec["panel"][2] + 1, spec["panel"][3] + 1)
+    # 面板：硬投影（仅 24px+，16/20px 会与波粘连）+ 白渐变。
+    # spec 面板框为几何右开区间，直接使用（此前误 +1 按含端点消费，
+    # 导致面板多画一列、左右边距 4:3，内容观感右偏）
+    panel_box = tuple(spec["panel"])
     panel_r = spec["panel_r"]
     if px >= 24:
         off = max(1, round(0.05 * px)) * size / px
@@ -401,7 +389,13 @@ def draw_small(px: int, supersample: int = 8) -> Image.Image:
         width = max(1.4, 0.055 * px)
         _draw_quad_wave(img, (x0, y0), (cx, cy), (x1, y1), width, _rgba(color), px)
 
-    return _downscale_premultiplied(img, px)
+    return img
+
+
+def draw_small(px: int, supersample: int = 8) -> Image.Image:
+    """小尺寸专用稿：沿用小尺寸布局（元素占比大、锐利），渲染走向量质感
+    （渐变底板 + 光斑 + 硬投影 + 渐变内容条），保证与大图同一气质。"""
+    return _downscale_premultiplied(render_small_canvas(px, supersample), px)
 
 
 def render_size(px: int) -> Image.Image:
@@ -484,6 +478,10 @@ def main() -> None:
 
     master = draw_icon(512, supersample=4)
     master.save(ICONS / "icon-512.png")
+
+    # 托盘源图：16px 小尺寸规格的 8x 超采样画布（无光斑/投影），
+    # 供运行时按 DPI 精确缩放（src-tauri/src/platform/windows/app_icon.rs）
+    render_small_canvas(16, supersample=8).save(ICONS / "icon-tray.png")
 
     sizes = [16, 20, 24, 28, 32, 40, 48, 64, 256]
     images = {px: render_size(px) for px in sizes}
