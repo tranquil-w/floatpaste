@@ -1,19 +1,20 @@
 """FloatPaste 应用图标生成脚本。
 
-最终设计「深夜底 · 光标贴入浮层」（V13 深色底 + V14 标志融合）：
+最终设计「双人字疾进」（V56）：
 - 深夜蓝三段对角渐变圆角底板 + 左上光斑 + 边缘提亮描边
-- 白色实心渐变面板（柔和投影），面板内亮蓝渐变光标竖线 + 文本条，
-  面板下方两道半透明悬浮波——「内容正贴进光标处、面板浮于工作之上」
+- 两道人字形色块一浅蓝一白，整体逆时针倾斜 20° 向右上疾进——
+  「连续速贴、内容快进上屏」的速度感
 
 渲染分两条路径：
 
-- 32px 及以上：向量几何 + 超采样，质感层（渐变/光斑/投影/玻璃）齐全。
-- 16/20/24/28px：按目标像素逐点手绘（整数坐标、无重采样）。玻璃质感
-  在 1x 下用预混色值表达（底色上叠白的中间色），轮廓保持完整。
+- 32px 及以上：向量几何 + 超采样，质感层（渐变/光斑）齐全。
+- 16~48px：同一几何等比绘制（双人字色块占比大、无细笔画，
+  超采样 + 预乘降采样即可锐利）；一律免光斑——左上亮斑会把
+  主体左缘融进背景，破坏小尺寸的明暗平衡。
 
 用法：python scripts/make_icon.py
 输出：
-- src-tauri/icons/icon.ico      （16/20/24/28/32/40/48/64 BMP + 256 PNG）
+- src-tauri/icons/icon.ico      （16/20/24/28/30/32/36/40/42/48/64 BMP + 256 PNG）
 - src-tauri/icons/icon-512.png  （512 高清源图，用于展示与再生成）
 - src-tauri/icons/_preview_pngs/preview_sheet.png（多尺寸 + 像素放大预览）
 
@@ -23,6 +24,7 @@
 from __future__ import annotations
 
 import io
+import math
 import struct
 from pathlib import Path
 
@@ -42,90 +44,33 @@ GLOW_COLOR = "#4F8FFF"
 GLOW_ALPHA = 0.55
 EDGE_ALPHA = 0.22  # 底板边缘提亮描边
 
-# 面板与内容（viewBox 100 → ×10.24）
-PANEL_BOX = (256.0, 204.8, 768.0, 563.2)
-PANEL_RADIUS = 112.6
-PANEL_TOP = "#FFFFFF"
-PANEL_BOTTOM = "#DCE9FB"
-SHADOW_DY = 46.0
-SHADOW_BLUR = 46.0
-SHADOW_ALPHA = 0.55
-SHADOW_COLOR = "#041233"
+# 双人字主体（V56 几何，BASE 尺度）
+CHEVRON_PTS = [
+    (250.0, 270.0),
+    (440.0, 270.0),
+    (660.0, 512.0),
+    (440.0, 754.0),
+    (250.0, 754.0),
+    (470.0, 512.0),
+]
+CHEVRON_ANGLE = -20.0  # y 向下坐标系，负角 = 视觉逆时针，尖端朝右上抬
+CHEVRON_BACK_DX = -70.0  # 后翼（浅蓝）相对基准左移
+CHEVRON_FRONT_DX = 185.0  # 前翼（白）相对基准右移
+CHEVRON_BACK = "#5FA8FF"
+CHEVRON_FRONT_TOP = "#FFFFFF"
+CHEVRON_FRONT_BOTTOM = "#DCE9FB"
 
-CARET_BOX = (348.2, 297.0, 394.2, 450.6)  # 光标竖线
-TEXT_BOX = (440.3, 327.7, 675.8, 388.9)  # 文本条
-LINE_TOP = "#2E8BFF"
-LINE_BOTTOM = "#0A5ED7"
-TEXT_ALPHA = 0.50
-
-WAVE1 = ((307.2, 696.3), (512.0, 778.2), (716.8, 696.3))  # 二次贝塞尔三控制点（BASE 尺度）
-WAVE2 = ((389.1, 839.7), (512.0, 890.9), (634.9, 839.7))
-WAVE_COLOR = "#BFD9FF"
-WAVE1_W, WAVE2_W = 51.2, 46.1
-
-# ---- 小尺寸专用稿：按比例自动布局（全浮点、严格同心），矢量质感渲染 ----
-SMALL_TEXT = "#5D9BE0"  # 文本条：白底上保持可读对比，过浅（如 #A9CBF8）在小尺寸会发虚
-SMALL_WAVE = "#8FB7E8"
-SMALL_WAVE_DIM = "#5F86C4"
+# ---- 小尺寸专用稿：与母图同几何，仅保留底板圆角半径 ----
 
 
 def _small_spec(px: int) -> dict:
-    """按面板/底板几何中心比例生成小尺寸布局，保证所有元素严格同心。"""
-
-    def _snap_v(y0: float, y1: float) -> tuple[float, float]:
-        # 垂直方向对齐整数像素栅格：位置取整、尺寸取整，半像素框会在
-        # 降采样后把一条实线摊成 2~3 行半透明（发虚）
-        y = float(round(y0))
-        return (y, y + round(y1 - y0))
-
     tile = float(px)
-    radius = tile * 0.22
-    panel_w = round(tile * 0.5)
-    panel_h = round(tile * 0.34)
-    panel_x0 = (tile - panel_w) / 2
-    panel_y0 = round(tile * 0.2)
-    panel_r = max(1.0, panel_w * 0.094)
-    cy = panel_y0 + panel_h / 2
-
-    inset = round(panel_w * 0.18)
-    # 线条宽度的下限按"任务栏 0.75x 缩放后仍 ≥2px"反推：源图 3px 缩后 2.25px。
-    # 光标竖线 0.17：16px 档 2px、32px 档 3px
-    caret_w = max(2.0, round(panel_w * 0.17))
-    gap = round(panel_w * 0.09)
-    caret_h = round(panel_h * 0.44)
-    # 文本条高度 0.28：16px 档 1px，24px 档 2px、32px 档 3px
-    text_h = max(1.0, round(panel_h * 0.28))
-    text_w = panel_w - 2 * inset - caret_w - gap
-    caret_x0 = panel_x0 + inset
-    text_x0 = caret_x0 + caret_w + gap
-    caret_y0, caret_y1 = _snap_v(cy - caret_h / 2, cy + caret_h / 2)
-    text_y0, text_y1 = _snap_v(cy - text_h / 2, cy + text_h / 2)
-
-    wave1_span = round(tile * 0.4)
-    wave1_x0 = (tile - wave1_span) / 2
-    wave1_y = panel_y0 + panel_h + round(tile * 0.115)
-    sag1 = wave1_span * 0.16
-    wave2_span = round(wave1_span * 0.72)
-    wave2_x0 = (tile - wave2_span) / 2
-    wave2_y = wave1_y + round(tile * 0.135)
-    sag2 = wave2_span * 0.18
-
-    return dict(
-        radius=radius,
-        panel=(panel_x0, panel_y0, panel_x0 + panel_w, panel_y0 + panel_h),
-        panel_r=panel_r,
-        caret=(caret_x0, caret_y0, caret_x0 + caret_w, caret_y1),
-        text=(text_x0, text_y0, text_x0 + text_w, text_y1),
-        wave1=((wave1_x0, wave1_y), (tile / 2, wave1_y + 2 * sag1), (wave1_x0 + wave1_span, wave1_y)),
-        wave2=(
-            ((wave2_x0, wave2_y), (tile / 2, wave2_y + 2 * sag2), (wave2_x0 + wave2_span, wave2_y))
-            if px >= 20
-            else None
-        ),
-    )
+    return dict(radius=tile * 0.22)
 
 
-SMALL_SPECS = {px: _small_spec(px) for px in (16, 20, 24, 28, 32, 40, 48)}
+# 30/36/42 档对应 125%/150%/175% 缩放下任务栏大图标的精确绘制尺寸
+# （SM_CXICON × 3/4），供 app_icon.rs 的 LoadImageW 1:1 命中
+SMALL_SPECS = {px: _small_spec(px) for px in (16, 20, 24, 28, 30, 32, 36, 40, 42, 48)}
 
 
 def _rgba(hex_color: str, alpha: float = 1.0) -> tuple[int, int, int, int]:
@@ -182,6 +127,36 @@ def _downscale_premultiplied(img: Image.Image, px: int) -> Image.Image:
     return Image.fromarray(out, "RGBA")
 
 
+def _rot_pts(
+    pts: list[tuple[float, float]], deg: float, cx: float, cy: float
+) -> list[tuple[float, float]]:
+    """绕 (cx, cy) 旋转多边形顶点；y 向下坐标系，正角度为视觉顺时针。"""
+    t = math.radians(deg)
+    c, s = math.cos(t), math.sin(t)
+    return [(cx + dx * c - dy * s, cy + dx * s + dy * c) for x, y in pts for dx, dy in [(x - cx, y - cy)]]
+
+
+def _draw_chevrons(img: Image.Image) -> None:
+    """双人字主体：浅蓝后翼 + 白渐变前翼，整体旋转后向右上疾进。
+    在任意尺寸画布上按 BASE 坐标等比绘制，几何全局一致。"""
+    size = img.width
+    k = size / BASE
+    back = _rot_pts([(x + CHEVRON_BACK_DX, y) for x, y in CHEVRON_PTS], CHEVRON_ANGLE, 512.0, 512.0)
+    front = _rot_pts(
+        [(x + CHEVRON_FRONT_DX, y) for x, y in CHEVRON_PTS], CHEVRON_ANGLE, 512.0, 512.0
+    )
+
+    layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    ImageDraw.Draw(layer).polygon([(x * k, y * k) for x, y in back], fill=_rgba(CHEVRON_BACK))
+    img.alpha_composite(layer)
+
+    grad = _vertical_gradient(size, CHEVRON_FRONT_TOP, CHEVRON_FRONT_BOTTOM).convert("RGBA")
+    mask = Image.new("L", img.size, 0)
+    ImageDraw.Draw(mask).polygon([(x * k, y * k) for x, y in front], fill=255)
+    grad.putalpha(mask)
+    img.alpha_composite(grad)
+
+
 def draw_icon(px: int, supersample: int = 4) -> Image.Image:
     """大尺寸路径：向量几何在超采样画布上绘制后重采样到目标尺寸。"""
     size = px * supersample
@@ -219,61 +194,8 @@ def draw_icon(px: int, supersample: int = 4) -> Image.Image:
     )
     img.alpha_composite(edge)
 
-    # 面板投影：形状下移 + 高斯模糊
-    panel_mask = _rounded_mask(size, PANEL_BOX, PANEL_RADIUS)
-    shadow_a = (
-        Image.fromarray(np.asarray(panel_mask), "L")
-        .transform((size, size), Image.AFFINE, (1, 0, 0, 0, 1, -round(SHADOW_DY * k)))
-        .filter(ImageFilter.GaussianBlur(radius=SHADOW_BLUR * k))
-    )
-    shadow = Image.new("RGBA", (size, size), _rgba(SHADOW_COLOR, 1.0))
-    shadow.putalpha(shadow_a.point(lambda v: round(v / 255 * SHADOW_ALPHA * 255)))
-    img.alpha_composite(shadow)
-
-    # 白色实心渐变面板
-    rows = np.linspace(0.0, 1.0, size, dtype=np.float32)
-    pt = np.array(_rgba(PANEL_TOP)[:3], dtype=np.float32)
-    pb = np.array(_rgba(PANEL_BOTTOM)[:3], dtype=np.float32)
-    ramp = pt[None, :] * (1 - rows[:, None]) + pb[None, :] * rows[:, None]
-    panel_grad = Image.fromarray(
-        np.repeat(ramp[:, None, :], size, axis=1).astype(np.uint8), "RGB"
-    ).convert("RGBA")
-    panel_grad.putalpha(panel_mask)
-    img.alpha_composite(panel_grad)
-
-    # 两道悬浮波：中心线法线偏移成填充多边形（无接缝），两端圆帽
-    for ctrl, wv in ((WAVE1, WAVE1_W), (WAVE2, WAVE2_W)):
-        alpha = 0.55 if ctrl is WAVE2 else 1.0
-        ts = np.linspace(0.0, 1.0, 200)
-        cx = (1 - ts) ** 2 * ctrl[0][0] + 2 * (1 - ts) * ts * ctrl[1][0] + ts**2 * ctrl[2][0]
-        cy = (1 - ts) ** 2 * ctrl[0][1] + 2 * (1 - ts) * ts * ctrl[1][1] + ts**2 * ctrl[2][1]
-        center = np.stack([cx * k, cy * k], axis=1)
-        d = np.gradient(center, axis=0)
-        norm = np.linalg.norm(d, axis=1, keepdims=True)
-        norm[norm == 0] = 1.0
-        normal = np.stack([-d[:, 1] / norm[:, 0], d[:, 0] / norm[:, 0]], axis=1)
-        hw = wv * k / 2
-        poly = np.concatenate([center + normal * hw, (center - normal * hw)[::-1]])
-        wave = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-        wd = ImageDraw.Draw(wave)
-        wd.polygon([tuple(p) for p in poly], fill=_rgba(WAVE_COLOR, alpha))
-        for ex, ey in (center[0], center[-1]):
-            wd.ellipse([ex - hw, ey - hw, ex + hw, ey + hw], fill=_rgba(WAVE_COLOR, alpha))
-        img.alpha_composite(wave)
-
-    # 光标竖线 + 文本条：水平渐变蓝
-    lg = np.linspace(0.0, 1.0, size, dtype=np.float32)
-    lt = np.array(_rgba(LINE_TOP)[:3], dtype=np.float32)
-    lb = np.array(_rgba(LINE_BOTTOM)[:3], dtype=np.float32)
-    lramp = lt[None, :] * (1 - lg[:, None]) + lb[None, :] * lg[:, None]
-    line_grad = Image.fromarray(np.repeat(lramp[None, :, :], size, axis=0).astype(np.uint8), "RGB")
-
-    for box, alpha in ((CARET_BOX, 1.0), (TEXT_BOX, TEXT_ALPHA)):
-        bar = line_grad.convert("RGBA")
-        bar.putalpha(
-            _rounded_mask(size, box, (box[3] - box[1]) / 2).point(lambda v: round(v * alpha))
-        )
-        img.alpha_composite(bar)
+    # 双人字主体：浅蓝后翼 + 白渐变前翼
+    _draw_chevrons(img)
 
     return _downscale_premultiplied(img, px)
 
@@ -291,12 +213,38 @@ def _rounded_mask_px(size: int, box: tuple[float, float, float, float], radius: 
     return mask
 
 
-def _h_gradient(size: int, left_hex: str, right_hex: str) -> Image.Image:
-    cols = np.linspace(0.0, 1.0, size, dtype=np.float32)
-    left = np.array(_rgba(left_hex)[:3], dtype=np.float32)
-    right = np.array(_rgba(right_hex)[:3], dtype=np.float32)
-    ramp = left[None, :] * (1 - cols[:, None]) + right[None, :] * cols[:, None]
-    return Image.fromarray(np.repeat(ramp[None, :, :], size, axis=0).astype(np.uint8), "RGB")
+def render_small_canvas(px: int, supersample: int = 8) -> Image.Image:
+    """小尺寸规格的超采样画布（未降采样）。16px 档免光斑/投影的规则在此生效，
+    托盘等常驻小图标的源图应取本画布，避免把母图的强光斑带进小尺寸造成明暗失衡。"""
+    spec = SMALL_SPECS[px]
+    size = px * supersample
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+
+    # 底板：深夜渐变 + 亮边。小尺寸一律免光斑——左上亮斑会把主体左缘
+    # 融进背景、右缘对比过强，几何居中的内容也会被看成右偏
+    tile = _multi_stop_gradient(size).convert("RGBA")
+    tile.putalpha(_rounded_mask_px(size, (0, 0, px, px), spec["radius"], px))
+    img.alpha_composite(tile)
+
+    # 边缘提亮描边：与底板圆角同心，且用底板 mask 裁剪——
+    # 否则圆角弧上描边会凸出底板轮廓，在透明角区漏白
+    sw = max(2, round(0.7 * supersample))
+    inset = sw / 2
+    edge = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    ImageDraw.Draw(edge).rounded_rectangle(
+        [inset, inset, size - inset, size - inset],
+        radius=max(1.0, spec["radius"] * size / px - inset),
+        outline=(255, 255, 255, round(0.22 * 255)),
+        width=sw,
+    )
+    tile_mask = _rounded_mask_px(size, (0, 0, px, px), spec["radius"], px)
+    edge.putalpha(ImageChops.multiply(edge.getchannel("A"), tile_mask))
+    img.alpha_composite(edge)
+
+    # 双人字主体：与母图同一几何（色块占比大、无细笔画，等比即可锐利）
+    _draw_chevrons(img)
+
+    return img
 
 
 def _draw_quad_wave(
@@ -329,85 +277,8 @@ def _draw_quad_wave(
     img.alpha_composite(layer)
 
 
-def render_small_canvas(px: int, supersample: int = 8) -> Image.Image:
-    """小尺寸规格的超采样画布（未降采样）。16px 档免光斑/投影的规则在此生效，
-    托盘等常驻小图标的源图应取本画布，避免把母图的强光斑带进小尺寸造成明暗失衡。"""
-    spec = SMALL_SPECS[px]
-    size = px * supersample
-    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-
-    # 底板：深夜渐变 + 亮边。小尺寸一律免光斑——左上亮斑会把白色面板左缘
-    # 融进背景、右缘对比过强，几何居中的内容也会被看成右偏
-    tile = _multi_stop_gradient(size).convert("RGBA")
-    tile.putalpha(_rounded_mask_px(size, (0, 0, px, px), spec["radius"], px))
-    img.alpha_composite(tile)
-
-    # 边缘提亮描边：与底板圆角同心，且用底板 mask 裁剪——
-    # 否则圆角弧上描边会凸出底板轮廓，在透明角区漏白
-    sw = max(2, round(0.7 * supersample))
-    inset = sw / 2
-    edge = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    ImageDraw.Draw(edge).rounded_rectangle(
-        [inset, inset, size - inset, size - inset],
-        radius=max(1.0, spec["radius"] * size / px - inset),
-        outline=(255, 255, 255, round(0.22 * 255)),
-        width=sw,
-    )
-    tile_mask = _rounded_mask_px(size, (0, 0, px, px), spec["radius"], px)
-    edge.putalpha(ImageChops.multiply(edge.getchannel("A"), tile_mask))
-    img.alpha_composite(edge)
-
-    # 面板：硬投影（仅 24px+，16/20px 会与波粘连）+ 白渐变。
-    # spec 面板框为几何右开区间，直接使用（此前误 +1 按含端点消费，
-    # 导致面板多画一列、左右边距 4:3，内容观感右偏）
-    panel_box = tuple(spec["panel"])
-    panel_r = spec["panel_r"]
-    if px >= 24:
-        off = max(1, round(0.05 * px)) * size / px
-        shadow_mask = _rounded_mask_px(
-            size,
-            (panel_box[0], panel_box[1] + off / (size / px), panel_box[2], panel_box[3] + off / (size / px)),
-            panel_r,
-            px,
-        )
-        shadow = Image.new("RGBA", (size, size), _rgba(SHADOW_COLOR, 0.5))
-        shadow.putalpha(shadow_mask)
-        img.alpha_composite(shadow)
-
-    rows = np.linspace(0.0, 1.0, size, dtype=np.float32)
-    pt = np.array(_rgba(PANEL_TOP)[:3], dtype=np.float32)
-    pb = np.array(_rgba(PANEL_BOTTOM)[:3], dtype=np.float32)
-    ramp = pt[None, :] * (1 - rows[:, None]) + pb[None, :] * rows[:, None]
-    panel_grad = Image.fromarray(
-        np.repeat(ramp[:, None, :], size, axis=1).astype(np.uint8), "RGB"
-    ).convert("RGBA")
-    panel_grad.putalpha(_rounded_mask_px(size, panel_box, panel_r, px))
-    img.alpha_composite(panel_grad)
-
-    # 内容条：光标竖线 + 文本条（渐变蓝 / 浅蓝）
-    caret_box, text_box = spec["caret"], spec["text"]
-    caret = _h_gradient(size, LINE_TOP, LINE_BOTTOM).convert("RGBA")
-    caret.putalpha(_rounded_mask_px(size, caret_box, (caret_box[3] - caret_box[1]) / 2, px))
-    img.alpha_composite(caret)
-    text = Image.new("RGBA", (size, size), _rgba(SMALL_TEXT))
-    text.putalpha(_rounded_mask_px(size, text_box, (text_box[3] - text_box[1]) / 2, px))
-    img.alpha_composite(text)
-
-    # 悬浮波：贝塞尔弧线（法线偏移填充，无接缝），两端圆帽，矢高随尺寸放大保证可见
-    for key, color in (("wave1", SMALL_WAVE), ("wave2", SMALL_WAVE_DIM)):
-        if not spec[key]:
-            continue
-        (x0, y0), (cx, cy), (x1, y1) = spec[key]
-        # 线宽下限 2px：更细的波浪线在降采样后只剩半透明残影
-        width = max(2.0, round(0.09 * px))
-        _draw_quad_wave(img, (x0, y0), (cx, cy), (x1, y1), width, _rgba(color), px)
-
-    return img
-
-
 def draw_small(px: int, supersample: int = 8) -> Image.Image:
-    """小尺寸专用稿：沿用小尺寸布局（元素占比大、锐利），渲染走向量质感
-    （渐变底板 + 光斑 + 硬投影 + 渐变内容条），保证与大图同一气质。"""
+    """小尺寸路径：与母图同一几何，8x 超采样 + 预乘降采样保证锐利。"""
     return _downscale_premultiplied(render_small_canvas(px, supersample), px)
 
 
@@ -496,7 +367,7 @@ def main() -> None:
     # 供运行时按 DPI 精确缩放（src-tauri/src/platform/windows/app_icon.rs）
     render_small_canvas(16, supersample=8).save(ICONS / "icon-tray.png")
 
-    sizes = [16, 20, 24, 28, 32, 40, 48, 64, 256]
+    sizes = [16, 20, 24, 28, 30, 32, 36, 40, 42, 48, 64, 256]
     images = {px: render_size(px) for px in sizes}
     (ICONS / "icon.ico").write_bytes(build_ico(images))
 

@@ -94,20 +94,28 @@ fn load_window_icons() -> Option<(isize, isize)> {
     let icons = unsafe {
         let module = GetModuleHandleW(PCWSTR::null()).ok()?;
         let instance = HINSTANCE(module.0);
-        let load = |width_index: SYSTEM_METRICS_INDEX, height_index: SYSTEM_METRICS_INDEX| {
+        let load = |width: i32, height: i32| {
             let handle = LoadImageW(
                 Some(instance),
                 PCWSTR(ICON_RESOURCE_ID as usize as _),
                 IMAGE_ICON,
-                GetSystemMetrics(width_index),
-                GetSystemMetrics(height_index),
+                width,
+                height,
                 LR_DEFAULTSIZE,
             )
             .ok()?;
             Some(HICON(handle.0).0 as isize)
         };
-        let small = load(SM_CXSMICON, SM_CYSMICON)?;
-        let big = load(SM_CXICON, SM_CYICON)?;
+        let small = load(
+            GetSystemMetrics(SM_CXSMICON),
+            GetSystemMetrics(SM_CYSMICON),
+        )?;
+        // 任务栏以 SM_CXICON 的 3/4（100% 缩放下 24px）绘制按钮图标，按该尺寸
+        // 取档可 1:1 命中 ICO 中 24/30/36px 档位，避免 shell 二次缩放糊掉细线条
+        let big = load(
+            GetSystemMetrics(SM_CXICON) * 3 / 4,
+            GetSystemMetrics(SM_CYICON) * 3 / 4,
+        )?;
         (small, big)
     };
 
