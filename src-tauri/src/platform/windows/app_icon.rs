@@ -18,7 +18,7 @@ use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
     GetSystemMetrics, LoadImageW, SendMessageW, HICON, IMAGE_ICON, LR_DEFAULTSIZE, SM_CXICON,
-    SM_CXSMICON, SM_CYICON, SM_CYSMICON, SYSTEM_METRICS_INDEX, WM_SETICON,
+    SM_CXSMICON, SM_CYICON, SM_CYSMICON, WM_SETICON,
 };
 
 use crate::domain::error::AppError;
