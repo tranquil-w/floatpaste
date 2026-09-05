@@ -1,8 +1,8 @@
 // src/shared/queries/clipQueries.ts
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { getItemDetail, updateTextItem } from "../../bridge/commands";
-import { queryClient } from "../../app/queryClient";
-import { queryKeys } from "./queryKeys";
+import { getItemDetail, updateTextItem } from "../../bridge/commands.ts";
+import { queryClient } from "../../app/queryClient.ts";
+import { queryKeys } from "./queryKeys.ts";
 
 // 条目内容低频变化；staleTime 放宽避免上下键导航时反复触发 get_item_detail IPC
 const DETAIL_STALE_TIME_MS = 30_000;

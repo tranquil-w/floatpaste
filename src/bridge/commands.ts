@@ -26,8 +26,8 @@ import {
   mockSetItemTags,
   mockUpdateSettings,
   mockUpdateTextItem,
-} from "./mockBackend";
-import { isTauriRuntime } from "./runtime";
+} from "./mockBackend.ts";
+import { isTauriRuntime } from "./runtime.ts";
 
 export async function listRecentItems(limit: number): Promise<ClipItemSummary[]> {
   if (!isTauriRuntime()) {
