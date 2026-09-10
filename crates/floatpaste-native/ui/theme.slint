@@ -1,0 +1,70 @@
+// 语义主题 token：由 Rust 侧（floatpaste-core::theme 派生结果）写入。
+// 键集与前端 --pg-* CSS 变量一一对应，组件只消费这一层。
+export global Theme {
+    // 画布
+    in-out property <color> canvas-default;
+    in-out property <color> canvas-subtle;
+    in-out property <color> canvas-inset;
+
+    // 前景
+    in-out property <color> fg-default;
+    in-out property <color> fg-muted;
+    in-out property <color> fg-subtle;
+    in-out property <color> fg-on-emphasis;
+
+    // 强调
+    in-out property <color> accent-fg;
+    in-out property <color> accent-emphasis;
+    in-out property <color> accent-hover;
+    in-out property <color> accent-subtle; // rgba 合成后的半透明色
+
+    // 边框
+    in-out property <color> border-default;
+    in-out property <color> border-window;
+    in-out property <color> border-muted;
+    in-out property <color> border-subtle;
+
+    // 状态色（前景 + 半透明底）
+    in-out property <color> success-fg;
+    in-out property <color> success-subtle;
+    in-out property <color> danger-fg;
+    in-out property <color> danger-subtle;
+    in-out property <color> warning-fg;
+    in-out property <color> warning-subtle;
+    in-out property <color> done-fg;
+    in-out property <color> done-subtle;
+
+    // 收藏星标 / 阴影
+    in-out property <color> favorite;
+    in-out property <color> shadow-color;
+}
+
+// 语义尺寸 token：刻度与原版 Tailwind 类一一对应（注释标明出处）。
+// 组件不得散写魔法数——新尺寸先到这里对号入座；仅一次性用途的
+// 结构尺寸（如头部高度、预览最大高）允许留在组件内。
+export global Metrics {
+    // 圆角：rounded-lg / rounded-md / rounded-[4px] / rounded-full
+    out property <length> radius-lg: 8px;
+    out property <length> radius-md: 6px;
+    out property <length> radius-sm: 4px;
+    out property <length> radius-pill: 999px;
+
+    // 间距：gap-1 / py-1.5 / py-2 / px-3
+    out property <length> space-1: 4px;
+    out property <length> space-1_5: 6px;
+    out property <length> space-2: 8px;
+    out property <length> space-3: 12px;
+
+    // 字级：text-[9px] / text-[10px] / text-[11px] / text-xs / text-[13px] / text-sm
+    out property <length> text-micro: 9px;
+    out property <length> text-meta: 10px;
+    out property <length> text-hint: 11px;
+    out property <length> text-xs: 12px;
+    out property <length> text-body: 13px;
+    out property <length> text-sm: 14px;
+
+    // 字重：font-medium / font-semibold / font-bold
+    out property <int> weight-medium: 500;
+    out property <int> weight-semibold: 600;
+    out property <int> weight-bold: 700;
+}

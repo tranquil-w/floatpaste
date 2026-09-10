@@ -1,6 +1,6 @@
-use tauri::{AppHandle, Manager, State, Theme, WebviewWindow};
-use std::time::Duration;
 use std::collections::HashMap;
+use std::time::Duration;
+use tauri::{AppHandle, Manager, State, Theme, WebviewWindow};
 
 use crate::{
     app_bootstrap::AppState,
@@ -92,11 +92,17 @@ pub async fn show_tooltip(
     theme: String,
     theme_vars: HashMap<String, String>,
 ) -> Result<(), String> {
-    TooltipWindow::show_tooltip(&app, request_id, x, y, html, &theme, &theme_vars).map_err(map_error)
+    TooltipWindow::show_tooltip(&app, request_id, x, y, html, &theme, &theme_vars)
+        .map_err(map_error)
 }
 
 #[tauri::command]
-pub fn tooltip_ready(app: AppHandle, request_id: u32, width: u32, height: u32) -> Result<(), String> {
+pub fn tooltip_ready(
+    app: AppHandle,
+    request_id: u32,
+    width: u32,
+    height: u32,
+) -> Result<(), String> {
     TooltipWindow::on_tooltip_ready(&app, request_id, width, height).map_err(map_error)
 }
 
@@ -104,4 +110,3 @@ pub fn tooltip_ready(app: AppHandle, request_id: u32, width: u32, height: u32) -
 pub fn hide_tooltip(app: AppHandle) -> Result<(), String> {
     TooltipWindow::hide_tooltip(&app).map_err(map_error)
 }
-

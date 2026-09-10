@@ -65,8 +65,7 @@ extern "system" fn mouse_hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) ->
             || msg == WM_NCMBUTTONDOWN
         {
             let close_picker = {
-                let Ok(app_lock) = APP_HANDLE.lock()
-                else {
+                let Ok(app_lock) = APP_HANDLE.lock() else {
                     // 锁中毒时无法判定，放行事件避免误关闭 Picker
                     unsafe { return CallNextHookEx(None, code, wparam, lparam) };
                 };

@@ -1,0 +1,13 @@
+pub mod clip_service;
+pub mod dedup_service;
+pub mod history_service;
+pub mod image_storage;
+pub mod normalize_service;
+pub mod paste_support;
+pub mod picker_position_service;
+pub mod privacy_service;
+pub mod retention_service;
+pub mod search_service;
+pub mod startup_service;
+pub mod tag_service;
+pub mod time_format;

@@ -1,17 +1,10 @@
-pub mod clip_service;
-pub mod dedup_service;
-pub mod history_service;
-pub mod image_storage;
-pub mod normalize_service;
+// 迁移垫层：纯业务服务已下沉 floatpaste-core，经 glob 再导出保持旧路径可用。
+pub use floatpaste_core::services::*;
+
 pub mod paste_executor;
 pub mod picker_position_service;
-pub mod privacy_service;
-pub mod retention_service;
-pub mod search_service;
 pub mod settings_service;
 pub mod shortcut_manager;
-pub mod startup_service;
-pub mod tag_service;
 pub mod tooltip_window;
 pub mod tray_service;
 pub mod window_coordinator;

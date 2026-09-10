@@ -1,0 +1,346 @@
+//! FloatPaste 原生壳（Slint + 软件渲染）。
+//!
+//! 与老 Tauri 壳共用 floatpaste-core 与同一数据目录。本阶段完成速贴面板的
+//! 完整复刻（无焦点会话模型 / 长按导航 / 外击关闭 / 悬停预览 / 三种定位 /
+//! 尺寸记忆 / 主题），search/editor/settings/tray 按窗口逐个迁移。
+
+mod app_state;
+mod paste_flow;
+mod picker;
+mod system;
+mod theme_bridge;
+mod thumbnails;
+mod tooltip;
+mod win32_ext;
+
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
+
+use slint::ComponentHandle;
+
+use floatpaste_core::launch_mode::LaunchMode;
+use floatpaste_core::platform::windows::clipboard_monitor::ClipboardMonitor;
+use floatpaste_core::platform::windows::hotkey;
+use floatpaste_core::platform::windows::mouse_monitor;
+use floatpaste_core::platform::windows::session_keyboard;
+use floatpaste_core::platform::windows::window_control::{self, GestureMode, ResizeDirection};
+use floatpaste_core::services::picker_position_service::{PICKER_MIN_HEIGHT, PICKER_MIN_WIDTH};
+use floatpaste_core::theme;
+
+use app_state::SharedState;
+use picker::App;
+
+slint::include_modules!();
+
+fn main() {
+    let _log_guard = system::init_logging();
+    let launch_mode = LaunchMode::from_env();
+
+    // 单实例：已有实例时通过命名事件唤醒其速贴会话并退出当前进程
+    let _single_instance =
+        match floatpaste_core::platform::windows::single_instance::acquire_or_focus_existing(
+            launch_mode,
+            || floatpaste_core::platform::windows::single_instance::signal_wake_event(),
+        ) {
+            Ok(Some(guard)) => Some(guard),
+            Ok(None) => return,
+            Err(error) => {
+                tracing::error!("单实例检查失败，退出当前实例: {error}");
+                return;
+            }
+        };
+
+    let core = match system::init_core() {
+        Ok(core) => core,
+        Err(error) => {
+            tracing::error!("初始化核心状态失败: {error}");
+            return;
+        }
+    };
+
+    if let Err(error) =
+        floatpaste_core::services::history_service::HistoryService::ensure_welcome_item(
+            &core.repository,
+        )
+    {
+        tracing::warn!("初始化欢迎记录失败: {error}");
+    }
+
+    // ── 窗口创建 ──
+    let picker_win = match QuickPasteWindow::new() {
+        Ok(win) => win,
+        Err(error) => {
+            tracing::error!("创建速贴窗口失败: {error}");
+            return;
+        }
+    };
+    let tooltip_win = match TooltipWindow::new() {
+        Ok(win) => win,
+        Err(error) => {
+            tracing::error!("创建预览窗口失败: {error}");
+            return;
+        }
+    };
+
+    let state = Arc::new(SharedState::new(core));
+
+    let app = App {
+        state: state.clone(),
+        picker: picker_win.as_weak(),
+        tooltip: tooltip_win.as_weak(),
+    };
+
+    // ── 二次启动唤醒：打开速贴会话（等价于按下主快捷键）──
+    {
+        let app_for_wake = app.clone();
+        if let Err(error) =
+            floatpaste_core::platform::windows::single_instance::listen_wake(move || {
+                let app = app_for_wake.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    picker::toggle(&app);
+                });
+            })
+        {
+            tracing::warn!("装载唤醒事件失败，二次启动将无法唤起面板: {error}");
+        }
+    }
+
+    // ── 主题初值（首帧即正确，无需等会话）──
+    {
+        let settings = state.current_settings();
+        let resolved =
+            theme::resolve_theme(settings.theme_mode.clone(), theme::system_prefers_dark());
+        let tokens = theme::derive_tokens(&settings.theme_preset, &settings.theme_accent, resolved);
+        theme_bridge::apply_theme(&picker_win, Some(&tooltip_win), &tokens);
+    }
+
+    wire_picker_callbacks(&app);
+
+    // ── 窗口句柄与浮层样式：事件循环首轮装配 ──
+    // winit 惰性建窗：show() 同步创建 OS 窗口后句柄才可用；
+    // 随即 hide()，且此闭包运行在泵帧之前，不会闪现窗口。
+    let silent_startup = launch_mode.is_silent();
+    let app_for_init = app.clone();
+    let _ = slint::invoke_from_event_loop(move || {
+        let Some(picker_win) = app_for_init.picker.upgrade() else {
+            return;
+        };
+        let Some(tooltip_win) = app_for_init.tooltip.upgrade() else {
+            return;
+        };
+
+        let _ = picker_win.window().show();
+        if let Some(hwnd) = win32_ext::window_hwnd(&picker_win) {
+            win32_ext::apply_overlay_style(hwnd);
+            win32_ext::apply_dwm_shadow(hwnd);
+            win32_ext::apply_dwm_rounded_corners(hwnd);
+            let _ = window_control::remove_window_system_menu(hwnd);
+            app_for_init.state.picker_hwnd.store(hwnd, Ordering::SeqCst);
+        } else {
+            tracing::error!("获取速贴窗口句柄失败，会话功能不可用");
+        }
+        let _ = picker_win.window().hide();
+
+        let _ = tooltip_win.window().show();
+        if let Some(hwnd) = win32_ext::window_hwnd(&tooltip_win) {
+            win32_ext::apply_overlay_style(hwnd);
+            app_for_init
+                .state
+                .tooltip_hwnd
+                .store(hwnd, Ordering::SeqCst);
+        }
+        let _ = tooltip_win.window().hide();
+
+        if !silent_startup {
+            picker::activate(&app_for_init);
+        }
+    });
+
+    // ── 剪贴板监听：录入成功后同步刷新列表 ──
+    {
+        let app_for_sink = app.clone();
+        let on_upsert: floatpaste_core::platform::windows::clipboard_monitor::ClipUpsertSink =
+            Arc::new(move |_detail| {
+                let app = app_for_sink.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    picker::refresh_list_changed(&app);
+                });
+            });
+        if let Err(error) = ClipboardMonitor::start(state.core.clone(), on_upsert) {
+            tracing::error!("启动剪贴板监听失败: {error}");
+        }
+    }
+
+    // ── 全局快捷键：主快捷键切换速贴 ──
+    {
+        let app_for_hotkey = app.clone();
+        let shortcut_text = {
+            let configured = state.current_settings().shortcut;
+            if configured.trim().is_empty() {
+                "Alt+Q".to_string()
+            } else {
+                configured
+            }
+        };
+        let main_spec = hotkey::parse_hotkey(&shortcut_text)
+            .or_else(|| hotkey::parse_hotkey("Alt+Q"))
+            .expect("默认快捷键 Alt+Q 必须可解析");
+        if let Err(error) = hotkey::register_hotkeys(vec![(1, main_spec)], move |id| {
+            tracing::info!("命中主快捷键 id={id}");
+            let app = app_for_hotkey.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                picker::toggle(&app);
+            });
+        }) {
+            tracing::error!("注册全局快捷键失败: {error}");
+        }
+    }
+
+    // 必须用 until_quit 变体：Slint 默认在最后一个窗口关闭/隐藏时退出事件循环，
+    // 而"隐藏窗口"是速贴应用的常态操作（Esc/粘贴/热键），会让整个进程静默退出
+    if let Err(error) = slint::run_event_loop_until_quit() {
+        tracing::error!("事件循环异常退出: {error}");
+    }
+
+    // 退出收尾：先停输入拦截与监听，再置退出标志
+    session_keyboard::end_session();
+    mouse_monitor::end_session();
+    ClipboardMonitor::stop();
+    hotkey::stop_hotkeys();
+    state.core.begin_quit();
+}
+
+fn wire_picker_callbacks(app: &App) {
+    let win = match app.picker.upgrade() {
+        Some(win) => win,
+        None => return,
+    };
+
+    // 单击选中（不上屏）
+    {
+        let app_cb = app.clone();
+        win.on_row_clicked(move |index| {
+            picker::set_selected(&app_cb, index.max(0) as usize);
+        });
+    }
+
+    // 双击上屏
+    {
+        let app_cb = app.clone();
+        win.on_row_double_clicked(move |index| {
+            let index = index.max(0) as usize;
+            picker::set_selected(&app_cb, index);
+            picker::confirm(&app_cb, index, false);
+        });
+    }
+
+    // 悬停（移动即重置 400ms 计时）
+    {
+        let app_cb = app.clone();
+        win.on_row_hover(move |index, x, y| {
+            tooltip::schedule(&app_cb, index.max(0) as usize, x, y);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_row_hover_left(move || {
+            tooltip::cancel(&app_cb);
+        });
+    }
+
+    // 列表实测预览可用宽（含窗口缩放）→ 按新宽度重裁预览
+    {
+        let app_cb = app.clone();
+        win.on_preview_widths_changed(move || {
+            picker::schedule_preview_reclamp(&app_cb);
+        });
+    }
+
+    // 头部拖拽移动（非模态手势：down/moved/up 全程由 Slint 事件驱动；
+    // 系统模态循环会吞掉指针抬起事件，面板此后收不到任何条目点击）
+    {
+        let state_cb = app.state.clone();
+        win.on_header_drag_started(move || {
+            let hwnd = state_cb.picker_hwnd.load(Ordering::SeqCst);
+            if hwnd != 0 {
+                window_control::begin_window_gesture(hwnd, GestureMode::Move, 0, 0);
+            }
+        });
+    }
+    {
+        let state_cb = app.state.clone();
+        win.on_header_drag_moved(move || {
+            let hwnd = state_cb.picker_hwnd.load(Ordering::SeqCst);
+            if hwnd != 0 {
+                window_control::update_window_gesture(hwnd);
+            }
+        });
+    }
+    {
+        let state_cb = app.state.clone();
+        win.on_header_drag_finished(move || {
+            let hwnd = state_cb.picker_hwnd.load(Ordering::SeqCst);
+            if hwnd != 0 {
+                window_control::end_window_gesture(hwnd);
+            }
+        });
+    }
+
+    // 八方向拉伸（同一非模态手势，带最小尺寸约束）
+    {
+        let app_cb = app.clone();
+        win.on_resize_started(move |direction| {
+            let hwnd = app_cb.state.picker_hwnd.load(Ordering::SeqCst);
+            if hwnd == 0 {
+                return;
+            }
+            let direction = match direction {
+                0 => ResizeDirection::North,
+                1 => ResizeDirection::South,
+                2 => ResizeDirection::West,
+                3 => ResizeDirection::East,
+                4 => ResizeDirection::NorthWest,
+                5 => ResizeDirection::NorthEast,
+                6 => ResizeDirection::SouthWest,
+                _ => ResizeDirection::SouthEast,
+            };
+            let scale = app_cb
+                .picker
+                .upgrade()
+                .map(|win| win.window().scale_factor())
+                .unwrap_or(1.0);
+            window_control::begin_window_gesture(
+                hwnd,
+                GestureMode::Resize(direction),
+                (PICKER_MIN_WIDTH as f32 * scale) as i32,
+                (PICKER_MIN_HEIGHT as f32 * scale) as i32,
+            );
+        });
+    }
+    {
+        let state_cb = app.state.clone();
+        win.on_resize_moved(move || {
+            let hwnd = state_cb.picker_hwnd.load(Ordering::SeqCst);
+            if hwnd != 0 {
+                window_control::update_window_gesture(hwnd);
+            }
+        });
+    }
+    {
+        let state_cb = app.state.clone();
+        win.on_resize_finished(move || {
+            let hwnd = state_cb.picker_hwnd.load(Ordering::SeqCst);
+            if hwnd != 0 {
+                window_control::end_window_gesture(hwnd);
+            }
+        });
+    }
+
+    // 加载失败重试
+    {
+        let app_cb = app.clone();
+        win.on_retry_clicked(move || {
+            picker::refresh_list_changed(&app_cb);
+        });
+    }
+}

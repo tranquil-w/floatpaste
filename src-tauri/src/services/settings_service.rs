@@ -4,7 +4,8 @@ use crate::{
     app_bootstrap::AppState,
     domain::{error::AppError, events::SETTINGS_CHANGED_EVENT},
     services::{
-        shortcut_manager::ShortcutManager, startup_service::StartupService, tray_service::TrayService,
+        shortcut_manager::ShortcutManager, startup_service::StartupService,
+        tray_service::TrayService,
     },
 };
 

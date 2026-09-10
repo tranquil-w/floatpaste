@@ -1,42 +1,47 @@
 use std::{
     path::PathBuf,
-    sync::atomic::{AtomicBool, AtomicU64, Ordering},
-    sync::{Arc, Mutex, RwLock},
+    sync::{atomic::Ordering, Arc, Mutex},
     time::{Duration, Instant},
 };
 
 use tauri::{App, AppHandle, Emitter, Manager};
 use tracing::{info, warn};
 
+use floatpaste_core::state::CoreState;
+
 use crate::{
     domain::{
-        editor_session::EditorSession, error::AppError,
-        events::{ClipsChangedPayload, CLIPS_CHANGED_EVENT}, search_session::SearchSession,
-        settings::UserSetting,
+        editor_session::EditorSession,
+        error::AppError,
+        events::{ClipsChangedPayload, CLIPS_CHANGED_EVENT},
+        search_session::SearchSession,
     },
     launch_mode::LaunchMode,
-    platform::windows::clipboard_monitor::ClipboardMonitor,
     repository::sqlite_repository::SqliteRepository,
     services::{
-        image_storage::ImageStorage, privacy_service::SelfWriteGuard,
-        retention_service::RetentionService, settings_service::SettingsService,
-        tray_service::TrayService, window_coordinator::WindowCoordinator,
+        image_storage::ImageStorage, settings_service::SettingsService, tray_service::TrayService,
+        window_coordinator::WindowCoordinator,
     },
 };
 
+/// 壳层应用状态 = 核心状态（仓储/设置/图片存储）+ Tauri 窗口会话状态。
+///
+/// 核心成员经 `Deref` 直接访问（`state.repository`、`state.current_settings()` 等），
+/// 窗口会话成员是 Tauri 特有的编排概念，不进入 core。
 #[derive(Clone)]
 pub struct AppState {
-    pub repository: SqliteRepository,
-    pub image_storage: ImageStorage,
-    settings: Arc<RwLock<UserSetting>>,
-    self_write_guard: SelfWriteGuard,
-    quitting: Arc<AtomicBool>,
+    pub core: CoreState,
     picker: PickerState,
     search: SearchState,
     editor: EditorState,
-    /// 托盘"切换监听"的最近一次受理时间。Windows 菜单存在一次点击触发两次
-    /// 事件的上游缺陷，toggle 两次会相互抵消导致状态看似不变，用时间窗去抖。
-    monitoring_toggle_gate: Arc<Mutex<DebounceGate>>,
+}
+
+impl std::ops::Deref for AppState {
+    type Target = CoreState;
+
+    fn deref(&self) -> &Self::Target {
+        &self.core
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -49,16 +54,16 @@ pub struct PickerSession {
 #[derive(Clone, Default)]
 struct PickerState {
     session: Arc<Mutex<PickerSession>>,
-    active: Arc<AtomicBool>,
-    session_shortcuts_registered: Arc<AtomicBool>,
+    active: Arc<std::sync::atomic::AtomicBool>,
+    session_shortcuts_registered: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// Search 搜索窗口的会话状态。
 #[derive(Clone, Default)]
 struct SearchState {
     session: Arc<Mutex<Option<SearchSession>>>,
-    active: Arc<AtomicBool>,
-    session_monitor_token: Arc<AtomicU64>,
+    active: Arc<std::sync::atomic::AtomicBool>,
+    session_monitor_token: Arc<std::sync::atomic::AtomicU64>,
     focus_loss_ignore_deadline: Arc<Mutex<Option<Instant>>>,
 }
 
@@ -66,72 +71,21 @@ struct SearchState {
 #[derive(Clone, Default)]
 struct EditorState {
     session: Arc<Mutex<Option<EditorSession>>>,
-    active: Arc<AtomicBool>,
+    active: Arc<std::sync::atomic::AtomicBool>,
 }
-
-/// 时间窗去抖闸门：窗口期内重复请求被拒绝。
-/// 用于过滤 Windows 托盘菜单一次点击触发两次事件的上游缺陷。
-#[derive(Default)]
-pub struct DebounceGate {
-    last_accepted: Option<Instant>,
-}
-
-impl DebounceGate {
-    pub fn try_accept(&mut self, window: Duration) -> bool {
-        match self.last_accepted {
-            Some(at) if at.elapsed() < window => false,
-            _ => {
-                self.last_accepted = Some(Instant::now());
-                true
-            }
-        }
-    }
-}
-
-/// 托盘"切换监听"的去抖窗口：双触发的第二次事件通常在首次后约 1 秒内到达，
-/// 1.5 秒窗口可覆盖，同时不影响人工连续点击（重新打开菜单已超过该间隔）。
-const MONITORING_TOGGLE_DEBOUNCE: Duration = Duration::from_millis(1500);
 
 impl AppState {
     pub fn new(
         repository: SqliteRepository,
         image_storage: ImageStorage,
-        settings: UserSetting,
+        settings: crate::domain::settings::UserSetting,
     ) -> Self {
         Self {
-            repository,
-            image_storage,
-            settings: Arc::new(RwLock::new(settings)),
-            self_write_guard: SelfWriteGuard::default(),
-            quitting: Arc::new(AtomicBool::new(false)),
+            core: CoreState::new(repository, image_storage, settings),
             picker: PickerState::default(),
             search: SearchState::default(),
             editor: EditorState::default(),
-            monitoring_toggle_gate: Arc::default(),
         }
-    }
-
-    /// 距上次受理不足去抖窗口的"切换监听"事件视为重复（一次菜单点击的双触发），忽略。
-    pub fn should_accept_monitoring_toggle(&self) -> bool {
-        let Ok(mut gate) = self.monitoring_toggle_gate.lock() else {
-            return false;
-        };
-        gate.try_accept(MONITORING_TOGGLE_DEBOUNCE)
-    }
-
-    pub fn current_settings(&self) -> Result<UserSetting, AppError> {
-        Ok(self.settings.read()?.clone())
-    }
-
-    pub fn update_settings(&self, next_value: UserSetting) -> Result<UserSetting, AppError> {
-        let sanitized = next_value.sanitized();
-        self.repository.save_settings(&sanitized)?;
-        *self.settings.write()? = sanitized.clone();
-        Ok(sanitized)
-    }
-
-    pub fn self_write_guard(&self) -> SelfWriteGuard {
-        self.self_write_guard.clone()
     }
 
     pub fn set_picker_session(
@@ -171,14 +125,6 @@ impl AppState {
         self.picker
             .session_shortcuts_registered
             .load(Ordering::SeqCst)
-    }
-
-    pub fn begin_quit(&self) {
-        self.quitting.store(true, Ordering::SeqCst);
-    }
-
-    pub fn is_quitting(&self) -> bool {
-        self.quitting.load(Ordering::SeqCst)
     }
 
     pub fn set_search_session(&self, session: SearchSession) -> Result<(), AppError> {
@@ -281,8 +227,8 @@ pub fn bootstrap(app: &mut App, launch_mode: LaunchMode) -> Result<(), AppError>
         warn!("启动时同步运行设置失败，应用将继续运行，但部分系统能力暂不可用: {error}");
     }
     TrayService::setup(&app.handle())?;
-    ClipboardMonitor::start(app.handle().clone(), state.clone())?;
-    RetentionService::start(state.clone());
+    start_clipboard_monitor(app.handle().clone(), state.clone())?;
+    crate::services::retention_service::RetentionService::start(state.core.clone());
 
     if let Err(error) = seed_welcome_entry(&app.handle(), &repository) {
         warn!("初始化欢迎记录失败: {error}");
@@ -297,24 +243,26 @@ pub fn bootstrap(app: &mut App, launch_mode: LaunchMode) -> Result<(), AppError>
     Ok(())
 }
 
-fn seed_welcome_entry(app: &AppHandle, repository: &SqliteRepository) -> Result<(), AppError> {
-    if !repository.list_recent(1)?.is_empty() {
-        return Ok(());
-    }
+/// 启动剪贴板监听：录入成功后通过 Tauri 事件广播给前端窗口。
+fn start_clipboard_monitor(handle: AppHandle, state: AppState) -> Result<(), AppError> {
+    let on_upsert: crate::platform::windows::clipboard_monitor::ClipUpsertSink =
+        Arc::new(move |detail| {
+            let _ = handle.emit(CLIPS_CHANGED_EVENT, ClipsChangedPayload::upserted(&detail));
+        });
+    crate::platform::windows::clipboard_monitor::ClipboardMonitor::start(
+        state.core.clone(),
+        on_upsert,
+    )
+}
 
-    let Some(text_item) = crate::services::normalize_service::NormalizeService::normalize_text(
-        "欢迎使用 FloatPaste 👋  [↑↓] 导航记录 · [Enter] 快速粘贴 · [1~9] 数字键直达 · [Tab] 打开完整资料库 · [Esc] 随时退出",
-        Some("使用指引".to_string()),
-    ) else {
+fn seed_welcome_entry(app: &AppHandle, repository: &SqliteRepository) -> Result<(), AppError> {
+    let Some(detail) =
+        crate::services::history_service::HistoryService::ensure_welcome_item(repository)?
+    else {
         return Ok(());
     };
 
-    let detail = repository.save_text_item(&text_item)?;
-    repository.set_favorited(&detail.id, true)?;
-    let _ = app.emit(
-        CLIPS_CHANGED_EVENT,
-        ClipsChangedPayload::upserted(&detail),
-    );
+    let _ = app.emit(CLIPS_CHANGED_EVENT, ClipsChangedPayload::upserted(&detail));
     Ok(())
 }
 
@@ -324,23 +272,4 @@ fn resolve_app_data_dir(app: &App) -> Result<PathBuf, AppError> {
     }
 
     Ok(std::env::current_dir()?.join(".floatpaste-data"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{DebounceGate, MONITORING_TOGGLE_DEBOUNCE};
-    use std::time::Duration;
-
-    #[test]
-    fn debounce_gate_rejects_rapid_repeat_and_accepts_after_window() {
-        let mut gate = DebounceGate::default();
-
-        // 首次事件受理（对应一次菜单点击的第一次触发）
-        assert!(gate.try_accept(MONITORING_TOGGLE_DEBOUNCE));
-        // 窗口期内的第二次事件被拒绝（对应同一点击的重复触发）
-        assert!(!gate.try_accept(MONITORING_TOGGLE_DEBOUNCE));
-        assert!(!gate.try_accept(MONITORING_TOGGLE_DEBOUNCE));
-        // 窗口过期后重新受理（零窗口等价于立即过期）
-        assert!(gate.try_accept(Duration::ZERO));
-    }
 }

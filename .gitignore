@@ -10,6 +10,7 @@ src-tauri/gen/
 
 # 应用本地运行数据
 .floatpaste-data/
+.release-accept/
 
 # 日志文件
 *.log
@@ -42,3 +43,8 @@ docs/superpowers/*-comparison.html
 # 图标生成脚本的本地产物
 scripts/__pycache__/
 src-tauri/icons/_preview_pngs/
+# 原生化冒烟测试工程（临时）
+smoke/
+
+# Cargo workspace 根 target
+target/

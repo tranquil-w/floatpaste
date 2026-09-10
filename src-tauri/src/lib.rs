@@ -1,10 +1,20 @@
 mod app_bootstrap;
 mod commands;
-mod domain;
-mod launch_mode;
 mod platform;
-mod repository;
 mod services;
+
+// 迁移垫层：domain/repository/launch_mode 已下沉 floatpaste-core，
+// 这里保留旧模块路径，让壳层代码暂不修改导入；
+// 逐文件改为直接依赖 floatpaste_core 后即可删除对应垫层。
+pub mod domain {
+    pub use floatpaste_core::domain::*;
+}
+pub mod launch_mode {
+    pub use floatpaste_core::launch_mode::*;
+}
+pub mod repository {
+    pub use floatpaste_core::repository::*;
+}
 
 use std::path::PathBuf;
 
@@ -37,11 +47,7 @@ fn init_logging() -> Option<WorkerGuard> {
     let result = tracing_subscriber::registry()
         .with(env_filter)
         .with(fmt::layer().with_target(false))
-        .with(
-            fmt::layer()
-                .with_writer(non_blocking_file)
-                .with_ansi(false),
-        )
+        .with(fmt::layer().with_writer(non_blocking_file).with_ansi(false))
         .try_init();
 
     if result.is_err() {
@@ -60,15 +66,16 @@ fn init_logging() -> Option<WorkerGuard> {
 /// 解析日志目录：优先使用应用数据目录下的 logs 子目录，失败时回退到当前目录。
 fn resolve_log_dir() -> Option<PathBuf> {
     if let Ok(appdata) = std::env::var("APPDATA") {
-        let dir = PathBuf::from(appdata)
-            .join("com.floatpaste")
-            .join("logs");
+        let dir = PathBuf::from(appdata).join("com.floatpaste").join("logs");
         if std::fs::create_dir_all(&dir).is_ok() {
             return Some(dir);
         }
     }
 
-    let fallback = std::env::current_dir().ok()?.join(".floatpaste-data").join("logs");
+    let fallback = std::env::current_dir()
+        .ok()?
+        .join(".floatpaste-data")
+        .join("logs");
     std::fs::create_dir_all(&fallback).ok()?;
     Some(fallback)
 }
@@ -78,7 +85,10 @@ pub fn run() {
     let _log_guard = init_logging();
     let launch_mode = LaunchMode::from_env();
     let _single_instance =
-        match crate::platform::windows::single_instance::acquire_or_focus_existing(launch_mode) {
+        match floatpaste_core::platform::windows::single_instance::acquire_or_focus_existing(
+            launch_mode,
+            || crate::services::window_coordinator::WindowCoordinator::focus_settings_window(),
+        ) {
             Ok(Some(guard)) => Some(guard),
             Ok(None) => return,
             Err(error) => {
@@ -137,7 +147,9 @@ pub fn run() {
             // 避免进程退出时仍有 Chrome_WidgetWin_0 类窗口存活而触发
             // Chromium 的 `Failed to unregister class ... Error = 1412` 报错。
             if let tauri::RunEvent::ExitRequested { .. } = event {
-                crate::services::window_coordinator::WindowCoordinator::prepare_for_exit(app_handle);
+                crate::services::window_coordinator::WindowCoordinator::prepare_for_exit(
+                    app_handle,
+                );
             }
         });
 }

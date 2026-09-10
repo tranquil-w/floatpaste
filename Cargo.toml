@@ -1,0 +1,3 @@
+[workspace]
+resolver = "2"
+members = ["crates/floatpaste-core", "crates/floatpaste-native", "src-tauri"]

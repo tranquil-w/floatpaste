@@ -39,7 +39,10 @@ pub fn get_item_detail(state: State<'_, AppState>, id: String) -> Result<ClipIte
 }
 
 #[tauri::command]
-pub fn resolve_image_path(state: State<'_, AppState>, image_path: String) -> Result<String, String> {
+pub fn resolve_image_path(
+    state: State<'_, AppState>,
+    image_path: String,
+) -> Result<String, String> {
     state
         .image_storage
         .resolve_existing_image_path(&image_path)
@@ -126,11 +129,7 @@ pub fn rename_tag(
 }
 
 #[tauri::command]
-pub fn delete_tag(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    name: String,
-) -> Result<(), String> {
+pub fn delete_tag(app: AppHandle, state: State<'_, AppState>, name: String) -> Result<(), String> {
     TagService::delete_tag(&state, &name).map_err(map_error)?;
     let _ = app.emit(CLIPS_CHANGED_EVENT, ClipsChangedPayload::BulkChanged);
     let _ = app.emit(TAGS_CHANGED_EVENT, ());

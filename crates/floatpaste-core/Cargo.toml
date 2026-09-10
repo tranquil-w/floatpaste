@@ -1,0 +1,36 @@
+[package]
+name = "floatpaste-core"
+version = "0.7.1"
+edition = "2021"
+
+[dependencies]
+arboard = "3.4.1"
+chrono = { version = "0.4.42", features = ["clock", "serde"] }
+image = { version = "0.25.9", default-features = false, features = ["bmp", "png"] }
+png = "0.17.16"
+rusqlite = { version = "0.32.1", features = ["bundled"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+sha2 = "0.10.9"
+thiserror = "2.0.17"
+tracing = "0.1.41"
+uuid = { version = "1.18.1", features = ["serde", "v4"] }
+windows = { version = "0.61.3", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_Security",
+  "Win32_System_DataExchange",
+  "Win32_System_LibraryLoader",
+  "Win32_System_Memory",
+  "Win32_System_Registry",
+  "Win32_System_Threading",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging"
+] }
+# 仅老 Tauri 壳启用：AppError::Tauri 变体供壳层 `?` 直接转换，
+# 原生壳（Slint）不启用该特性，core 本体不依赖任何 GUI 运行时。
+tauri = { version = "2.9.2", optional = true }
+
+[features]
+tauri = ["dep:tauri"]

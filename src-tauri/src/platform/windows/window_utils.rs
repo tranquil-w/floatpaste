@@ -5,18 +5,15 @@ use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::SetActiveWindow;
 use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
-    BringWindowToTop, GetCursorPos, GetWindowLongPtrW, GetWindowRect, HWND_TOPMOST, IsIconic,
+    BringWindowToTop, GetCursorPos, GetWindowLongPtrW, GetWindowRect, IsIconic,
     SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow, GWL_EXSTYLE, GWL_STYLE,
-    SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW,
-    SW_HIDE, SW_RESTORE, SW_SHOW, SW_SHOWNOACTIVATE, WM_SYSCOMMAND, WS_EX_NOACTIVATE,
-    WS_EX_TRANSPARENT, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_SYSMENU, SC_KEYMENU,
+    HWND_TOPMOST, SC_KEYMENU, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+    SWP_NOZORDER, SWP_SHOWWINDOW, SW_HIDE, SW_RESTORE, SW_SHOW, SW_SHOWNOACTIVATE, WM_SYSCOMMAND,
+    WS_EX_NOACTIVATE, WS_EX_TRANSPARENT, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_SYSMENU,
 };
 
 fn strip_system_menu_style(style: isize) -> isize {
-    style
-        & !(WS_SYSMENU.0 as isize)
-        & !(WS_MINIMIZEBOX.0 as isize)
-        & !(WS_MAXIMIZEBOX.0 as isize)
+    style & !(WS_SYSMENU.0 as isize) & !(WS_MINIMIZEBOX.0 as isize) & !(WS_MAXIMIZEBOX.0 as isize)
 }
 
 const ALT_MENU_BLOCKER_SUBCLASS_ID: usize = 0x4650_0101;

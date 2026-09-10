@@ -83,7 +83,9 @@ impl WindowCoordinator {
             configure_editor_window(&window);
         }
 
-        if let Some(window) = app.get_webview_window(crate::services::tooltip_window::TOOLTIP_WINDOW_LABEL) {
+        if let Some(window) =
+            app.get_webview_window(crate::services::tooltip_window::TOOLTIP_WINDOW_LABEL)
+        {
             crate::services::tooltip_window::configure_tooltip_window(&window);
         }
     }
@@ -99,10 +101,8 @@ impl WindowCoordinator {
 
         let window = ensure_settings_window(app)?;
 
-        window
-            .show()?;
-        window
-            .set_focus()?;
+        window.show()?;
+        window.set_focus()?;
         Ok(())
     }
 
@@ -117,12 +117,7 @@ impl WindowCoordinator {
             let window_actually_visible = window.is_visible().unwrap_or(false);
             if window_actually_visible {
                 let session = state.picker_session()?;
-                apply_picker_window_position(
-                    &window,
-                    state,
-                    &settings,
-                    session.target_window_hwnd,
-                );
+                apply_picker_window_position(&window, state, &settings, session.target_window_hwnd);
                 return Ok(());
             }
             warn!("Picker 标志位为激活但窗口实际不可见，重置状态后重新显示");
@@ -163,18 +158,16 @@ impl WindowCoordinator {
         }
         #[cfg(not(target_os = "windows"))]
         {
-            window
-                .show()?;
+            window.show()?;
         }
 
-        window
-            .emit(
-                PICKER_SESSION_START_EVENT,
-                PickerSessionPayload {
-                    session_id: Utc::now().timestamp_millis().to_string(),
-                    shown_at: Utc::now().to_rfc3339(),
-                },
-            )?;
+        window.emit(
+            PICKER_SESSION_START_EVENT,
+            PickerSessionPayload {
+                session_id: Utc::now().timestamp_millis().to_string(),
+                shown_at: Utc::now().to_rfc3339(),
+            },
+        )?;
 
         Ok(())
     }
@@ -234,6 +227,39 @@ impl WindowCoordinator {
     /// `Chrome_WidgetWin_0` 类窗口，Chromium 在进程拆解时注销窗口类会因 `ERROR_CLASS_HAS_WINDOWS
     /// (1412)` 失败（参见 tauri#7606、tauri#14088）。销毁后进程退出阶段不再有同类窗口残留。
     /// 供托盘退出与 `RunEvent::ExitRequested` 共用，幂等可重复调用。
+    /// 尝试把已存在的设置窗口带到前台（单实例二次启动时调用）。
+    /// 返回是否成功找到并聚焦窗口；找不到或聚焦失败均返回 false。
+    #[cfg(target_os = "windows")]
+    pub fn focus_settings_window() -> bool {
+        use windows::core::PCWSTR;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            FindWindowW, IsIconic, SetForegroundWindow, ShowWindow, SW_RESTORE, SW_SHOW,
+        };
+
+        let title = crate::platform::windows::wide_string::to_wide(SETTINGS_WINDOW_TITLE);
+        let Ok(hwnd) = (unsafe { FindWindowW(None, PCWSTR::from_raw(title.as_ptr())) }) else {
+            return false;
+        };
+        if hwnd.0.is_null() {
+            return false;
+        }
+
+        unsafe {
+            if IsIconic(hwnd).as_bool() {
+                let _ = ShowWindow(hwnd, SW_RESTORE);
+            } else {
+                let _ = ShowWindow(hwnd, SW_SHOW);
+            }
+            SetForegroundWindow(hwnd).as_bool()
+        }
+    }
+
+    /// 非 Windows 平台无设置窗口可聚焦。
+    #[cfg(not(target_os = "windows"))]
+    pub fn focus_settings_window() -> bool {
+        false
+    }
+
     pub fn prepare_for_exit(app: &AppHandle) {
         if let Some(state) = app.try_state::<AppState>() {
             state.begin_quit();
@@ -281,17 +307,14 @@ impl WindowCoordinator {
             return Ok(());
         };
 
-        if window
-            .is_visible()?
-        {
+        if window.is_visible()? {
             persist_picker_window_position(app, &window);
             #[cfg(target_os = "windows")]
             {
                 crate::platform::windows::window_utils::hide_window(&window)?;
             }
             #[cfg(not(target_os = "windows"))]
-            window
-                .hide()?;
+            window.hide()?;
         }
 
         info!("隐藏 Picker");
@@ -393,15 +416,14 @@ impl WindowCoordinator {
         state.begin_search_activation();
         begin_search_window_minimize_monitor(app.clone(), state.clone());
 
-        window
-            .emit(
-                SEARCH_SESSION_START_EVENT,
-                SearchSessionPayload {
-                    source: "global",
-                    item_id: None,
-                    initial_keyword: None,
-                },
-            )?;
+        window.emit(
+            SEARCH_SESSION_START_EVENT,
+            SearchSessionPayload {
+                source: "global",
+                item_id: None,
+                initial_keyword: None,
+            },
+        )?;
 
         info!("全局快捷键打开 Search");
         Ok(())
@@ -455,11 +477,8 @@ impl WindowCoordinator {
             return Ok(());
         };
 
-        if window
-            .is_visible()?
-        {
-            window
-                .hide()?;
+        if window.is_visible()? {
+            window.hide()?;
         }
 
         let _ = window.emit(EDITOR_SESSION_END_EVENT, ());
@@ -484,12 +503,9 @@ impl WindowCoordinator {
         state.set_editor_session(session.clone())?;
         state.begin_editor_activation();
 
-        window
-            .show()?;
-        window
-            .set_focus()?;
-        window
-            .emit(EDITOR_SESSION_START_EVENT, session)?;
+        window.show()?;
+        window.set_focus()?;
+        window.emit(EDITOR_SESSION_START_EVENT, session)?;
 
         info!("打开 Editor");
         Ok(())
@@ -506,11 +522,8 @@ impl WindowCoordinator {
             return Ok(());
         };
 
-        if window
-            .is_visible()?
-        {
-            window
-                .hide()?;
+        if window.is_visible()? {
+            window.hide()?;
         }
 
         Ok(())
@@ -527,11 +540,8 @@ fn hide_search_window(
     let session = state.search_session()?;
 
     if let Some(window) = app.get_webview_window(SEARCH_WINDOW_LABEL) {
-        if window
-            .is_visible()?
-        {
-            window
-                .hide()?;
+        if window.is_visible()? {
+            window.hide()?;
         }
 
         if let Err(err) = window.emit(SEARCH_SESSION_END_EVENT, ()) {
@@ -829,8 +839,7 @@ fn restore_picker_after_editor(
     }
     #[cfg(not(target_os = "windows"))]
     {
-        window
-            .show()?;
+        window.show()?;
     }
 
     state.begin_picker_activation();
@@ -864,14 +873,12 @@ fn restore_search_after_editor(app: &AppHandle, state: &AppState) -> Result<(), 
 }
 
 fn is_window_ready_for_reuse(window: &WebviewWindow) -> Result<bool, AppError> {
-    let is_visible = window
-        .is_visible()?;
+    let is_visible = window.is_visible()?;
     #[cfg(target_os = "windows")]
     let is_minimized = crate::platform::windows::window_utils::is_window_minimized(window)?;
 
     #[cfg(not(target_os = "windows"))]
-    let is_minimized = window
-        .is_minimized()?;
+    let is_minimized = window.is_minimized()?;
 
     Ok(is_visible && !is_minimized)
 }
@@ -895,8 +902,7 @@ fn is_search_window_ready_for_toggle(app: &AppHandle) -> bool {
 }
 
 fn show_and_focus_window(window: &WebviewWindow) -> Result<(), AppError> {
-    window
-        .show()?;
+    window.show()?;
 
     #[cfg(target_os = "windows")]
     {
@@ -915,14 +921,12 @@ fn show_and_focus_window(window: &WebviewWindow) -> Result<(), AppError> {
             }
         }
 
-        return Err(last_error
-            .unwrap_or_else(|| AppError::Message("搜索窗口聚焦失败".to_string())));
+        return Err(last_error.unwrap_or_else(|| AppError::Message("搜索窗口聚焦失败".to_string())));
     }
 
     #[cfg(not(target_os = "windows"))]
     {
-        window
-            .set_focus()?;
+        window.set_focus()?;
         Ok(())
     }
 }
@@ -1154,12 +1158,10 @@ mod tests {
         let security = &config["app"]["security"];
 
         assert_eq!(security["assetProtocol"]["enable"], Value::Bool(true));
-        assert!(
-            security["assetProtocol"]["scope"]
-                .as_array()
-                .map(|scope| !scope.is_empty())
-                .unwrap_or(false)
-        );
+        assert!(security["assetProtocol"]["scope"]
+            .as_array()
+            .map(|scope| !scope.is_empty())
+            .unwrap_or(false));
     }
 
     #[test]

@@ -1,0 +1,173 @@
+// 悬停预览：对齐原版 tooltip.html 的卡片（canvas-subtle 底、1px 边框、
+// 6px 圆角、8/12 内边距、图片最大 560×420 居中、元信息分隔行）。
+// 点击穿透与置顶不激活由 Rust 侧 Win32 处理；窗口尺寸由 Rust 度量后设置。
+import { Theme, Metrics } from "theme.slint";
+
+export struct TooltipMetaBadge {
+    kind: int, // 0=类型徽章（带底色）1=尺寸 2=格式
+    text: string,
+}
+
+export component TooltipWindow inherits Window {
+    no-frame: true;
+    background: transparent;
+    title: "FloatPaste · Tooltip";
+    // Rust 在显示前按内容度量设置物理尺寸
+    preferred-width: 200px;
+    preferred-height: 80px;
+
+    in-out property <bool> has-image: false;
+    in-out property <image> image;
+    in-out property <length> image-width: 0px;
+    in-out property <length> image-height: 0px;
+    in-out property <string> content-text;
+    in-out property <[TooltipMetaBadge]> badges;
+    in-out property <string> source-app;
+    in-out property <string> time-text;
+
+    // 排版度量标尺：Rust 据此设置窗口高度——度量与渲染同引擎，
+    // 与内容 Text（13px + word-wrap）完全一致，窗口不会过矮裁掉尾部行
+    callback measure-text(string, length) -> length;
+    measure-text(text, width) => {
+        text-ruler.text = text;
+        text-ruler.width = width;
+        text-ruler.height
+    }
+
+    // 自然宽度度量：不换行整串排开所需宽度（最宽段落），供 Rust 定卡片
+    // 宽。与高度度量同引擎，取代原 GDI 估计（GDI 与 Slint 排版存在
+    // 系统性偏差，靠安全系数硬凑）
+    callback measure-natural-width(string) -> length;
+    measure-natural-width(text) => {
+        natural-ruler.text = text;
+        natural-ruler.preferred-width
+    }
+
+    Rectangle {
+        background: Theme.canvas-subtle;
+        border-width: 1px;
+        border-color: Theme.border-muted;
+        border-radius: Metrics.radius-md;
+        // 原版 box-shadow: 0 8px 24px rgba(shadow, 0.12)
+        drop-shadow-blur: 24px;
+        drop-shadow-offset-y: 8px;
+        drop-shadow-color: Theme.shadow-color.with-alpha(0.12);
+
+        VerticalLayout {
+            padding-left: Metrics.space-3;
+            padding-right: Metrics.space-3;
+            padding-top: Metrics.space-2;
+            padding-bottom: Metrics.space-2;
+
+            if (root.has-image): Rectangle {
+                height: root.image-height;
+                // 原版 .tooltip-image-preview：8px 圆角裁剪
+                border-radius: Metrics.radius-lg;
+                clip: true;
+                Image {
+                    width: root.image-width;
+                    height: root.image-height;
+                    source: root.image;
+                    image-fit: contain;
+                }
+            }
+            if (!root.has-image): Text {
+                text: root.content-text;
+                color: Theme.fg-default;
+                font-size: Metrics.text-body;
+                wrap: word-wrap;
+                // 布局引擎对换行文本的最小高度按“最窄词宽折行”估计，长文
+                // 会撑出数百像素的窗口最小高度，把 Rust set_size 的目标尺寸
+                // 顶开（卡片下方成片空白）——高度用同排版参数的标尺实测，
+                // 显式 height 同时锁定最小高度，min-width 归零解除宽度约束
+                min-width: 0px;
+                height: content-ruler.height;
+                vertical-alignment: top;
+                horizontal-stretch: 1;
+            }
+
+            // 元信息行上方分隔线（对齐原版 border-top + margin/padding 6px）
+            Rectangle {
+                height: 1px;
+                background: Theme.border-muted;
+            }
+
+            // ── 元信息行 ──
+            HorizontalLayout {
+                padding-top: 5px;
+                spacing: Metrics.space-1_5;
+                alignment: start;
+
+                HorizontalLayout {
+                    spacing: Metrics.space-1_5;
+                    alignment: start;
+                    horizontal-stretch: 1;
+
+                    for badge in root.badges: Rectangle {
+                        height: 18px;
+                        border-radius: Metrics.radius-sm;
+                        background: badge.kind == 0 ? Theme.canvas-inset : transparent;
+                        HorizontalLayout {
+                            padding-left: badge.kind == 0 ? 5px : 0px;
+                            padding-right: badge.kind == 0 ? 5px : 0px;
+                            Text {
+                                text: badge.text;
+                                color: badge.kind == 0 ? Theme.fg-muted : Theme.fg-subtle;
+                                font-size: Metrics.text-hint;
+                                font-weight: Metrics.weight-medium;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+
+                Text {
+                    text: root.source-app;
+                    color: Theme.fg-subtle;
+                    font-size: Metrics.text-hint;
+                    font-weight: Metrics.weight-medium;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: root.time-text;
+                    color: Theme.fg-subtle;
+                    font-size: Metrics.text-hint;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // 度量标尺（不可见不挡输入，排版属性与内容 Text 一致），
+        // Rust 显示前经 measure-text 借它量内容高度
+        text-ruler := Text {
+            opacity: 0;
+            x: 0;
+            y: 0;
+            width: 0px;
+            text: "";
+            font-size: Metrics.text-body;
+            wrap: word-wrap;
+        }
+
+        // 自然宽度标尺：不换行排版，preferred-width 即最宽段落所需宽度
+        natural-ruler := Text {
+            opacity: 0;
+            x: 0;
+            y: 0;
+            font-size: Metrics.text-body;
+            wrap: no-wrap;
+        }
+
+        // 内容高度标尺：与内容 Text 同文本/字号/换行、同宽度（卡片内宽
+        // = 卡片宽 − 左右 12 padding − 左右 1 border），高度绑定到内容 Text
+        content-ruler := Text {
+            opacity: 0;
+            x: 0;
+            y: 0;
+            text: root.content-text;
+            font-size: Metrics.text-body;
+            wrap: word-wrap;
+            width: parent.width - 26px;
+        }
+    }
+}

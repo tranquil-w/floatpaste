@@ -1,13 +1,19 @@
-use std::sync::Mutex;
 use std::collections::HashMap;
+use std::sync::Mutex;
 
-use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, Position, Size, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{
+    AppHandle, Manager, PhysicalPosition, PhysicalSize, Position, Size, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder,
+};
 use tracing::{info, warn};
 
 use crate::domain::error::AppError;
 
 #[cfg(target_os = "windows")]
-use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, HWND_TOPMOST, SetWindowPos, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW};
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetCursorPos, SetWindowPos, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+    SWP_SHOWWINDOW,
+};
 
 /// Return the cursor position in physical screen coordinates.
 #[cfg(target_os = "windows")]
@@ -114,10 +120,11 @@ impl TooltipWindow {
         let json_html = serde_json::to_string(&html)?;
         let json_theme = serde_json::to_string(theme)?;
         let json_theme_vars = serde_json::to_string(theme_vars)?;
-        window.eval(&format!(
-            "window.showTooltip({}, {}, {}, {})",
-            json_request_id, json_html, json_theme, json_theme_vars
-        ))
+        window
+            .eval(&format!(
+                "window.showTooltip({}, {}, {}, {})",
+                json_request_id, json_html, json_theme, json_theme_vars
+            ))
             .map_err(|e| {
                 clear_pending_tooltip_request();
                 warn!("tooltip JS eval 失败: {e}");
@@ -133,8 +140,7 @@ impl TooltipWindow {
         width: u32,
         height: u32,
     ) -> Result<(), AppError> {
-        let Some(request) = take_matching_pending_tooltip_request(request_id)?
-        else {
+        let Some(request) = take_matching_pending_tooltip_request(request_id)? else {
             return Ok(());
         };
 
@@ -271,8 +277,7 @@ pub(crate) fn configure_tooltip_window(window: &WebviewWindow) {
 mod tests {
     use super::{
         clear_pending_tooltip_request, set_pending_tooltip_request,
-        take_matching_pending_tooltip_request, take_pending_tooltip_request,
-        PendingTooltipRequest,
+        take_matching_pending_tooltip_request, take_pending_tooltip_request, PendingTooltipRequest,
     };
 
     #[test]

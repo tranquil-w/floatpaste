@@ -142,7 +142,6 @@ impl ShortcutManager {
             }
         }
 
-
         info!(
             "已注册全局快捷键: 主={main_shortcut}, 搜索={:?}",
             search_shortcut
@@ -184,8 +183,10 @@ impl ShortcutManager {
                 return;
             }
         };
-        let normalized_search_shortcut =
-            normalize_enabled_search_shortcut(settings.search_shortcut_enabled, &settings.search_shortcut);
+        let normalized_search_shortcut = normalize_enabled_search_shortcut(
+            settings.search_shortcut_enabled,
+            &settings.search_shortcut,
+        );
 
         if normalized == settings_shortcut {
             if event.state != ShortcutState::Pressed {
@@ -244,10 +245,9 @@ impl ShortcutManager {
                     info!("命中 Picker 关闭快捷键: {normalized}");
                     defer_shortcut_main_thread_action(app.clone(), move |app_clone| {
                         // hide_picker 内部会注销会话快捷键并结束会话
-                        if let Err(error) = WindowCoordinator::hide_picker_and_restore_target(
-                            &app_clone,
-                            &state,
-                        ) {
+                        if let Err(error) =
+                            WindowCoordinator::hide_picker_and_restore_target(&app_clone, &state)
+                        {
                             error!("关闭 Picker 失败: {error}");
                         }
                     });
@@ -395,7 +395,18 @@ fn picker_is_active(app: &AppHandle) -> bool {
 }
 
 fn picker_digit_shortcut(shortcut: &str) -> bool {
-    matches!(shortcut, "Digit1" | "Digit2" | "Digit3" | "Digit4" | "Digit5" | "Digit6" | "Digit7" | "Digit8" | "Digit9")
+    matches!(
+        shortcut,
+        "Digit1"
+            | "Digit2"
+            | "Digit3"
+            | "Digit4"
+            | "Digit5"
+            | "Digit6"
+            | "Digit7"
+            | "Digit8"
+            | "Digit9"
+    )
 }
 
 #[cfg(test)]
@@ -468,7 +479,6 @@ fn set_picker_shortcuts_registered(app: &AppHandle, registered: bool) {
     }
 }
 
-
 fn picker_navigation_direction(shortcut: &str) -> Option<&'static str> {
     match shortcut {
         "up" | "arrowup" => Some("up"),
@@ -515,9 +525,8 @@ fn normalize_enabled_search_shortcut(enabled: bool, shortcut: &str) -> Option<St
 #[cfg(test)]
 mod tests {
     use super::{
-        is_picker_session_shortcut, is_search_session_shortcut,
-        normalize_enabled_search_shortcut, normalize_shortcut,
-        should_release_stale_picker_shortcuts,
+        is_picker_session_shortcut, is_search_session_shortcut, normalize_enabled_search_shortcut,
+        normalize_shortcut, should_release_stale_picker_shortcuts,
     };
 
     #[test]
@@ -561,7 +570,10 @@ mod tests {
 
     #[test]
     fn normalize_enabled_search_shortcut_skips_invalid_value() {
-        assert_eq!(normalize_enabled_search_shortcut(true, "not-a-shortcut"), None);
+        assert_eq!(
+            normalize_enabled_search_shortcut(true, "not-a-shortcut"),
+            None
+        );
     }
 
     #[test]

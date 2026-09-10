@@ -106,10 +106,7 @@ fn load_window_icons() -> Option<(isize, isize)> {
             .ok()?;
             Some(HICON(handle.0).0 as isize)
         };
-        let small = load(
-            GetSystemMetrics(SM_CXSMICON),
-            GetSystemMetrics(SM_CYSMICON),
-        )?;
+        let small = load(GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON))?;
         // 任务栏以 SM_CXICON 的 3/4（100% 缩放下 24px）绘制按钮图标，按该尺寸
         // 取档可 1:1 命中 ICO 中 24/30/36px 档位，避免 shell 二次缩放糊掉细线条
         let big = load(

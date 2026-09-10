@@ -8,9 +8,7 @@ use tracing::{debug, warn};
 use crate::{
     app_bootstrap::AppState,
     domain::error::AppError,
-    services::{
-        settings_service::SettingsService, window_coordinator::WindowCoordinator,
-    },
+    services::{settings_service::SettingsService, window_coordinator::WindowCoordinator},
 };
 
 pub struct TrayService;
@@ -28,13 +26,21 @@ fn build_menu(app: &AppHandle, monitoring_paused: bool) -> Result<Menu<tauri::Wr
     let open_settings = MenuItemBuilder::with_id("open-settings", "打开设置").build(app)?;
     let open_picker = MenuItemBuilder::with_id("open-picker", "打开速贴面板").build(app)?;
     let open_search = MenuItemBuilder::with_id("open-search", "打开搜索").build(app)?;
-    let toggle_monitoring =
-        MenuItemBuilder::with_id("toggle-monitoring", monitoring_menu_label(monitoring_paused))
-            .build(app)?;
+    let toggle_monitoring = MenuItemBuilder::with_id(
+        "toggle-monitoring",
+        monitoring_menu_label(monitoring_paused),
+    )
+    .build(app)?;
     let quit = MenuItemBuilder::with_id("quit", "退出").build(app)?;
 
     Ok(MenuBuilder::new(app)
-        .items(&[&open_picker, &open_search, &open_settings, &toggle_monitoring, &quit])
+        .items(&[
+            &open_picker,
+            &open_search,
+            &open_settings,
+            &toggle_monitoring,
+            &quit,
+        ])
         .build()?)
 }
 
