@@ -3,17 +3,19 @@ mod commands;
 mod platform;
 mod services;
 
-// 迁移垫层：domain/repository/launch_mode 已下沉 floatpaste-core，
-// 这里保留旧模块路径，让壳层代码暂不修改导入；
-// 逐文件改为直接依赖 floatpaste_core 后即可删除对应垫层。
+// 迁移垫层：domain/launch_mode/repository 已下沉 floatpaste-core，
+// 这里只显式列举旧壳代码仍经旧路径引用的模块；新代码一律直接依赖
+// floatpaste_core，不再往垫层里加条目，清零即删除本块。
 pub mod domain {
-    pub use floatpaste_core::domain::*;
+    pub use floatpaste_core::domain::{
+        clip_item, editor_session, error, events, search_session, settings,
+    };
 }
 pub mod launch_mode {
-    pub use floatpaste_core::launch_mode::*;
+    pub use floatpaste_core::launch_mode::LaunchMode;
 }
 pub mod repository {
-    pub use floatpaste_core::repository::*;
+    pub use floatpaste_core::repository::sqlite_repository;
 }
 
 use std::path::PathBuf;

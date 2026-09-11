@@ -2,19 +2,23 @@
 
 ## 项目结构与模块组织
 
-### 前端 (`src/`)
-- `app/` - 应用壳与查询客户端
-- `features/manager/` - 资料库
-- `features/picker/` - 速贴面板
-- `bridge/` - Tauri 运行时与浏览器模拟的区分层
-- `shared/` - 通用 UI、类型与工具
+桌面端处于「Tauri 壳 → 原生 Slint 壳」迁移期，结构如下：
 
-### 后端 (`src-tauri/`)
-- `commands/` - Tauri 命令暴露层
-- `services/` - 业务逻辑
-- `repository/` - SQLite 数据访问
-- `platform/windows/` - Windows 平台集成
-- `migrations/` - 数据库迁移
+- `crates/floatpaste-core/` - 业务、数据与 Windows 平台共享核心。新业务逻辑一律落这里，两个壳共用
+- `crates/floatpaste-native/` - 目标壳（Slint 软件渲染）。新窗口与新功能只在此实现
+- `src-tauri/` - 旧 Tauri 壳（迁移期保留）：只做与 core 等价的修复和迁移收尾，不新增功能；与 core 同名的逻辑以 core 为唯一实现，壳内只允许写薄适配层
+- `src/` - 旧壳前端（迁移期保留）：作为复刻对齐的行为规格，不新增功能。复刻验收通过后与 `src-tauri/` 一并删除，届时 `crates/floatpaste-native/` 是唯一桌面壳
+
+旧壳目录细分（迁移期内仍适用）：
+
+- `src/app/` - 应用壳与查询客户端
+- `src/features/` - 资料库（manager）、速贴面板（picker）、搜索、编辑器、设置
+- `src/bridge/` - Tauri 运行时与浏览器模拟的区分层
+- `src/shared/` - 通用 UI、类型与工具
+- `src-tauri/commands/` - Tauri 命令暴露层
+- `src-tauri/services/` - 依赖 Tauri 窗口类型的壳层窗口服务（纯逻辑在 core）
+- `src-tauri/platform/windows/` - 依赖 Tauri 窗口类型的平台适配
+- `src-tauri/migrations/` - 数据库迁移
 
 ### 其他目录
 - `docs/` - 架构文档
