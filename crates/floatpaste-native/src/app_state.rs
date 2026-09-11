@@ -17,14 +17,25 @@ pub struct TargetSession {
     pub target_focus_hwnd: Option<isize>,
 }
 
+/// 搜索会话：打开时捕获的回贴目标窗口
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SearchSession {
+    pub target_window_hwnd: Option<isize>,
+}
+
 pub struct SharedState {
     pub core: CoreState,
     session: Mutex<TargetSession>,
     picker_active: AtomicBool,
     pub picker_hwnd: AtomicIsize,
     pub tooltip_hwnd: AtomicIsize,
+    search_active: AtomicBool,
+    pub search_hwnd: AtomicIsize,
+    search_session: Mutex<SearchSession>,
     /// 列表缓存：会话键（Enter/Esc 路径按 id 取条目，避免与 UI 行模型竞态）
     items: Mutex<Vec<ClipItemSummary>>,
+    /// 搜索窗口结果列表缓存（分页累积，与速贴列表相互独立）
+    search_items: Mutex<Vec<ClipItemSummary>>,
     /// 选中项 id 锚点：新剪贴插入列表头部时按 id 恢复，避免选区漂移
     selected_id: Mutex<Option<String>>,
     pub favorite_pending: AtomicBool,
@@ -40,7 +51,11 @@ impl SharedState {
             picker_active: AtomicBool::new(false),
             picker_hwnd: AtomicIsize::new(0),
             tooltip_hwnd: AtomicIsize::new(0),
+            search_active: AtomicBool::new(false),
+            search_hwnd: AtomicIsize::new(0),
+            search_session: Mutex::new(SearchSession::default()),
             items: Mutex::new(Vec::new()),
+            search_items: Mutex::new(Vec::new()),
             selected_id: Mutex::new(None),
             favorite_pending: AtomicBool::new(false),
             settings: Mutex::new(settings),
@@ -87,6 +102,54 @@ impl SharedState {
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .clone()
+    }
+
+    pub fn is_search_active(&self) -> bool {
+        self.search_active.load(Ordering::SeqCst)
+    }
+
+    pub fn begin_search_activation(&self) {
+        self.search_active.store(true, Ordering::SeqCst);
+    }
+
+    pub fn end_search_activation(&self) {
+        self.search_active.store(false, Ordering::SeqCst);
+    }
+
+    pub fn set_search_session(&self, session: SearchSession) {
+        *self
+            .search_session
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = session;
+    }
+
+    pub fn search_session(&self) -> SearchSession {
+        *self
+            .search_session
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+    }
+
+    pub fn set_search_items(&self, items: Vec<ClipItemSummary>) {
+        self.search_items
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone_from(&items);
+    }
+
+    pub fn search_items(&self) -> Vec<ClipItemSummary> {
+        self.search_items
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+    }
+
+    pub fn search_item_at(&self, index: usize) -> Option<ClipItemSummary> {
+        self.search_items
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .get(index)
+            .cloned()
     }
 
     pub fn set_items(&self, items: Vec<ClipItemSummary>) {

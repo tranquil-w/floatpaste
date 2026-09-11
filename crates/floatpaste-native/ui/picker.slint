@@ -61,7 +61,8 @@ component ResizeHandle inherits TouchArea {
 }
 
 // ── 列表滚动条：10px 稳定槽 + 4px 视觉拇指（对齐原版 webkit 拇指全槽可抓）──
-component ListScrollBar inherits Rectangle {
+// 搜索窗口复用同一组件
+export component ListScrollBar inherits Rectangle {
     in property <length> viewport-height;
     in property <length> visible-height;
     in-out property <length> viewport-y;

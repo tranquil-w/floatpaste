@@ -35,22 +35,23 @@ pub fn physical_rect(hwnd: isize) -> Option<RECT> {
     Some(rect)
 }
 
-/// 无边框浮层样式：跳过任务栏（TOOLWINDOW）+ 不抢焦点（NOACTIVATE）。
+/// 无边框浮层样式：跳过任务栏（TOOLWINDOW）+ 可选不抢焦点（NOACTIVATE）。
 /// winit 默认还挂 WS_EX_APPWINDOW——「窗口可见即强制给任务栏按钮」，
 /// 与 TOOLWINDOW 相冲，必须显式清掉跳任务栏才生效。
 /// 透明渲染由 Slint/winit 的 DWM 合成负责，不要手工加 WS_EX_LAYERED——
 /// 未调 SetLayeredWindowAttributes 的分层窗口既不绘制也不命中鼠标
-pub fn apply_overlay_style(hwnd: isize) {
+///
+/// 速贴/tooltip 传 no_activate=true；搜索窗口需要接收键盘输入，
+/// 传 false 保持可激活
+pub fn apply_overlay_style(hwnd: isize, no_activate: bool) {
     let hwnd = HWND(hwnd as *mut _);
     unsafe {
         let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-        SetWindowLongPtrW(
-            hwnd,
-            GWL_EXSTYLE,
-            ex_style & !(WS_EX_APPWINDOW.0 as isize)
-                | WS_EX_TOOLWINDOW.0 as isize
-                | WS_EX_NOACTIVATE.0 as isize,
-        );
+        let mut next = ex_style & !(WS_EX_APPWINDOW.0 as isize) | WS_EX_TOOLWINDOW.0 as isize;
+        if no_activate {
+            next |= WS_EX_NOACTIVATE.0 as isize;
+        }
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, next);
     }
 }
 

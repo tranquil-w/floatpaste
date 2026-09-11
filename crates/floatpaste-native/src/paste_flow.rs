@@ -23,6 +23,7 @@ use floatpaste_core::platform::windows::{mouse_monitor, session_keyboard};
 use floatpaste_core::services::paste_support;
 
 use crate::picker::{self, App};
+use crate::search;
 
 const RESTORE_DELAY: Duration = Duration::from_millis(90);
 const INJECT_DELAY: Duration = Duration::from_millis(60);
@@ -83,6 +84,16 @@ pub fn paste_item(app: &App, id: &str, option: PasteOption) -> Result<(), AppErr
                     target_hwnd,
                     session.target_focus_hwnd,
                 ) {
+                    // 目标是搜索窗口：把输入焦点还给搜索框（对齐原版
+                    // resume_search_input_if_target）
+                    if target_hwnd == app_for_result.state.search_hwnd.load(
+                        std::sync::atomic::Ordering::SeqCst,
+                    ) {
+                        let app_for_resume = app_for_result.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            search::resume_input(&app_for_resume);
+                        });
+                    }
                     thread::sleep(INJECT_DELAY);
                     if paste_support::trigger_ctrl_v() {
                         (true, format!("已将{clip_type_label}写入系统剪贴板，并回贴到目标窗口。"))

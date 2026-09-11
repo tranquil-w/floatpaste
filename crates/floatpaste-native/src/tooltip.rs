@@ -48,21 +48,45 @@ enum Payload {
     Image(Option<slint::Image>),
 }
 
-/// 条目内鼠标移动：重置 400ms 计时，到点后构建内容并显示
+/// tooltip 宿主上下文：定位基准窗口与会话活跃判定
+/// （速贴与搜索窗口共用同一个 tooltip 窗口）
+#[derive(Clone, Copy)]
+pub struct HoverHost {
+    /// 宿主窗口句柄（tooltip 以其原点 + 条目内鼠标坐标定位；缩放由
+    /// render 按句柄实时取 DPI）
+    pub hwnd: isize,
+    /// 到点显示前复查宿主会话是否仍活跃（会话结束则放弃显示）
+    pub is_active: fn(&App) -> bool,
+}
+
+fn picker_is_active(app: &App) -> bool {
+    app.state.is_picker_active()
+}
+
+/// 速贴面板悬停调度（条目索引取自速贴列表缓存）
 pub fn schedule(app: &App, index: usize, mouse_x: f32, mouse_y: f32) {
     let Some(item) = app.state.item_at(index) else {
         return;
     };
+    let host = HoverHost {
+        hwnd: app.state.picker_hwnd.load(Ordering::SeqCst),
+        is_active: picker_is_active,
+    };
+    schedule_with(app, host, item, mouse_x, mouse_y);
+}
 
+/// 条目内鼠标移动：重置 400ms 计时，到点后构建内容并显示
+pub fn schedule_with(app: &App, host: HoverHost, item: ClipItemSummary, mouse_x: f32, mouse_y: f32) {
     let token = PENDING_TOKEN.with(|value| {
         value.set(value.get() + 1);
         value.get()
     });
-    let picker_hwnd = app.state.picker_hwnd.load(Ordering::SeqCst);
+    let host_hwnd = host.hwnd;
+    let host_active = host.is_active;
     let app = app.clone();
 
     slint::Timer::single_shot(std::time::Duration::from_millis(SHOW_DELAY_MS), move || {
-        if PENDING_TOKEN.with(|value| value.get()) != token || !app.state.is_picker_active() {
+        if PENDING_TOKEN.with(|value| value.get()) != token || !host_active(&app) {
             return;
         }
 
@@ -75,16 +99,15 @@ pub fn schedule(app: &App, index: usize, mouse_x: f32, mouse_y: f32) {
             std::thread::spawn(move || {
                 let raw = thumbnails::load_full_image_raw(&core, &path);
                 let _ = slint::invoke_from_event_loop(move || {
-                    if PENDING_TOKEN.with(|value| value.get()) != token
-                        || !app_for_cb.state.is_picker_active()
+                    if PENDING_TOKEN.with(|value| value.get()) != token || !host_active(&app_for_cb)
                     {
                         return;
                     }
                     let image = raw.map(thumbnails::image_from_rgba);
                     render(
                         &app_for_cb,
+                        host_hwnd,
                         &item_for_cb,
-                        picker_hwnd,
                         mouse_x,
                         mouse_y,
                         Payload::Image(image),
@@ -104,8 +127,8 @@ pub fn schedule(app: &App, index: usize, mouse_x: f32, mouse_y: f32) {
             // Slint 会照排成空行，把元信息行顶出窗口下方，显示前裁掉
             render(
                 &app,
+                host_hwnd,
                 &item,
-                picker_hwnd,
                 mouse_x,
                 mouse_y,
                 Payload::Text(full_text.trim_end().to_owned()),
@@ -130,8 +153,8 @@ pub fn cancel(app: &App) {
 
 fn render(
     app: &App,
+    host_hwnd: isize,
     item: &ClipItemSummary,
-    picker_hwnd: isize,
     mouse_x: f32,
     mouse_y: f32,
     payload: Payload,
@@ -139,15 +162,11 @@ fn render(
     let Some(win) = app.tooltip.upgrade() else {
         return;
     };
-    let Some(picker_win) = app.picker.upgrade() else {
-        return;
-    };
 
-    let scale = picker_win.window().scale_factor();
-    let dpi = if picker_hwnd > 0 {
-        win32_ext::window_dpi(picker_hwnd) as f32 / 96.0
+    let dpi = if host_hwnd > 0 {
+        win32_ext::window_dpi(host_hwnd) as f32 / 96.0
     } else {
-        scale
+        1.0
     };
 
     // ── 内容与度量 ──
@@ -218,8 +237,8 @@ fn render(
     win.window()
         .set_size(slint::PhysicalSize::new(physical_w, physical_h));
 
-    // ── 定位：面板原点 + (条目内鼠标 + 偏移)×scale，越界翻转 ──
-    let position = resolve_position(picker_hwnd, mouse_x, mouse_y, scale, physical_w, physical_h);
+    // ── 定位：宿主窗口原点 + (条目内鼠标 + 偏移)×scale，越界翻转 ──
+    let position = resolve_position(host_hwnd, mouse_x, mouse_y, dpi, physical_w, physical_h);
     win.window()
         .set_position(slint::PhysicalPosition::new(position.0, position.1));
 

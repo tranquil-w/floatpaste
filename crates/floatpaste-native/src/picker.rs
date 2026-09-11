@@ -8,6 +8,7 @@
 
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use tracing::{info, warn};
@@ -27,10 +28,12 @@ use floatpaste_core::theme;
 use crate::app_state::{SharedState, TargetSession};
 use crate::overlay::{self, ForegroundPolicy};
 use crate::paste_flow;
+use crate::search;
 use crate::theme_bridge;
+use crate::thumbnails;
 use crate::tooltip;
 use crate::win32_ext;
-use crate::{ClipRow, PanelGeometry, QuickPasteWindow, TooltipWindow};
+use crate::{ClipRow, PanelGeometry, QuickPasteWindow, SearchWindow, TooltipWindow};
 
 /// 预览最多显示行数（对齐原版 line-clamp-4）
 const PREVIEW_MAX_LINES: usize = 4;
@@ -43,11 +46,16 @@ pub struct App {
     pub state: Arc<SharedState>,
     pub picker: slint::Weak<QuickPasteWindow>,
     pub tooltip: slint::Weak<TooltipWindow>,
+    pub search: slint::Weak<SearchWindow>,
 }
 
 impl App {
     pub fn with_picker<R>(&self, f: impl FnOnce(&QuickPasteWindow) -> R) -> Option<R> {
         self.picker.upgrade().map(|win| f(&win))
+    }
+
+    pub fn with_search<R>(&self, f: impl FnOnce(&SearchWindow) -> R) -> Option<R> {
+        self.search.upgrade().map(|win| f(&win))
     }
 
     pub fn core(&self) -> &CoreState {
@@ -116,7 +124,12 @@ pub fn activate(app: &App) {
     // 主题随设置刷新（设置可能在后台被改变）
     let resolved = theme::resolve_theme(settings.theme_mode.clone(), theme::system_prefers_dark());
     let tokens = theme::derive_tokens(&settings.theme_preset, &settings.theme_accent, resolved);
-    theme_bridge::apply_theme(&win, app.tooltip.upgrade().as_ref(), &tokens);
+    theme_bridge::apply_theme(
+        &win,
+        app.tooltip.upgrade().as_ref(),
+        app.search.upgrade().as_ref(),
+        &tokens,
+    );
 
     app.state.begin_picker_activation();
 
@@ -134,6 +147,13 @@ pub fn activate(app: &App) {
         .target_window_hwnd
         .map_or(ForegroundPolicy::Keep, ForegroundPolicy::RestoreIfStolen);
     overlay::after_show(hwnd, false, immediate, deferred);
+
+    // 搜索窗口正被作为回贴目标（用户在搜索中按了主快捷键）：键盘交给
+    // 速贴会话，搜索侧输入框失焦、底栏切换为速贴键位（对齐
+    // SEARCH_INPUT_SUSPEND_EVENT 语义）
+    if session.target_window_hwnd == Some(app.state.search_hwnd.load(Ordering::SeqCst)) {
+        search::suspend_input(app);
+    }
 
     // 会话开始：刷新列表、选中归零、滚回顶部、清空消息
     refresh_list_reset(app, &settings);
@@ -178,6 +198,7 @@ pub fn hide(app: &App, restore_target: bool) {
     if restore_target {
         let session = app.state.picker_session();
         let quitting = app.core().clone();
+        let app_for_resume = app.clone();
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(50));
             if quitting.is_quitting() {
@@ -185,6 +206,12 @@ pub fn hide(app: &App, restore_target: bool) {
             }
             if let Some(target_hwnd) = session.target_window_hwnd {
                 let _ = ActiveAppResolver::restore_foreground_window(target_hwnd);
+                // 目标是搜索窗口：把输入焦点还给搜索框（SEARCH_INPUT_RESUME）
+                if target_hwnd == app_for_resume.state.search_hwnd.load(Ordering::SeqCst) {
+                    let _ = slint::invoke_from_event_loop(move || {
+                        search::resume_input(&app_for_resume);
+                    });
+                }
             }
         });
     }
@@ -342,10 +369,8 @@ fn refresh_list(app: &App, keep_anchor: bool) {
 }
 
 thread_local! {
-    /// 缩略图缓存：id -> Some(图像) | None(解码失败哨兵，避免反复重试)
-    static THUMBNAILS: std::cell::RefCell<std::collections::HashMap<String, Option<slint::Image>>> =
-        std::cell::RefCell::new(std::collections::HashMap::new());
     /// 列表版本号：异步缩略图回来时校验列表是否已变
+    /// （缓存本体在 thumbnails 模块，速贴与搜索共用）
     static LIST_VERSION: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
@@ -367,7 +392,7 @@ fn preview_line_height(win: &QuickPasteWindow) -> f32 {
 /// - 文本放得下且非截断源 → 原样返回（对齐 line-clamp 不溢出不加省略号）
 /// - 否则二分最大前缀使「前缀 + …」仍放得下预算行；截断源（原文更长）
 ///   即便恰好排满预算行也会补出省略号，截断无省略号会被感知为显示不全
-fn clamp_preview_with(
+pub fn clamp_preview_with(
     measure: &mut dyn FnMut(&str, f32) -> f32,
     text: &str,
     avail_logical: f32,
@@ -470,9 +495,7 @@ fn build_rows(win: &QuickPasteWindow, items: &[ClipItemSummary]) {
         .iter()
         .enumerate()
         .map(|(index, item)| {
-            let thumb = THUMBNAILS
-                .with(|cache| cache.borrow().get(&item.id).cloned())
-                .flatten();
+            let thumb = thumbnails::cached(&item.id);
             let has_thumb = thumb.is_some();
             // 预览达到入库截断上限即认为原文更长，行末始终要有省略号
             let source_truncated = item.content_preview.chars().count() >= PREVIEW_SOURCE_LIMIT;
@@ -525,7 +548,7 @@ fn build_rows(win: &QuickPasteWindow, items: &[ClipItemSummary]) {
         .collect();
 
     win.set_rows(ModelRc::new(Rc::new(VecModel::from(rows))));
-    LIST_VERSION.with(|version| version.set(version.get() + 1));
+    LIST_VERSION.with(|version| version.set(thumbnails::bump_list_version()));
 }
 
 thread_local! {
@@ -555,7 +578,7 @@ fn ensure_thumbnails(app: &App, items: &[ClipItemSummary]) {
     let missing: Vec<(String, String)> = items
         .iter()
         .filter(|item| item.r#type == "image" && item.image_path.is_some())
-        .filter(|item| THUMBNAILS.with(|cache| !cache.borrow().contains_key(&item.id)))
+        .filter(|item| !thumbnails::contains(&item.id))
         .filter_map(|item| {
             let path = item.image_path.clone()?;
             Some((item.id.clone(), path))
@@ -566,27 +589,24 @@ fn ensure_thumbnails(app: &App, items: &[ClipItemSummary]) {
         return;
     }
 
-    let version = LIST_VERSION.with(|v| v.get());
+    let version = thumbnails::list_version();
     let core = app.core().clone();
     let app_for_cb = app.clone();
     std::thread::spawn(move || {
         // 跨线程只传原始像素；slint::Image 非 Send，事件循环侧再构造
-        let mut decoded: Vec<(String, Option<crate::thumbnails::RawImage>)> = Vec::new();
+        let mut decoded: Vec<(String, Option<thumbnails::RawImage>)> = Vec::new();
         for (id, path) in missing {
-            let raw = crate::thumbnails::load_thumbnail_raw(&core, &path);
+            let raw = thumbnails::load_thumbnail_raw(&core, &path);
             decoded.push((id, raw));
         }
 
         let _ = slint::invoke_from_event_loop(move || {
-            if LIST_VERSION.with(|v| v.get()) != version {
+            if thumbnails::list_version() != version {
                 return; // 列表已刷新，等待下一轮 ensure_thumbnails
             }
-            THUMBNAILS.with(|cache| {
-                for (id, raw) in decoded {
-                    let image = raw.map(crate::thumbnails::image_from_rgba);
-                    cache.borrow_mut().insert(id, image);
-                }
-            });
+            for (id, raw) in decoded {
+                thumbnails::insert(id, raw.map(thumbnails::image_from_rgba));
+            }
             let items = app_for_cb.state.items();
             app_for_cb.with_picker(|win| build_rows(&win, &items));
         });

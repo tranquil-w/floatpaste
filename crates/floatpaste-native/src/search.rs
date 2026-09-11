@@ -1,0 +1,1484 @@
+//! 搜索窗口会话逻辑：对齐原版 SearchShell / useSearchSession / 搜索相关
+//! WindowCoordinator 分支的完整行为。
+//!
+//! - 会话：打开时捕获回贴目标并定位到光标所在显示器工作区中央，真实获得
+//!   键盘焦点（无全局钩子）；失焦且光标在窗外 → 边沿触发自动关闭（不还原
+//!   目标，用户点击的位置已持有前台）。
+//! - 查询：200ms 关键词防抖 + 类型/标签筛选 + 50 条分页 + 触底预载
+//!   （240px），keyword 非空按相关度排序，否则按最近使用。
+//! - 高度：target = min(620, 5 + chrome + 列表内容)，棘轮同步——结构变化
+//!   （关键词/筛选/错误条/条目数）允许收缩，选中展开只允许增高。
+//! - 挂起态（速贴会话把回贴目标定为搜索窗口）：输入框失焦、底栏切换为速
+//!   贴键位；恢复路径覆盖速贴隐藏还原与粘贴还原两条链路。
+
+use std::cell::{Cell, RefCell};
+use std::collections::HashSet;
+use std::rc::Rc;
+use std::sync::atomic::Ordering;
+use std::thread;
+use std::time::Duration;
+
+use slint::{ComponentHandle, Model, ModelRc, PhysicalPosition, PhysicalSize, VecModel};
+use tracing::{info, warn};
+
+use floatpaste_core::domain::clip_item::{
+    ClipItemSummary, ClipType, PasteOption, SearchFilters, SearchQuery, SearchSort, SearchResult,
+};
+use floatpaste_core::domain::error::AppError;
+use floatpaste_core::platform::windows::active_app::ActiveAppResolver;
+use floatpaste_core::platform::windows::picker_position::{
+    current_cursor_point, work_area_from_point,
+};
+use floatpaste_core::platform::windows::window_control;
+use floatpaste_core::services::clip_service::ClipService;
+use floatpaste_core::services::paste_support;
+use floatpaste_core::services::time_format::format_relative_time_or_unused;
+
+use crate::app_state::SearchSession;
+use crate::overlay;
+use crate::picker::{self, App};
+use crate::thumbnails;
+use crate::tooltip::{self, HoverHost};
+use crate::{SearchGeometry, SearchRow, SearchTagChip, SearchWindow};
+
+/// 单页条数（对齐旧版 SEARCH_PAGE_SIZE）
+const PAGE_SIZE: u32 = 50;
+/// 关键词防抖（对齐 SEARCH_INPUT_DEBOUNCE_MS）
+const INPUT_DEBOUNCE_MS: u64 = 200;
+/// 二次确认删除的保持时长（对齐 ARMED_DELETE_RESET_DELAY_MS）
+const DELETE_ARM_TIMEOUT_MS: u64 = 3000;
+/// 错误条自动消失时长（对齐 ERROR_TIMEOUT_MS）
+const ERROR_TIMEOUT_MS: u64 = 3000;
+/// 焦点监视轮询间隔（对齐 SEARCH_FOCUS_WATCH_INTERVAL_MS）
+const FOCUS_WATCH_INTERVAL_MS: u64 = 120;
+/// 选中预览最多行数（对齐 line-clamp-3）
+const PREVIEW_MAX_LINES: usize = 3;
+/// 入库预览的字符截断上限（normalize_service 同值）：达到即认为原文更长
+const PREVIEW_SOURCE_LIMIT: usize = 120;
+/// 大图预览最高（对齐 max-h-[120px]）
+const LARGE_PREVIEW_MAX_H: f32 = 120.0;
+
+const RESTORE_DELAY: Duration = Duration::from_millis(90);
+const INJECT_DELAY: Duration = Duration::from_millis(60);
+
+/* ───────────────── 会话生命周期 ───────────────── */
+
+/// 全局搜索快捷键命中：活跃则关闭并还原目标；速贴活跃则先收起速贴（不还
+/// 原目标，焦点交给搜索窗口），再打开搜索（对齐 open_search_global）
+pub fn toggle_from_shortcut(app: &App) {
+    if app.state.is_search_active() {
+        hide(app, true);
+        return;
+    }
+    if app.state.is_picker_active() {
+        picker::hide(app, false);
+    }
+    open(app);
+}
+
+/// 打开搜索会话（对齐 open_search_global）
+pub fn open(app: &App) {
+    let hwnd = app.state.search_hwnd.load(Ordering::SeqCst);
+    if hwnd == 0 {
+        warn!("搜索窗口 HWND 尚未就绪，无法显示");
+        return;
+    }
+
+    // 先捕获回贴目标再显示（此刻前台还是用户正在用的窗口）
+    let target = ActiveAppResolver::current_foreground_window_handle();
+    app.state.set_search_session(SearchSession {
+        target_window_hwnd: target,
+    });
+    app.state.begin_search_activation();
+    info!("打开 Search，target_window={target:?}");
+
+    let Some(win) = app.search.upgrade() else {
+        app.state.end_search_activation();
+        return;
+    };
+
+    position_on_cursor_monitor(&win);
+    reset_session_state(app);
+
+    let _ = win.window().show();
+    if let Err(error) = window_control::restore_window_and_focus(hwnd) {
+        warn!("搜索窗口获取焦点失败: {error}");
+    }
+    // winit show 的异步样式重置会摘掉浮层属性：显示后重挂（可聚焦变体，
+    // 不带 WS_EX_NOACTIVATE）并复查置顶
+    overlay::after_show_focusable(hwnd);
+
+    begin_focus_watcher(app);
+    refresh_tags(app);
+    // 行模型已清空：首帧显示加载态（对齐旧版 keyword 重置后 isLoading）
+    run_query(app);
+}
+
+/// 隐藏（对齐 hide_search_window / hide_search_and_restore_target）。
+/// restore_target=true 立即把前台还给会话目标（粘贴/快捷键关闭路径）；
+/// false 时不动前台（失焦自动关闭/Esc，用户点击处已持有前台）
+pub fn hide(app: &App, restore_target: bool) {
+    tooltip::cancel(app);
+    app.state.end_search_activation();
+    let session = app.state.search_session();
+    if let Some(win) = app.search.upgrade() {
+        if win.window().is_visible() {
+            let _ = win.window().hide();
+        }
+    }
+    if restore_target {
+        if let Some(target_hwnd) = session.target_window_hwnd {
+            ActiveAppResolver::restore_foreground_window(target_hwnd);
+        }
+    }
+    app.state.set_search_session(Default::default());
+    info!("隐藏 Search，会话已清理");
+}
+
+/// 键盘交给速贴面板（对齐 SEARCH_INPUT_SUSPEND_EVENT）
+pub fn suspend_input(app: &App) {
+    app.with_search(|win| {
+        win.set_input_suspended(true);
+        win.invoke_blur_input();
+    });
+}
+
+/// 键盘交还搜索窗口（对齐 SEARCH_INPUT_RESUME_EVENT）
+pub fn resume_input(app: &App) {
+    app.with_search(|win| {
+        win.set_input_suspended(false);
+        win.invoke_focus_input();
+    });
+}
+
+/// 打开时定位：光标所在显示器工作区居中（不持久化位置，对齐
+/// center_window_on_cursor_monitor）
+fn position_on_cursor_monitor(win: &SearchWindow) {
+    let Ok(cursor) = current_cursor_point() else {
+        return;
+    };
+    let Ok(work) = work_area_from_point(cursor) else {
+        return;
+    };
+    let size = win.window().size();
+    let x = work.left + (work.width() - size.width as i32).max(0) / 2;
+    let y = work.top + (work.height() - size.height as i32).max(0) / 2;
+    win.window().set_position(PhysicalPosition::new(x, y));
+}
+
+/// 会话开始重置（对齐 SEARCH_SESSION_START）：关键词/筛选/选中/滚动/错误
+/// 全部归零，行模型清空进入加载态
+fn reset_session_state(app: &App) {
+    let Some(win) = app.search.upgrade() else {
+        return;
+    };
+    QUERY.with(|state| *state.borrow_mut() = QueryState::default());
+    CANCEL_DEBOUNCE.with(|slot| *slot.borrow_mut() = None);
+    SELECTED_ID.with(|slot| *slot.borrow_mut() = None);
+    SELECTED_DETAIL.with(|slot| *slot.borrow_mut() = None);
+    SELECTED_FULL_IMAGE.with(|slot| *slot.borrow_mut() = None);
+    ARMED_DELETE.with(|slot| *slot.borrow_mut() = None);
+    DELETE_TOKEN.with(|token| token.set(token.get() + 1));
+    ERROR_TOKEN.with(|token| token.set(token.get() + 1));
+    LAST_HEIGHT.with(|value| value.set(0.0));
+    ALLOW_SHRINK.with(|flag| flag.set(false));
+
+    win.set_keyword("".into());
+    win.set_input_suspended(false);
+    win.set_selected(0);
+    win.set_delete_armed(false);
+    win.set_active_filter(0);
+    win.set_error_text("".into());
+    win.set_load_failed(false);
+    win.set_fetching_next(false);
+    win.set_has_next_page(false);
+    win.set_show_result_count(false);
+    win.set_result_count(0);
+    win.set_result_total(0);
+    win.set_rows(ModelRc::new(Rc::new(VecModel::from(Vec::<SearchRow>::new()))));
+    win.set_loading(true);
+    win.set_tag_chips(ModelRc::new(Rc::new(VecModel::from(Vec::<SearchTagChip>::new()))));
+    win.set_scroll_generation(win.get_scroll_generation() + 1);
+    win.invoke_focus_input();
+}
+
+/// 焦点监视（对齐旧版 searchFocusWatcher）：上一拍还在前台、这一拍丢失
+/// 且光标不在窗口内 → 关闭且不还原目标。边沿触发：焦点从未拿到时不误关
+fn begin_focus_watcher(app: &App) {
+    let app_for_watch = app.clone();
+    thread::spawn(move || {
+        let mut was_foreground = false;
+        loop {
+            thread::sleep(Duration::from_millis(FOCUS_WATCH_INTERVAL_MS));
+            if app_for_watch.core().is_quitting() || !app_for_watch.state.is_search_active() {
+                return;
+            }
+            let hwnd = app_for_watch.state.search_hwnd.load(Ordering::SeqCst);
+            if hwnd == 0 {
+                return;
+            }
+            let is_foreground = ActiveAppResolver::current_foreground_hwnd() == Some(hwnd);
+            if was_foreground && !is_foreground {
+                let cursor_outside = window_control::is_cursor_inside_window(hwnd)
+                    .map(|inside| !inside)
+                    .unwrap_or(false);
+                if cursor_outside {
+                    let app = app_for_watch.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        hide(&app, false);
+                    });
+                    return;
+                }
+            }
+            was_foreground = is_foreground;
+        }
+    });
+}
+
+/* ───────────────── 查询引擎 ───────────────── */
+
+#[derive(Default)]
+struct QueryState {
+    /// 已生效（防抖后）进入查询的关键词
+    keyword: String,
+    /// 0=全部 1=收藏 2=文本 3=图片 4=文件
+    filter: u32,
+    /// 标签筛选（原始大小写，AND 语义）
+    tags: Vec<String>,
+    /// 已加载条数（分页游标）
+    offset: u32,
+    total: u32,
+    has_more: bool,
+    fetching: bool,
+    fetching_next: bool,
+    /// 失效在途响应：会话重置/新查询使旧回调丢弃
+    seq: u64,
+}
+
+thread_local! {
+    static QUERY: RefCell<QueryState> = RefCell::new(QueryState::default());
+    /// 关键词防抖定时器（restartable：覆盖即停旧计时）
+    static CANCEL_DEBOUNCE: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
+    static SELECTED_ID: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// 选中条目详情全文（id, full_text）；仅文本条目预览需要
+    static SELECTED_DETAIL: RefCell<Option<(String, String)>> = const { RefCell::new(None) };
+    /// 选中图片条目的全图解码结果（id, image）；None 表示解码中/未就绪
+    static SELECTED_FULL_IMAGE: RefCell<Option<(String, Option<slint::Image>)>> =
+        const { RefCell::new(None) };
+    static ARMED_DELETE: RefCell<Option<String>> = const { RefCell::new(None) };
+    static DELETE_TOKEN: Cell<u64> = const { Cell::new(0) };
+    static ERROR_TOKEN: Cell<u64> = const { Cell::new(0) };
+    static LAST_HEIGHT: Cell<f32> = const { Cell::new(0.0) };
+    static ALLOW_SHRINK: Cell<bool> = const { Cell::new(false) };
+    static HEIGHT_TOKEN: Cell<u64> = const { Cell::new(0) };
+}
+
+fn build_query(keyword: &str, filter: u32, tags: &[String], offset: u32) -> SearchQuery {
+    let mut filters = SearchFilters::default();
+    match filter {
+        1 => filters.favorited_only = Some(true),
+        2 => filters.clip_type = Some(ClipType::Text),
+        3 => filters.clip_type = Some(ClipType::Image),
+        4 => filters.clip_type = Some(ClipType::File),
+        _ => {}
+    }
+    if !tags.is_empty() {
+        filters.tag_names = Some(tags.to_vec());
+    }
+    SearchQuery {
+        keyword: keyword.to_string(),
+        filters,
+        offset,
+        limit: PAGE_SIZE,
+        sort: if keyword.trim().is_empty() {
+            SearchSort::RecentDesc
+        } else {
+            SearchSort::RelevanceDesc
+        },
+    }
+}
+
+/// 发起查询（offset 归零）。旧行保留显示直到新结果落地（对齐
+/// keepPreviousData）；无旧行才显示加载态
+fn run_query(app: &App) {
+    let Some(win) = app.search.upgrade() else {
+        return;
+    };
+    let keyword = win.get_keyword().to_string();
+    let (filter, tags, seq) = QUERY.with(|state| {
+        let mut state = state.borrow_mut();
+        state.keyword = keyword.clone();
+        state.offset = 0;
+        state.fetching = true;
+        state.fetching_next = false;
+        state.seq += 1;
+        (state.filter, state.tags.clone(), state.seq)
+    });
+    win.set_fetching_next(false);
+    let keep_loading = win.get_rows().row_count() == 0;
+    win.set_loading(keep_loading);
+
+    let core = app.core().clone();
+    let app_cb = app.clone();
+    thread::spawn(move || {
+        let query = build_query(&keyword, filter, &tags, 0);
+        let result = core.repository.search(query);
+        let _ = slint::invoke_from_event_loop(move || match result {
+            Ok(result) => apply_page(&app_cb, result, seq, false),
+            Err(error) => {
+                warn!("搜索查询失败: {error}");
+                let stale = QUERY.with(|state| {
+                    let mut state = state.borrow_mut();
+                    if state.seq != seq {
+                        return true;
+                    }
+                    state.fetching = false;
+                    false
+                });
+                if stale {
+                    return;
+                }
+                app_cb.with_search(|win| {
+                    win.set_fetching_next(false);
+                    // 有旧行时保留旧数据静默失败（对齐 isError && items.length === 0）
+                    if win.get_rows().row_count() == 0 {
+                        win.set_loading(false);
+                        win.set_load_failed(true);
+                    }
+                });
+            }
+        });
+    });
+}
+
+/// 查询落地：写入缓存/模型，按 id 锚点恢复选中（对齐 items 变更 effect）
+fn apply_page(app: &App, result: SearchResult, seq: u64, append: bool) {
+    let valid = QUERY.with(|state| {
+        let mut state = state.borrow_mut();
+        if state.seq != seq {
+            return false;
+        }
+        state.fetching = false;
+        state.fetching_next = false;
+        state.total = result.total;
+        true
+    });
+    if !valid {
+        return;
+    }
+
+    let mut items = if append {
+        app.state.search_items()
+    } else {
+        Vec::new()
+    };
+    items.extend(result.items.iter().cloned());
+    app.state.set_search_items(items.clone());
+    // 分页游标与是否还有下一页（对齐 getNextPageParam：offset + items.length < total）
+    QUERY.with(|state| {
+        let mut state = state.borrow_mut();
+        state.offset = items.len() as u32;
+        state.has_more = state.offset < result.total;
+    });
+
+    let previous_selected = SELECTED_ID.with(|slot| slot.borrow().clone());
+    let next_selected = match &previous_selected {
+        Some(id) if items.iter().any(|item| &item.id == id) => previous_selected,
+        _ => items.first().map(|item| item.id.clone()),
+    };
+    SELECTED_ID.with(|slot| *slot.borrow_mut() = next_selected);
+    refresh_selected_detail(app);
+
+    let has_more = QUERY.with(|state| state.borrow().has_more);
+    app.with_search(|win| {
+        win.set_loading(false);
+        win.set_load_failed(false);
+        win.set_show_result_count(true);
+        win.set_result_count(items.len() as i32);
+        win.set_result_total(result.total as i32);
+        win.set_has_next_page(has_more);
+        win.set_fetching_next(false);
+    });
+    update_empty_state(app);
+    build_rows(app);
+    ensure_thumbnails(app, &items);
+    sync_height(app, true);
+}
+
+/// 触底预载（对齐 fetchNextPage：offset + items.length < total）
+pub fn fetch_next(app: &App) {
+    let (has_more, fetching, fetching_next, keyword, filter, tags) = QUERY.with(|state| {
+        let state = state.borrow();
+        (
+            state.has_more,
+            state.fetching,
+            state.fetching_next,
+            state.keyword.clone(),
+            state.filter,
+            state.tags.clone(),
+        )
+    });
+    if !has_more || fetching || fetching_next {
+        return;
+    }
+    let offset = app.state.search_items().len() as u32;
+    let seq = QUERY.with(|state| {
+        let mut state = state.borrow_mut();
+        state.fetching_next = true;
+        state.seq += 1;
+        state.seq
+    });
+    app.with_search(|win| win.set_fetching_next(true));
+
+    let core = app.core().clone();
+    let app_cb = app.clone();
+    thread::spawn(move || {
+        let query = build_query(&keyword, filter, &tags, offset);
+        let result = core.repository.search(query);
+        let _ = slint::invoke_from_event_loop(move || match result {
+            Ok(result) => apply_page(&app_cb, result, seq, true),
+            Err(error) => {
+                warn!("搜索翻页失败: {error}");
+                QUERY.with(|state| {
+                    let mut state = state.borrow_mut();
+                    if state.seq == seq {
+                        state.fetching_next = false;
+                    }
+                });
+                app_cb.with_search(|win| win.set_fetching_next(false));
+            }
+        });
+    });
+}
+
+/// 新剪贴内容入库：在途分页失效，从第一页重查（关键词/筛选保持，
+/// 选中按 id 锚点恢复；对齐旧版 queryClient.invalidateQueries）
+pub fn notify_clips_changed(app: &App) {
+    if !app.state.is_search_active() {
+        return;
+    }
+    run_query(app);
+}
+
+/// 关键词编辑：重启 200ms 防抖（输入框文本已双向绑定到窗口属性）
+pub fn keyword_edited(app: &App) {
+    let app_cb = app.clone();
+    let timer = slint::Timer::default();
+    timer.start(
+        slint::TimerMode::SingleShot,
+        Duration::from_millis(INPUT_DEBOUNCE_MS),
+        move || run_query(&app_cb),
+    );
+    CANCEL_DEBOUNCE.with(|slot| *slot.borrow_mut() = Some(timer));
+}
+
+/// 清除关键词：立即清空并重查（对齐旧版同时置 keyword 与 debouncedKeyword）
+pub fn clear_keyword(app: &App) {
+    CANCEL_DEBOUNCE.with(|slot| *slot.borrow_mut() = None);
+    QUERY.with(|state| state.borrow_mut().keyword.clear());
+    app.with_search(|win| win.set_keyword("".into()));
+    run_query(app);
+}
+
+pub fn filter_selected(app: &App, filter: i32) {
+    QUERY.with(|state| state.borrow_mut().filter = filter.max(0) as u32);
+    app.with_search(|win| win.set_active_filter(filter));
+    run_query(app);
+}
+
+pub fn clear_filters(app: &App) {
+    QUERY.with(|state| {
+        let mut state = state.borrow_mut();
+        state.filter = 0;
+        state.tags.clear();
+    });
+    app.with_search(|win| {
+        win.set_active_filter(0);
+        rebuild_tag_chips(win);
+    });
+    run_query(app);
+}
+
+pub fn tag_toggled(app: &App, index: usize) {
+    let Some(win) = app.search.upgrade() else {
+        return;
+    };
+    let Some(chip) = win.get_tag_chips().iter().nth(index) else {
+        return;
+    };
+    let name = chip.name.to_string();
+    QUERY.with(|state| {
+        let mut state = state.borrow_mut();
+        match state
+            .tags
+            .iter()
+            .position(|tag| tag.to_lowercase() == name.to_lowercase())
+        {
+            Some(position) => {
+                state.tags.remove(position);
+            }
+            None => state.tags.push(name.clone()),
+        }
+    });
+    rebuild_tag_chips(&win);
+    run_query(app);
+}
+
+/// 标签 chips 重建：active 标记按当前筛选（大小写不敏感）恢复
+fn rebuild_tag_chips(win: &SearchWindow) {
+    let active: HashSet<String> = QUERY.with(|state| {
+        state
+            .borrow()
+            .tags
+            .iter()
+            .map(|tag| tag.to_lowercase())
+            .collect()
+    });
+    let chips: Vec<SearchTagChip> = win
+        .get_tag_chips()
+        .iter()
+        .map(|chip| SearchTagChip {
+            active: active.contains(&chip.name.to_string().to_lowercase()),
+            ..chip
+        })
+        .collect();
+    win.set_tag_chips(ModelRc::new(Rc::new(VecModel::from(chips))));
+}
+
+/// 会话打开时加载标签列表（对齐 tagsQuery）
+fn refresh_tags(app: &App) {
+    let Ok(tags) = app.core().repository.list_tags() else {
+        return;
+    };
+    let active: HashSet<String> = QUERY.with(|state| {
+        state
+            .borrow()
+            .tags
+            .iter()
+            .map(|tag| tag.to_lowercase())
+            .collect()
+    });
+    let chips: Vec<SearchTagChip> = tags
+        .into_iter()
+        .map(|tag| SearchTagChip {
+            active: active.contains(&tag.name.to_lowercase()),
+            name: tag.name.into(),
+        })
+        .collect();
+    app.with_search(|win| win.set_tag_chips(ModelRc::new(Rc::new(VecModel::from(chips)))));
+}
+
+/* ───────────────── 选中与行模型 ───────────────── */
+
+pub fn set_selected(app: &App, index: usize) {
+    let Some(item) = app.state.search_item_at(index) else {
+        return;
+    };
+    SELECTED_ID.with(|slot| *slot.borrow_mut() = Some(item.id));
+    reset_delete_arm(app);
+    refresh_selected_detail(app);
+    build_rows(app);
+    // 选中展开只允许增高（对齐 allowWindowShrinkRef 不置位的棘轮语义）
+    sync_height(app, false);
+}
+
+/// ↑↓ 循环导航（对齐 (i ± 1 + n) % n）
+pub fn navigate(app: &App, up: bool) {
+    let count = app.state.search_items().len();
+    if count == 0 {
+        return;
+    }
+    let current = app
+        .with_search(|win| win.get_selected().max(0) as usize)
+        .unwrap_or(0)
+        .min(count - 1);
+    set_selected(app, next_navigation_index(count, current, up));
+}
+
+fn next_navigation_index(count: usize, current: usize, up: bool) -> usize {
+    if up {
+        (current + count - 1) % count
+    } else {
+        (current + 1) % count
+    }
+}
+
+/// 选中条目详情与全图：文本取全文（同步单行读），图片调度全图解码
+fn refresh_selected_detail(app: &App) {
+    let selected_id = SELECTED_ID.with(|slot| slot.borrow().clone());
+    let Some(id) = selected_id else {
+        SELECTED_DETAIL.with(|slot| *slot.borrow_mut() = None);
+        SELECTED_FULL_IMAGE.with(|slot| *slot.borrow_mut() = None);
+        return;
+    };
+    let Some(item) = app
+        .state
+        .search_items()
+        .into_iter()
+        .find(|item| item.id == id)
+    else {
+        return;
+    };
+
+    if item.r#type == "text" {
+        // 旧版选中预览对文本条目替换为详情全文（detailQuery.data.fullText）
+        let full = app
+            .core()
+            .repository
+            .get_item_detail(&id)
+            .ok()
+            .map(|detail| (detail.id, detail.full_text));
+        SELECTED_DETAIL.with(|slot| *slot.borrow_mut() = full);
+    } else {
+        SELECTED_DETAIL.with(|slot| *slot.borrow_mut() = None);
+    }
+    ensure_selected_full_image(app, &item);
+}
+
+/// 全图异步解码回填（缩略图 36px 拉伸会糊化，选中后换全图）。
+/// 高度在行模型里按元数据先占位，解码完成只补像素
+fn ensure_selected_full_image(app: &App, item: &ClipItemSummary) {
+    if item.r#type != "image" {
+        SELECTED_FULL_IMAGE.with(|slot| *slot.borrow_mut() = None);
+        return;
+    }
+    let already = SELECTED_FULL_IMAGE.with(|slot| {
+        matches!(&*slot.borrow(), Some((id, Some(_))) if id == &item.id)
+    });
+    if already {
+        return;
+    }
+    let Some(path) = item.image_path.clone() else {
+        SELECTED_FULL_IMAGE.with(|slot| *slot.borrow_mut() = None);
+        return;
+    };
+
+    let id = item.id.clone();
+    SELECTED_FULL_IMAGE.with(|slot| *slot.borrow_mut() = Some((id.clone(), None)));
+    let core = app.core().clone();
+    let app_cb = app.clone();
+    thread::spawn(move || {
+        let raw = thumbnails::load_full_image_raw(&core, &path);
+        let _ = slint::invoke_from_event_loop(move || {
+            let still_selected = SELECTED_ID.with(|slot| {
+                slot.borrow().as_deref() == Some(id.as_str())
+            });
+            if !still_selected {
+                return;
+            }
+            SELECTED_FULL_IMAGE.with(|slot| {
+                *slot.borrow_mut() = Some((id, raw.map(thumbnails::image_from_rgba)))
+            });
+            build_rows(&app_cb);
+        });
+    });
+}
+
+/// 预览单行排版高度：一行与两行度量之差（与 picker 同技巧，标尺是
+/// 搜索窗口 15px/medium 版本）
+fn preview_line_height(win: &SearchWindow) -> f32 {
+    let one = win.invoke_measure_preview("文本Ag".into(), 1000.0);
+    let two = win.invoke_measure_preview("文本Ag\n文本Ag".into(), 1000.0);
+    (two - one).max(1.0)
+}
+
+/// 用 Slint 排版引擎把选中预览裁到 3 行（复用 picker 的裁排核心，
+/// 度量换成搜索窗口标尺——15px/medium 与行内 Text 同参数）
+fn clamp_selected_preview(
+    win: &SearchWindow,
+    text: &str,
+    avail_logical: f32,
+    source_truncated: bool,
+    line_height: f32,
+) -> String {
+    picker::clamp_preview_with(
+        &mut |candidate, width| win.invoke_measure_preview(candidate.into(), width),
+        text,
+        avail_logical,
+        source_truncated,
+        line_height,
+        PREVIEW_MAX_LINES,
+    )
+}
+
+/// 行基础预览宽（逻辑像素）：列表布局实测上报为准；首帧未上报时按窗口
+/// 几何常量兜底（与 slint 布局同式）
+fn preview_base_widths(win: &SearchWindow) -> (f32, f32) {
+    let reported = win.get_preview_width_no_thumb();
+    if reported > 0.0 {
+        return (reported, win.get_preview_width_thumb());
+    }
+    let geo = win.global::<SearchGeometry>();
+    let scale = win.window().scale_factor();
+    let panel_logical = win.window().size().width as f32 / scale;
+    let base = panel_logical
+        - geo.get_scroll_slot()
+        - 2.0 * geo.get_content_pad_h()
+        - geo.get_row_border_l()
+        - 2.0 * geo.get_row_pad_h();
+    let base = base.max(40.0);
+    let thumb_column = geo.get_thumb_size() + geo.get_thumb_gap();
+    (base, (base - thumb_column).max(40.0))
+}
+
+fn build_rows(app: &App) {
+    let Some(win) = app.search.upgrade() else {
+        return;
+    };
+    let items = app.state.search_items();
+    let selected_id = SELECTED_ID.with(|slot| slot.borrow().clone());
+    let selected_index = items
+        .iter()
+        .position(|item| Some(&item.id) == selected_id.as_ref());
+
+    let (base_no_thumb, base_with_thumb) = preview_base_widths(&win);
+    let line_height = preview_line_height(&win);
+    let reserve = win.global::<SearchGeometry>().get_selected_preview_reserve();
+
+    let rows: Vec<SearchRow> = items
+        .iter()
+        .map(|item| {
+            let selected = selected_id.as_deref() == Some(item.id.as_str());
+            let thumb = thumbnails::cached(&item.id);
+            let has_thumb = thumb.is_some();
+            let base_width = if has_thumb {
+                base_with_thumb
+            } else {
+                base_no_thumb
+            };
+
+            // 非选中：入库预览单行省略（换行折为空格，对齐 whitespace-nowrap
+            // 前的 flatten）；选中：文本条目换详情全文，按 3 行预算裁排
+            let preview = if selected {
+                let source_truncated = item.content_preview.chars().count() >= PREVIEW_SOURCE_LIMIT;
+                let full: String = SELECTED_DETAIL
+                    .with(|slot| {
+                        slot.borrow()
+                            .as_ref()
+                            .filter(|(id, _)| id == &item.id)
+                            .map(|(_, text)| text.clone())
+                    })
+                    .filter(|text| !text.is_empty())
+                    .unwrap_or_else(|| item.content_preview.clone());
+                clamp_selected_preview(
+                    &win,
+                    &full,
+                    base_width - reserve,
+                    source_truncated,
+                    line_height,
+                )
+            } else {
+                flatten_preview_newlines(&item.content_preview)
+            };
+
+            // 大图预览仅选中行携带（内存考量）：高度按列宽等比、上限 120
+            let (has_large, large_height) = if selected && item.r#type == "image" {
+                large_preview_geometry(item, base_width)
+                    .map(|height| (true, height))
+                    .unwrap_or((false, 0.0))
+            } else {
+                (false, 0.0)
+            };
+            let large_image = if has_large {
+                SELECTED_FULL_IMAGE
+                    .with(|slot| {
+                        slot.borrow()
+                            .as_ref()
+                            .filter(|(id, _)| id == &item.id)
+                            .and_then(|(_, image)| image.clone())
+                    })
+                    .unwrap_or_default()
+            } else {
+                slint::Image::default()
+            };
+
+            SearchRow {
+                id: item.id.clone().into(),
+                preview: preview.into(),
+                kind: match item.r#type.as_str() {
+                    "image" => 1,
+                    "file" => 2,
+                    _ => 0,
+                },
+                source_app: item
+                    .source_app
+                    .clone()
+                    .unwrap_or_else(|| "未知来源".into())
+                    .into(),
+                time_text: format_relative_time_or_unused(
+                    item.last_used_at
+                        .as_deref()
+                        .or(Some(item.created_at.as_str())),
+                )
+                .into(),
+                meta: build_meta(item).into(),
+                favorited: item.is_favorited,
+                has_thumb,
+                thumb: thumb.unwrap_or_default(),
+                tags: {
+                    let shown: Vec<slint::SharedString> = item
+                        .tags
+                        .iter()
+                        .take(3)
+                        .map(|tag| tag.clone().into())
+                        .collect();
+                    ModelRc::new(Rc::new(VecModel::from(shown)))
+                },
+                tag_more: item.tags.len().saturating_sub(3) as i32,
+                has_large_preview: has_large,
+                large_preview: large_image,
+                large_preview_height: large_height,
+            }
+        })
+        .collect();
+
+    win.set_selected(selected_index.unwrap_or(0) as i32);
+    win.set_rows(ModelRc::new(Rc::new(VecModel::from(rows))));
+}
+
+/// 异步补齐缩略图（与速贴共用缓存；解码回填后重建搜索行模型）
+fn ensure_thumbnails(app: &App, items: &[ClipItemSummary]) {
+    let missing: Vec<(String, String)> = items
+        .iter()
+        .filter(|item| item.r#type == "image" && item.image_path.is_some())
+        .filter(|item| !thumbnails::contains(&item.id))
+        .filter_map(|item| {
+            let path = item.image_path.clone()?;
+            Some((item.id.clone(), path))
+        })
+        .collect();
+    if missing.is_empty() {
+        return;
+    }
+
+    let version = thumbnails::list_version();
+    let core = app.core().clone();
+    let app_cb = app.clone();
+    thread::spawn(move || {
+        // 跨线程只传原始像素；slint::Image 非 Send，事件循环侧再构造
+        let mut decoded: Vec<(String, Option<thumbnails::RawImage>)> = Vec::new();
+        for (id, path) in missing {
+            let raw = thumbnails::load_thumbnail_raw(&core, &path);
+            decoded.push((id, raw));
+        }
+        let _ = slint::invoke_from_event_loop(move || {
+            if thumbnails::list_version() != version {
+                return; // 列表已刷新，等待下一轮 ensure_thumbnails
+            }
+            for (id, raw) in decoded {
+                thumbnails::insert(id, raw.map(thumbnails::image_from_rgba));
+            }
+            build_rows(&app_cb);
+        });
+    });
+}
+
+/// 大图预览高度：实图解码完成后用实图尺寸，否则退回元数据；等比缩放宽
+/// 到列宽，上限 120。无尺寸信息时不渲染
+fn large_preview_geometry(item: &ClipItemSummary, base_width: f32) -> Option<f32> {
+    let decoded_size = SELECTED_FULL_IMAGE.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .filter(|(id, _)| id == &item.id)
+            .and_then(|(_, image)| image.as_ref())
+            .map(|image| image.size())
+    });
+    let (width, height) = match decoded_size {
+        Some(size) => (size.width as f32, size.height as f32),
+        None => (item.image_width? as f32, item.image_height? as f32),
+    };
+    if width <= 0.0 || height <= 0.0 {
+        return None;
+    }
+    Some((base_width * height / width).min(LARGE_PREVIEW_MAX_H).max(1.0))
+}
+
+/// 非选中预览的换行折行（对齐旧版 preview.replace(/\r?\n/g, " ")）
+fn flatten_preview_newlines(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(current) = chars.next() {
+        match current {
+            '\r' => {
+                if chars.peek() == Some(&'\n') {
+                    chars.next();
+                }
+                result.push(' ');
+            }
+            '\n' => result.push(' '),
+            _ => result.push(current),
+        }
+    }
+    result
+}
+
+/* ───────────────── 元信息行（对齐 getItemDetailMeta）───────────────── */
+
+fn build_meta(item: &ClipItemSummary) -> String {
+    let mut parts = vec![
+        item.source_app.clone().unwrap_or_else(|| "未知来源".into()),
+        format_relative_time_or_unused(
+            item.last_used_at
+                .as_deref()
+                .or(Some(item.created_at.as_str())),
+        ),
+    ];
+    if item.r#type == "image" {
+        if let (Some(width), Some(height)) = (item.image_width, item.image_height) {
+            parts.push(format!("{width} × {height}"));
+        }
+    }
+    if let Some(label) = format_file_size(item.file_size) {
+        parts.push(label);
+    }
+    if item.r#type == "file" {
+        if item.file_count > 0 {
+            parts.push(format!("{} 个文件", item.file_count));
+        }
+        if item.directory_count > 0 {
+            parts.push(format!("{} 个文件夹", item.directory_count));
+        }
+    }
+    parts.join(" • ")
+}
+
+/// 文件大小人类可读（对齐 formatFileSize：1024 进制，按值选小数位）
+fn format_file_size(bytes: Option<i64>) -> Option<String> {
+    let bytes = bytes?;
+    if bytes <= 0 {
+        return None;
+    }
+    const UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
+    let mut value = bytes as f64;
+    let mut unit_index = 0usize;
+    while value >= 1024.0 && unit_index < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit_index += 1;
+    }
+    let digits = if unit_index == 0 {
+        0
+    } else if value >= 100.0 {
+        0
+    } else if value >= 10.0 {
+        1
+    } else {
+        2
+    };
+    Some(format!("{value:.digits$} {}", UNITS[unit_index]))
+}
+
+/* ───────────────── 空状态与错误 ───────────────── */
+
+fn update_empty_state(app: &App) {
+    let settings = app.state.current_settings();
+    let open_hint = if settings.search_shortcut_enabled && !settings.search_shortcut.trim().is_empty()
+    {
+        format!("复制内容后使用 {} 打开此窗口", settings.search_shortcut)
+    } else {
+        "复制内容后即可在此查看".to_string()
+    };
+    let (keyword, filter, tags_len) = QUERY.with(|state| {
+        let state = state.borrow();
+        (state.keyword.clone(), state.filter, state.tags.len())
+    });
+    let (title, description, action) = empty_state(&keyword, filter, tags_len, &open_hint);
+    app.with_search(|win| {
+        win.set_empty_title(title.into());
+        win.set_empty_description(description.into());
+        win.set_empty_action(action);
+    });
+}
+
+/// 空状态三分支（对齐 EMPTY_STATES）：有关键词 → 未找到匹配；有筛选 →
+/// 筛选下暂无；否则 → 全空 + 打开方式提示
+fn empty_state(
+    keyword: &str,
+    filter: u32,
+    tags_len: usize,
+    open_hint: &str,
+) -> (String, String, i32) {
+    if !keyword.trim().is_empty() {
+        return (
+            "未找到匹配记录".to_string(),
+            "尝试调整搜索关键词".to_string(),
+            1,
+        );
+    }
+    if filter != 0 || tags_len > 0 {
+        return (
+            "当前筛选下暂无记录".to_string(),
+            "尝试切换其他筛选或复制更多内容".to_string(),
+            2,
+        );
+    }
+    ("暂无剪贴板记录".to_string(), open_hint.to_string(), 0)
+}
+
+fn show_error(app: &App, message: &str) {
+    app.with_search(|win| win.set_error_text(message.into()));
+    let token = ERROR_TOKEN.with(|value| {
+        value.set(value.get() + 1);
+        value.get()
+    });
+    let app_cb = app.clone();
+    slint::Timer::single_shot(Duration::from_millis(ERROR_TIMEOUT_MS), move || {
+        if ERROR_TOKEN.with(|value| value.get()) != token {
+            return;
+        }
+        app_cb.with_search(|win| win.set_error_text("".into()));
+    });
+}
+
+/* ───────────────── 条目动作 ───────────────── */
+
+pub fn paste_index(app: &App, index: usize, as_file_requested: bool) {
+    let Some(item) = app.state.search_item_at(index) else {
+        return;
+    };
+    paste_item(app, &item, as_file_requested);
+}
+
+/// 选中条目上屏（键盘路径）；Shift+Enter 仅对图片以文件形式
+pub fn paste_selected(app: &App, as_file_requested: bool) {
+    let index = app
+        .with_search(|win| win.get_selected().max(0) as usize)
+        .unwrap_or(0);
+    paste_index(app, index, as_file_requested);
+}
+
+fn paste_item(app: &App, item: &ClipItemSummary, as_file_requested: bool) {
+    tooltip::cancel(app);
+    let settings = app.state.current_settings();
+    let option = PasteOption {
+        restore_clipboard_after_paste: settings.restore_clipboard_after_paste,
+        paste_to_target: true,
+        as_file: as_file_requested && item.r#type == "image",
+    };
+    if let Err(error) = execute_paste(app, &item.id, option) {
+        warn!("搜索粘贴失败: {error}");
+        show_error(app, "执行粘贴失败，请稍后重试");
+    }
+}
+
+/// 上屏流（对齐 PasteExecutor 搜索分支）：趁搜索窗口可见写剪贴板 →
+/// 隐藏并还原会话目标 → 90ms → 恢复前台 → 60ms → 注入 Ctrl+V →
+/// 调度快照恢复 → mark_used。窗口已隐藏，结果消息无处展示（对齐旧版）
+fn execute_paste(app: &App, id: &str, option: PasteOption) -> Result<(), AppError> {
+    let detail = app.core().repository.get_item_detail(id)?;
+    let previous_clipboard = paste_support::capture_snapshot_if_needed(&option)?;
+    let mut clipboard =
+        arboard::Clipboard::new().map_err(|error| AppError::Clipboard(error.to_string()))?;
+
+    let owner_hwnd = {
+        let hwnd = app.state.search_hwnd.load(Ordering::SeqCst);
+        (hwnd != 0).then_some(hwnd)
+    };
+    paste_support::write_item_to_clipboard(
+        app.core(),
+        &mut clipboard,
+        &detail,
+        option.as_file,
+        owner_hwnd,
+    )?;
+
+    let session = app.state.search_session();
+    hide(app, true);
+
+    let core = app.core().clone();
+    let id = id.to_string();
+    thread::spawn(move || {
+        match session.target_window_hwnd {
+            Some(target_hwnd) => {
+                thread::sleep(RESTORE_DELAY);
+                if core.is_quitting() {
+                    return;
+                }
+                if ActiveAppResolver::restore_foreground_window_with_focus(target_hwnd, None) {
+                    thread::sleep(INJECT_DELAY);
+                    if !paste_support::trigger_ctrl_v() {
+                        warn!("搜索回贴 Ctrl+V 注入失败");
+                    }
+                } else {
+                    warn!("搜索回贴恢复目标窗口失败");
+                }
+            }
+            None => warn!("搜索会话没有可恢复的目标窗口"),
+        }
+        if let Some(snapshot) = previous_clipboard {
+            let _ = paste_support::schedule_clipboard_restore(&core, snapshot, owner_hwnd);
+        }
+        let _ = core.repository.mark_used(&id);
+    });
+    Ok(())
+}
+
+/// 收藏切换（对齐 toggleFavorite：乐观更新 + 收藏视图内取消收藏即时移除）
+pub fn toggle_favorite(app: &App) {
+    if app
+        .state
+        .favorite_pending
+        .swap(true, Ordering::SeqCst)
+    {
+        return;
+    }
+    let selected_id = SELECTED_ID.with(|slot| slot.borrow().clone());
+    let mut items = app.state.search_items();
+    let result = items
+        .iter()
+        .find(|item| Some(item.id.as_str()) == selected_id.as_deref())
+        .map(|item| {
+            let next = !item.is_favorited;
+            (next, ClipService::set_favorited(app.core(), &item.id, next))
+        });
+    app.state.favorite_pending.store(false, Ordering::SeqCst);
+
+    let Some((next_favorited, result)) = result else {
+        return;
+    };
+    match result {
+        Err(error) => {
+            warn!("更新收藏状态失败: {error}");
+            show_error(app, "更新收藏状态失败，请稍后重试");
+        }
+        Ok(()) => {
+            items
+                .iter_mut()
+                .filter(|item| Some(item.id.as_str()) == selected_id.as_deref())
+                .for_each(|item| item.is_favorited = next_favorited);
+
+            let favorite_view_removed =
+                !next_favorited && QUERY.with(|state| state.borrow().filter == 1);
+            if favorite_view_removed {
+                // 收藏视图内取消收藏：从当前页移除、总数回补、选中重锚
+                items.retain(|item| Some(item.id.as_str()) != selected_id.as_deref());
+                let total = QUERY.with(|state| {
+                    let mut state = state.borrow_mut();
+                    state.total = state.total.saturating_sub(1);
+                    state.total
+                });
+                app.state.set_search_items(items.clone());
+                app.with_search(|win| {
+                    win.set_result_count(items.len() as i32);
+                    win.set_result_total(total as i32);
+                });
+                refresh_selected_detail(app);
+                update_empty_state(app);
+                build_rows(app);
+                sync_height(app, true);
+            } else {
+                app.state.set_search_items(items);
+                build_rows(app);
+            }
+        }
+    }
+}
+
+/* ───────────────── 两段式删除 ───────────────── */
+
+/// Del 或删除按钮：首次进入待确认态（3 秒后自动解除），再次触发执行
+pub fn request_delete(app: &App) {
+    let Some(id) = SELECTED_ID.with(|slot| slot.borrow().clone()) else {
+        return;
+    };
+    let armed = ARMED_DELETE.with(|slot| slot.borrow().as_deref() == Some(id.as_str()));
+    if armed {
+        perform_delete(app, &id);
+        return;
+    }
+    ARMED_DELETE.with(|slot| *slot.borrow_mut() = Some(id.clone()));
+    app.with_search(|win| win.set_delete_armed(true));
+    let token = DELETE_TOKEN.with(|value| {
+        value.set(value.get() + 1);
+        value.get()
+    });
+    let app_cb = app.clone();
+    slint::Timer::single_shot(Duration::from_millis(DELETE_ARM_TIMEOUT_MS), move || {
+        if DELETE_TOKEN.with(|value| value.get()) != token {
+            return;
+        }
+        ARMED_DELETE.with(|slot| *slot.borrow_mut() = None);
+        app_cb.with_search(|win| win.set_delete_armed(false));
+    });
+}
+
+fn reset_delete_arm(app: &App) {
+    DELETE_TOKEN.with(|value| value.set(value.get() + 1));
+    ARMED_DELETE.with(|slot| *slot.borrow_mut() = None);
+    app.with_search(|win| win.set_delete_armed(false));
+}
+
+fn perform_delete(app: &App, id: &str) {
+    reset_delete_arm(app);
+    if let Err(error) = ClipService::delete(app.core(), id) {
+        warn!("删除条目失败: {error}");
+        show_error(app, "删除条目失败，请稍后重试");
+        return;
+    }
+    // 即时从列表缓存移除（对齐 applyClipsChanged deleted）
+    let mut items = app.state.search_items();
+    let removed_was_selected = SELECTED_ID.with(|slot| {
+        let current = slot.borrow().clone();
+        let matches = current.as_deref() == Some(id);
+        if matches {
+            *slot.borrow_mut() = None;
+        }
+        matches
+    });
+    items.retain(|item| item.id != id);
+    app.state.set_search_items(items.clone());
+    let total = QUERY.with(|state| {
+        let mut state = state.borrow_mut();
+        state.total = state.total.saturating_sub(1);
+        state.total
+    });
+    if removed_was_selected {
+        SELECTED_ID.with(|slot| {
+            *slot.borrow_mut() = items.first().map(|item| item.id.clone());
+        });
+        refresh_selected_detail(app);
+    }
+    app.with_search(|win| {
+        win.set_result_count(items.len() as i32);
+        win.set_result_total(total as i32);
+    });
+    update_empty_state(app);
+    build_rows(app);
+    sync_height(app, true);
+}
+
+/* ───────────────── 悬停预览（仅图片条目）───────────────── */
+
+pub fn search_is_active(app: &App) -> bool {
+    app.state.is_search_active()
+}
+
+pub fn row_hover(app: &App, index: usize, mouse_x: f32, mouse_y: f32) {
+    if !app.state.is_search_active() {
+        return;
+    }
+    // 旧版搜索窗口 shouldShow 仅对图片条目启用悬浮预览
+    let Some(item) = app.state.search_item_at(index) else {
+        return;
+    };
+    if item.r#type != "image" {
+        return;
+    }
+    let hwnd = app.state.search_hwnd.load(Ordering::SeqCst);
+    if hwnd == 0 {
+        return;
+    }
+    let host = HoverHost {
+        hwnd,
+        is_active: search_is_active,
+    };
+    tooltip::schedule_with(app, host, item, mouse_x, mouse_y);
+}
+
+pub fn hover_left(app: &App) {
+    tooltip::cancel(app);
+}
+
+/* ───────────────── 高度棘轮同步 ───────────────── */
+
+/// 目标高度 = min(620, 5 + chrome + 列表内容高)（对齐
+/// syncWindowHeightWithContent）。0ms 延迟合并同帧多次触发并等布局把新
+/// 模型高度算出；ALLOW_SHRINK 由结构性变化置位、应用后消费（棘轮）：
+/// 选中展开的 sync(false) 不会取消结构性收缩许可
+pub fn sync_height(app: &App, allow_shrink: bool) {
+    if allow_shrink {
+        ALLOW_SHRINK.with(|flag| flag.set(true));
+    }
+    let token = HEIGHT_TOKEN.with(|value| {
+        value.set(value.get() + 1);
+        value.get()
+    });
+    let app_cb = app.clone();
+    slint::Timer::single_shot(Duration::from_millis(0), move || {
+        if HEIGHT_TOKEN.with(|value| value.get()) != token {
+            return;
+        }
+        let Some(win) = app_cb.search.upgrade() else {
+            return;
+        };
+        let geo = win.global::<SearchGeometry>();
+        let target_logical = (geo.get_height_slack()
+            + win.get_chrome_height()
+            + win.get_list_content_height())
+        .min(geo.get_window_max_height());
+        let scale = win.window().scale_factor();
+        let target = (target_logical * scale).round() as i32;
+        let last = LAST_HEIGHT.with(|value| value.get()) as i32;
+        if target == last {
+            // 布局尚未把新模型的高度算出（0ms 定时器可能先于渲染帧）：
+            // 提前返回并保留收缩许可，等随后的 heights-changed 带新值重入
+            return;
+        }
+        let allow = ALLOW_SHRINK.with(|flag| flag.get());
+        ALLOW_SHRINK.with(|flag| flag.set(false));
+        if !allow && target < last {
+            return;
+        }
+        LAST_HEIGHT.with(|value| value.set(target as f32));
+        win.window().set_size(PhysicalSize::new(
+            (geo.get_window_width() * scale).round() as u32,
+            target as u32,
+        ));
+    });
+}
+
+/// 列表内容实测高变化（viewport-height）：视作安全网重同步（允许增长；
+/// 收缩许可仍由结构性变化的 sync(true) 供给）
+pub fn heights_changed(app: &App) {
+    sync_height(app, false);
+}
+
+/* ───────────────── 窗口拖拽 ───────────────── */
+
+pub fn drag_started(app: &App) {
+    let hwnd = app.state.search_hwnd.load(Ordering::SeqCst);
+    if hwnd != 0 {
+        window_control::begin_window_gesture(
+            hwnd,
+            floatpaste_core::platform::windows::window_control::GestureMode::Move,
+            0,
+            0,
+        );
+    }
+}
+
+pub fn drag_moved(app: &App) {
+    let hwnd = app.state.search_hwnd.load(Ordering::SeqCst);
+    if hwnd != 0 {
+        window_control::update_window_gesture(hwnd);
+    }
+}
+
+pub fn drag_finished(app: &App) {
+    let hwnd = app.state.search_hwnd.load(Ordering::SeqCst);
+    if hwnd != 0 {
+        window_control::end_window_gesture(hwnd);
+    }
+}
+
+/// 加载失败重试：按当前关键词/筛选重查
+pub fn retry(app: &App) {
+    run_query(app);
+}
+
+/// Ctrl+Enter / 编辑按钮：编辑器窗口在后续迁移阶段接入
+pub fn edit_requested(_app: &App) {
+    warn!("编辑器窗口尚未迁移，Ctrl+Enter 暂不处理");
+}
+
+/* ───────────────── 单元测试 ───────────────── */
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn summary_of(kind: &str) -> ClipItemSummary {
+        ClipItemSummary {
+            id: "id".into(),
+            r#type: kind.into(),
+            content_preview: String::new(),
+            source_app: Some("浏览器".into()),
+            is_favorited: false,
+            file_count: 0,
+            directory_count: 0,
+            created_at: "2026-01-01T00:00:00Z".into(),
+            updated_at: "2026-01-01T00:00:00Z".into(),
+            last_used_at: None,
+            image_path: None,
+            image_width: None,
+            image_height: None,
+            image_format: None,
+            file_size: None,
+            tags: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn navigation_wraps_in_both_directions() {
+        assert_eq!(next_navigation_index(5, 0, true), 4);
+        assert_eq!(next_navigation_index(5, 4, true), 3);
+        assert_eq!(next_navigation_index(5, 4, false), 0);
+        assert_eq!(next_navigation_index(1, 0, true), 0);
+    }
+
+    #[test]
+    fn file_size_matches_legacy_digit_rules() {
+        assert_eq!(format_file_size(None), None);
+        assert_eq!(format_file_size(Some(0)), None);
+        assert_eq!(format_file_size(Some(-5)), None);
+        assert_eq!(format_file_size(Some(512)), Some("512 B".into()));
+        assert_eq!(format_file_size(Some(2048)), Some("2.00 KB".into()));
+        assert_eq!(format_file_size(Some(15 * 1024)), Some("15.0 KB".into()));
+        assert_eq!(format_file_size(Some(200 * 1024)), Some("200 KB".into()));
+    }
+
+    #[test]
+    fn meta_joins_source_time_and_details() {
+        let mut item = summary_of("image");
+        item.image_width = Some(1920);
+        item.image_height = Some(1080);
+        item.file_size = Some(2048);
+        let meta = build_meta(&item);
+        assert!(meta.starts_with("浏览器 • "));
+        assert!(meta.contains("1920 × 1080"));
+        assert!(meta.contains("2.00 KB"));
+    }
+
+    #[test]
+    fn file_meta_lists_files_and_directories() {
+        let mut item = summary_of("file");
+        item.file_count = 5;
+        item.directory_count = 2;
+        let meta = build_meta(&item);
+        assert!(meta.contains("5 个文件"));
+        assert!(meta.contains("2 个文件夹"));
+    }
+
+    #[test]
+    fn query_maps_filter_and_sort() {
+        let query = build_query("  关键词 ", 3, &["工作".to_string()], 50);
+        assert_eq!(query.keyword, "  关键词 ");
+        assert_eq!(query.filters.clip_type, Some(ClipType::Image));
+        assert_eq!(
+            query.filters.tag_names.as_deref(),
+            Some(["工作".to_string()].as_slice())
+        );
+        assert!(matches!(query.sort, SearchSort::RelevanceDesc));
+        assert_eq!(query.offset, 50);
+        assert_eq!(query.limit, PAGE_SIZE);
+
+        let query = build_query("", 1, &[], 0);
+        assert!(matches!(query.sort, SearchSort::RecentDesc));
+        assert_eq!(query.filters.favorited_only, Some(true));
+    }
+
+    #[test]
+    fn empty_state_picks_branch_by_keyword_then_filters() {
+        assert_eq!(
+            empty_state("  abc ", 0, 0, "提示"),
+            ("未找到匹配记录".into(), "尝试调整搜索关键词".into(), 1)
+        );
+        assert_eq!(
+            empty_state("", 2, 0, "提示"),
+            ("当前筛选下暂无记录".into(), "尝试切换其他筛选或复制更多内容".into(), 2)
+        );
+        assert_eq!(
+            empty_state("", 0, 1, "提示"),
+            ("当前筛选下暂无记录".into(), "尝试切换其他筛选或复制更多内容".into(), 2)
+        );
+        assert_eq!(
+            empty_state("", 0, 0, "提示"),
+            ("暂无剪贴板记录".into(), "提示".into(), 0)
+        );
+    }
+
+    #[test]
+    fn preview_newlines_flatten_to_spaces() {
+        assert_eq!(flatten_preview_newlines("a\r\nb\nc"), "a b c");
+        assert_eq!(flatten_preview_newlines("无换行"), "无换行");
+    }
+}

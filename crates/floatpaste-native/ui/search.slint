@@ -1,0 +1,1220 @@
+// 搜索窗口：对齐原版 SearchShell.tsx 的完整复刻。
+// - 无边框不透明窗（方角 + 1px 窗口边框 + DWM 阴影由 Rust 侧处理），
+//   宽度固定 780，高度由 Rust 按内容棘轮同步（min(620, chrome+列表)）
+// - 头部：放大镜 + 输入框（17px/24px 行高）+ 清除按钮 + 条目计数，背景可拖拽移动
+// - 筛选行：类型 chips（全部/收藏/文本/图片/文件）+ 标签 chips（多选 AND）
+// - 列表：非选中单行省略；选中内联展开（3 行预览 + 元信息 + 大图预览 + 操作条）
+// - 键盘：根 FocusScope capture-key-pressed 先于输入框拦截会话键
+//   （↑↓/Enter/Shift+Enter/Ctrl+Enter/Ctrl+Space/Del/Esc），其余按键放行输入框
+// - 挂起态（键盘交给速贴面板）：输入框失焦、底栏切换为速贴键位提示
+import { Theme, Metrics } from "theme.slint";
+import { ListScrollBar } from "picker.slint";
+
+export struct SearchRow {
+    id: string,
+    // 非选中：入库预览（单行省略，换行已由 Rust 折为空格）；
+    // 选中：详情全文（Rust 已按 3 行预算裁排）
+    preview: string,
+    kind: int, // 0=text 1=image 2=file
+    source-app: string,
+    time-text: string,
+    meta: string, // 已用 " • " 连接的元信息串
+    favorited: bool,
+    has-thumb: bool,
+    thumb: image,
+    tags: [string],
+    tag-more: int,
+    // 选中态大图预览：高度由 Rust 按元数据/实图与列宽算好；
+    // has-large-preview 置位后才渲染（全图异步解码回填，避免缩略图拉伸糊化）
+    has-large-preview: bool,
+    large-preview: image,
+    large-preview-height: length,
+}
+
+export struct SearchTagChip {
+    name: string,
+    active: bool,
+}
+
+// ── 结构几何：slint 布局与 Rust 高度同步/裁排共用的常量，禁双边手抄 ──
+export global SearchGeometry {
+    out property <length> window-width: 780px;
+    out property <length> window-max-height: 620px;
+    // 旧版 chromeHeight = 5 + 头部 + 错误条 + 筛选行 + 底栏
+    out property <length> height-slack: 5px;
+    out property <length> window-border: 1px;
+    out property <length> scroll-slot: 10px;
+    // 列表内容包裹层（wrapper px-0.5 + inner px-1 / pt-1.5+pt-0.5 / pb-1+pb-1）
+    out property <length> content-pad-h: 6px;
+    out property <length> content-pad-top: 8px;
+    out property <length> content-pad-bottom: 8px;
+    out property <length> row-border-l: 2px;
+    out property <length> row-pad-h: 12px;
+    out property <length> thumb-size: 36px;
+    out property <length> thumb-gap: 12px;
+    // 选中态预览为悬浮操作条预留的右侧宽（旧版 pr-[148px]）
+    out property <length> selected-preview-reserve: 148px;
+    // 触底预载距离（旧版 SEARCH_LOAD_MORE_ROOT_MARGIN_PX）
+    out property <length> load-more-margin: 240px;
+}
+
+// ── 1.8px 线性图标路径（viewbox 24，路径与旧版 svg 同源）──
+component GlyphPath inherits Path {
+    in property <color> glyph-color;
+    width: 18px;
+    height: 18px;
+    viewbox-width: 24;
+    viewbox-height: 24;
+    stroke: root.glyph-color;
+    stroke-width: 1.8px;
+    fill: transparent;
+}
+
+// ── 28×28 方形图标按钮（操作条内），图标经 @children 传入 ──
+component IconButton inherits Rectangle {
+    in property <color> icon-color;
+    in property <bool> emphasized: false;
+    in property <bool> danger-hover: false;
+    callback clicked();
+
+    width: 28px;
+    height: 28px;
+    border-radius: Metrics.radius-md;
+    background: root.emphasized ? Theme.accent-emphasis
+        : (btn-ta.has-hover
+            ? (root.danger-hover ? Theme.danger-subtle : Theme.canvas-subtle)
+            : transparent);
+
+    HorizontalLayout {
+        alignment: center;
+        @children
+    }
+
+    btn-ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+// 底栏键位提示
+component Kbd inherits Rectangle {
+    in property <string> key;
+    height: 15px;
+    border-radius: 3px;
+    border-width: 1px;
+    border-color: Theme.border-subtle;
+    background: Theme.canvas-default;
+    HorizontalLayout {
+        padding-left: 3px;
+        padding-right: 3px;
+        Text {
+            text: root.key;
+            color: Theme.fg-muted;
+            font-size: 10px;
+            font-family: "Consolas";
+            vertical-alignment: center;
+        }
+    }
+}
+
+component KeyHint inherits HorizontalLayout {
+    in property <string> key;
+    in property <string> label;
+    spacing: 4px;
+    Kbd { key: root.key; }
+    Text {
+        text: root.label;
+        color: Theme.fg-muted;
+        font-size: Metrics.text-hint;
+        vertical-alignment: center;
+    }
+}
+
+// 类型筛选 chip（rounded-md px-2.5 py-1 text-xs）
+component FilterChip inherits Rectangle {
+    in property <string> label;
+    in property <bool> active;
+    callback clicked();
+
+    height: 24px;
+    border-radius: Metrics.radius-md;
+    background: root.active ? Theme.accent-subtle
+        : (chip-ta.has-hover ? Theme.canvas-subtle : transparent);
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        Text {
+            text: root.label;
+            color: root.active ? Theme.accent-fg
+                : (chip-ta.has-hover ? Theme.fg-default : Theme.fg-muted);
+            font-size: Metrics.text-xs;
+            font-weight: Metrics.weight-medium;
+            vertical-alignment: center;
+        }
+    }
+    chip-ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+// 标签筛选 chip（胶囊，多选 AND）
+component TagChip inherits Rectangle {
+    in property <string> label;
+    in property <bool> active;
+    callback clicked();
+
+    height: 24px;
+    border-radius: Metrics.radius-pill;
+    background: root.active ? Theme.accent-subtle
+        : (chip-ta.has-hover ? Theme.canvas-subtle : transparent);
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        Text {
+            text: root.label;
+            color: root.active ? Theme.accent-fg
+                : (chip-ta.has-hover ? Theme.fg-default : Theme.fg-muted);
+            font-size: Metrics.text-xs;
+            vertical-alignment: center;
+        }
+    }
+    chip-ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+// 条目类型图标（36×36 底座内 18×18，对齐旧版 ClipTypeIcon）
+component TypeGlyph inherits Rectangle {
+    in property <int> kind; // 0=text 1=image 2=file
+    in property <color> glyph-color;
+    width: 18px;
+    height: 18px;
+
+    if (root.kind == 0): Rectangle {
+        // 文本：三横线（M5 6.25h14 M5 11h11 M5 15.75h14）
+        x: 3.75px; y: 4.6px; width: 10.5px; height: 1.4px; background: root.glyph-color;
+    }
+    if (root.kind == 0): Rectangle {
+        x: 3.75px; y: 8.3px; width: 8.25px; height: 1.4px; background: root.glyph-color;
+    }
+    if (root.kind == 0): Rectangle {
+        x: 3.75px; y: 12px; width: 10.5px; height: 1.4px; background: root.glyph-color;
+    }
+
+    if (root.kind == 1): GlyphPath {
+        glyph-color: root.glyph-color;
+        // 相框 + 双山（旧版 image svg 的 M/L 路径）
+        commands: "M 3 5 L 21 5 L 21 19 L 3 19 Z M 5 16 L 9.2 11.8 L 15 15.5 M 13 13 L 14.7 11.3 L 21 15.5";
+    }
+    if (root.kind == 1): Rectangle {
+        // 太阳点（旧版 circle r=1.2）
+        x: 7.8px; y: 8.3px; width: 2.4px; height: 2.4px;
+        border-radius: Metrics.radius-pill;
+        background: root.glyph-color;
+    }
+
+    if (root.kind == 2): GlyphPath {
+        glyph-color: root.glyph-color;
+        // 折角文档（旧版 file svg）
+        commands: "M 6 3.75 L 13 3.75 L 18.25 9 L 18.25 20.25 L 6 20.25 Z M 13 3.75 L 13 9 L 18.25 9";
+    }
+}
+
+// ── 行卡片：非选中单行；选中内联展开（3 行预览 + 大图 + 操作条）──
+component SearchRowCard inherits Rectangle {
+    in property <SearchRow> data;
+    in property <bool> selected;
+    in property <length> preview-width; // 基础预览宽（未扣选中预留/未扣 pr-1）
+    in property <bool> delete-armed;
+    callback clicked();
+    callback double-clicked();
+    callback hover(length, length);
+    callback hover-left();
+    callback paste();
+    callback paste-as-file();
+    callback edit();
+    callback toggle-favorite();
+    callback delete-armed-request();
+    callback scroll-into-view(length, length);
+
+    // 事件驱动悬停态：行命中区与操作条/快捷粘贴按钮互斥命中，
+    // 各自的 has-hover 变化都从当前实际命中重算，与回调触发顺序无关
+    property <bool> hovered: false;
+    property <bool> is-selected: selected;
+    // 右列纵向排布链（旧版 mt-0.5 / mt-1 / mt-1.5）
+    property <length> preview-h: root.selected ? min(72px, sel-ruler.height) : 24px;
+    property <length> meta-y: root.preview-h + 2px;
+    property <length> meta-h: meta-ruler.height;
+    property <bool> tags-shown: data.tags.length > 0;
+    property <length> tags-y: root.meta-y + root.meta-h + 4px;
+    property <length> tags-h: 18px;
+    property <length> large-y: root.tags-y + (root.tags-shown ? root.tags-h : 0px) + 6px;
+    property <length> col-height:
+        root.large-y + (root.selected && data.has-large-preview ? data.large-preview-height : 0px);
+
+    height: 20px + root.col-height;
+
+    changed is-selected => {
+        if (self.is-selected) {
+            self.scroll-into-view(self.y, self.height);
+        }
+    }
+
+    border-radius: Metrics.radius-lg;
+    background: root.selected ? Theme.accent-subtle
+        : (root.hovered ? Theme.canvas-subtle : transparent);
+
+    // 选中态左侧 2px 强调边（旧版 border-l-pg-accent-fg）
+    if (root.selected): Rectangle {
+        x: 0;
+        y: 0;
+        width: 2px;
+        height: parent.height;
+        background: Theme.accent-fg;
+    }
+
+    // 整行命中（声明在前处于最上层内容之下）
+    row-ta := TouchArea {
+        clicked => { root.clicked(); }
+        double-clicked => { root.double-clicked(); }
+        changed mouse-x => {
+            root.hover(self.absolute-position.x + self.mouse-x,
+                self.absolute-position.y + self.mouse-y);
+        }
+        changed mouse-y => {
+            root.hover(self.absolute-position.x + self.mouse-x,
+                self.absolute-position.y + self.mouse-y);
+        }
+        changed has-hover => {
+            root.hovered = self.has-hover || act-ta.has-hover || hover-paste-ta.has-hover;
+            if (!root.hovered) {
+                root.hover-left();
+            }
+        }
+    }
+
+    // ── 行主体（py-2.5 pl-3 pr-3 gap-3）──
+    // 图标底座与右列均绝对定位（右列子元素全为绝对定位、无首选宽，
+    // 交给布局推断会得到错误的摆位），几何全部显式化
+    property <length> col-x: SearchGeometry.row-border-l + SearchGeometry.row-pad-h;
+    property <length> col-w:
+        root.preview-width - (data.has-thumb
+            ? SearchGeometry.thumb-size + SearchGeometry.thumb-gap
+            : 0px);
+
+    if (data.has-thumb): Rectangle {
+        x: SearchGeometry.row-border-l + SearchGeometry.row-pad-h;
+        y: 10px;
+        width: SearchGeometry.thumb-size;
+        height: SearchGeometry.thumb-size;
+        border-radius: Metrics.radius-md;
+        border-width: 1px;
+        border-color: root.selected ? Theme.border-default : Theme.border-subtle;
+        clip: true;
+        Image {
+            width: parent.width;
+            height: parent.height;
+            source: data.thumb;
+            image-fit: cover;
+        }
+    }
+    if (!data.has-thumb): Rectangle {
+        x: SearchGeometry.row-border-l + SearchGeometry.row-pad-h;
+        y: 10px;
+        width: SearchGeometry.thumb-size;
+        height: SearchGeometry.thumb-size;
+        border-radius: Metrics.radius-md;
+        background: Theme.canvas-inset;
+        TypeGlyph {
+            kind: data.kind;
+            glyph-color: root.selected ? Theme.fg-default : Theme.fg-muted;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+        }
+    }
+
+    // ── 右列：预览 + 元信息 + 标签 + 大图（绝对定位纵排链）──
+    Rectangle {
+        x: root.col-x + (data.has-thumb ? SearchGeometry.thumb-size + SearchGeometry.thumb-gap : 0px);
+        y: 10px;
+        width: root.col-w;
+        height: root.col-height;
+
+            // 非选中：单行省略（旧版 truncate pr-1）
+            Text {
+                visible: !root.selected;
+                y: 0;
+                height: 24px;
+                width: root.col-w - 4px;
+                text: data.preview;
+                color: Theme.fg-default;
+                font-size: 15px;
+                font-weight: Metrics.weight-medium;
+                wrap: no-wrap;
+                overflow: elide;
+                vertical-alignment: center;
+            }
+
+            // 选中：pre-wrap 3 行预算（Rust 裁排 + 标尺实测高）
+            Text {
+                visible: root.selected;
+                y: 0;
+                height: root.preview-h;
+                width: root.col-w - SearchGeometry.selected-preview-reserve;
+                text: data.preview;
+                color: Theme.fg-default;
+                font-size: 15px;
+                font-weight: Metrics.weight-medium;
+                wrap: word-wrap;
+                vertical-alignment: top;
+            }
+
+            // 元信息行（mt-0.5 text-xs fg-subtle）
+            Text {
+                y: root.meta-y;
+                height: root.meta-h;
+                width: root.col-w;
+                text: data.meta;
+                color: Theme.fg-subtle;
+                font-size: Metrics.text-xs;
+                wrap: word-wrap;
+                vertical-alignment: top;
+            }
+
+            // 标签行（mt-1，最多 3 个 + 溢出计数）
+            Rectangle {
+                visible: root.tags-shown;
+                y: root.tags-y;
+                height: root.tags-h;
+                width: root.col-w;
+                clip: true;
+                HorizontalLayout {
+                    spacing: Metrics.space-1;
+                    alignment: start;
+                    for tag-name in data.tags: Rectangle {
+                        height: 18px;
+                        border-radius: Metrics.radius-pill;
+                        background: Theme.canvas-inset;
+                        HorizontalLayout {
+                            padding-left: Metrics.space-1_5;
+                            padding-right: Metrics.space-1_5;
+                            Text {
+                                text: tag-name;
+                                color: Theme.fg-muted;
+                                font-size: 11px;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                    if (data.tag-more > 0): Text {
+                        text: "+" + data.tag-more;
+                        color: Theme.fg-subtle;
+                        font-size: 11px;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            // 选中态大图预览（mt-1.5，max-h 120，contain）
+            Rectangle {
+                visible: root.selected && data.has-large-preview;
+                y: root.large-y;
+                height: data.large-preview-height;
+                width: root.col-w;
+                border-radius: Metrics.radius-md;
+                border-width: 1px;
+                border-color: Theme.border-subtle;
+                clip: true;
+                Image {
+                    width: parent.width;
+                    height: parent.height;
+                    source: data.large-preview;
+                    image-fit: contain;
+                }
+            }
+
+            // 选中态预览标尺：同文本/宽度/字号/字重实测 3 行排版高
+            sel-ruler := Text {
+                opacity: 0;
+                x: 0;
+                y: 0;
+                text: data.preview;
+                font-size: 15px;
+                font-weight: Metrics.weight-medium;
+                wrap: word-wrap;
+                width: root.col-w - SearchGeometry.selected-preview-reserve;
+            }
+
+            // 元信息标尺：元信息可能折行，高度实测
+            meta-ruler := Text {
+                opacity: 0;
+                x: 0;
+                y: 0;
+                text: data.meta;
+                font-size: Metrics.text-xs;
+                wrap: word-wrap;
+                width: root.col-w;
+            }
+    }
+
+    // ── 选中态操作条（absolute right-2.5 top-1.5）──
+    Rectangle {
+        visible: root.selected;
+        clip: false;
+        HorizontalLayout {
+            width: parent.width;
+            padding-right: 10px;
+            padding-top: 6px;
+            alignment: end;
+
+            Rectangle {
+                height: 36px;
+                border-radius: Metrics.radius-md;
+                border-width: 1px;
+                border-color: Theme.border-subtle;
+                background: Theme.canvas-default;
+                drop-shadow-blur: 12px;
+                drop-shadow-offset-y: 4px;
+                drop-shadow-color: Theme.shadow-color.with-alpha(0.14);
+
+                act-ta := TouchArea {
+                    changed has-hover => {
+                        root.hovered = row-ta.has-hover || self.has-hover;
+                        if (!root.hovered) {
+                            root.hover-left();
+                        }
+                    }
+                    // 挡住行级点击
+                    clicked => { }
+                }
+
+                HorizontalLayout {
+                    padding: 2px;
+                    spacing: Metrics.space-1;
+
+                    paste-btn := IconButton {
+                        emphasized: true;
+                        icon-color: Theme.fg-on-emphasis;
+                        clicked => { root.paste(); }
+                        Path {
+                            width: 16px;
+                            height: 16px;
+                            viewbox-width: 24;
+                            viewbox-height: 24;
+                            stroke: paste-btn.icon-color;
+                            stroke-width: 1.8px;
+                            commands: "M 9.75 4.75 L 14.25 4.75 L 14.25 6 L 9.75 6 Z M 5 8.75 L 19 8.75 L 19 21 L 5 21 Z M 9 11 L 15 11 M 9 15 L 15 15";
+                        }
+                    }
+                    if (data.kind == 1): IconButton {
+                        icon-color: Theme.fg-default;
+                        clicked => { root.paste-as-file(); }
+                        Path {
+                            width: 16px;
+                            height: 16px;
+                            viewbox-width: 24;
+                            viewbox-height: 24;
+                            stroke: Theme.fg-default;
+                            stroke-width: 1.8px;
+                            commands: "M 4 7 L 4 4 L 20 4 L 20 7 M 9 20 L 15 20 M 12 4 L 12 20";
+                        }
+                    }
+                    if (data.kind == 0): IconButton {
+                        icon-color: Theme.fg-default;
+                        clicked => { root.edit(); }
+                        Path {
+                            width: 16px;
+                            height: 16px;
+                            viewbox-width: 24;
+                            viewbox-height: 24;
+                            stroke: Theme.fg-default;
+                            stroke-width: 1.8px;
+                            commands: "M 4.75 19.25 L 8.25 19.25 L 18.5 9 L 15 5.5 L 4.75 15.75 L 4.75 19.25 Z M 13.75 6.75 L 17.25 10.25";
+                        }
+                    }
+                    fav-btn := IconButton {
+                        icon-color: data.favorited ? Theme.favorite : Theme.fg-default;
+                        clicked => { root.toggle-favorite(); }
+                        Path {
+                            width: 16px;
+                            height: 16px;
+                            viewbox-width: 24;
+                            viewbox-height: 24;
+                            stroke: fav-btn.icon-color;
+                            stroke-width: 1.8px;
+                            fill: data.favorited ? Theme.favorite : transparent;
+                            commands: "M 12 3.85 L 14.55 9.02 L 20.26 9.85 L 16.13 13.88 L 17.11 19.57 L 12 16.89 L 6.89 19.57 L 7.87 13.88 L 3.74 9.85 L 9.45 9.02 Z";
+                        }
+                    }
+                    del-btn := IconButton {
+                        icon-color: root.delete-armed ? Theme.danger-fg : Theme.fg-muted;
+                        danger-hover: true;
+                        clicked => { root.delete-armed-request(); }
+                        if (root.delete-armed): HorizontalLayout {
+                            padding-left: 6px;
+                            padding-right: 6px;
+                            Text {
+                                text: "确认删除";
+                                color: del-btn.icon-color;
+                                font-size: Metrics.text-xs;
+                                font-weight: Metrics.weight-medium;
+                                vertical-alignment: center;
+                            }
+                        }
+                        if (!root.delete-armed): Path {
+                            width: 16px;
+                            height: 16px;
+                            viewbox-width: 24;
+                            viewbox-height: 24;
+                            stroke: del-btn.icon-color;
+                            stroke-width: 1.8px;
+                            commands: "M 4 7 L 20 7 M 9.5 4.75 L 14.5 4.75 L 14.5 7 L 9.5 7 Z M 6.5 7 L 7.3 19.25 L 16.7 19.25 L 17.5 7 M 10 10.5 L 10 16.5 M 14 10.5 L 14 16.5";
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ── 非选中悬停快捷粘贴（absolute right-2.5 top-1.5）──
+    Rectangle {
+        visible: !root.selected && root.hovered;
+        clip: false;
+        HorizontalLayout {
+            width: parent.width;
+            padding-right: 10px;
+            padding-top: 6px;
+            alignment: end;
+
+            Rectangle {
+                height: 28px;
+                border-radius: Metrics.radius-md;
+                border-width: 1px;
+                border-color: Theme.border-default;
+                background: Theme.canvas-default;
+                drop-shadow-blur: 8px;
+                drop-shadow-offset-y: 2px;
+                drop-shadow-color: Theme.shadow-color.with-alpha(0.12);
+
+                hover-paste-ta := TouchArea {
+                    clicked => { root.paste(); }
+                    changed has-hover => {
+                        root.hovered = row-ta.has-hover || self.has-hover;
+                        if (!root.hovered) {
+                            root.hover-left();
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    padding-left: Metrics.space-2;
+                    padding-right: Metrics.space-2;
+                    spacing: 4px;
+                    Path {
+                        width: 14px;
+                        height: 14px;
+                        viewbox-width: 24;
+                        viewbox-height: 24;
+                        stroke: Theme.fg-default;
+                        stroke-width: 1.8px;
+                        commands: "M 9.75 4.75 L 14.25 4.75 L 14.25 6 L 9.75 6 Z M 5 8.75 L 19 8.75 L 19 21 L 5 21 Z";
+                    }
+                    Text {
+                        text: "粘贴";
+                        color: Theme.fg-default;
+                        font-size: Metrics.text-xs;
+                        font-weight: Metrics.weight-medium;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component SearchWindow inherits Window {
+    no-frame: true;
+    background: transparent;
+    always-on-top: true;
+    title: "FloatPaste · 搜索";
+    preferred-width: 780px;
+    preferred-height: 420px;
+
+    // ── 数据（Rust 接管）──
+    in-out property <[SearchRow]> rows;
+    in-out property <int> selected: 0;
+    in-out property <string> keyword;
+    in-out property <bool> input-suspended: false;
+    in-out property <bool> loading: false;
+    in-out property <bool> load-failed: false;
+    in-out property <bool> show-result-count: true;
+    in-out property <int> result-count: 0;
+    in-out property <int> result-total: 0;
+    in-out property <string> error-text;
+    in-out property <bool> delete-armed: false;
+    in-out property <bool> has-next-page: false;
+    in-out property <bool> fetching-next: false;
+    in-out property <[SearchTagChip]> tag-chips;
+    in-out property <int> active-filter: 0; // 0=全部 1=收藏 2=文本 3=图片 4=文件
+    // 空状态：标题/描述/动作（0=无 1=清除关键词 2=清除筛选）
+    in-out property <string> empty-title;
+    in-out property <string> empty-description;
+    in-out property <int> empty-action: 0;
+    // 每次会话打开滚回顶部
+    in-out property <int> scroll-generation: 0;
+
+    // ── 回调（Rust 接管）──
+    callback keyword-edited(string);
+    callback clear-keyword();
+    callback filter-selected(int);
+    callback tag-toggled(int);
+    callback clear-filters();
+    callback retry-clicked();
+    callback row-clicked(int);
+    callback row-double-clicked(int);
+    callback row-hover(int, length, length);
+    callback row-hover-left();
+    callback action-paste(int);
+    callback action-paste-as-file();
+    callback action-edit();
+    callback action-toggle-favorite();
+    callback action-delete();
+    callback key-navigate-up();
+    callback key-navigate-down();
+    callback key-paste(bool); // shift=图片按文件粘贴
+    callback key-edit();
+    callback key-toggle-favorite();
+    callback key-delete();
+    callback key-close();
+    callback near-bottom();
+    callback drag-started();
+    callback drag-moved();
+    callback drag-finished();
+    callback heights-changed();
+    // 排版度量标尺（选中预览 15px/medium，与 Rust 裁排同引擎）
+    callback measure-preview(string, length) -> length;
+    measure-preview(text, width) => {
+        ruler.text = text;
+        ruler.width = width;
+        ruler.height
+    }
+
+    // ── 预览可用宽（列表布局实测上报，Rust 只消费）──
+    out property <length> preview-width-no-thumb;
+    out property <length> preview-width-thumb;
+    // ── 高度同步度量（旧版：target = min(620, 5 + chrome + 列表内容高)）──
+    out property <length> chrome-height:
+        header-bar.height + (error-bar.visible ? error-bar.height : 0px)
+        + filter-bar.height + footer-bar.height;
+    out property <length> list-content-height: list-stack.natural-height;
+
+    public function focus-input() {
+        search-input.focus();
+    }
+    public function blur-input() {
+        key-scope.focus();
+    }
+
+    key-scope := FocusScope {
+        // 键盘会话：capture 阶段先于输入框消费会话键（对齐旧版 window 级
+        // keydown + preventDefault），其余按键 reject 放行给输入框
+        capture-key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.key-close();
+                return accept;
+            }
+            if (root.input-suspended) {
+                // 挂起态：键盘已交给速贴面板（原生由 LL 钩子全局接管，
+                // 窗口内只剩兜底 Esc）
+                return reject;
+            }
+            if (event.text == Key.UpArrow) {
+                root.key-navigate-up();
+                return accept;
+            }
+            if (event.text == Key.DownArrow) {
+                root.key-navigate-down();
+                return accept;
+            }
+            if (event.text == Key.Return) {
+                if (event.modifiers.control) {
+                    root.key-edit();
+                } else {
+                    root.key-paste(event.modifiers.shift);
+                }
+                return accept;
+            }
+            if (event.text == Key.Delete) {
+                root.key-delete();
+                return accept;
+            }
+            if (event.text == Key.Space && event.modifiers.control) {
+                root.key-toggle-favorite();
+                return accept;
+            }
+            return reject;
+        }
+
+        panel := Rectangle {
+            background: Theme.canvas-default;
+            border-width: SearchGeometry.window-border;
+            border-color: Theme.border-window;
+            clip: true;
+
+            VerticalLayout {
+                // ── 头部（背景可拖拽；px-4 py-3 gap-3）──
+                header-bar := Rectangle {
+                    height: 56px;
+                    background: Theme.canvas-default;
+
+                    header-ta := TouchArea {
+                        mouse-cursor: default;
+                        pointer-event(e) => {
+                            if (e.kind == PointerEventKind.down) {
+                                root.drag-started();
+                            }
+                            if (e.kind == PointerEventKind.up) {
+                                root.drag-finished();
+                            }
+                        }
+                        moved => {
+                            root.drag-moved();
+                        }
+                    }
+
+                    HorizontalLayout {
+                        padding-left: Metrics.space-3;
+                        padding-right: Metrics.space-3;
+                        spacing: Metrics.space-3;
+
+                        // 输入控件容器（flex-1 rounded-md px-2）
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            border-radius: Metrics.radius-md;
+                            background: root.input-suspended ? Theme.canvas-subtle : transparent;
+
+                            HorizontalLayout {
+                                padding-left: Metrics.space-2;
+                                padding-right: Metrics.space-2;
+                                spacing: Metrics.space-2;
+
+                                // 放大镜（h-8 w-8 圆底座内 20px 图形）
+                                Rectangle {
+                                    width: 32px;
+                                    height: 32px;
+                                    Rectangle {
+                                        width: 11px;
+                                        height: 11px;
+                                        x: 5px;
+                                        y: 5px;
+                                        border-radius: Metrics.radius-pill;
+                                        border-width: 1.5px;
+                                        border-color: Theme.fg-muted;
+                                    }
+                                    Path {
+                                        width: 32px;
+                                        height: 32px;
+                                        viewbox-width: 32;
+                                        viewbox-height: 32;
+                                        stroke: Theme.fg-muted;
+                                        stroke-width: 1.6px;
+                                        commands: "M 15 15 L 19.5 19.5";
+                                    }
+                                }
+
+                                // 输入区（flex-1，17px/24px）
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    VerticalLayout {
+                                        alignment: center;
+                                        search-input := TextInput {
+                                            text <=> root.keyword;
+                                            font-size: 17px;
+                                            color: Theme.fg-default;
+                                            single-line: true;
+                                            enabled: !root.input-suspended;
+                                            edited() => {
+                                                root.keyword-edited(self.text);
+                                            }
+                                        }
+                                    }
+                                    if (root.keyword == ""): Text {
+                                        text: root.input-suspended
+                                            ? "键盘已交给速贴面板，按 Esc 返回" : "开始键入...";
+                                        color: Theme.fg-subtle;
+                                        font-size: 17px;
+                                        vertical-alignment: center;
+                                    }
+                                }
+
+                                // 清除按钮（h-7 w-7）
+                                if (root.keyword != ""): Rectangle {
+                                    width: 28px;
+                                    height: 28px;
+                                    border-radius: Metrics.radius-pill;
+                                    background: clear-ta.has-hover ? Theme.canvas-subtle : transparent;
+                                    clear-ta := TouchArea {
+                                        clicked => {
+                                            root.clear-keyword();
+                                            search-input.focus();
+                                        }
+                                    }
+                                    Path {
+                                        width: 12px;
+                                        height: 12px;
+                                        viewbox-width: 12;
+                                        viewbox-height: 12;
+                                        stroke: Theme.fg-subtle;
+                                        stroke-width: 1.6px;
+                                        commands: "M 1 1 L 11 11 M 1 11 L 11 1";
+                                    }
+                                }
+
+                                // 分隔线
+                                Rectangle {
+                                    width: 1px;
+                                    height: 20px;
+                                    background: Theme.border-subtle;
+                                }
+
+                                // 条目计数（加载中隐藏）
+                                if (root.show-result-count): Text {
+                                    text: root.result-count + "/" + root.result-total + " 条";
+                                    color: Theme.fg-subtle;
+                                    font-size: Metrics.text-xs;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ── 错误条（3 秒自动消失由 Rust 控制）──
+                error-bar := Rectangle {
+                    visible: root.error-text != "";
+                    height: self.visible ? 36px : 0px;
+                    background: Theme.danger-subtle;
+                    Rectangle {
+                        y: parent.height - 1px;
+                        height: 1px;
+                        background: Theme.danger-fg.with-alpha(0.2);
+                    }
+                    HorizontalLayout {
+                        padding-left: Metrics.space-3;
+                        padding-right: Metrics.space-3;
+                        Text {
+                            text: root.error-text;
+                            color: Theme.danger-fg;
+                            font-size: Metrics.text-sm;
+                            vertical-alignment: center;
+                            wrap: no-wrap;
+                            overflow: elide;
+                        }
+                    }
+                }
+
+                // ── 筛选行（px-4 py-1.5 gap-1，全窗唯一分隔线）──
+                filter-bar := Rectangle {
+                    height: 36px;
+                    background: Theme.canvas-default;
+                    Rectangle {
+                        y: parent.height - 1px;
+                        height: 1px;
+                        background: Theme.border-subtle;
+                    }
+                    filter-flick := Flickable {
+                        x: 0;
+                        y: 0;
+                        width: parent.width;
+                        height: parent.height;
+                        interactive: true;
+                        HorizontalLayout {
+                            padding-left: Metrics.space-3;
+                            padding-right: Metrics.space-3;
+                            padding-top: Metrics.space-1_5;
+                            padding-bottom: Metrics.space-1_5;
+                            spacing: Metrics.space-1;
+                            alignment: start;
+
+                            FilterChip {
+                                label: "全部";
+                                active: root.active-filter == 0;
+                                clicked => { root.filter-selected(0); }
+                            }
+                            FilterChip {
+                                label: "收藏";
+                                active: root.active-filter == 1;
+                                clicked => { root.filter-selected(1); }
+                            }
+                            FilterChip {
+                                label: "文本";
+                                active: root.active-filter == 2;
+                                clicked => { root.filter-selected(2); }
+                            }
+                            FilterChip {
+                                label: "图片";
+                                active: root.active-filter == 3;
+                                clicked => { root.filter-selected(3); }
+                            }
+                            FilterChip {
+                                label: "文件";
+                                active: root.active-filter == 4;
+                                clicked => { root.filter-selected(4); }
+                            }
+                            if (root.tag-chips.length > 0): Rectangle {
+                                width: 1px;
+                                height: 16px;
+                                background: Theme.border-subtle;
+                            }
+                            for tag[i] in root.tag-chips: TagChip {
+                                label: tag.name;
+                                active: tag.active;
+                                clicked => { root.tag-toggled(i); }
+                            }
+                        }
+                    }
+                }
+
+                // ── 列表区（flex-1；四态共用同一 Flickable 保证实测高度）──
+                Rectangle {
+                    horizontal-stretch: 1;
+                    background: Theme.canvas-default;
+                    clip: true;
+
+                    list-flick := Flickable {
+                        x: 0;
+                        y: 0;
+                        width: parent.width - SearchGeometry.scroll-slot;
+                        height: parent.height;
+                        interactive: true;
+
+                        function report-preview-widths() {
+                            // 列表内容宽（扣双层包裹 padding）→ 行基础预览宽
+                            //（扣行左强调边 2px + 左右 12px 内边距）
+                            root.preview-width-no-thumb =
+                                self.width - 2 * SearchGeometry.content-pad-h
+                                - SearchGeometry.row-border-l - 2 * SearchGeometry.row-pad-h;
+                            root.preview-width-thumb = root.preview-width-no-thumb
+                                - SearchGeometry.thumb-size - SearchGeometry.thumb-gap;
+                        }
+                        init => { self.report-preview-widths(); }
+                        changed width => { self.report-preview-widths(); }
+
+                        list-stack := VerticalLayout {
+                            padding-top: SearchGeometry.content-pad-top;
+                            padding-bottom: SearchGeometry.content-pad-bottom;
+                            padding-left: SearchGeometry.content-pad-h;
+                            padding-right: SearchGeometry.content-pad-h;
+                            spacing: 0px;
+
+                            // 内容自然高：viewport-height 有下限（不低于视口
+                            // 自身），窗口收不高、也收不矮；高度同步改用布局
+                            // 的首选/最小高（含 padding，行卡片均显式高度）
+                            property <length> natural-height:
+                                max(self.min-height, self.preferred-height);
+
+                            if (root.loading): VerticalLayout {
+                                min-height: 160px;
+                                padding-top: 48px;
+                                padding-bottom: 48px;
+                                alignment: center;
+                                Text {
+                                    text: "加载中...";
+                                    color: Theme.fg-muted;
+                                    font-size: Metrics.text-sm;
+                                    horizontal-alignment: center;
+                                }
+                            }
+
+                            if (!root.loading && root.load-failed): VerticalLayout {
+                                min-height: 160px;
+                                padding-top: 48px;
+                                padding-bottom: 48px;
+                                alignment: center;
+                                spacing: Metrics.space-1;
+                                Text {
+                                    text: "记录加载失败";
+                                    color: Theme.fg-subtle;
+                                    font-size: Metrics.text-sm;
+                                    horizontal-alignment: center;
+                                }
+                                Text {
+                                    text: "请稍后重试";
+                                    color: Theme.fg-subtle;
+                                    font-size: Metrics.text-xs;
+                                    horizontal-alignment: center;
+                                }
+                                Rectangle {
+                                    height: 26px;
+                                    border-radius: Metrics.radius-md;
+                                    border-width: 1px;
+                                    border-color: Theme.border-default;
+                                    background: retry-ta.has-hover ? Theme.canvas-subtle : transparent;
+                                    retry-ta := TouchArea {
+                                        clicked => { root.retry-clicked(); }
+                                    }
+                                    HorizontalLayout {
+                                        padding-left: 10px;
+                                        padding-right: 10px;
+                                        Text {
+                                            text: "重试";
+                                            color: Theme.fg-muted;
+                                            font-size: Metrics.text-xs;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (!root.loading && !root.load-failed && root.rows.length == 0): VerticalLayout {
+                                min-height: 160px;
+                                padding-top: 48px;
+                                padding-bottom: 48px;
+                                alignment: center;
+                                spacing: Metrics.space-1;
+                                Text {
+                                    text: root.empty-title;
+                                    color: Theme.fg-subtle;
+                                    font-size: Metrics.text-sm;
+                                    horizontal-alignment: center;
+                                }
+                                Text {
+                                    text: root.empty-description;
+                                    color: Theme.fg-subtle;
+                                    font-size: Metrics.text-sm;
+                                    horizontal-alignment: center;
+                                }
+                                if (root.empty-action != 0): Rectangle {
+                                    height: 26px;
+                                    border-radius: Metrics.radius-md;
+                                    border-width: 1px;
+                                    border-color: Theme.border-default;
+                                    background: empty-ta.has-hover ? Theme.canvas-subtle : transparent;
+                                    empty-ta := TouchArea {
+                                        clicked => {
+                                            if (root.empty-action == 1) {
+                                                root.clear-keyword();
+                                            } else {
+                                                root.clear-filters();
+                                            }
+                                        }
+                                    }
+                                    HorizontalLayout {
+                                        padding-left: 10px;
+                                        padding-right: 10px;
+                                        Text {
+                                            text: root.empty-action == 1 ? "清除关键词" : "清除筛选";
+                                            color: Theme.fg-muted;
+                                            font-size: Metrics.text-xs;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (!root.loading && !root.load-failed && root.rows.length > 0): VerticalLayout {
+                                spacing: 0px;
+                                for row[i] in root.rows: SearchRowCard {
+                                    data: row;
+                                    selected: i == root.selected;
+                                    preview-width: row.has-thumb
+                                        ? root.preview-width-thumb
+                                        : root.preview-width-no-thumb;
+                                    delete-armed: root.delete-armed;
+                                    clicked => { root.row-clicked(i); }
+                                    double-clicked => { root.row-double-clicked(i); }
+                                    hover(x, y) => { root.row-hover(i, x, y); }
+                                    hover-left => { root.row-hover-left(); }
+                                    paste => { root.action-paste(i); }
+                                    paste-as-file => { root.action-paste-as-file(); }
+                                    edit => { root.action-edit(); }
+                                    toggle-favorite => { root.action-toggle-favorite(); }
+                                    delete-armed-request => { root.action-delete(); }
+                                    scroll-into-view(row-y, row-height) => {
+                                        if (row-y < -list-flick.viewport-y + 6px) {
+                                            list-flick.viewport-y = -row-y + 6px;
+                                        } else if (row-y + row-height > -list-flick.viewport-y + list-flick.height - 6px) {
+                                            list-flick.viewport-y = -(row-y + row-height - list-flick.height + 6px);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 内容实测高变化上报（空态/加载态/行数变化都反映在
+                    // 内容自然高上）
+                    Rectangle {
+                        visible: false;
+                        property <length> observed-nh: list-stack.natural-height;
+                        changed observed-nh => {
+                            root.heights-changed();
+                        }
+                    }
+
+                    // 触底预载：可视底部接近内容底部 240px 内时上报
+                    Rectangle {
+                        visible: false;
+                        property <length> visible-bottom:
+                            -list-flick.viewport-y + list-flick.height;
+                        changed visible-bottom => {
+                            if (root.has-next-page && list-flick.viewport-height > 0
+                                && list-flick.viewport-height - self.visible-bottom
+                                    < SearchGeometry.load-more-margin) {
+                                root.near-bottom();
+                            }
+                        }
+                    }
+
+                    if (list-flick.viewport-height > list-flick.height): ListScrollBar {
+                        x: parent.width - SearchGeometry.scroll-slot;
+                        y: 0;
+                        width: SearchGeometry.scroll-slot;
+                        height: parent.height;
+                        viewport-height: list-flick.viewport-height;
+                        visible-height: list-flick.height;
+                        viewport-y <=> list-flick.viewport-y;
+                    }
+
+                    // 会话打开滚回顶部
+                    Rectangle {
+                        visible: false;
+                        property <int> generation: root.scroll-generation;
+                        changed generation => {
+                            list-flick.viewport-y = 0;
+                        }
+                    }
+                }
+
+                // ── 底栏键位提示 ──
+                footer-bar := Rectangle {
+                    height: 28px;
+                    background: Theme.canvas-subtle;
+                    HorizontalLayout {
+                        alignment: center;
+                        spacing: Metrics.space-3;
+                        if (!root.input-suspended): KeyHint { key: "↑↓"; label: "选择"; }
+                        if (!root.input-suspended): KeyHint { key: "Enter"; label: "粘贴"; }
+                        if (!root.input-suspended): KeyHint { key: "Ctrl+Enter"; label: "编辑"; }
+                        if (!root.input-suspended): KeyHint { key: "Del"; label: "删除"; }
+                        if (!root.input-suspended): KeyHint { key: "Esc"; label: "关闭"; }
+                        if (root.input-suspended): KeyHint { key: "↑↓"; label: "选择"; }
+                        if (root.input-suspended): KeyHint { key: "Enter"; label: "粘贴"; }
+                        if (root.input-suspended): KeyHint { key: "1-9"; label: "直达"; }
+                        if (root.input-suspended): KeyHint { key: "Esc"; label: "返回搜索"; }
+                    }
+                }
+            }
+        }
+    }
+
+    // 排版度量标尺：与选中预览同排版参数（15px/medium）
+    ruler := Text {
+        opacity: 0;
+        x: 0;
+        y: 0;
+        width: 0px;
+        text: "";
+        font-size: 15px;
+        font-weight: Metrics.weight-medium;
+        wrap: word-wrap;
+    }
+}

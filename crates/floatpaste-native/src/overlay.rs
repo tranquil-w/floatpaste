@@ -38,7 +38,7 @@ pub enum ForegroundPolicy {
 pub fn silent_assemble<W: ComponentHandle>(win: &W, decorated: bool) -> Option<isize> {
     let _ = win.window().show();
     let hwnd = win32_ext::window_hwnd(win)?;
-    win32_ext::apply_overlay_style(hwnd);
+    win32_ext::apply_overlay_style(hwnd, true);
     if decorated {
         win32_ext::apply_dwm_shadow(hwnd);
         win32_ext::apply_dwm_rounded_corners(hwnd);
@@ -46,6 +46,33 @@ pub fn silent_assemble<W: ComponentHandle>(win: &W, decorated: bool) -> Option<i
     let _ = window_control::remove_window_system_menu(hwnd);
     let _ = win.window().hide();
     Some(hwnd)
+}
+
+/// 搜索窗口的启动期静默装配：可激活（接收键盘输入）的 TOOLWINDOW 变体，
+/// 只挂阴影不挂系统圆角（旧版搜索窗为方角）
+pub fn silent_assemble_focusable<W: ComponentHandle>(win: &W) -> Option<isize> {
+    let _ = win.window().show();
+    let hwnd = win32_ext::window_hwnd(win)?;
+    win32_ext::apply_overlay_style(hwnd, false);
+    win32_ext::apply_dwm_shadow(hwnd);
+    let _ = window_control::remove_window_system_menu(hwnd);
+    let _ = win.window().hide();
+    Some(hwnd)
+}
+
+/// 搜索窗口显示后的样式兜底：重挂可激活 TOOLWINDOW 样式并保持置顶
+/// （不抢焦点、不还原前台——搜索窗本身就该是前台）。winit 显示后的
+/// 异步样式重置同样适用，50ms 后兜底重挂一次
+pub fn after_show_focusable(hwnd: isize) {
+    win32_ext::apply_overlay_style(hwnd, false);
+    let _ = window_control::remove_window_system_menu(hwnd);
+    window_control::set_window_topmost_no_activate(hwnd);
+
+    slint::Timer::single_shot(Duration::from_millis(50), move || {
+        win32_ext::apply_overlay_style(hwnd, false);
+        let _ = window_control::remove_window_system_menu(hwnd);
+        window_control::set_window_topmost_no_activate(hwnd);
+    });
 }
 
 /// 显示后立即重挂浮层样式并执行前台策略，50ms 后兜底重挂一次
@@ -57,7 +84,7 @@ pub fn after_show(
     immediate: ForegroundPolicy,
     deferred: ForegroundPolicy,
 ) {
-    win32_ext::apply_overlay_style(hwnd);
+    win32_ext::apply_overlay_style(hwnd, true);
     let _ = window_control::remove_window_system_menu(hwnd);
     window_control::set_window_topmost_no_activate(hwnd);
     if click_through {
@@ -66,7 +93,7 @@ pub fn after_show(
     apply_policy(hwnd, &immediate);
 
     slint::Timer::single_shot(Duration::from_millis(50), move || {
-        win32_ext::apply_overlay_style(hwnd);
+        win32_ext::apply_overlay_style(hwnd, true);
         let _ = window_control::remove_window_system_menu(hwnd);
         window_control::set_window_topmost_no_activate(hwnd);
         if click_through {

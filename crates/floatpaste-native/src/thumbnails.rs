@@ -1,9 +1,50 @@
 //! 图片加载与缩放：解码在工作线程执行，跨线程只传原始 RGBA 像素
 //! （slint::Image 内部是 Rc 引用计数，不能跨线程），
 //! 事件循环侧用 [`image_from_rgba`] 构造共享像素缓冲。
+//!
+//! 列表缩略图缓存（id → 图像）按窗口共享：速贴与搜索展示同一批条目，
+//! 共用一份解码结果与失败哨兵，避免双份内存与重复解码。
 
 use floatpaste_core::state::CoreState;
 use slint::{Rgba8Pixel, SharedPixelBuffer};
+
+thread_local! {
+    /// 缩略图缓存：id -> Some(图像) | None(解码失败哨兵，避免反复重试)
+    static CACHE: std::cell::RefCell<std::collections::HashMap<String, Option<slint::Image>>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+    /// 列表版本号：异步缩略图回来时校验列表是否已变
+    static LIST_VERSION: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// 读取缓存的缩略图（未解码/失败返回 None）
+pub fn cached(id: &str) -> Option<slint::Image> {
+    CACHE.with(|cache| cache.borrow().get(id).cloned()).flatten()
+}
+
+/// 是否已在缓存中（含失败哨兵）
+pub fn contains(id: &str) -> bool {
+    CACHE.with(|cache| cache.borrow().contains_key(id))
+}
+
+/// 写入缓存（事件循环线程）
+pub fn insert(id: String, image: Option<slint::Image>) {
+    CACHE.with(|cache| {
+        cache.borrow_mut().insert(id, image);
+    });
+}
+
+/// 列表版本号：递增并返回新值（重建行模型时调用）
+pub fn bump_list_version() -> u64 {
+    LIST_VERSION.with(|version| {
+        version.set(version.get() + 1);
+        version.get()
+    })
+}
+
+/// 读取当前列表版本号（异步回填前记录，回来时校验）
+pub fn list_version() -> u64 {
+    LIST_VERSION.with(|version| version.get())
+}
 
 /// 原始 RGBA 数据与尺寸
 pub struct RawImage {

@@ -1,13 +1,15 @@
 //! FloatPaste 原生壳（Slint + 软件渲染）。
 //!
-//! 与老 Tauri 壳共用 floatpaste-core 与同一数据目录。本阶段完成速贴面板的
-//! 完整复刻（无焦点会话模型 / 长按导航 / 外击关闭 / 悬停预览 / 三种定位 /
-//! 尺寸记忆 / 主题），search/editor/settings/tray 按窗口逐个迁移。
+//! 与老 Tauri 壳共用 floatpaste-core 与同一数据目录。本阶段完成速贴面板与
+//! 搜索窗口的完整复刻（无焦点会话模型 / 长按导航 / 外击关闭 / 悬停预览 /
+//! 三种定位 / 尺寸记忆 / 主题 / 搜索会话 / 两段式删除），editor/settings/
+//! tray 按窗口逐个迁移。
 
 mod app_state;
 mod overlay;
 mod paste_flow;
 mod picker;
+mod search;
 mod system;
 mod theme_bridge;
 mod thumbnails;
@@ -82,6 +84,13 @@ fn main() {
             return;
         }
     };
+    let search_win = match SearchWindow::new() {
+        Ok(win) => win,
+        Err(error) => {
+            tracing::error!("创建搜索窗口失败: {error}");
+            return;
+        }
+    };
 
     let state = Arc::new(SharedState::new(core));
 
@@ -89,6 +98,7 @@ fn main() {
         state: state.clone(),
         picker: picker_win.as_weak(),
         tooltip: tooltip_win.as_weak(),
+        search: search_win.as_weak(),
     };
 
     // ── 二次启动唤醒：打开速贴会话（等价于按下主快捷键）──
@@ -112,10 +122,11 @@ fn main() {
         let resolved =
             theme::resolve_theme(settings.theme_mode.clone(), theme::system_prefers_dark());
         let tokens = theme::derive_tokens(&settings.theme_preset, &settings.theme_accent, resolved);
-        theme_bridge::apply_theme(&picker_win, Some(&tooltip_win), &tokens);
+        theme_bridge::apply_theme(&picker_win, Some(&tooltip_win), Some(&search_win), &tokens);
     }
 
     wire_picker_callbacks(&app);
+    wire_search_callbacks(&app);
 
     // ── 窗口句柄与浮层样式：事件循环首轮装配（winit 惰性建窗，
     // show/hide 舞蹈统一在 overlay::silent_assemble）──
@@ -126,6 +137,9 @@ fn main() {
             return;
         };
         let Some(tooltip_win) = app_for_init.tooltip.upgrade() else {
+            return;
+        };
+        let Some(search_win) = app_for_init.search.upgrade() else {
             return;
         };
 
@@ -141,13 +155,20 @@ fn main() {
                 .tooltip_hwnd
                 .store(hwnd, Ordering::SeqCst);
         }
+        // 搜索窗口可聚焦（需要真实键盘焦点），装配变体不带 NOACTIVATE
+        match overlay::silent_assemble_focusable(&search_win) {
+            Some(hwnd) => {
+                app_for_init.state.search_hwnd.store(hwnd, Ordering::SeqCst);
+            }
+            None => tracing::error!("获取搜索窗口句柄失败，搜索会话不可用"),
+        }
 
         if !silent_startup {
             picker::activate(&app_for_init);
         }
     });
 
-    // ── 剪贴板监听：录入成功后同步刷新列表 ──
+    // ── 剪贴板监听：录入成功后同步刷新速贴列表与搜索结果 ──
     {
         let app_for_sink = app.clone();
         let on_upsert: floatpaste_core::platform::windows::clipboard_monitor::ClipUpsertSink =
@@ -155,6 +176,7 @@ fn main() {
                 let app = app_for_sink.clone();
                 let _ = slint::invoke_from_event_loop(move || {
                     picker::refresh_list_changed(&app);
+                    search::notify_clips_changed(&app);
                 });
             });
         if let Err(error) = ClipboardMonitor::start(state.core.clone(), on_upsert) {
@@ -162,33 +184,56 @@ fn main() {
         }
     }
 
-    // ── 全局快捷键：主快捷键切换速贴 ──
+    // ── 全局快捷键：主快捷键切换速贴，搜索快捷键切换搜索窗口 ──
     {
         let app_for_hotkey = app.clone();
+        let settings = state.current_settings();
         let shortcut_text = {
-            let configured = state.current_settings().shortcut;
+            let configured = settings.shortcut;
             if configured.trim().is_empty() {
                 "Alt+Q".to_string()
             } else {
                 configured
             }
         };
+        let search_shortcut_text = settings.search_shortcut;
+        let search_shortcut_enabled = settings.search_shortcut_enabled;
         // 快捷键无法解析时只跳过注册，不退出进程：剪贴板监听与
         // 二次启动唤起仍可用
-        if let Some(main_spec) =
-            hotkey::parse_hotkey(&shortcut_text).or_else(|| hotkey::parse_hotkey("Alt+Q"))
-        {
-            if let Err(error) = hotkey::register_hotkeys(vec![(1, main_spec)], move |id| {
-                tracing::info!("命中主快捷键 id={id}");
+        let main_spec =
+            hotkey::parse_hotkey(&shortcut_text).or_else(|| hotkey::parse_hotkey("Alt+Q"));
+        if main_spec.is_none() {
+            tracing::error!("主快捷键无法解析（配置值与默认值均失败），跳过注册");
+        }
+        let mut hotkeys = Vec::new();
+        if let Some(main_spec) = main_spec {
+            hotkeys.push((1, main_spec, false));
+            // 搜索快捷键与主快捷键相同时跳过（同组合键 RegisterHotKey 必失败）
+            if search_shortcut_enabled {
+                match hotkey::parse_hotkey(&search_shortcut_text) {
+                    Some(search_spec) if search_spec != main_spec => {
+                        hotkeys.push((2, search_spec, true));
+                    }
+                    Some(_) => tracing::warn!("搜索快捷键与主快捷键相同，跳过注册"),
+                    None => tracing::warn!("搜索快捷键无法解析，跳过注册"),
+                }
+            }
+        }
+        if let Err(error) = hotkey::register_hotkeys(
+            hotkeys.into_iter().map(|(id, spec, _)| (id, spec)).collect(),
+            move |id| {
+                tracing::info!("命中全局快捷键 id={id}");
                 let app = app_for_hotkey.clone();
                 let _ = slint::invoke_from_event_loop(move || {
-                    picker::toggle(&app);
+                    if id == 2 {
+                        search::toggle_from_shortcut(&app);
+                    } else {
+                        picker::toggle(&app);
+                    }
                 });
-            }) {
-                tracing::error!("注册全局快捷键失败: {error}");
-            }
-        } else {
-            tracing::error!("主快捷键无法解析（配置值与默认值均失败），跳过注册");
+            },
+        ) {
+            tracing::error!("注册全局快捷键失败: {error}");
         }
     }
 
@@ -337,6 +382,184 @@ fn wire_picker_callbacks(app: &App) {
         let app_cb = app.clone();
         win.on_retry_clicked(move || {
             picker::refresh_list_changed(&app_cb);
+        });
+    }
+}
+
+fn wire_search_callbacks(app: &App) {
+    let win = match app.search.upgrade() {
+        Some(win) => win,
+        None => return,
+    };
+
+    // 搜索框
+    {
+        let app_cb = app.clone();
+        win.on_keyword_edited(move |_text| {
+            search::keyword_edited(&app_cb);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_clear_keyword(move || {
+            search::clear_keyword(&app_cb);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_filter_selected(move |filter| {
+            search::filter_selected(&app_cb, filter);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_tag_toggled(move |index| {
+            search::tag_toggled(&app_cb, index.max(0) as usize);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_clear_filters(move || {
+            search::clear_filters(&app_cb);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_retry_clicked(move || {
+            search::retry(&app_cb);
+        });
+    }
+
+    // 行交互
+    {
+        let app_cb = app.clone();
+        win.on_row_clicked(move |index| {
+            search::set_selected(&app_cb, index.max(0) as usize);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_row_double_clicked(move |index| {
+            search::paste_index(&app_cb, index.max(0) as usize, false);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_row_hover(move |index, x, y| {
+            search::row_hover(&app_cb, index.max(0) as usize, x, y);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_row_hover_left(move || {
+            search::hover_left(&app_cb);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_action_paste(move |index| {
+            search::paste_index(&app_cb, index.max(0) as usize, false);
+        });
+    }
+    // 图片按文件粘贴的按钮只在选中行上出现，作用于当前选中
+    {
+        let app_cb = app.clone();
+        win.on_action_paste_as_file(move || {
+            search::paste_selected(&app_cb, true);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_action_edit(move || {
+            search::edit_requested(&app_cb);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_action_toggle_favorite(move || {
+            search::toggle_favorite(&app_cb);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_action_delete(move || {
+            search::request_delete(&app_cb);
+        });
+    }
+
+    // 键盘会话（capture 阶段拦截）
+    {
+        let app_cb = app.clone();
+        win.on_key_navigate_up(move || {
+            search::navigate(&app_cb, true);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_key_navigate_down(move || {
+            search::navigate(&app_cb, false);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_key_paste(move |as_file| {
+            search::paste_selected(&app_cb, as_file);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_key_edit(move || {
+            search::edit_requested(&app_cb);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_key_toggle_favorite(move || {
+            search::toggle_favorite(&app_cb);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_key_delete(move || {
+            search::request_delete(&app_cb);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_key_close(move || {
+            search::hide(&app_cb, false);
+        });
+    }
+
+    // 触底预载 / 高度棘轮 / 头部拖拽
+    {
+        let app_cb = app.clone();
+        win.on_near_bottom(move || {
+            search::fetch_next(&app_cb);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_heights_changed(move || {
+            search::heights_changed(&app_cb);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_drag_started(move || {
+            search::drag_started(&app_cb);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_drag_moved(move || {
+            search::drag_moved(&app_cb);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_drag_finished(move || {
+            search::drag_finished(&app_cb);
         });
     }
 }
