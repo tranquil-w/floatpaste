@@ -6,7 +6,7 @@ use slint::ComponentHandle;
 use windows::Win32::Foundation::{HWND, RECT};
 use windows::Win32::Graphics::Dwm::{
     DwmExtendFrameIntoClientArea, DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE,
-    DWM_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+    DWMWCP_ROUND, DWM_WINDOW_CORNER_PREFERENCE,
 };
 use windows::Win32::UI::Controls::MARGINS;
 use windows::Win32::UI::HiDpi::GetDpiForWindow;

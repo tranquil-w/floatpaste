@@ -5,6 +5,7 @@
 //! 尺寸记忆 / 主题），search/editor/settings/tray 按窗口逐个迁移。
 
 mod app_state;
+mod overlay;
 mod paste_flow;
 mod picker;
 mod system;
@@ -116,9 +117,8 @@ fn main() {
 
     wire_picker_callbacks(&app);
 
-    // ── 窗口句柄与浮层样式：事件循环首轮装配 ──
-    // winit 惰性建窗：show() 同步创建 OS 窗口后句柄才可用；
-    // 随即 hide()，且此闭包运行在泵帧之前，不会闪现窗口。
+    // ── 窗口句柄与浮层样式：事件循环首轮装配（winit 惰性建窗，
+    // show/hide 舞蹈统一在 overlay::silent_assemble）──
     let silent_startup = launch_mode.is_silent();
     let app_for_init = app.clone();
     let _ = slint::invoke_from_event_loop(move || {
@@ -129,27 +129,18 @@ fn main() {
             return;
         };
 
-        let _ = picker_win.window().show();
-        if let Some(hwnd) = win32_ext::window_hwnd(&picker_win) {
-            win32_ext::apply_overlay_style(hwnd);
-            win32_ext::apply_dwm_shadow(hwnd);
-            win32_ext::apply_dwm_rounded_corners(hwnd);
-            let _ = window_control::remove_window_system_menu(hwnd);
-            app_for_init.state.picker_hwnd.store(hwnd, Ordering::SeqCst);
-        } else {
-            tracing::error!("获取速贴窗口句柄失败，会话功能不可用");
+        match overlay::silent_assemble(&picker_win, true) {
+            Some(hwnd) => {
+                app_for_init.state.picker_hwnd.store(hwnd, Ordering::SeqCst);
+            }
+            None => tracing::error!("获取速贴窗口句柄失败，会话功能不可用"),
         }
-        let _ = picker_win.window().hide();
-
-        let _ = tooltip_win.window().show();
-        if let Some(hwnd) = win32_ext::window_hwnd(&tooltip_win) {
-            win32_ext::apply_overlay_style(hwnd);
+        if let Some(hwnd) = overlay::silent_assemble(&tooltip_win, false) {
             app_for_init
                 .state
                 .tooltip_hwnd
                 .store(hwnd, Ordering::SeqCst);
         }
-        let _ = tooltip_win.window().hide();
 
         if !silent_startup {
             picker::activate(&app_for_init);
@@ -182,17 +173,22 @@ fn main() {
                 configured
             }
         };
-        let main_spec = hotkey::parse_hotkey(&shortcut_text)
-            .or_else(|| hotkey::parse_hotkey("Alt+Q"))
-            .expect("默认快捷键 Alt+Q 必须可解析");
-        if let Err(error) = hotkey::register_hotkeys(vec![(1, main_spec)], move |id| {
-            tracing::info!("命中主快捷键 id={id}");
-            let app = app_for_hotkey.clone();
-            let _ = slint::invoke_from_event_loop(move || {
-                picker::toggle(&app);
-            });
-        }) {
-            tracing::error!("注册全局快捷键失败: {error}");
+        // 快捷键无法解析时只跳过注册，不退出进程：剪贴板监听与
+        // 二次启动唤起仍可用
+        if let Some(main_spec) =
+            hotkey::parse_hotkey(&shortcut_text).or_else(|| hotkey::parse_hotkey("Alt+Q"))
+        {
+            if let Err(error) = hotkey::register_hotkeys(vec![(1, main_spec)], move |id| {
+                tracing::info!("命中主快捷键 id={id}");
+                let app = app_for_hotkey.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    picker::toggle(&app);
+                });
+            }) {
+                tracing::error!("注册全局快捷键失败: {error}");
+            }
+        } else {
+            tracing::error!("主快捷键无法解析（配置值与默认值均失败），跳过注册");
         }
     }
 

@@ -22,6 +22,365 @@ export struct ClipRow {
     tag-more: int,
 }
 
+// ── 面板结构几何：slint 布局与 Rust 首帧兜底共用的常量，禁双边手抄 ──
+// Rust 读取经 global::<PanelGeometry>()；改这里即同时改变布局与裁排
+export global PanelGeometry {
+    out property <length> card-border: 1px;                // 窗口卡片 1px 边框（两侧共 2px）
+    out property <length> scroll-slot: 10px;               // 列表右侧滚动槽
+    out property <length> list-pad-left: 14px;             // 原版 grid pl-[14px]
+    out property <length> list-pad-right: Metrics.space-1; // 原版 grid pr-1
+    out property <length> row-frame: 2px;                  // 行卡片描边双层（上下各 1px）
+    out property <length> row-pad-h: Metrics.space-1_5;    // 行内水平 padding（单侧）
+    out property <length> thumb-size: 72px;
+    out property <length> thumb-gap: 10px;
+    // 预览可用宽需从 flick 宽扣除的横向总量（Rust 首帧兜底同式）
+    out property <length> preview-pad-h:
+        list-pad-left + list-pad-right + row-frame + 2 * row-pad-h;
+}
+
+// ── 拉伸手柄：八方向共用，direction 编码对齐 resize-started 回调 ──
+component ResizeHandle inherits TouchArea {
+    in property <int> direction; // 0=N 1=S 2=W 3=E 4=NW 5=NE 6=SW 7=SE
+    callback started();
+    callback drag-moved();
+    callback finished();
+
+    pointer-event(e) => {
+        if (e.kind == PointerEventKind.down) {
+            root.started();
+        }
+        if (e.kind == PointerEventKind.up) {
+            root.finished();
+        }
+    }
+    moved => { root.drag-moved(); }
+    mouse-cursor: direction == 0 || direction == 4 || direction == 5 ? n-resize
+        : direction == 1 || direction == 6 || direction == 7 ? s-resize
+        : direction == 2 ? w-resize
+        : e-resize;
+}
+
+// ── 列表滚动条：10px 稳定槽 + 4px 视觉拇指（对齐原版 webkit 拇指全槽可抓）──
+component ListScrollBar inherits Rectangle {
+    in property <length> viewport-height;
+    in property <length> visible-height;
+    in-out property <length> viewport-y;
+
+    track-ta := TouchArea {
+        clicked => {
+            // 点击轨道：滚到对应位置。只驱动 viewport-y，
+            // thumb.y 始终由声明式绑定跟随滚动
+            if (self.mouse-y < thumb.y || self.mouse-y > thumb.y + thumb.height) {
+                if (thumb.max-y > 0) {
+                    root.viewport-y = -(Math.min(thumb.max-y, Math.max(0, self.mouse-y - thumb.height / 2)) / thumb.max-y)
+                        * (root.viewport-height - root.visible-height);
+                }
+            }
+        }
+    }
+
+    thumb := Rectangle {
+        property <length> max-y: parent.height - self.height;
+        y: root.viewport-height > root.visible-height && self.max-y > 0
+            ? Math.min(self.max-y, Math.max(0, (-root.viewport-y) / (root.viewport-height - root.visible-height) * self.max-y))
+            : 0;
+        height: Math.max(30px, root.visible-height * root.visible-height / root.viewport-height);
+        width: 4px;
+        x: 3px;
+        border-radius: 2px;
+        background: thumb-ta.has-hover ? Theme.border-default : Theme.border-muted;
+
+        // 拖拽热区扩到整条 10px 槽（原版 webkit 拇指含透明边，
+        // 可抓取宽度就是全槽宽）
+        thumb-ta := TouchArea {
+            x: -3px;
+            width: 10px;
+            // 拖拽锚点记窗口坐标：TouchArea 随拇指一起动，本地
+            // mouse-y 会被自身移动抵消（拇指只走约一半路程）。
+            // absolute-position 与 mouse-y 随元素移动反向互补，
+            // 两者之和在整个拖拽过程是稳定的窗口坐标
+            property <length> press-thumb-y;
+            property <length> press-mouse-y;
+            pointer-event(e) => {
+                if (e.kind == PointerEventKind.down) {
+                    self.press-thumb-y = thumb.y;
+                    self.press-mouse-y = self.absolute-position.y + self.mouse-y;
+                }
+            }
+            moved => {
+                if (self.pressed && thumb.max-y > 0) {
+                    // 只写 viewport-y：直接赋值 thumb.y 会顶掉它的
+                    // 绑定，拖拽一次后滚轮/惯性滚动不再更新拇指
+                    let target = Math.min(thumb.max-y, Math.max(0,
+                        self.press-thumb-y
+                            + (self.absolute-position.y + self.mouse-y - self.press-mouse-y)));
+                    root.viewport-y = -(target / thumb.max-y)
+                        * (root.viewport-height - root.visible-height);
+                }
+            }
+        }
+    }
+}
+
+// ── 行卡片：预览排版、元信息与选中态的完整行内 UI ──
+// 行高稳定性不变量收口在本组件：标尺与预览文本同文本、同宽度、
+// 同字重（Metrics.weight-semibold，与 Rust 裁排的 measure-preview 一致）；
+// 选中只切观感字重（500↔600），行高在两态间保持不变
+component ClipRowCard inherits Rectangle {
+    in property <ClipRow> data;
+    in property <bool> selected;
+    in property <length> text-width;
+    callback clicked();
+    callback double-clicked();
+    callback hover(length, length);
+    callback hover-left();
+    callback scroll-into-view(length, length);
+
+    property <bool> is-selected: selected;
+    changed is-selected => {
+        if (self.is-selected) {
+            self.scroll-into-view(self.y, self.height);
+        }
+    }
+
+    // 描边用双层填充模拟（外层填边框色、内层填背景色）：
+    // 渲染器对带边框圆角在弧线切点附近的行会把外缘 AA
+    // 段与内容 AA 段重叠混色（同一像素 blend 两次），
+    // 高对比描边色下呈孤立亮点；纯填充路径无此问题
+    border-radius: Metrics.radius-lg;
+    background: selected
+        ? Theme.accent-fg.with-alpha(0.35)
+        : (item-ta.has-hover ? Theme.border-default : Theme.border-subtle);
+    animate background { duration: 120ms; }
+
+    VerticalLayout {
+        padding: 1px;
+
+        inner-card := Rectangle {
+            border-radius: Metrics.radius-lg - 1px;
+            background: selected
+                ? Theme.accent-subtle
+                : (item-ta.has-hover ? Theme.canvas-inset : Theme.canvas-subtle);
+            animate background { duration: 120ms; }
+            // 兜底裁剪：字体度量与渲染器行高存在细微差异时，
+            // 防止预览文本画穿条目边界（原版由 CSS overflow 保证）
+            clip: true;
+
+            // 收藏条目左侧 3px 强调边条
+            if (data.favorited && !selected): Rectangle {
+                x: 0;
+                y: 0;
+                width: 3px;
+                height: parent.height;
+                background: Theme.accent-fg;
+                border-radius: 2px;
+            }
+
+            // 选中态内圈 1px 强调描边：原版为 inset box-shadow。
+            // 8% 透明度低对比，不会显出渲染器的切点混色
+            if (selected): Rectangle {
+                border-radius: Metrics.radius-lg - 1px;
+                border-width: 1px;
+                border-color: Theme.accent-fg.with-alpha(0.08);
+            }
+
+            // 每行一把隐藏标尺：与预览 Text 同文本、同宽度，
+            // 高度喂回预览 Text。布局引擎对换行文本的
+            // 预选高度不反映字重加宽，溢出会把元信息行
+            // 挤出卡片被裁掉——高度必须实测。
+            // 字重固定 Metrics.weight-semibold：标尺若随选中切到 500，
+            // 加粗文本比标尺宽，会多折一行把整行撑高
+            // （预览串由 Rust 统一按重字重裁排，见 picker.rs measure-preview）
+            preview-ruler := Text {
+                opacity: 0;
+                x: 0;
+                y: 0;
+                text: data.preview;
+                font-size: Metrics.text-body;
+                font-weight: Metrics.weight-semibold;
+                wrap: word-wrap;
+                width: preview-text.width;
+            }
+
+            VerticalLayout {
+                padding-left: PanelGeometry.row-pad-h;
+                padding-right: PanelGeometry.row-pad-h;
+                padding-top: Metrics.space-2;
+                padding-bottom: Metrics.space-2;
+                spacing: Metrics.space-1_5;
+
+                HorizontalLayout {
+                    spacing: PanelGeometry.thumb-gap;
+                    alignment: start;
+
+                    if (data.has-thumb): Rectangle {
+                        width: PanelGeometry.thumb-size;
+                        height: PanelGeometry.thumb-size;
+                        border-radius: Metrics.radius-md;
+                        border-width: 1px;
+                        border-color: selected ? Theme.border-default : Theme.border-subtle;
+                        clip: true;
+                        Image {
+                            width: parent.width;
+                            height: parent.height;
+                            source: data.thumb;
+                            image-fit: contain;
+                        }
+                    }
+
+                    preview-text := Text {
+                        text: data.preview;
+                        color: selected
+                            ? Theme.fg-default
+                            : (data.favorited ? Theme.fg-default : Theme.fg-muted);
+                        font-size: Metrics.text-body;
+                        // 原版 line-clamp-4：预览串由 Rust 用度量标尺
+                        // 按当前宽度裁到 4 行并加省略号
+                        font-weight: selected ? Metrics.weight-semibold : Metrics.weight-medium;
+                        wrap: word-wrap;
+                        // 宽度显式固定（实例化处按 preview-width-* 传入），
+                        // 不给布局按首选宽分配的机会
+                        width: root.text-width;
+                        // 高度取同行标尺实测（同文本/同字重/同宽度），
+                        // 布局引擎的预选高度不反映字重加宽，不可依赖
+                        height: min(82px, preview-ruler.height);
+                        vertical-alignment: top;
+                    }
+                }
+
+                // ── 元信息行 ──
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+
+                    HorizontalLayout {
+                        spacing: 8px;
+                        alignment: start;
+                        horizontal-stretch: 1;
+
+                        if (data.digit != ""): Rectangle {
+                            height: 18px;
+                            min-width: 18px;
+                            border-radius: Metrics.radius-sm;
+                            background: selected
+                                ? Theme.accent-fg
+                                : (item-ta.has-hover ? Theme.canvas-inset : Theme.canvas-subtle);
+                            HorizontalLayout {
+                                padding-left: Metrics.space-1;
+                                padding-right: Metrics.space-1;
+                                Text {
+                                    text: data.digit;
+                                    color: selected
+                                        ? Theme.fg-on-emphasis
+                                        : (item-ta.has-hover ? Theme.fg-muted : Theme.fg-subtle);
+                                    font-size: Metrics.text-micro;
+                                    font-weight: Metrics.weight-bold;
+                                    font-family: "Consolas";
+                                    vertical-alignment: center;
+                                    horizontal-alignment: center;
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            height: 18px;
+                            border-radius: Metrics.radius-sm;
+                            background: selected ? Theme.canvas-default : Theme.canvas-inset;
+                            HorizontalLayout {
+                                padding-left: Metrics.space-1_5;
+                                padding-right: Metrics.space-1_5;
+                                Text {
+                                    text: data.type-label;
+                                    color: selected ? Theme.fg-muted : Theme.fg-subtle;
+                                    font-size: Metrics.text-meta;
+                                    font-weight: Metrics.weight-medium;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+
+                        Text {
+                            text: data.source-app;
+                            color: selected ? Theme.fg-muted : Theme.fg-subtle;
+                            font-size: Metrics.text-meta;
+                            font-weight: Metrics.weight-medium;
+                            vertical-alignment: center;
+                            overflow: elide;
+                            horizontal-stretch: 1;
+                        }
+                    }
+
+                    Text {
+                        text: data.time-text;
+                        color: selected ? Theme.fg-muted : Theme.fg-subtle;
+                        font-size: Metrics.text-meta;
+                        font-weight: Metrics.weight-medium;
+                        vertical-alignment: center;
+                    }
+
+                    if (data.favorited): Text {
+                        text: "★";
+                        color: Theme.favorite;
+                        font-size: selected ? 11px : 12px;
+                        vertical-alignment: center;
+                    }
+                }
+
+                // ── 选中态标签行（最多 2 个 + 计数）──
+                if (selected && data.tags.length > 0): HorizontalLayout {
+                    spacing: Metrics.space-1;
+                    alignment: start;
+                    for tag-name in data.tags: Rectangle {
+                        height: 20px;
+                        border-radius: Metrics.radius-pill;
+                        background: Theme.canvas-inset;
+                        HorizontalLayout {
+                            padding-left: Metrics.space-1_5;
+                            padding-right: Metrics.space-1_5;
+                            Text {
+                                text: tag-name;
+                                color: Theme.fg-muted;
+                                font-size: Metrics.text-meta;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                    if (data.tag-more > 0): Text {
+                        text: "+" + data.tag-more;
+                        color: Theme.fg-subtle;
+                        font-size: Metrics.text-meta;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+
+    // 整行命中（含边框圈）：声明在内容之后以处于最上层，
+    // 行内其余元素无自身交互
+    item-ta := TouchArea {
+        clicked => { root.clicked(); }
+        double-clicked => { root.double-clicked(); }
+        // 悬停追踪：pointer-event(move) 仅在按住时派发，
+        // 纯悬停要监视自身 mouse-x/y 的变化。
+        // 坐标换算成窗口内位置上报：tooltip 以面板原点
+        // 定位（原版 clientX/Y），行内坐标会偏移整行位置
+        changed mouse-x => {
+            root.hover(self.absolute-position.x + self.mouse-x,
+                self.absolute-position.y + self.mouse-y);
+        }
+        changed mouse-y => {
+            root.hover(self.absolute-position.x + self.mouse-x,
+                self.absolute-position.y + self.mouse-y);
+        }
+        changed has-hover => {
+            if (!self.has-hover) {
+                root.hover-left();
+            }
+        }
+    }
+}
+
 export component QuickPasteWindow inherits Window {
     no-frame: true;
     background: transparent;
@@ -54,24 +413,20 @@ export component QuickPasteWindow inherits Window {
     callback resize-finished();
     callback retry-clicked();
     // ── 预览排版几何（单一事实来源：slint 布局实测，Rust 只消费）──
-    // 行内缩略图列：缩略图边长与图文间距，行布局与宽度扣除共用
-    property <length> thumb-size: 72px;
-    property <length> thumb-gap: 10px;
     // 预览文本可用宽（逻辑 px）：由列表布局实测上报（flick 未实例化时
-    // 为 0，Rust 首帧自行兜底，上报后重裁修正）。裁排与渲染共用同一值，
-    // 不再两边手抄几何公式
+    // 为 0，Rust 首帧自行兜底——常量取自 PanelGeometry，上报后重裁修正）。
+    // 裁排与渲染共用同一值，不再两边手抄几何公式
     out property <length> preview-width-no-thumb;
     out property <length> preview-width-thumb;
     callback preview-widths-changed();
-    // 排版度量标尺：返回 text 在给定宽度与字重下的排版高度（逻辑像素）。
-    // 用 Slint 自己的排版引擎度量，与实际渲染天然一致——GDI 模拟存在
-    // 系统性偏差（偏窄或偏宽都会导致省略号丢失/提前截断）。
-    // 仅 Rust 裁切预览时调用；行内高度测量用每行的隐藏标尺（见 preview-ruler）
-    callback measure-preview(string, length, int) -> length;
-    measure-preview(text, width, weight) => {
+    // 排版度量标尺：返回 text 在给定宽度下的排版高度（逻辑像素）。
+    // 用 Slint 自己的排版引擎度量，与实际渲染天然一致。字重固定
+    // Metrics.weight-semibold（标尺属性同值）：选中态行内 Text 在
+    // 500↔600 间切换，按重字重裁排才能保证两态都不溢出预算
+    callback measure-preview(string, length) -> length;
+    measure-preview(text, width) => {
         measure-ruler.text = text;
         measure-ruler.width = width;
-        measure-ruler.font-weight = weight;
         measure-ruler.height
     }
 
@@ -88,7 +443,7 @@ export component QuickPasteWindow inherits Window {
     card := Rectangle {
         background: Theme.canvas-default;
         border-radius: Metrics.radius-lg;
-        border-width: 1px;
+        border-width: PanelGeometry.card-border;
         border-color: Theme.border-window;
         clip: true;
 
@@ -234,367 +589,65 @@ export component QuickPasteWindow inherits Window {
                     }
                 }
                 if (!root.loading && !root.load-failed && root.rows.length > 0): Rectangle {
-                    // Flickable 显式几何（不进布局）：右侧预留 10px 滚动槽，
+                    // Flickable 显式几何（不进布局）：右侧预留滚动槽，
                     // 原版 grid: pl-[14px] pr-1 gap-1 py-1.5
                     flick := Flickable {
                         x: 0;
                         y: 0;
-                        width: parent.width - 10px;
+                        width: parent.width - PanelGeometry.scroll-slot;
                         height: parent.height;
                         interactive: true;
-                        // 实测上报预览可用宽：flick 宽 − 列表内边距(14+4) −
-                        // 描边层(2) − 行内边距(2×6)；含缩略图列再减 72+10。
-                        // 窗口缩放联动 changed width，重裁由回调驱动
-                        init => {
-                            root.preview-width-no-thumb = self.width - 14px - Metrics.space-1 - 2px - 2 * Metrics.space-1_5;
-                            root.preview-width-thumb = root.preview-width-no-thumb - root.thumb-size - root.thumb-gap;
+                        // 实测上报预览可用宽：flick 宽扣 PanelGeometry.
+                        // preview-pad-h（列表内边距 + 行描边 + 行内边距），
+                        // 含缩略图列再扣缩略图列宽。窗口缩放联动 changed
+                        // width，重裁由回调驱动
+                        function report-preview-widths() {
+                            root.preview-width-no-thumb = self.width - PanelGeometry.preview-pad-h;
+                            root.preview-width-thumb = root.preview-width-no-thumb
+                                - PanelGeometry.thumb-size - PanelGeometry.thumb-gap;
                             root.preview-widths-changed();
                         }
-                        changed width => {
-                            root.preview-width-no-thumb = self.width - 14px - Metrics.space-1 - 2px - 2 * Metrics.space-1_5;
-                            root.preview-width-thumb = root.preview-width-no-thumb - root.thumb-size - root.thumb-gap;
-                            root.preview-widths-changed();
-                        }
+                        init => { self.report-preview-widths(); }
+                        changed width => { self.report-preview-widths(); }
 
                         VerticalLayout {
                             // 原版 grid: pl-[14px] pr-1 gap-1 py-1.5
-                            padding-left: 14px;
-                            padding-right: Metrics.space-1;
+                            padding-left: PanelGeometry.list-pad-left;
+                            padding-right: PanelGeometry.list-pad-right;
                             padding-top: Metrics.space-1_5;
                             padding-bottom: Metrics.space-1_5;
                             spacing: Metrics.space-1;
 
-                            for row[i] in root.rows: row-card := Rectangle {
-                                // 预览排版宽度显式固定：布局给无显式宽度的伸缩
-                                // Text 分配宽度时受其首选宽（整串未换行宽度，
-                                // 随字重 500↔600 变化）影响，选中切换字重会改变
-                                // 文本框宽度，标尺跟着变宽变窄，行高随之抖动。
-                                // 宽度取列表实测上报值（见 preview-width-*），
-                                // 与 Rust 裁排同源，且与字重无关
-                                property <length> text-width: row.has-thumb
+                            for row[i] in root.rows: ClipRowCard {
+                                data: row;
+                                selected: i == root.selected;
+                                text-width: row.has-thumb
                                     ? root.preview-width-thumb
                                     : root.preview-width-no-thumb;
-                                // 描边用双层填充模拟（外层填边框色、内层填背景色）：
-                                // 渲染器对带边框圆角在弧线切点附近的行会把外缘 AA
-                                // 段与内容 AA 段重叠混色（同一像素 blend 两次），
-                                // 高对比描边色下呈孤立亮点；纯填充路径无此问题
-                                border-radius: Metrics.radius-lg;
-                                background: i == root.selected
-                                    ? Theme.accent-fg.with-alpha(0.35)
-                                    : (item-ta.has-hover ? Theme.border-default : Theme.border-subtle);
-                                animate background { duration: 120ms; }
-
-                                VerticalLayout {
-                                    padding: 1px;
-
-                                    inner-card := Rectangle {
-                                        border-radius: Metrics.radius-lg - 1px;
-                                        background: i == root.selected
-                                            ? Theme.accent-subtle
-                                            : (item-ta.has-hover ? Theme.canvas-inset : Theme.canvas-subtle);
-                                        animate background { duration: 120ms; }
-                                        // 兜底裁剪：字体度量与渲染器行高存在细微差异时，
-                                        // 防止预览文本画穿条目边界（原版由 CSS overflow 保证）
-                                        clip: true;
-
-                                        // 收藏条目左侧 3px 强调边条
-                                        if (row.favorited && i != root.selected): Rectangle {
-                                            x: 0;
-                                            y: 0;
-                                            width: 3px;
-                                            height: parent.height;
-                                            background: Theme.accent-fg;
-                                            border-radius: 2px;
-                                        }
-
-                                        // 选中态内圈 1px 强调描边：原版为 inset box-shadow。
-                                        // 8% 透明度低对比，不会显出渲染器的切点混色
-                                        if (i == root.selected): Rectangle {
-                                            border-radius: Metrics.radius-lg - 1px;
-                                            border-width: 1px;
-                                            border-color: Theme.accent-fg.with-alpha(0.08);
-                                        }
-
-                                        // 每行一把隐藏标尺：与预览 Text 同文本、同宽度，
-                                        // 高度喂回预览 Text。布局引擎对换行文本的
-                                        // 预选高度不反映字重加宽，溢出会把元信息行
-                                        // 挤出卡片被裁掉——高度必须实测。
-                                        // 字重固定 600：标尺若随选中切到 500，加粗
-                                        // 文本比标尺宽，会多折一行把整行撑高
-                                        // （预览串由 Rust 统一按 600 裁排，见 picker.rs）
-                                        preview-ruler := Text {
-                                            opacity: 0;
-                                            x: 0;
-                                            y: 0;
-                                            text: row.preview;
-                                            font-size: Metrics.text-body;
-                                            font-weight: Metrics.weight-semibold;
-                                            wrap: word-wrap;
-                                            width: preview-text.width;
-                                        }
-
-                                        VerticalLayout {
-                                            padding-left: Metrics.space-1_5;
-                                            padding-right: Metrics.space-1_5;
-                                            padding-top: Metrics.space-2;
-                                            padding-bottom: Metrics.space-2;
-                                            spacing: Metrics.space-1_5;
-
-                                    HorizontalLayout {
-                                        spacing: root.thumb-gap;
-                                        alignment: start;
-
-                                        if (row.has-thumb): Rectangle {
-                                            width: root.thumb-size;
-                                            height: root.thumb-size;
-                                                    border-radius: Metrics.radius-md;
-                                                    border-width: 1px;
-                                                    border-color: i == root.selected
-                                                        ? Theme.border-default
-                                                        : Theme.border-subtle;
-                                                    clip: true;
-                                                    Image {
-                                                        width: parent.width;
-                                                        height: parent.height;
-                                                        source: row.thumb;
-                                                        image-fit: contain;
-                                                    }
-                                                }
-
-                                                preview-text := Text {
-                                                    text: row.preview;
-                                                    color: i == root.selected
-                                                        ? Theme.fg-default
-                                                        : (row.favorited ? Theme.fg-default : Theme.fg-muted);
-                                                    font-size: Metrics.text-body;
-                                                    // 原版 line-clamp-4：预览串由 Rust 用度量标尺
-                                                    // 按当前宽度裁到 4 行并加省略号
-                                                    font-weight: i == root.selected ? Metrics.weight-semibold : Metrics.weight-medium;
-                                                    wrap: word-wrap;
-                                                    // 宽度显式固定（见 row-card.text-width），
-                                                    // 不给布局按首选宽分配的机会
-                                                    width: row-card.text-width;
-                                                    // 高度取同行标尺实测（同文本/同字重/同宽度），
-                                                    // 布局引擎的预选高度不反映字重加宽，不可依赖
-                                                    height: min(82px, preview-ruler.height);
-                                                    vertical-alignment: top;
-                                                }
-                                            }
-
-                                            // ── 元信息行 ──
-                                            HorizontalLayout {
-                                                spacing: 8px;
-                                                alignment: start;
-
-                                                HorizontalLayout {
-                                                    spacing: 8px;
-                                                    alignment: start;
-                                                    horizontal-stretch: 1;
-
-                                                    if (row.digit != ""): Rectangle {
-                                                        height: 18px;
-                                                        min-width: 18px;
-                                                        border-radius: Metrics.radius-sm;
-                                                        background: i == root.selected
-                                                            ? Theme.accent-fg
-                                                            : (item-ta.has-hover ? Theme.canvas-inset : Theme.canvas-subtle);
-                                                        HorizontalLayout {
-                                                            padding-left: Metrics.space-1;
-                                                            padding-right: Metrics.space-1;
-                                                            Text {
-                                                                text: row.digit;
-                                                                color: i == root.selected
-                                                                    ? Theme.fg-on-emphasis
-                                                                    : (item-ta.has-hover ? Theme.fg-muted : Theme.fg-subtle);
-                                                                font-size: Metrics.text-micro;
-                                                                font-weight: Metrics.weight-bold;
-                                                                font-family: "Consolas";
-                                                                vertical-alignment: center;
-                                                                horizontal-alignment: center;
-                                                            }
-                                                        }
-                                                    }
-
-                                                    Rectangle {
-                                                        height: 18px;
-                                                        border-radius: Metrics.radius-sm;
-                                                        background: i == root.selected
-                                                            ? Theme.canvas-default
-                                                            : Theme.canvas-inset;
-                                                        HorizontalLayout {
-                                                            padding-left: Metrics.space-1_5;
-                                                            padding-right: Metrics.space-1_5;
-                                                            Text {
-                                                                text: row.type-label;
-                                                                color: i == root.selected
-                                                                    ? Theme.fg-muted
-                                                                    : Theme.fg-subtle;
-                                                                font-size: Metrics.text-meta;
-                                                                font-weight: Metrics.weight-medium;
-                                                                vertical-alignment: center;
-                                                            }
-                                                        }
-                                                    }
-
-                                                    Text {
-                                                        text: row.source-app;
-                                                        color: i == root.selected
-                                                            ? Theme.fg-muted
-                                                            : Theme.fg-subtle;
-                                                        font-size: Metrics.text-meta;
-                                                        font-weight: Metrics.weight-medium;
-                                                        vertical-alignment: center;
-                                                        overflow: elide;
-                                                        horizontal-stretch: 1;
-                                                    }
-                                                }
-
-                                                Text {
-                                                    text: row.time-text;
-                                                    color: i == root.selected ? Theme.fg-muted : Theme.fg-subtle;
-                                                    font-size: Metrics.text-meta;
-                                                    font-weight: Metrics.weight-medium;
-                                                    vertical-alignment: center;
-                                                }
-
-                                                if (row.favorited): Text {
-                                                    text: "★";
-                                                    color: Theme.favorite;
-                                                    font-size: i == root.selected ? 11px : 12px;
-                                                    vertical-alignment: center;
-                                                }
-                                            }
-
-                                            // ── 选中态标签行（最多 2 个 + 计数）──
-                                            if (i == root.selected && row.tags.length > 0): HorizontalLayout {
-                                                spacing: Metrics.space-1;
-                                                alignment: start;
-                                                for tag-name in row.tags: Rectangle {
-                                                    height: 20px;
-                                                    border-radius: Metrics.radius-pill;
-                                                    background: Theme.canvas-inset;
-                                                    HorizontalLayout {
-                                                        padding-left: Metrics.space-1_5;
-                                                        padding-right: Metrics.space-1_5;
-                                                        Text {
-                                                            text: tag-name;
-                                                            color: Theme.fg-muted;
-                                                            font-size: Metrics.text-meta;
-                                                            vertical-alignment: center;
-                                                        }
-                                                    }
-                                                }
-                                                if (row.tag-more > 0): Text {
-                                                    text: "+" + row.tag-more;
-                                                    color: Theme.fg-subtle;
-                                                    font-size: Metrics.text-meta;
-                                                    vertical-alignment: center;
-                                                }
-                                            }
-                                }
-                                    }
-                                }
-
-                                // 整行命中（含边框圈）：声明在内容之后以处于最上层，
-                                // 行内其余元素无自身交互
-                                item-ta := TouchArea {
-                                    clicked => { root.row-clicked(i); }
-                                    double-clicked => { root.row-double-clicked(i); }
-                                    // 悬停追踪：pointer-event(move) 仅在按住时派发，
-                                    // 纯悬停要监视自身 mouse-x/y 的变化。
-                                    // 坐标换算成窗口内位置上报：tooltip 以面板原点
-                                    // 定位（原版 clientX/Y），行内坐标会偏移整行位置
-                                    changed mouse-x => {
-                                        root.row-hover(i, self.absolute-position.x + self.mouse-x,
-                                            self.absolute-position.y + self.mouse-y);
-                                    }
-                                    changed mouse-y => {
-                                        root.row-hover(i, self.absolute-position.x + self.mouse-x,
-                                            self.absolute-position.y + self.mouse-y);
-                                    }
-                                    changed has-hover => {
-                                        if (!self.has-hover) {
-                                            root.row-hover-left();
-                                        }
-                                    }
-                                }
-
-                                // 选中变化时让本行滚入可视区
-                                property <bool> is-selected: root.selected == i;
-                                changed is-selected => {
-                                    if (self.is-selected) {
-                                        if (self.y < -flick.viewport-y + 6px) {
-                                            flick.viewport-y = -self.y + 6px;
-                                        } else if (self.y + self.height > -flick.viewport-y + flick.height - 6px) {
-                                            flick.viewport-y = -(self.y + self.height - flick.height + 6px);
-                                        }
+                                clicked => { root.row-clicked(i); }
+                                double-clicked => { root.row-double-clicked(i); }
+                                hover(x, y) => { root.row-hover(i, x, y); }
+                                hover-left => { root.row-hover-left(); }
+                                scroll-into-view(row-y, row-height) => {
+                                    if (row-y < -flick.viewport-y + 6px) {
+                                        flick.viewport-y = -row-y + 6px;
+                                    } else if (row-y + row-height > -flick.viewport-y + flick.height - 6px) {
+                                        flick.viewport-y = -(row-y + row-height - flick.height + 6px);
                                     }
                                 }
                             }
                         }
                     }
 
-                    // ── 滚动条（对齐原版 10px 稳定槽 + 4px 视觉拇指；绝对定位不进布局）──
-                    if (flick.viewport-height > flick.height): Rectangle {
-                        x: parent.width - 10px;
+                    // ── 滚动条（绝对定位不进布局）──
+                    if (flick.viewport-height > flick.height): ListScrollBar {
+                        x: parent.width - PanelGeometry.scroll-slot;
                         y: 0;
-                        width: 10px;
+                        width: PanelGeometry.scroll-slot;
                         height: parent.height;
-
-                        track-ta := TouchArea {
-                            clicked => {
-                                // 点击轨道：滚到对应位置。只驱动 viewport-y，
-                                // thumb.y 始终由声明式绑定跟随滚动
-                                if (self.mouse-y < thumb.y || self.mouse-y > thumb.y + thumb.height) {
-                                    if (thumb.max-y > 0) {
-                                        flick.viewport-y = -(Math.min(thumb.max-y, Math.max(0, self.mouse-y - thumb.height / 2)) / thumb.max-y)
-                                            * (flick.viewport-height - flick.height);
-                                    }
-                                }
-                            }
-                        }
-
-                        thumb := Rectangle {
-                            property <length> max-y: parent.height - self.height;
-                            y: flick.viewport-height > flick.height && self.max-y > 0
-                                ? Math.min(self.max-y, Math.max(0, (-flick.viewport-y) / (flick.viewport-height - flick.height) * self.max-y))
-                                : 0;
-                            height: Math.max(30px, flick.height * flick.height / flick.viewport-height);
-                            width: 4px;
-                            x: 3px;
-                            border-radius: 2px;
-                            background: thumb-ta.has-hover ? Theme.border-default : Theme.border-muted;
-
-                            // 拖拽热区扩到整条 10px 槽（原版 webkit 拇指含透明边，
-                            // 可抓取宽度就是全槽宽）
-                            thumb-ta := TouchArea {
-                                x: -3px;
-                                width: 10px;
-                                // 拖拽锚点记窗口坐标：TouchArea 随拇指一起动，本地
-                                // mouse-y 会被自身移动抵消（拇指只走约一半路程）。
-                                // absolute-position 与 mouse-y 随元素移动反向互补，
-                                // 两者之和在整个拖拽过程是稳定的窗口坐标
-                                property <length> press-thumb-y;
-                                property <length> press-mouse-y;
-                                pointer-event(e) => {
-                                    if (e.kind == PointerEventKind.down) {
-                                        self.press-thumb-y = thumb.y;
-                                        self.press-mouse-y = self.absolute-position.y + self.mouse-y;
-                                    }
-                                }
-                                moved => {
-                                    if (self.pressed && thumb.max-y > 0) {
-                                        // 只写 viewport-y：直接赋值 thumb.y 会顶掉它的
-                                        // 绑定，拖拽一次后滚轮/惯性滚动不再更新拇指
-                                        let target = Math.min(thumb.max-y, Math.max(0,
-                                            self.press-thumb-y
-                                                + (self.absolute-position.y + self.mouse-y - self.press-mouse-y)));
-                                        flick.viewport-y = -(target / thumb.max-y)
-                                            * (flick.viewport-height - flick.height);
-                                    }
-                                }
-                            }
-                        }
+                        viewport-height: flick.viewport-height;
+                        visible-height: flick.height;
+                        viewport-y <=> flick.viewport-y;
                     }
 
                     // 会话打开时滚回顶部（监听代数属性；changed 只能挂在本元素属性上）
@@ -611,167 +664,95 @@ export component QuickPasteWindow inherits Window {
 
         // ── 拉伸手柄（最顶层，几何对齐原版 PICKER_RESIZE_HANDLES）──
         // 北向两条（避开头部中央拖拽区）
-        handle-ta := TouchArea {
+        ResizeHandle {
+            direction: 0;
             x: 12px;
             y: 0;
             width: (parent.width - 24px) / 2 - 36px;
             height: 8px;
-            mouse-cursor: n-resize;
-            pointer-event(e) => {
-                if (e.kind == PointerEventKind.down) {
-                    root.resize-started(0);
-                }
-                if (e.kind == PointerEventKind.up) {
-                    root.resize-finished();
-                }
-            }
-            moved => {
-                root.resize-moved();
-            }
+            started => { root.resize-started(0); }
+            drag-moved => { root.resize-moved(); }
+            finished => { root.resize-finished(); }
         }
-        TouchArea {
+        ResizeHandle {
+            direction: 0;
             x: 12px + (parent.width - 24px) / 2 + 36px;
             y: 0;
             width: (parent.width - 24px) / 2 - 36px;
             height: 8px;
-            mouse-cursor: n-resize;
-            pointer-event(e) => {
-                if (e.kind == PointerEventKind.down) {
-                    root.resize-started(0);
-                }
-                if (e.kind == PointerEventKind.up) {
-                    root.resize-finished();
-                }
-            }
-            moved => {
-                root.resize-moved();
-            }
+            started => { root.resize-started(0); }
+            drag-moved => { root.resize-moved(); }
+            finished => { root.resize-finished(); }
         }
-        TouchArea {
+        ResizeHandle {
+            direction: 1;
             x: 12px;
             y: parent.height - 8px;
             width: parent.width - 24px;
             height: 8px;
-            mouse-cursor: s-resize;
-            pointer-event(e) => {
-                if (e.kind == PointerEventKind.down) {
-                    root.resize-started(1);
-                }
-                if (e.kind == PointerEventKind.up) {
-                    root.resize-finished();
-                }
-            }
-            moved => {
-                root.resize-moved();
-            }
+            started => { root.resize-started(1); }
+            drag-moved => { root.resize-moved(); }
+            finished => { root.resize-finished(); }
         }
-        TouchArea {
+        ResizeHandle {
+            direction: 2;
             x: 0;
             y: 12px;
             width: 4px;
             height: parent.height - 24px;
-            mouse-cursor: w-resize;
-            pointer-event(e) => {
-                if (e.kind == PointerEventKind.down) {
-                    root.resize-started(2);
-                }
-                if (e.kind == PointerEventKind.up) {
-                    root.resize-finished();
-                }
-            }
-            moved => {
-                root.resize-moved();
-            }
+            started => { root.resize-started(2); }
+            drag-moved => { root.resize-moved(); }
+            finished => { root.resize-finished(); }
         }
-        TouchArea {
+        ResizeHandle {
+            direction: 3;
             x: parent.width - 4px;
             y: 12px;
             width: 4px;
             height: parent.height - 24px;
-            mouse-cursor: e-resize;
-            pointer-event(e) => {
-                if (e.kind == PointerEventKind.down) {
-                    root.resize-started(3);
-                }
-                if (e.kind == PointerEventKind.up) {
-                    root.resize-finished();
-                }
-            }
-            moved => {
-                root.resize-moved();
-            }
+            started => { root.resize-started(3); }
+            drag-moved => { root.resize-moved(); }
+            finished => { root.resize-finished(); }
         }
-        TouchArea {
+        ResizeHandle {
+            direction: 4;
             x: 0;
             y: 0;
             width: 16px;
             height: 16px;
-            mouse-cursor: nw-resize;
-            pointer-event(e) => {
-                if (e.kind == PointerEventKind.down) {
-                    root.resize-started(4);
-                }
-                if (e.kind == PointerEventKind.up) {
-                    root.resize-finished();
-                }
-            }
-            moved => {
-                root.resize-moved();
-            }
+            started => { root.resize-started(4); }
+            drag-moved => { root.resize-moved(); }
+            finished => { root.resize-finished(); }
         }
-        TouchArea {
+        ResizeHandle {
+            direction: 5;
             x: parent.width - 16px;
             y: 0;
             width: 16px;
             height: 16px;
-            mouse-cursor: ne-resize;
-            pointer-event(e) => {
-                if (e.kind == PointerEventKind.down) {
-                    root.resize-started(5);
-                }
-                if (e.kind == PointerEventKind.up) {
-                    root.resize-finished();
-                }
-            }
-            moved => {
-                root.resize-moved();
-            }
+            started => { root.resize-started(5); }
+            drag-moved => { root.resize-moved(); }
+            finished => { root.resize-finished(); }
         }
-        TouchArea {
+        ResizeHandle {
+            direction: 6;
             x: 0;
             y: parent.height - 16px;
             width: 16px;
             height: 16px;
-            mouse-cursor: sw-resize;
-            pointer-event(e) => {
-                if (e.kind == PointerEventKind.down) {
-                    root.resize-started(6);
-                }
-                if (e.kind == PointerEventKind.up) {
-                    root.resize-finished();
-                }
-            }
-            moved => {
-                root.resize-moved();
-            }
+            started => { root.resize-started(6); }
+            drag-moved => { root.resize-moved(); }
+            finished => { root.resize-finished(); }
         }
-        TouchArea {
+        ResizeHandle {
+            direction: 7;
             x: parent.width - 16px;
             y: parent.height - 16px;
             width: 16px;
             height: 16px;
-            mouse-cursor: se-resize;
-            pointer-event(e) => {
-                if (e.kind == PointerEventKind.down) {
-                    root.resize-started(7);
-                }
-                if (e.kind == PointerEventKind.up) {
-                    root.resize-finished();
-                }
-            }
-            moved => {
-                root.resize-moved();
-            }
+            started => { root.resize-started(7); }
+            drag-moved => { root.resize-moved(); }
+            finished => { root.resize-finished(); }
         }
 
         // ── 排版度量标尺：与列表预览同款排版属性，不可见不挡输入 ──
@@ -782,6 +763,7 @@ export component QuickPasteWindow inherits Window {
             width: 0px;
             text: "";
             font-size: Metrics.text-body;
+            font-weight: Metrics.weight-semibold;
             wrap: word-wrap;
         }
     }

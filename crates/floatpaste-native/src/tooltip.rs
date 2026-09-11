@@ -1,10 +1,10 @@
-//! 悬停预览 tooltip：400ms 延迟触发、请求失效、内容构建、GDI 度量与翻转定位。
+//! 悬停预览 tooltip：400ms 延迟触发、请求失效、内容构建、排版度量与翻转定位。
 //!
 //! 对齐原版 useHoverTooltip + tooltip.html + TooltipWindow：
 //! - 悬停移动每帧重置计时；离开条目立即取消并隐藏；
 //! - 文本条目按需取全文（detail），图片条目解码原图预览（≤560×420）；
 //! - 定位：面板窗口位置 + (条目内鼠标 + 12,16)×scale，越界时按光标翻转（gap 4）；
-//! - 点击穿透 + 置顶不激活显示。
+//! - 点击穿透 + 置顶不激活显示（winit 样式重置统一交 overlay 公共层处理）。
 
 use std::rc::Rc;
 use std::sync::atomic::Ordering;
@@ -19,6 +19,7 @@ use floatpaste_core::platform::windows::picker_position::{
 use floatpaste_core::platform::windows::window_control;
 use floatpaste_core::services::time_format::format_relative_time_or_unused;
 
+use crate::overlay::{self, ForegroundPolicy};
 use crate::picker::{self, App};
 use crate::thumbnails;
 use crate::win32_ext;
@@ -28,15 +29,12 @@ const SHOW_DELAY_MS: u64 = 400;
 /// 鼠标右下偏移（逻辑像素）
 const OFFSET_X: f32 = 12.0;
 const OFFSET_Y: f32 = 16.0;
-/// 卡片内边距与内容约束（对齐 tooltip.html）
-const PADDING_H: f32 = 12.0;
-const PADDING_V: f32 = 8.0;
+/// 内容与窗口约束（对齐 tooltip.html；卡片 padding/边框读 slint 属性）
 const MAX_WIDTH: f32 = 600.0;
 const MIN_WIDTH: f32 = 120.0;
 const IMAGE_MAX_WIDTH: f32 = 560.0;
 const IMAGE_MAX_HEIGHT: f32 = 420.0;
-/// 元信息行（分隔线 1px + 上下间距 + 18px 徽章）+ 度量安全余量
-const META_HEIGHT: f32 = 24.0;
+/// 高度安全余量：字体度量与窗口装配存在边缘差异时防止裁掉尾行
 const HEIGHT_SAFETY: f32 = 8.0;
 
 thread_local! {
@@ -153,14 +151,15 @@ fn render(
     };
 
     // ── 内容与度量 ──
+    let inset_h = win.get_card_inset_h();
+    let chrome_v = win.get_card_chrome_v();
     let (content_width, content_height) = match &payload {
         Payload::Text(text) => {
             // 自然宽度（最宽段落一行放下所需）与高度同走 Slint 排版度量：
             // 与内容 Text 同引擎，卡片宽窄与高度都不会偏离实际渲染
             let natural_width = win.invoke_measure_natural_width(text.as_str().into());
-            let card_width =
-                (natural_width + PADDING_H * 2.0 + 2.0).clamp(MIN_WIDTH, MAX_WIDTH);
-            let text_width = card_width - PADDING_H * 2.0 - 2.0;
+            let card_width = (natural_width + inset_h).clamp(MIN_WIDTH, MAX_WIDTH);
+            let text_width = card_width - inset_h;
             let content_height = win.invoke_measure_text(text.as_str().into(), text_width);
             win.set_content_text(text.as_str().into());
             win.set_has_image(false);
@@ -210,9 +209,9 @@ fn render(
         .into(),
     );
 
-    // ── 窗口尺寸（含边框 2px 与安全余量）──
-    let width = (content_width + PADDING_H * 2.0 + 2.0).clamp(MIN_WIDTH, MAX_WIDTH);
-    let height = content_height + PADDING_V * 2.0 + META_HEIGHT + 2.0 + HEIGHT_SAFETY;
+    // ── 窗口尺寸（chrome 读 slint 属性 + 安全余量）──
+    let width = (content_width + inset_h).clamp(MIN_WIDTH, MAX_WIDTH);
+    let height = content_height + chrome_v + HEIGHT_SAFETY;
 
     let physical_w = (width * dpi).round().max(1.0) as u32;
     let physical_h = (height * dpi).round().max(1.0) as u32;
@@ -224,40 +223,16 @@ fn render(
     win.window()
         .set_position(slint::PhysicalPosition::new(position.0, position.1));
 
-    // ── 显示（点击穿透 + 置顶不激活）──
-    // winit 在 show 后会异步重置窗口样式：穿透/置顶若只在 show 后立即设置会被抹掉，
-    // tooltip 会变成盖在面板上方的实心窗口，拦截面板的滚轮与点击，故延迟重挂。
-    // 另 winit 的 show 走 SW_SHOW 会把 tooltip 激活成前台、抢走目标窗口焦点：
-    // show 前记录前台，show 后（含延迟重挂时）发现前台被占立即归还
+    // ── 显示（点击穿透 + 置顶不激活 + 前台若被抢则归还）──
+    // winit show 的异步样式重置与前台抢占统一交 overlay 公共层处理
     let prev_foreground = ActiveAppResolver::current_foreground_hwnd();
     let _ = win.window().show();
     let tooltip_hwnd = app.state.tooltip_hwnd.load(Ordering::SeqCst);
     if tooltip_hwnd != 0 {
-        apply_overlay_styles(tooltip_hwnd);
-        restore_focus_if_stolen(tooltip_hwnd, prev_foreground);
-        slint::Timer::single_shot(std::time::Duration::from_millis(50), move || {
-            apply_overlay_styles(tooltip_hwnd);
-            restore_focus_if_stolen(tooltip_hwnd, prev_foreground);
-        });
+        let restore =
+            prev_foreground.map_or(ForegroundPolicy::Keep, ForegroundPolicy::RestoreIfStolen);
+        overlay::after_show(tooltip_hwnd, true, restore, restore);
     }
-}
-
-/// winit show 的激活若已把前台变成 tooltip，把前台还给显示前的窗口。
-/// 仅在前台确实是 tooltip 时动作，不覆盖用户主动的窗口切换
-fn restore_focus_if_stolen(tooltip_hwnd: isize, prev_foreground: Option<isize>) {
-    let Some(prev) = prev_foreground else {
-        return;
-    };
-    if ActiveAppResolver::current_foreground_hwnd() == Some(tooltip_hwnd) {
-        let _ = ActiveAppResolver::restore_foreground_window(prev);
-    }
-}
-
-/// 浮层样式：工具窗 + 不抢焦点 + 点击穿透 + 置顶不激活（幂等，可重复调用）
-fn apply_overlay_styles(hwnd: isize) {
-    win32_ext::apply_overlay_style(hwnd);
-    let _ = window_control::set_window_click_through(hwnd);
-    window_control::set_window_topmost_no_activate(hwnd);
 }
 
 /// 定位与翻转（对齐 TooltipWindow::resolve_clamped_position：

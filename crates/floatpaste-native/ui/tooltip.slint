@@ -25,6 +25,16 @@ export component TooltipWindow inherits Window {
     in-out property <string> source-app;
     in-out property <string> time-text;
 
+    // ── 卡片固定几何：Rust 定窗口尺寸时读取（单一事实来源，禁双边手抄）──
+    // 横向：内容宽之外的总占用 = 左右 padding + 1px 边框×2
+    out property <length> card-inset-h: 2 * Metrics.space-3 + 2px;
+    // 元信息行的组成原子（分隔线 1px + 行上间距 + 徽章高）
+    out property <length> meta-gap: 5px;
+    out property <length> meta-badge-height: 18px;
+    // 纵向：内容高之外的总占用 = 上下 padding + 分隔线 + 元信息行 + 边框×2
+    out property <length> card-chrome-v:
+        2 * Metrics.space-2 + 1px + meta-gap + meta-badge-height + 2px;
+
     // 排版度量标尺：Rust 据此设置窗口高度——度量与渲染同引擎，
     // 与内容 Text（13px + word-wrap）完全一致，窗口不会过矮裁掉尾部行
     callback measure-text(string, length) -> length;
@@ -86,7 +96,7 @@ export component TooltipWindow inherits Window {
                 horizontal-stretch: 1;
             }
 
-            // 元信息行上方分隔线（对齐原版 border-top + margin/padding 6px）
+            // 元信息行上方分隔线（对齐原版 border-top + margin/padding）
             Rectangle {
                 height: 1px;
                 background: Theme.border-muted;
@@ -94,7 +104,7 @@ export component TooltipWindow inherits Window {
 
             // ── 元信息行 ──
             HorizontalLayout {
-                padding-top: 5px;
+                padding-top: root.meta-gap;
                 spacing: Metrics.space-1_5;
                 alignment: start;
 
@@ -104,7 +114,7 @@ export component TooltipWindow inherits Window {
                     horizontal-stretch: 1;
 
                     for badge in root.badges: Rectangle {
-                        height: 18px;
+                        height: root.meta-badge-height;
                         border-radius: Metrics.radius-sm;
                         background: badge.kind == 0 ? Theme.canvas-inset : transparent;
                         HorizontalLayout {
@@ -159,7 +169,7 @@ export component TooltipWindow inherits Window {
         }
 
         // 内容高度标尺：与内容 Text 同文本/字号/换行、同宽度（卡片内宽
-        // = 卡片宽 − 左右 12 padding − 左右 1 border），高度绑定到内容 Text
+        // = 卡片宽 − card-inset-h），高度绑定到内容 Text
         content-ruler := Text {
             opacity: 0;
             x: 0;
@@ -167,7 +177,7 @@ export component TooltipWindow inherits Window {
             text: root.content-text;
             font-size: Metrics.text-body;
             wrap: word-wrap;
-            width: parent.width - 26px;
+            width: parent.width - root.card-inset-h;
         }
     }
 }

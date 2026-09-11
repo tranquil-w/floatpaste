@@ -25,19 +25,15 @@ use floatpaste_core::state::CoreState;
 use floatpaste_core::theme;
 
 use crate::app_state::{SharedState, TargetSession};
+use crate::overlay::{self, ForegroundPolicy};
 use crate::paste_flow;
 use crate::theme_bridge;
 use crate::tooltip;
 use crate::win32_ext;
-use crate::{ClipRow, QuickPasteWindow, TooltipWindow};
+use crate::{ClipRow, PanelGeometry, QuickPasteWindow, TooltipWindow};
 
 /// 预览最多显示行数（对齐原版 line-clamp-4）
 const PREVIEW_MAX_LINES: usize = 4;
-/// 预览裁排与标尺度量的固定字重：选中态行内 Text 在 500↔600 间切换，
-/// 若按当前字重裁排，加粗变宽可能多折一行把整行撑高。统一按重字重
-/// 600 裁排与度量（标尺同步固定 600），两态共用同一串、同一行高，
-/// 选中只切换观感字重
-const PREVIEW_MEASURE_WEIGHT: i32 = 600;
 /// 入库预览的字符截断上限（normalize_service 同值）：达到即认为原文更长
 const PREVIEW_SOURCE_LIMIT: usize = 120;
 
@@ -116,7 +112,6 @@ pub fn activate(app: &App) {
     );
 
     apply_window_position(app, &settings, session.target_window_hwnd);
-    let target_for_session = session.target_window_hwnd;
 
     // 主题随设置刷新（设置可能在后台被改变）
     let resolved = theme::resolve_theme(settings.theme_mode.clone(), theme::system_prefers_dark());
@@ -127,38 +122,18 @@ pub fn activate(app: &App) {
 
     begin_input_session(app, hwnd, settings.picker_digit_shortcuts_enabled);
 
-    // 显示（无激活 + 置顶，对齐原版 always_on_top），再把前台还给目标窗口。
-    // winit 在事件循环内会异步重置窗口样式（覆盖 TOOLWINDOW/NOACTIVATE 等），
-    // 所以每次显示后要延迟重应用浮层样式与置顶
+    // 显示（无激活 + 置顶，对齐原版 always_on_top）。winit show 的异步
+    // 样式重置与前台抢占统一交 overlay 公共层处理：立即重挂浮层样式并
+    // 把前台还给目标窗口，50ms 后兜底复查（winit 的激活若晚于归还落地，
+    // 兜底会把前台请回来）
     let _ = win.window().show();
-    // winit show 会按自身窗口参数重排扩展样式，剥掉 TOOLWINDOW/NOACTIVATE；
-    // 任务栏按钮判定发生在显示瞬间，一旦生成不会因事后补挂样式而撤销，
-    // 必须紧跟 show 立即重挂（50ms 定时器只作兜底，等不起）
-    win32_ext::apply_overlay_style(hwnd);
-    // winit 的样式重置同样会带回 WS_SYSMENU：无边框窗的非客户区虽被
-    // WM_NCCALCSIZE 吃掉，但显示瞬间 DWM 按含标题栏的窗口绘制一帧
-    // 非客户区，右上角会闪过原生关闭按钮——每次显示后立即重摘
-    let _ = window_control::remove_window_system_menu(hwnd);
-    window_control::set_window_topmost_no_activate(hwnd);
-    // 归还前台只用 SetForegroundWindow：Windows 会自动恢复目标窗口内的
-    // 焦点子窗口。带 AttachThreadInput + SetFocus 的精确恢复在面板激活
-    // 竞争下会把前台搞悬空（GetForegroundWindow()==0，表现为原窗口失焦）
-    // winit show 的激活若异步落地，会晚于下方的归还把前台拉回面板：
-    // 延迟重挂样式时一并检查，前台仍被面板占着就把目标窗口请回来
-    let focus_target_for_timer = session.target_window_hwnd;
-    slint::Timer::single_shot(std::time::Duration::from_millis(50), move || {
-        crate::win32_ext::apply_overlay_style(hwnd);
-        let _ = window_control::remove_window_system_menu(hwnd);
-        window_control::set_window_topmost_no_activate(hwnd);
-        if ActiveAppResolver::current_foreground_hwnd() == Some(hwnd) {
-            if let Some(target_hwnd) = focus_target_for_timer {
-                let _ = ActiveAppResolver::restore_foreground_window(target_hwnd);
-            }
-        }
-    });
-    if let Some(target_hwnd) = target_for_session {
-        let _ = ActiveAppResolver::restore_foreground_window(target_hwnd);
-    }
+    let immediate = session
+        .target_window_hwnd
+        .map_or(ForegroundPolicy::Keep, ForegroundPolicy::Restore);
+    let deferred = session
+        .target_window_hwnd
+        .map_or(ForegroundPolicy::Keep, ForegroundPolicy::RestoreIfStolen);
+    overlay::after_show(hwnd, false, immediate, deferred);
 
     // 会话开始：刷新列表、选中归零、滚回顶部、清空消息
     refresh_list_reset(app, &settings);
@@ -374,64 +349,68 @@ thread_local! {
     static LIST_VERSION: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
-/// 首帧兜底宽度：列表标尺尚未上报实测宽（preview-width-* 为 0）时按
-/// 窗口宽估算：窗口宽 − 卡片边框/滚动槽/列表与行内边距/缩略图列。
-/// 实测值到位后 preview-widths-changed 会触发重裁修正
-fn preview_avail_width(panel_width: f32, has_thumb: bool) -> f32 {
-    let width = panel_width - 42.0 - if has_thumb { 82.0 } else { 0.0 };
-    width.max(40.0)
-}
+// 已知规模边界：行模型全量重建，且每行各带一把隐藏度量标尺；当前
+// picker_record_limit（9..=1000）内够用，若要放开上限需先做裁排结果
+// 缓存与模型 diff 更新，否则软件渲染与逐行度量会成为刷新瓶颈
 
 /// 预览单行排版高度（逻辑像素）：同一文本一行与两行的度量之差，
-/// 不依赖具体字体行框数值。与裁排同用重字重，预算才与度量一致
+/// 不依赖具体字体行框数值。度量走 measure-preview 标尺，与裁排同字重
 fn preview_line_height(win: &QuickPasteWindow) -> f32 {
-    let one = win.invoke_measure_preview("文本Ag".into(), 1000.0, PREVIEW_MEASURE_WEIGHT);
-    let two = win.invoke_measure_preview("文本Ag\n文本Ag".into(), 1000.0, PREVIEW_MEASURE_WEIGHT);
+    let one = win.invoke_measure_preview("文本Ag".into(), 1000.0);
+    let two = win.invoke_measure_preview("文本Ag\n文本Ag".into(), 1000.0);
     (two - one).max(1.0)
 }
 
-/// 用 Slint 排版引擎把预览裁到 PREVIEW_MAX_LINES 行。度量与渲染同引擎，
-/// 结果既不会溢出条目边界也不会提前截断（GDI 模拟两者皆不可保）：
+/// 用 Slint 排版引擎把预览裁到 max_lines 行的纯裁排核心。
+/// measure 返回候选串在给定宽度下的排版高度（逻辑像素），与窗口解耦
+/// 以便单元测试固定裁切语义：
 /// - 文本放得下且非截断源 → 原样返回（对齐 line-clamp 不溢出不加省略号）
 /// - 否则二分最大前缀使「前缀 + …」仍放得下预算行；截断源（原文更长）
 ///   即便恰好排满预算行也会补出省略号，截断无省略号会被感知为显示不全
-fn clamp_preview(
-    win: &QuickPasteWindow,
+fn clamp_preview_with(
+    measure: &mut dyn FnMut(&str, f32) -> f32,
     text: &str,
     avail_logical: f32,
-    weight: i32,
     source_truncated: bool,
     line_height: f32,
+    max_lines: usize,
 ) -> String {
     if text.is_empty() || avail_logical <= 0.0 {
         return text.to_string();
     }
-    let budget = PREVIEW_MAX_LINES as f32 * line_height;
-    let fits_with_ellipsis = |count: usize| -> bool {
+    let budget = max_lines as f32 * line_height;
+
+    fn fits_with_ellipsis(
+        measure: &mut dyn FnMut(&str, f32) -> f32,
+        text: &str,
+        count: usize,
+        avail_logical: f32,
+        budget: f32,
+    ) -> bool {
         let mut candidate: String = text.chars().take(count).collect();
         let trimmed = candidate.trim_end().len();
         candidate.truncate(trimmed);
         candidate.push('…');
-        win.invoke_measure_preview(candidate.into(), avail_logical, weight) <= budget + 0.5
-    };
+        measure(candidate.as_str(), avail_logical) <= budget + 0.5
+    }
 
-    let full_height = win.invoke_measure_preview(text.into(), avail_logical, weight);
+    let full_height = measure(text, avail_logical);
     if full_height <= budget + 0.5 && !source_truncated {
         return text.to_string();
     }
-    if fits_with_ellipsis(text.chars().count()) {
+    if fits_with_ellipsis(measure, text, text.chars().count(), avail_logical, budget) {
         let mut trimmed = text.trim_end().to_string();
         trimmed.push('…');
         return trimmed;
     }
-    if !fits_with_ellipsis(0) {
+    if !fits_with_ellipsis(measure, text, 0, avail_logical, budget) {
         return "…".into();
     }
     let mut lo = 0usize;
     let mut hi = text.chars().count();
     while hi - lo > 1 {
         let mid = (lo + hi) / 2;
-        if fits_with_ellipsis(mid) {
+        if fits_with_ellipsis(measure, text, mid, avail_logical, budget) {
             lo = mid;
         } else {
             hi = mid;
@@ -444,22 +423,47 @@ fn clamp_preview(
     candidate
 }
 
+/// 行内裁排：度量走 measure-preview 标尺（Slint 排版引擎，字重固定重字重
+/// ——见 picker.slint，选中两态共用同一串与同一行高）
+fn clamp_preview(
+    win: &QuickPasteWindow,
+    text: &str,
+    avail_logical: f32,
+    source_truncated: bool,
+    line_height: f32,
+) -> String {
+    clamp_preview_with(
+        &mut |candidate, width| win.invoke_measure_preview(candidate.into(), width),
+        text,
+        avail_logical,
+        source_truncated,
+        line_height,
+        PREVIEW_MAX_LINES,
+    )
+}
+
+/// 预览可用宽：以 slint 列表布局实测上报为准（单一事实来源）。
+/// 列表未实例化（首帧，preview-width-* 为 0）时按窗口宽兜底：窗口宽 −
+/// 卡片边框/滚动槽/列表与行内边距（常量读 PanelGeometry，与 slint 布局
+/// 同式）− 缩略图列。实测值到位后 preview-widths-changed 会触发重裁修正
+fn preview_avail_widths(win: &QuickPasteWindow) -> (f32, f32) {
+    let reported_no_thumb = win.get_preview_width_no_thumb();
+    if reported_no_thumb > 0.0 {
+        return (reported_no_thumb, win.get_preview_width_thumb());
+    }
+    let geo = win.global::<PanelGeometry>();
+    let chrome = 2.0 * geo.get_card_border() + geo.get_scroll_slot() + geo.get_preview_pad_h();
+    let thumb_column = geo.get_thumb_size() + geo.get_thumb_gap();
+    // window().size() 为物理像素；度量标尺与布局都以逻辑像素运作
+    let scale = win.window().scale_factor();
+    let panel_logical = win.window().size().width as f32 / scale;
+    let no_thumb = (panel_logical - chrome).max(40.0);
+    (no_thumb, (no_thumb - thumb_column).max(40.0))
+}
+
 fn build_rows(win: &QuickPasteWindow, items: &[ClipItemSummary]) {
     let digit_enabled = win.get_digit_shortcuts_enabled();
-    // 预览可用宽以 slint 列表布局实测上报为准（单一事实来源）；
-    // 列表未实例化（首帧）时退回窗口宽估算，上报后重裁修正
-    let reported_no_thumb = win.get_preview_width_no_thumb();
-    let (avail_no_thumb, avail_with_thumb) = if reported_no_thumb > 0.0 {
-        (reported_no_thumb, win.get_preview_width_thumb())
-    } else {
-        // window().size() 为物理像素；度量标尺与布局都以逻辑像素运作
-        let scale = win.window().scale_factor();
-        let panel_logical = win.window().size().width as f32 / scale;
-        (
-            preview_avail_width(panel_logical, false),
-            preview_avail_width(panel_logical, true),
-        )
-    };
+    let (avail_no_thumb, avail_with_thumb) = preview_avail_widths(win);
     let line_height = preview_line_height(win);
 
     let rows: Vec<ClipRow> = items
@@ -480,7 +484,6 @@ fn build_rows(win: &QuickPasteWindow, items: &[ClipItemSummary]) {
                 } else {
                     avail_no_thumb
                 },
-                PREVIEW_MEASURE_WEIGHT,
                 source_truncated,
                 line_height,
             );
@@ -748,4 +751,111 @@ pub fn clip_type_label(item: &ClipItemSummary) -> String {
 /// 粘贴完成后由 paste_flow 调用：刷新列表顺序（mark_used 改变活动排序）
 pub fn notify_pasted(app: &App) {
     refresh_list_changed(app);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{clamp_preview_with, clip_type_label};
+    use floatpaste_core::domain::clip_item::ClipItemSummary;
+
+    /// 确定性排版模型：每个字符（含省略号）占一格，每 CAPACITY 字符折一行，
+    /// 行高 LINE_HEIGHT。足以驱动裁排语义，不依赖真实字体
+    const CAPACITY: usize = 10;
+    const LINE_HEIGHT: f32 = 20.0;
+
+    fn fake_measure(text: &str, _width: f32) -> f32 {
+        let lines = text.chars().count().div_ceil(CAPACITY).max(1);
+        lines as f32 * LINE_HEIGHT
+    }
+
+    fn clamp(text: &str, max_lines: usize, source_truncated: bool) -> String {
+        let mut measure = fake_measure;
+        clamp_preview_with(
+            &mut measure,
+            text,
+            1000.0,
+            source_truncated,
+            LINE_HEIGHT,
+            max_lines,
+        )
+    }
+
+    fn item_of(kind: &str, file_count: i32, directory_count: i32) -> ClipItemSummary {
+        ClipItemSummary {
+            id: "id".into(),
+            r#type: kind.into(),
+            content_preview: String::new(),
+            source_app: None,
+            is_favorited: false,
+            file_count,
+            directory_count,
+            created_at: String::new(),
+            updated_at: String::new(),
+            last_used_at: None,
+            image_path: None,
+            image_width: None,
+            image_height: None,
+            image_format: None,
+            file_size: None,
+            tags: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn short_text_passes_through_without_ellipsis() {
+        let text = "放得下的短文本";
+        assert_eq!(clamp(text, 4, false), text);
+    }
+
+    #[test]
+    fn long_text_is_clamped_within_budget_with_ellipsis() {
+        let text = "a".repeat(CAPACITY * 10);
+        let result = clamp(&text, 4, false);
+        assert!(result.ends_with('…'));
+        assert!(fake_measure(&result, 1000.0) <= 4.0 * LINE_HEIGHT + 0.5);
+        // 二分取到最大可放前缀：补一个字符即超预算
+        let mut longer = result.trim_end_matches('…').to_string();
+        longer.push('a');
+        longer.push('…');
+        assert!(fake_measure(&longer, 1000.0) > 4.0 * LINE_HEIGHT + 0.5);
+    }
+
+    #[test]
+    fn truncated_source_adds_ellipsis_even_when_text_fits() {
+        let text = "放得下但源已截断";
+        let result = clamp(text, 4, true);
+        assert_eq!(result, format!("{text}…"));
+    }
+
+    #[test]
+    fn trailing_whitespace_is_trimmed_before_ellipsis() {
+        let text = "abc   ";
+        let result = clamp(text, 4, true);
+        assert_eq!(result, "abc…");
+    }
+
+    #[test]
+    fn budget_too_small_for_any_prefix_returns_bare_ellipsis() {
+        // 0 行预算：连「…」都放不下，走空串兜底返回裸省略号
+        let result = clamp("任意文本", 0, false);
+        assert_eq!(result, "…");
+    }
+
+    #[test]
+    fn empty_text_returns_empty() {
+        assert_eq!(clamp("", 4, false), "");
+    }
+
+    #[test]
+    fn clip_type_label_maps_kinds_and_file_composition() {
+        let label =
+            |kind: &str, files: i32, dirs: i32| clip_type_label(&item_of(kind, files, dirs));
+        assert_eq!(label("text", 0, 0), "文本");
+        assert_eq!(label("image", 0, 0), "图片");
+        assert_eq!(label("file", 0, 0), "文件");
+        assert_eq!(label("file", 3, 3), "文件夹");
+        assert_eq!(label("file", 3, 1), "文件/文件夹");
+        assert_eq!(label("file", 3, 0), "文件");
+        assert_eq!(label("unknown", 0, 0), "未知");
+    }
 }
