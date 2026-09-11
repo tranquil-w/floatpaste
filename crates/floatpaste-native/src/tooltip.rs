@@ -76,7 +76,13 @@ pub fn schedule(app: &App, index: usize, mouse_x: f32, mouse_y: f32) {
 }
 
 /// 条目内鼠标移动：重置 400ms 计时，到点后构建内容并显示
-pub fn schedule_with(app: &App, host: HoverHost, item: ClipItemSummary, mouse_x: f32, mouse_y: f32) {
+pub fn schedule_with(
+    app: &App,
+    host: HoverHost,
+    item: ClipItemSummary,
+    mouse_x: f32,
+    mouse_y: f32,
+) {
     let token = PENDING_TOKEN.with(|value| {
         value.set(value.get() + 1);
         value.get()

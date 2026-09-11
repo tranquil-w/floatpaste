@@ -12,9 +12,12 @@ import { ListScrollBar } from "picker.slint";
 
 export struct SearchRow {
     id: string,
-    // 非选中：入库预览（单行省略，换行已由 Rust 折为空格）；
-    // 选中：详情全文（Rust 已按 3 行预算裁排）
+    // 非选中形态：入库预览（单行省略，换行已由 Rust 折为空格）
     preview: string,
+    // 选中形态：详情全文（Rust 已按 break-words 语义折到 3 行预算内）。
+    // 两形态都随行模型携带，导航只更新受影响的行（滚动跟随依赖行
+    // 元素持续存活，重建模型会让 changed is-selected 失效）
+    selected-preview: string,
     kind: int, // 0=text 1=image 2=file
     source-app: string,
     time-text: string,
@@ -339,7 +342,7 @@ component SearchRowCard inherits Rectangle {
         width: root.col-w;
         height: root.col-height;
 
-            // 非选中：单行省略（旧版 truncate pr-1）
+            // 非选中：单行省略（旧版 truncate pr-1，常规字重）
             Text {
                 visible: !root.selected;
                 y: 0;
@@ -348,19 +351,27 @@ component SearchRowCard inherits Rectangle {
                 text: data.preview;
                 color: Theme.fg-default;
                 font-size: 15px;
-                font-weight: Metrics.weight-medium;
                 wrap: no-wrap;
                 overflow: elide;
                 vertical-alignment: center;
             }
 
-            // 选中：pre-wrap 3 行预算（Rust 裁排 + 标尺实测高）
+            // 非选中收藏星标（旧版 ★ 12px，悬挂在内容列右上）
+            if (data.favorited && !root.selected): Text {
+                x: root.col-w - 14px;
+                y: 3px;
+                text: "★";
+                color: Theme.favorite;
+                font-size: 12px;
+            }
+
+            // 选中：pre-wrap 3 行预算（Rust 硬折行 + 标尺实测高）
             Text {
                 visible: root.selected;
                 y: 0;
                 height: root.preview-h;
                 width: root.col-w - SearchGeometry.selected-preview-reserve;
-                text: data.preview;
+                text: data.selected-preview;
                 color: Theme.fg-default;
                 font-size: 15px;
                 font-weight: Metrics.weight-medium;
@@ -432,12 +443,12 @@ component SearchRowCard inherits Rectangle {
                 }
             }
 
-            // 选中态预览标尺：同文本/宽度/字号/字重实测 3 行排版高
+            // 选中态预览标尺：同文本/宽度/字号/字重实测排版高
             sel-ruler := Text {
                 opacity: 0;
                 x: 0;
                 y: 0;
-                text: data.preview;
+                text: data.selected-preview;
                 font-size: 15px;
                 font-weight: Metrics.weight-medium;
                 wrap: word-wrap;
@@ -467,7 +478,7 @@ component SearchRowCard inherits Rectangle {
             alignment: end;
 
             Rectangle {
-                height: 36px;
+                height: 32px; // p-0.5 + h-7 按钮
                 border-radius: Metrics.radius-md;
                 border-width: 1px;
                 border-color: Theme.border-subtle;
@@ -689,12 +700,12 @@ export component SearchWindow inherits Window {
     callback drag-moved();
     callback drag-finished();
     callback heights-changed();
-    // 排版度量标尺（选中预览 15px/medium，与 Rust 裁排同引擎）
-    callback measure-preview(string, length) -> length;
-    measure-preview(text, width) => {
-        ruler.text = text;
-        ruler.width = width;
-        ruler.height
+    // 自然宽度标尺（不换行排开所需宽）：Rust 硬折行（break-words 语义）
+    // 逐字符找行内最大前缀时使用
+    callback measure-natural-width(string) -> length;
+    measure-natural-width(text) => {
+        natural-ruler.text = text;
+        natural-ruler.preferred-width
     }
 
     // ── 预览可用宽（列表布局实测上报，Rust 只消费）──
@@ -781,8 +792,8 @@ export component SearchWindow inherits Window {
                     }
 
                     HorizontalLayout {
-                        padding-left: Metrics.space-3;
-                        padding-right: Metrics.space-3;
+                        padding-left: 16px; // px-4
+                        padding-right: 16px;
                         spacing: Metrics.space-3;
 
                         // 输入控件容器（flex-1 rounded-md px-2）
@@ -796,15 +807,16 @@ export component SearchWindow inherits Window {
                                 padding-right: Metrics.space-2;
                                 spacing: Metrics.space-2;
 
-                                // 放大镜（h-8 w-8 圆底座内 20px 图形）
+                                // 放大镜（h-8 w-8 底座内 h-5 w-5 图形居中，
+                                // 对齐旧版 svg：圆 r6.5@24viewbox → 20px 显示）
                                 Rectangle {
                                     width: 32px;
                                     height: 32px;
                                     Rectangle {
-                                        width: 11px;
-                                        height: 11px;
-                                        x: 5px;
-                                        y: 5px;
+                                        width: 10.8px;
+                                        height: 10.8px;
+                                        x: 10.6px;
+                                        y: 10.6px;
                                         border-radius: Metrics.radius-pill;
                                         border-width: 1.5px;
                                         border-color: Theme.fg-muted;
@@ -815,8 +827,8 @@ export component SearchWindow inherits Window {
                                         viewbox-width: 32;
                                         viewbox-height: 32;
                                         stroke: Theme.fg-muted;
-                                        stroke-width: 1.6px;
-                                        commands: "M 15 15 L 19.5 19.5";
+                                        stroke-width: 1.5px;
+                                        commands: "M 19.3 19.3 L 23.1 23.1";
                                     }
                                 }
 
@@ -837,6 +849,9 @@ export component SearchWindow inherits Window {
                                         }
                                     }
                                     if (root.keyword == ""): Text {
+                                        x: 0;
+                                        width: parent.width;
+                                        horizontal-alignment: left;
                                         text: root.input-suspended
                                             ? "键盘已交给速贴面板，按 Esc 返回" : "开始键入...";
                                         color: Theme.fg-subtle;
@@ -898,8 +913,8 @@ export component SearchWindow inherits Window {
                         background: Theme.danger-fg.with-alpha(0.2);
                     }
                     HorizontalLayout {
-                        padding-left: Metrics.space-3;
-                        padding-right: Metrics.space-3;
+                        padding-left: 20px; // px-5
+                        padding-right: 20px;
                         Text {
                             text: root.error-text;
                             color: Theme.danger-fg;
@@ -927,8 +942,8 @@ export component SearchWindow inherits Window {
                         height: parent.height;
                         interactive: true;
                         HorizontalLayout {
-                            padding-left: Metrics.space-3;
-                            padding-right: Metrics.space-3;
+                            padding-left: 16px; // px-4
+                            padding-right: 16px;
                             padding-top: Metrics.space-1_5;
                             padding-bottom: Metrics.space-1_5;
                             spacing: Metrics.space-1;
@@ -1206,15 +1221,14 @@ export component SearchWindow inherits Window {
         }
     }
 
-    // 排版度量标尺：与选中预览同排版参数（15px/medium）
-    ruler := Text {
+    // 自然宽度标尺：不换行，preferred-width 即整串排开所需宽度
+    natural-ruler := Text {
         opacity: 0;
         x: 0;
         y: 0;
-        width: 0px;
         text: "";
         font-size: 15px;
         font-weight: Metrics.weight-medium;
-        wrap: word-wrap;
+        wrap: no-wrap;
     }
 }

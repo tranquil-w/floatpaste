@@ -7,8 +7,8 @@
 //! - 尺寸/位置持久化与三种定位模式在 core::PickerPositionService。
 
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use tracing::{info, warn};
@@ -217,13 +217,18 @@ pub fn hide(app: &App, restore_target: bool) {
     }
 }
 
-/// 主快捷键命中：活跃则关闭并恢复目标，否则打开
+/// 主快捷键命中：活跃则关闭并恢复目标，否则打开。
+/// 搜索窗口活跃时先无还原收起（对齐旧版 toggle_picker_from_shortcut，
+/// 避免两窗口争抢焦点导致闪烁）
 pub fn toggle(app: &App) {
     if app.state.is_picker_active() {
         hide(app, true);
-    } else {
-        activate(app);
+        return;
     }
+    if app.state.is_search_active() {
+        search::hide(app, false);
+    }
+    activate(app);
 }
 
 fn begin_input_session(app: &App, hwnd: isize, digit_shortcuts_enabled: bool) {

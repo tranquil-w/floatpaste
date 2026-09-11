@@ -18,7 +18,9 @@ thread_local! {
 
 /// 读取缓存的缩略图（未解码/失败返回 None）
 pub fn cached(id: &str) -> Option<slint::Image> {
-    CACHE.with(|cache| cache.borrow().get(id).cloned()).flatten()
+    CACHE
+        .with(|cache| cache.borrow().get(id).cloned())
+        .flatten()
 }
 
 /// 是否已在缓存中（含失败哨兵）

@@ -220,7 +220,10 @@ fn main() {
             }
         }
         if let Err(error) = hotkey::register_hotkeys(
-            hotkeys.into_iter().map(|(id, spec, _)| (id, spec)).collect(),
+            hotkeys
+                .into_iter()
+                .map(|(id, spec, _)| (id, spec))
+                .collect(),
             move |id| {
                 tracing::info!("命中全局快捷键 id={id}");
                 let app = app_for_hotkey.clone();
