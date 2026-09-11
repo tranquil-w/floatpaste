@@ -77,7 +77,11 @@ pub fn after_show_focusable(hwnd: isize) {
 
 /// 显示后立即重挂浮层样式并执行前台策略，50ms 后兜底重挂一次
 /// （winit 样式重置的落地时间不定，兜底等不起但也不可省）。
-/// click_through 供点击穿透的 tooltip 使用，面板传 false
+/// click_through 供点击穿透的 tooltip 使用，面板传 false。
+///
+/// 顺序约束：immediate 前台策略必须先于置顶执行——归还前台是
+/// SetForegroundWindow，会把目标窗口提到其 Z 序带顶部；宿主也是置顶
+/// 窗口时（搜索窗口），若先置顶 tooltip 再归还，宿主会盖住 tooltip
 pub fn after_show(
     hwnd: isize,
     click_through: bool,
@@ -86,19 +90,19 @@ pub fn after_show(
 ) {
     win32_ext::apply_overlay_style(hwnd, true);
     let _ = window_control::remove_window_system_menu(hwnd);
-    window_control::set_window_topmost_no_activate(hwnd);
     if click_through {
         let _ = window_control::set_window_click_through(hwnd);
     }
     apply_policy(hwnd, &immediate);
+    window_control::set_window_topmost_no_activate(hwnd);
 
     slint::Timer::single_shot(Duration::from_millis(50), move || {
         win32_ext::apply_overlay_style(hwnd, true);
         let _ = window_control::remove_window_system_menu(hwnd);
-        window_control::set_window_topmost_no_activate(hwnd);
         if click_through {
             let _ = window_control::set_window_click_through(hwnd);
         }
+        window_control::set_window_topmost_no_activate(hwnd);
         apply_policy(hwnd, &deferred);
     });
 }

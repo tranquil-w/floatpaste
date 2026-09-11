@@ -297,12 +297,11 @@ component SearchRowCard inherits Rectangle {
 
     // ── 行主体（py-2.5 pl-3 pr-3 gap-3）──
     // 图标底座与右列均绝对定位（右列子元素全为绝对定位、无首选宽，
-    // 交给布局推断会得到错误的摆位），几何全部显式化
+    // 交给布局推断会得到错误的摆位），几何全部显式化。
+    // 图标列（图片缩略图或类型图标底座）恒占 thumb-size + gap 宽
     property <length> col-x: SearchGeometry.row-border-l + SearchGeometry.row-pad-h;
     property <length> col-w:
-        root.preview-width - (data.has-thumb
-            ? SearchGeometry.thumb-size + SearchGeometry.thumb-gap
-            : 0px);
+        root.preview-width - SearchGeometry.thumb-size - SearchGeometry.thumb-gap;
 
     if (data.has-thumb): Rectangle {
         x: SearchGeometry.row-border-l + SearchGeometry.row-pad-h;
@@ -337,7 +336,7 @@ component SearchRowCard inherits Rectangle {
 
     // ── 右列：预览 + 元信息 + 标签 + 大图（绝对定位纵排链）──
     Rectangle {
-        x: root.col-x + (data.has-thumb ? SearchGeometry.thumb-size + SearchGeometry.thumb-gap : 0px);
+        x: root.col-x + SearchGeometry.thumb-size + SearchGeometry.thumb-gap;
         y: 10px;
         width: root.col-w;
         height: root.col-height;
@@ -471,6 +470,10 @@ component SearchRowCard inherits Rectangle {
     Rectangle {
         visible: root.selected;
         clip: false;
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
         HorizontalLayout {
             width: parent.width;
             padding-right: 10px;
@@ -590,6 +593,10 @@ component SearchRowCard inherits Rectangle {
     Rectangle {
         visible: !root.selected && root.hovered;
         clip: false;
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
         HorizontalLayout {
             width: parent.width;
             padding-right: 10px;
@@ -805,7 +812,9 @@ export component SearchWindow inherits Window {
                             HorizontalLayout {
                                 padding-left: Metrics.space-2;
                                 padding-right: Metrics.space-2;
-                                spacing: Metrics.space-2;
+                                // 旧版 searchControl 无 gap：图标底座自带视觉
+                                // 留白，分隔线靠 mx-1 自带边距
+                                spacing: 0px;
 
                                 // 放大镜（h-8 w-8 底座内 h-5 w-5 图形居中，
                                 // 对齐旧版 svg：圆 r6.5@24viewbox → 20px 显示）
@@ -883,11 +892,18 @@ export component SearchWindow inherits Window {
                                     }
                                 }
 
-                                // 分隔线
+                                // 分隔线（旧版 searchFilterDivider mx-1 h-5：
+                                // 左右各 4px 由 9px 包裹容器模拟）
                                 Rectangle {
-                                    width: 1px;
+                                    width: 9px;
                                     height: 20px;
-                                    background: Theme.border-subtle;
+                                    Rectangle {
+                                        x: 4px;
+                                        y: 0;
+                                        width: 1px;
+                                        height: parent.height;
+                                        background: Theme.border-subtle;
+                                    }
                                 }
 
                                 // 条目计数（加载中隐藏）
@@ -975,9 +991,17 @@ export component SearchWindow inherits Window {
                                 clicked => { root.filter-selected(4); }
                             }
                             if (root.tag-chips.length > 0): Rectangle {
-                                width: 1px;
+                                // 旧版 filterRowDivider mx-1 h-4：左右各 4px
+                                // 由 9px 包裹容器模拟
+                                width: 9px;
                                 height: 16px;
-                                background: Theme.border-subtle;
+                                Rectangle {
+                                    x: 4px;
+                                    y: 0;
+                                    width: 1px;
+                                    height: parent.height;
+                                    background: Theme.border-subtle;
+                                }
                             }
                             for tag[i] in root.tag-chips: TagChip {
                                 label: tag.name;
@@ -1003,12 +1027,13 @@ export component SearchWindow inherits Window {
 
                         function report-preview-widths() {
                             // 列表内容宽（扣双层包裹 padding）→ 行基础预览宽
-                            //（扣行左强调边 2px + 左右 12px 内边距）
+                            //（扣行左强调边 2px + 左右 12px 内边距 + 图标列
+                            // 36px + 列间距 12px；图标列对缩略图/类型图标恒占位）
                             root.preview-width-no-thumb =
                                 self.width - 2 * SearchGeometry.content-pad-h
-                                - SearchGeometry.row-border-l - 2 * SearchGeometry.row-pad-h;
-                            root.preview-width-thumb = root.preview-width-no-thumb
+                                - SearchGeometry.row-border-l - 2 * SearchGeometry.row-pad-h
                                 - SearchGeometry.thumb-size - SearchGeometry.thumb-gap;
+                            root.preview-width-thumb = root.preview-width-no-thumb;
                         }
                         init => { self.report-preview-widths(); }
                         changed width => { self.report-preview-widths(); }
@@ -1130,9 +1155,7 @@ export component SearchWindow inherits Window {
                                 for row[i] in root.rows: SearchRowCard {
                                     data: row;
                                     selected: i == root.selected;
-                                    preview-width: row.has-thumb
-                                        ? root.preview-width-thumb
-                                        : root.preview-width-no-thumb;
+                                    preview-width: root.preview-width-no-thumb;
                                     delete-armed: root.delete-armed;
                                     clicked => { root.row-clicked(i); }
                                     double-clicked => { root.row-double-clicked(i); }

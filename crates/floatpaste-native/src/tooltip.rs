@@ -249,14 +249,17 @@ fn render(
         .set_position(slint::PhysicalPosition::new(position.0, position.1));
 
     // ── 显示（点击穿透 + 置顶不激活 + 前台若被抢则归还）──
-    // winit show 的异步样式重置与前台抢占统一交 overlay 公共层处理
+    // winit show 的异步样式重置与前台抢占统一交 overlay 公共层处理。
+    // 归还只在 immediate 执行一次（after_show 保证先归还后置顶，tooltip
+    // 不会被宿主压住）；deferred 保持 Keep——兜底若再归还，SetForeground
+    // 会把同为置顶的宿主提到 tooltip 之上
     let prev_foreground = ActiveAppResolver::current_foreground_hwnd();
     let _ = win.window().show();
     let tooltip_hwnd = app.state.tooltip_hwnd.load(Ordering::SeqCst);
     if tooltip_hwnd != 0 {
         let restore =
             prev_foreground.map_or(ForegroundPolicy::Keep, ForegroundPolicy::RestoreIfStolen);
-        overlay::after_show(tooltip_hwnd, true, restore, restore);
+        overlay::after_show(tooltip_hwnd, true, restore, ForegroundPolicy::Keep);
     }
 }
 

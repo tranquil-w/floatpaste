@@ -735,29 +735,24 @@ fn update_selected_row(app: &App) {
 
 /// 行构建上下文：一次测量，多行复用
 struct RowCtx {
-    base_no_thumb: f32,
-    base_with_thumb: f32,
+    base: f32,
     reserve: f32,
 }
 
 fn row_ctx(win: &SearchWindow) -> RowCtx {
-    let (base_no_thumb, base_with_thumb) = preview_base_widths(win);
+    let base = preview_base_widths(win);
     let reserve = win
         .global::<SearchGeometry>()
         .get_selected_preview_reserve();
-    RowCtx {
-        base_no_thumb,
-        base_with_thumb,
-        reserve,
-    }
+    RowCtx { base, reserve }
 }
 
-/// 行基础预览宽（逻辑像素）：列表布局实测上报为准；首帧未上报时按窗口
-/// 几何常量兜底（与 slint 布局同式）
-fn preview_base_widths(win: &SearchWindow) -> (f32, f32) {
+/// 行基础预览宽（逻辑像素，图标列恒占位已扣除）：列表布局实测上报为准；
+/// 首帧未上报时按窗口几何常量兜底（与 slint 布局同式）
+fn preview_base_widths(win: &SearchWindow) -> f32 {
     let reported = win.get_preview_width_no_thumb();
     if reported > 0.0 {
-        return (reported, win.get_preview_width_thumb());
+        return reported;
     }
     let geo = win.global::<SearchGeometry>();
     let scale = win.window().scale_factor();
@@ -766,10 +761,10 @@ fn preview_base_widths(win: &SearchWindow) -> (f32, f32) {
         - geo.get_scroll_slot()
         - 2.0 * geo.get_content_pad_h()
         - geo.get_row_border_l()
-        - 2.0 * geo.get_row_pad_h();
-    let base = base.max(40.0);
-    let thumb_column = geo.get_thumb_size() + geo.get_thumb_gap();
-    (base, (base - thumb_column).max(40.0))
+        - 2.0 * geo.get_row_pad_h()
+        - geo.get_thumb_size()
+        - geo.get_thumb_gap();
+    base.max(40.0)
 }
 
 /// 单行数据构建。selected=true 时携带选中形态：文本条目取详情全文按
@@ -779,11 +774,7 @@ fn make_row(win: &SearchWindow, ctx: &RowCtx, item: &ClipItemSummary, selected: 
     let is_selected_row = selected && selected_id.as_deref() == Some(item.id.as_str());
     let thumb = thumbnails::cached(&item.id);
     let has_thumb = thumb.is_some();
-    let base_width = if has_thumb {
-        ctx.base_with_thumb
-    } else {
-        ctx.base_no_thumb
-    };
+    let base_width = ctx.base;
     let normal_preview = flatten_preview_newlines(&item.content_preview);
 
     // 选中形态预览：文本条目换详情全文（对齐 detailQuery.data.fullText），
