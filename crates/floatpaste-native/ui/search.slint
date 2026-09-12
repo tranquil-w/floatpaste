@@ -62,6 +62,8 @@ export global SearchGeometry {
 }
 
 // ── 1.8px 线性图标路径（viewbox 24，路径与旧版 svg 同源）──
+// Slint 只按视框缩放几何、不缩放 stroke-width：1.8@24 在 18px 下
+// 等效 1.35px，必须显式折算，否则笔画比旧版（浏览器）粗一半且发糊
 component GlyphPath inherits Path {
     in property <color> glyph-color;
     width: 18px;
@@ -69,7 +71,7 @@ component GlyphPath inherits Path {
     viewbox-width: 24;
     viewbox-height: 24;
     stroke: root.glyph-color;
-    stroke-width: 1.8px;
+    stroke-width: 1.35px;
     fill: transparent;
 }
 
@@ -106,8 +108,8 @@ component Kbd inherits Rectangle {
     border-color: Theme.border-subtle;
     background: Theme.canvas-default;
     HorizontalLayout {
-        padding-left: 3px;
-        padding-right: 3px;
+        padding-left: 4px;
+        padding-right: 4px;
         // Consolas 无降部字形墨迹中心比行盒中心高约 3px：顶部内边距
         // 把文本区整体下移，墨迹即与盒中心及右侧文案对齐
         padding-top: 4px;
@@ -117,6 +119,9 @@ component Kbd inherits Rectangle {
             font-size: 10px;
             font-family: "Consolas";
             vertical-alignment: center;
+            // Slint 量出的文本宽与实际墨迹宽有出入且默认左对齐，
+            // 居中后框内左右留白才对称（旧版 px-1 两侧各 4px）
+            horizontal-alignment: center;
         }
     }
 }
@@ -199,24 +204,24 @@ component TypeGlyph inherits Rectangle {
     height: 18px;
 
     if (root.kind == 0): Rectangle {
-        // 文本：三横线（M5 6.25h14 M5 11h11 M5 15.75h14）
-        x: 3.75px; y: 4.6px; width: 10.5px; height: 1.4px; background: root.glyph-color;
+        // 文本：三横线（M5 6.25h14 M5 11h11 M5 15.75h14，×0.75 后线心 4.69/8.25/11.81）
+        x: 3.75px; y: 4px; width: 10.5px; height: 1.4px; background: root.glyph-color;
     }
     if (root.kind == 0): Rectangle {
-        x: 3.75px; y: 8.3px; width: 8.25px; height: 1.4px; background: root.glyph-color;
+        x: 3.75px; y: 7.55px; width: 8.25px; height: 1.4px; background: root.glyph-color;
     }
     if (root.kind == 0): Rectangle {
-        x: 3.75px; y: 12px; width: 10.5px; height: 1.4px; background: root.glyph-color;
+        x: 3.75px; y: 11.1px; width: 10.5px; height: 1.4px; background: root.glyph-color;
     }
 
     if (root.kind == 1): GlyphPath {
         glyph-color: root.glyph-color;
-        // 相框 + 双山（旧版 image svg 的 M/L 路径）
-        commands: "M 3 5 L 21 5 L 21 19 L 3 19 Z M 5 16 L 9.2 11.8 L 15 15.5 M 13 13 L 14.7 11.3 L 21 15.5";
+        // 相框（rx2.5 圆角）+ 双山（与旧版 image svg 同源，含山尖圆弧）
+        commands: "M 5.5 5 L 18.5 5 A 2.5 2.5 0 0 1 21 7.5 L 21 16.5 A 2.5 2.5 0 0 1 18.5 19 L 5.5 19 A 2.5 2.5 0 0 1 3 16.5 L 3 7.5 A 2.5 2.5 0 0 1 5.5 5 Z M 5 16 L 9.2 11.8 A 1.5 1.5 0 0 1 11.3 11.8 L 15 15.5 M 13 13 L 14.7 11.3 A 1.5 1.5 0 0 1 16.8 11.3 L 21 15.5";
     }
     if (root.kind == 1): Rectangle {
-        // 太阳点（旧版 circle r=1.2）
-        x: 7.8px; y: 8.3px; width: 2.4px; height: 2.4px;
+        // 太阳点（旧版 circle cx9 cy9.5 r1.2，×0.75 → 圆心 6.75,7.125 r0.9）
+        x: 5.85px; y: 6.23px; width: 1.8px; height: 1.8px;
         border-radius: Metrics.radius-pill;
         background: root.glyph-color;
     }
@@ -527,8 +532,8 @@ component SearchRowCard inherits Rectangle {
                             viewbox-width: 24;
                             viewbox-height: 24;
                             stroke: paste-btn.icon-color;
-                            stroke-width: 1.8px;
-                            commands: "M 9.75 4.75 L 14.25 4.75 L 14.25 6 L 9.75 6 Z M 5 8.75 L 19 8.75 L 19 21 L 5 21 Z M 9 11 L 15 11 M 9 15 L 15 15";
+                            stroke-width: 1.2px;
+                            commands: "M 9.75 3 L 14.25 3 A 1.75 1.75 0 0 1 16 4.75 L 16 6 L 8 6 L 8 4.75 A 1.75 1.75 0 0 1 9.75 3 Z M 7.75 6 L 16.25 6 A 2.75 2.75 0 0 1 19 8.75 L 19 18.25 A 2.75 2.75 0 0 1 16.25 21 L 7.75 21 A 2.75 2.75 0 0 1 5 18.25 L 5 8.75 A 2.75 2.75 0 0 1 7.75 6 Z M 9 11 L 15 11 M 9 15 L 15 15";
                         }
                     }
                     if (data.kind == 1): IconButton {
@@ -540,7 +545,7 @@ component SearchRowCard inherits Rectangle {
                             viewbox-width: 24;
                             viewbox-height: 24;
                             stroke: Theme.fg-default;
-                            stroke-width: 1.8px;
+                            stroke-width: 1.2px;
                             commands: "M 4 7 L 4 4 L 20 4 L 20 7 M 9 20 L 15 20 M 12 4 L 12 20";
                         }
                     }
@@ -553,8 +558,8 @@ component SearchRowCard inherits Rectangle {
                             viewbox-width: 24;
                             viewbox-height: 24;
                             stroke: Theme.fg-default;
-                            stroke-width: 1.8px;
-                            commands: "M 4.75 19.25 L 8.25 19.25 L 18.5 9 L 15 5.5 L 4.75 15.75 L 4.75 19.25 Z M 13.75 6.75 L 17.25 10.25";
+                            stroke-width: 1.2px;
+                            commands: "M 4.75 19.25 L 8.25 19.25 L 18.5 9 L 15 5.5 L 4.75 15.75 L 4.75 19.25 Z M 13.75 6.75 L 17.25 10.25 M 4.75 19.25 L 8 19.2";
                         }
                     }
                     fav-btn := IconButton {
@@ -566,7 +571,7 @@ component SearchRowCard inherits Rectangle {
                             viewbox-width: 24;
                             viewbox-height: 24;
                             stroke: fav-btn.icon-color;
-                            stroke-width: 1.8px;
+                            stroke-width: 1.2px;
                             fill: data.favorited ? Theme.favorite : transparent;
                             commands: "M 12 3.85 L 14.55 9.02 L 20.26 9.85 L 16.13 13.88 L 17.11 19.57 L 12 16.89 L 6.89 19.57 L 7.87 13.88 L 3.74 9.85 L 9.45 9.02 Z";
                         }
@@ -592,7 +597,7 @@ component SearchRowCard inherits Rectangle {
                             viewbox-width: 24;
                             viewbox-height: 24;
                             stroke: del-btn.icon-color;
-                            stroke-width: 1.8px;
+                            stroke-width: 1.2px;
                             commands: "M 4 7 L 20 7 M 9.5 4.75 L 14.5 4.75 L 14.5 7 L 9.5 7 Z M 6.5 7 L 7.3 19.25 L 16.7 19.25 L 17.5 7 M 10 10.5 L 10 16.5 M 14 10.5 L 14 16.5";
                         }
                     }
@@ -616,6 +621,9 @@ component SearchRowCard inherits Rectangle {
             alignment: end;
 
             Rectangle {
+                // 旧版 h-7 px-2 gap-1：28×58 = 左8 + 图标14 + 间隔4 + 文案24 + 右8。
+                // 此结构下布局首选宽会被压小，必须显式定宽并逐项定位
+                width: 58px;
                 height: 28px;
                 border-radius: Metrics.radius-md;
                 border-width: 1px;
@@ -634,30 +642,32 @@ component SearchRowCard inherits Rectangle {
                         }
                     }
                 }
-                HorizontalLayout {
-                    padding-left: Metrics.space-2;
-                    padding-right: Metrics.space-2;
-                    spacing: 4px;
-                    // 布局交叉轴对固定高子元素顶对齐：包一层拉伸容器，
-                    // 图标走“默认 y = 居中”规则与文案垂直居中
-                    Rectangle {
-                        Path {
-                            width: 14px;
-                            height: 14px;
-                            viewbox-width: 24;
-                            viewbox-height: 24;
-                            stroke: Theme.fg-default;
-                            stroke-width: 1.8px;
-                            commands: "M 9.75 4.75 L 14.25 4.75 L 14.25 6 L 9.75 6 Z M 5 8.75 L 19 8.75 L 19 21 L 5 21 Z";
-                        }
+                // 图标：x=8（px-2），垂直居中；路径与旧版 svg 同源（圆角夹子+圆角盒身）
+                Rectangle {
+                    x: 8px;
+                    y: (parent.height - self.height) / 2;
+                    width: 14px;
+                    height: 14px;
+                    Path {
+                        width: 14px;
+                        height: 14px;
+                        viewbox-width: 24;
+                        viewbox-height: 24;
+                        stroke: Theme.fg-default;
+                        // 1.8 × 14/24：Slint 描边不随视框缩放，需按显示尺寸折算
+                        stroke-width: 1.05px;
+                        commands: "M 9.75 3 L 14.25 3 A 1.75 1.75 0 0 1 16 4.75 L 16 6 L 8 6 L 8 4.75 A 1.75 1.75 0 0 1 9.75 3 Z M 7.75 6 L 16.25 6 A 2.75 2.75 0 0 1 19 8.75 L 19 18.25 A 2.75 2.75 0 0 1 16.25 21 L 7.75 21 A 2.75 2.75 0 0 1 5 18.25 L 5 8.75 A 2.75 2.75 0 0 1 7.75 6 Z";
                     }
-                    Text {
-                        text: "粘贴";
-                        color: Theme.fg-default;
-                        font-size: Metrics.text-xs;
-                        font-weight: Metrics.weight-medium;
-                        vertical-alignment: center;
-                    }
+                }
+                Text {
+                    x: 26px;
+                    width: 26px;
+                    height: parent.height;
+                    text: "粘贴";
+                    color: Theme.fg-default;
+                    font-size: Metrics.text-xs;
+                    font-weight: Metrics.weight-medium;
+                    vertical-alignment: center;
                 }
             }
         }
@@ -906,15 +916,15 @@ export component SearchWindow inherits Window {
                                             }
                                         }
                                         Path {
-                                            width: 12px;
-                                            height: 12px;
+                                            width: 16px;
+                                            height: 16px;
                                             x: (parent.width - self.width) / 2;
                                             y: (parent.height - self.height) / 2;
-                                            viewbox-width: 12;
-                                            viewbox-height: 12;
+                                            viewbox-width: 24;
+                                            viewbox-height: 24;
                                             stroke: Theme.fg-subtle;
-                                            stroke-width: 1.6px;
-                                            commands: "M 1 1 L 11 11 M 1 11 L 11 1";
+                                            stroke-width: 1.2px;
+                                            commands: "M 6 6 L 18 18 M 18 6 L 6 18";
                                         }
                                     }
                                 }
