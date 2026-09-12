@@ -885,7 +885,10 @@ export component SearchWindow inherits Window {
                                             }
                                         }
                                     }
-                                    if (root.keyword == ""): Text {
+                                    // IME 组合期间 keyword 仍为空，但组合词已由
+                                    // TextInput 画在框内：等预编辑清空再显示占位符，
+                                    // 否则与组合词重叠（旧版浏览器组合开始即隐藏）
+                                    if (root.keyword == "" && search-input.preedit-text == ""): Text {
                                         x: 0;
                                         width: parent.width;
                                         horizontal-alignment: left;
