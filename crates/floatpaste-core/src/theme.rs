@@ -585,6 +585,11 @@ pub struct ThemeTokens {
 
     pub favorite: &'static str,
     pub shadow_color: [u8; 3],
+
+    /// 文本选区/IME 组合词高亮（旧版 ::selection：dark=canvas-default/
+    /// accent-hover，light=#ffffff/accent-emphasis）
+    pub selection_fg: String,
+    pub selection_bg: String,
 }
 
 /// 门禁常量：正文 AA+ 余量、组件边界非文本线
@@ -674,8 +679,8 @@ pub fn derive_tokens(preset_id: &str, theme_accent: &str, resolved: ResolvedThem
         fg_on_emphasis: fg_on_emphasis.to_string(),
 
         accent_fg: accent_fg.clone(),
-        accent_emphasis: emphasis,
-        accent_hover,
+        accent_emphasis: emphasis.clone(),
+        accent_hover: accent_hover.clone(),
         accent_subtle_rgb: hex_to_rgb_channels(&accent_fg),
         accent_subtle_alpha: subtle_alpha as f32,
 
@@ -704,6 +709,13 @@ pub fn derive_tokens(preset_id: &str, theme_accent: &str, resolved: ResolvedThem
         } else {
             [0, 0, 0]
         },
+
+        selection_fg: if is_light {
+            LIGHT_INK_ON_EMPHASIS.to_string()
+        } else {
+            scale.canvas.to_string()
+        },
+        selection_bg: if is_light { emphasis } else { accent_hover },
     }
 }
 

@@ -149,9 +149,11 @@ pub fn cancel(app: &App) {
     if let Some(win) = app.tooltip.upgrade() {
         let hwnd = app.state.tooltip_hwnd.load(Ordering::SeqCst);
         if hwnd != 0 {
+            // 只用 Win32 SW_HIDE：Slint hide 会翻转 winit 可见标志，
+            // 下次显示将退回 SW_SHOW 路径并激活窗口
             let _ = window_control::hide_window(hwnd);
-        }
-        if win.window().is_visible() {
+        } else if win.window().is_visible() {
+            // 装配失败降级路径：tooltip 由 Slint show 显示，需 Slint hide
             let _ = win.window().hide();
         }
     }
@@ -249,17 +251,33 @@ fn render(
         .set_position(slint::PhysicalPosition::new(position.0, position.1));
 
     // ── 显示（点击穿透 + 置顶不激活 + 前台若被抢则归还）──
-    // winit show 的异步样式重置与前台抢占统一交 overlay 公共层处理。
-    // 归还只在 immediate 执行一次（after_show 保证先归还后置顶，tooltip
-    // 不会被宿主压住）；deferred 保持 Keep——兜底若再归还，SetForeground
-    // 会把同为置顶的宿主提到 tooltip 之上
-    let prev_foreground = ActiveAppResolver::current_foreground_hwnd();
-    let _ = win.window().show();
+    // 不走 Slint show：winit 对二次 show 固定 SW_SHOW，无视 NOACTIVATE
+    // 激活窗口，打断宿主输入框焦点与 IME 组合。启动装配后 winit 可见
+    // 标志恒为真，这里直接复用速贴的无激活显示（SW_SHOWNOACTIVATE）；
+    // 样式重挂与置顶由 after_show 兜底。
+    // RestoreIfStolen 双保险：实测部分激活仍会穿透到达（时序在 show 与
+    // 兜底之间），归还后须把 tooltip 重新抬到置顶带顶部——宿主同为置顶，
+    // SetForegroundWindow 会把它提到 tooltip 之上盖住内容，两步均不激活
     let tooltip_hwnd = app.state.tooltip_hwnd.load(Ordering::SeqCst);
+    let prev_foreground = ActiveAppResolver::current_foreground_hwnd();
     if tooltip_hwnd != 0 {
+        win32_ext::apply_overlay_style(tooltip_hwnd, true);
+        let _ = window_control::remove_window_system_menu(tooltip_hwnd);
+        let _ = window_control::show_window_no_activate(tooltip_hwnd);
         let restore =
             prev_foreground.map_or(ForegroundPolicy::Keep, ForegroundPolicy::RestoreIfStolen);
         overlay::after_show(tooltip_hwnd, true, restore, ForegroundPolicy::Keep);
+        let host = host_hwnd;
+        slint::Timer::single_shot(std::time::Duration::from_millis(60), move || {
+            if ActiveAppResolver::current_foreground_hwnd() == Some(tooltip_hwnd)
+                && ActiveAppResolver::restore_foreground_window(host)
+            {
+                window_control::set_window_topmost_no_activate(tooltip_hwnd);
+            }
+        });
+    } else {
+        // 装配失败降级：裸 Slint show，可接受激活副作用
+        let _ = win.window().show();
     }
 }
 

@@ -60,6 +60,24 @@ pub fn silent_assemble_focusable<W: ComponentHandle>(win: &W) -> Option<isize> {
     Some(hwnd)
 }
 
+/// tooltip 启动装配：同 silent_assemble，但收起走 Win32 SW_HIDE 而非
+/// Slint hide。winit 对二次 show 固定 SW_SHOW（无视 WS_EX_NOACTIVATE，
+/// 激活窗口会打断宿主输入焦点与 IME 组合）；保持其可见标志恒为真、
+/// 显隐全部走 Win32（show_window_no_activate / hide_window），才能彻底
+/// 绕开 apply_diff 的 ShowWindow
+pub fn silent_assemble_win32_hidden<W: ComponentHandle>(win: &W, decorated: bool) -> Option<isize> {
+    let _ = win.window().show();
+    let hwnd = win32_ext::window_hwnd(win)?;
+    win32_ext::apply_overlay_style(hwnd, true);
+    if decorated {
+        win32_ext::apply_dwm_shadow(hwnd);
+        win32_ext::apply_dwm_rounded_corners(hwnd);
+    }
+    let _ = window_control::remove_window_system_menu(hwnd);
+    let _ = window_control::hide_window(hwnd);
+    Some(hwnd)
+}
+
 /// 搜索窗口显示后的样式兜底：重挂可激活 TOOLWINDOW 样式并保持置顶
 /// （不抢焦点、不还原前台——搜索窗本身就该是前台）。winit 显示后的
 /// 异步样式重置同样适用，50ms 后兜底重挂一次

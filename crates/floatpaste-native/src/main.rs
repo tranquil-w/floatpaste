@@ -149,7 +149,7 @@ fn main() {
             }
             None => tracing::error!("获取速贴窗口句柄失败，会话功能不可用"),
         }
-        if let Some(hwnd) = overlay::silent_assemble(&tooltip_win, false) {
+        if let Some(hwnd) = overlay::silent_assemble_win32_hidden(&tooltip_win, false) {
             app_for_init
                 .state
                 .tooltip_hwnd

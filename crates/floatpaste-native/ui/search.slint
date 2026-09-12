@@ -878,6 +878,10 @@ export component SearchWindow inherits Window {
                                             text <=> root.keyword;
                                             font-size: 17px;
                                             color: Theme.fg-default;
+                                            // 选区与 IME 组合词同用这对颜色：
+                                            // 缺省时走 Slint 硬编码蓝，与旧版 ::selection 不符
+                                            selection-foreground-color: Theme.selection-fg;
+                                            selection-background-color: Theme.selection-bg;
                                             single-line: true;
                                             enabled: !root.input-suspended;
                                             edited() => {

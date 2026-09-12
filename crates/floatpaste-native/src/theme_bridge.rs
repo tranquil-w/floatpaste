@@ -71,6 +71,8 @@ pub fn apply_theme(
     theme.set_done_subtle(rgba_color(tokens.done_subtle_rgb, tokens.done_subtle_alpha));
     theme.set_favorite(hex_color(tokens.favorite));
     theme.set_shadow_color(rgba_color(tokens.shadow_color, 1.0));
+    theme.set_selection_fg(hex_color(&tokens.selection_fg));
+    theme.set_selection_bg(hex_color(&tokens.selection_bg));
 
     if let Some(tooltip) = tooltip {
         let theme = tooltip.global::<Theme>();
@@ -123,5 +125,7 @@ pub fn apply_theme(
         theme.set_done_subtle(rgba_color(tokens.done_subtle_rgb, tokens.done_subtle_alpha));
         theme.set_favorite(hex_color(tokens.favorite));
         theme.set_shadow_color(rgba_color(tokens.shadow_color, 1.0));
+        theme.set_selection_fg(hex_color(&tokens.selection_fg));
+        theme.set_selection_bg(hex_color(&tokens.selection_bg));
     }
 }
