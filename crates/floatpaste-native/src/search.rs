@@ -747,13 +747,10 @@ fn row_ctx(win: &SearchWindow) -> RowCtx {
     RowCtx { base, reserve }
 }
 
-/// 行基础预览宽（逻辑像素，图标列恒占位已扣除）：列表布局实测上报为准；
-/// 首帧未上报时按窗口几何常量兜底（与 slint 布局同式）
+/// 行基础预览宽（逻辑像素，图标列恒占位已扣除）：按窗口几何常量推导。
+/// 不读 slint 上报值——首帧行构建可能早于窗口到位，读到陈旧小值会把
+/// 选中预览硬折成窄条（与 slint 侧 report-preview-widths 同式）
 fn preview_base_widths(win: &SearchWindow) -> f32 {
-    let reported = win.get_preview_width_no_thumb();
-    if reported > 0.0 {
-        return reported;
-    }
     let geo = win.global::<SearchGeometry>();
     let scale = win.window().scale_factor();
     let panel_logical = win.window().size().width as f32 / scale;

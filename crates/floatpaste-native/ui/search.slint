@@ -88,10 +88,9 @@ component IconButton inherits Rectangle {
             ? (root.danger-hover ? Theme.danger-subtle : Theme.canvas-subtle)
             : transparent);
 
-    HorizontalLayout {
-        alignment: center;
-        @children
-    }
+    // 图标直接作为 Rectangle 子元素走“默认 y = 居中”规则；若套布局，
+    // 固定高图标会被交叉轴顶对齐而整体偏高
+    @children
 
     btn-ta := TouchArea {
         clicked => { root.clicked(); }
@@ -109,6 +108,9 @@ component Kbd inherits Rectangle {
     HorizontalLayout {
         padding-left: 3px;
         padding-right: 3px;
+        // Consolas 无降部字形墨迹中心比行盒中心高约 3px：顶部内边距
+        // 把文本区整体下移，墨迹即与盒中心及右侧文案对齐
+        padding-top: 4px;
         Text {
             text: root.key;
             color: Theme.fg-muted;
@@ -123,7 +125,11 @@ component KeyHint inherits HorizontalLayout {
     in property <string> key;
     in property <string> label;
     spacing: 4px;
-    Kbd { key: root.key; }
+    // 布局交叉轴对固定高子元素是顶对齐：包一层拉伸容器，
+    // 让 Kbd 走“默认 y = 居中”规则与右侧文案垂直居中对齐
+    Rectangle {
+        Kbd { key: root.key; }
+    }
     Text {
         text: root.label;
         color: Theme.fg-muted;
@@ -300,8 +306,8 @@ component SearchRowCard inherits Rectangle {
     // 交给布局推断会得到错误的摆位），几何全部显式化。
     // 图标列（图片缩略图或类型图标底座）恒占 thumb-size + gap 宽
     property <length> col-x: SearchGeometry.row-border-l + SearchGeometry.row-pad-h;
-    property <length> col-w:
-        root.preview-width - SearchGeometry.thumb-size - SearchGeometry.thumb-gap;
+    // 上报的 preview-width 已扣除图标列，这里直接就是右列宽
+    property <length> col-w: root.preview-width;
 
     if (data.has-thumb): Rectangle {
         x: SearchGeometry.row-border-l + SearchGeometry.row-pad-h;
@@ -344,6 +350,7 @@ component SearchRowCard inherits Rectangle {
             // 非选中：单行省略（旧版 truncate pr-1，常规字重）
             Text {
                 visible: !root.selected;
+                x: 0;
                 y: 0;
                 height: 24px;
                 width: root.col-w - 4px;
@@ -365,8 +372,10 @@ component SearchRowCard inherits Rectangle {
             }
 
             // 选中：pre-wrap 3 行预算（Rust 硬折行 + 标尺实测高）
+            // 显式 x:0：Slint 默认 x 是“父内居中”，宽度小于父宽时会被静默居中
             Text {
                 visible: root.selected;
+                x: 0;
                 y: 0;
                 height: root.preview-h;
                 width: root.col-w - SearchGeometry.selected-preview-reserve;
@@ -380,6 +389,7 @@ component SearchRowCard inherits Rectangle {
 
             // 元信息行（mt-0.5 text-xs fg-subtle）
             Text {
+                x: 0;
                 y: root.meta-y;
                 height: root.meta-h;
                 width: root.col-w;
@@ -393,6 +403,7 @@ component SearchRowCard inherits Rectangle {
             // 标签行（mt-1，最多 3 个 + 溢出计数）
             Rectangle {
                 visible: root.tags-shown;
+                x: 0;
                 y: root.tags-y;
                 height: root.tags-h;
                 width: root.col-w;
@@ -427,6 +438,7 @@ component SearchRowCard inherits Rectangle {
             // 选中态大图预览（mt-1.5，max-h 120，contain）
             Rectangle {
                 visible: root.selected && data.has-large-preview;
+                x: 0;
                 y: root.large-y;
                 height: data.large-preview-height;
                 width: root.col-w;
@@ -626,14 +638,18 @@ component SearchRowCard inherits Rectangle {
                     padding-left: Metrics.space-2;
                     padding-right: Metrics.space-2;
                     spacing: 4px;
-                    Path {
-                        width: 14px;
-                        height: 14px;
-                        viewbox-width: 24;
-                        viewbox-height: 24;
-                        stroke: Theme.fg-default;
-                        stroke-width: 1.8px;
-                        commands: "M 9.75 4.75 L 14.25 4.75 L 14.25 6 L 9.75 6 Z M 5 8.75 L 19 8.75 L 19 21 L 5 21 Z";
+                    // 布局交叉轴对固定高子元素顶对齐：包一层拉伸容器，
+                    // 图标走“默认 y = 居中”规则与文案垂直居中
+                    Rectangle {
+                        Path {
+                            width: 14px;
+                            height: 14px;
+                            viewbox-width: 24;
+                            viewbox-height: 24;
+                            stroke: Theme.fg-default;
+                            stroke-width: 1.8px;
+                            commands: "M 9.75 4.75 L 14.25 4.75 L 14.25 6 L 9.75 6 Z M 5 8.75 L 19 8.75 L 19 21 L 5 21 Z";
+                        }
                     }
                     Text {
                         text: "粘贴";
@@ -801,6 +817,8 @@ export component SearchWindow inherits Window {
                     HorizontalLayout {
                         padding-left: 16px; // px-4
                         padding-right: 16px;
+                        padding-top: 12px; // py-3
+                        padding-bottom: 12px;
                         spacing: Metrics.space-3;
 
                         // 输入控件容器（flex-1 rounded-md px-2）
@@ -869,39 +887,48 @@ export component SearchWindow inherits Window {
                                     }
                                 }
 
-                                // 清除按钮（h-7 w-7）
+                                // 清除按钮（h-7 w-7）。布局交叉轴对固定高子元素
+                                // 是顶对齐：外层只定宽（交叉轴被拉伸），内层用
+                                // 显式 y 在控制区内垂直居中
                                 if (root.keyword != ""): Rectangle {
                                     width: 28px;
-                                    height: 28px;
-                                    border-radius: Metrics.radius-pill;
-                                    background: clear-ta.has-hover ? Theme.canvas-subtle : transparent;
-                                    clear-ta := TouchArea {
-                                        clicked => {
-                                            root.clear-keyword();
-                                            search-input.focus();
+                                    Rectangle {
+                                        x: 0;
+                                        y: (parent.height - self.height) / 2;
+                                        width: 28px;
+                                        height: 28px;
+                                        border-radius: Metrics.radius-pill;
+                                        background: clear-ta.has-hover ? Theme.canvas-subtle : transparent;
+                                        clear-ta := TouchArea {
+                                            clicked => {
+                                                root.clear-keyword();
+                                                search-input.focus();
+                                            }
                                         }
-                                    }
-                                    Path {
-                                        width: 12px;
-                                        height: 12px;
-                                        viewbox-width: 12;
-                                        viewbox-height: 12;
-                                        stroke: Theme.fg-subtle;
-                                        stroke-width: 1.6px;
-                                        commands: "M 1 1 L 11 11 M 1 11 L 11 1";
+                                        Path {
+                                            width: 12px;
+                                            height: 12px;
+                                            x: (parent.width - self.width) / 2;
+                                            y: (parent.height - self.height) / 2;
+                                            viewbox-width: 12;
+                                            viewbox-height: 12;
+                                            stroke: Theme.fg-subtle;
+                                            stroke-width: 1.6px;
+                                            commands: "M 1 1 L 11 11 M 1 11 L 11 1";
+                                        }
                                     }
                                 }
 
                                 // 分隔线（旧版 searchFilterDivider mx-1 h-5：
-                                // 左右各 4px 由 9px 包裹容器模拟）
+                                // 左右各 4px 由 9px 包裹容器模拟；线高 20px 在
+                                // 控制区内显式垂直居中）
                                 Rectangle {
                                     width: 9px;
-                                    height: 20px;
                                     Rectangle {
                                         x: 4px;
-                                        y: 0;
+                                        y: (parent.height - 20px) / 2;
                                         width: 1px;
-                                        height: parent.height;
+                                        height: 20px;
                                         background: Theme.border-subtle;
                                     }
                                 }
