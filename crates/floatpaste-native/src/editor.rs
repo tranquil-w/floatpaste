@@ -86,8 +86,20 @@ fn show_editor(app: &App, session: EditorSession) {
     reset_delete_arm(&win);
     // 显式定尺寸：窗口根布局的首选高被 stretch 子元素拉成极小，会被钳到
     // min（400×300），不能依赖 preferred（对齐旧版 inner_size(800,600)）
-    win.window().set_size(slint::LogicalSize::new(800.0, 600.0));
+    // 先以 +1px 打开、渲染一帧后再归位：hide→show 周期后 Slint 的脏区
+    // 跟踪只重绘变化区域（如焦点态），与上次帧相同的区域（背景/头部/
+    // 底栏）在 Windows 清屏后会永久露白；resize 迫使软件渲染器重建
+    // buffer 整帧重画。两次 set_size 必须隔开一帧，否则被 winit 合并
+    win.window()
+        .set_size(slint::LogicalSize::new(800.0, 601.0));
     let _ = win.window().show();
+    let editor_weak = app.editor.clone();
+    slint::Timer::single_shot(std::time::Duration::from_millis(16), move || {
+        if let Some(win) = editor_weak.upgrade() {
+            win.window()
+                .set_size(slint::LogicalSize::new(800.0, 600.0));
+        }
+    });
     // 首显可能走 SW_SHOWNOACTIVATE（winit 首窗语义），而从速贴打开时
     // 前台在回贴目标应用上——必须主动把前台请过来，否则 Esc/Ctrl+S
     // 落空（对齐旧版 window.set_focus()；不能复用带 TOPMOST 的
