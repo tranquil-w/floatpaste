@@ -300,10 +300,10 @@ export component EditorWindow inherits Window {
                     padding-top: 16px;
                     padding-bottom: 12px;
 
-                    // ── 头部：元信息 + 两段删除 ──
+                    // ── 头部：元信息 + 两段删除（无 alignment：文本
+                    // stretch 占满、删除按钮靠右，对齐旧版 justify-between）──
                     HorizontalLayout {
                         spacing: Metrics.space-3;
-                        alignment: start;
                         Text {
                             horizontal-stretch: 1;
                             wrap: word-wrap;
@@ -311,10 +311,10 @@ export component EditorWindow inherits Window {
                             vertical-alignment: center;
                             // 元信息：来源 · 时间 (+ 字数 / 尺寸 / 文件与大小)
                             text: root.is-text
-                                ? "{root.meta-source} · {root.meta-time} · {root.char-count} 字"
+                                ? "\{root.meta-source} · \{root.meta-time} · \{root.char-count} 字"
                                 : (root.meta-extra == ""
-                                    ? "{root.meta-source} · {root.meta-time}"
-                                    : "{root.meta-source} · {root.meta-time} · {root.meta-extra}");
+                                    ? "\{root.meta-source} · \{root.meta-time}"
+                                    : "\{root.meta-source} · \{root.meta-time} · \{root.meta-extra}");
                             color: Theme.fg-subtle;
                             font-size: Metrics.text-xs;
                         }
@@ -345,7 +345,6 @@ export component EditorWindow inherits Window {
                                     padding-left: 8px;
                                     padding-right: 8px;
                                     spacing: 6px;
-                                    alignment: start;
 
                                     for tag-name[i] in root.tags: Rectangle {
                                         height: 24px;
