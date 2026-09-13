@@ -98,6 +98,13 @@ export component EditorWindow inherits Window {
     // 实例化时执行，同窗口第二次打开不会再次触发）
     in-out property <int> session-seq: 0;
 
+    // 整帧重绘开关：重开路径中 hide→show 后 Slint 只重绘「变化了的区域」，
+    // 静态的窗口背景/头部/底栏保持表面销毁时的白底（尺寸变化实测不触发
+    // 整帧重建）。翻转此属性增删一层全窗口覆盖元素，强制全部区域变脏；
+    // 颜色必须非全透明——全透明会被场景优化判定为无变化，翻转即空操作
+    // （0.4% 白在深底上亮度差 1/255，不可感知）；无 TouchArea 不拦截指针
+    in-out property <bool> force-repaint;
+
     // 建议浮层开关：输入框聚焦且有建议（对齐 open = focused && len > 0）
     in-out property <bool> tag-open:
         tag-input.has-focus && root.tag-suggestions.length > 0;
@@ -824,6 +831,13 @@ export component EditorWindow inherits Window {
                     }
                 }
             }
+        }
+
+        // ── 整帧重绘覆盖层（force-repaint，见属性注释）──
+        if (root.force-repaint): Rectangle {
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.004);
         }
 
         // ── 未保存关闭确认（旧版 role=dialog，max-w-sm p-6）──

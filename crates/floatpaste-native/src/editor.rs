@@ -83,18 +83,19 @@ fn show_editor(app: &App, session: EditorSession) {
 
     reset_delete_arm(&win);
     // 显式定尺寸：窗口根布局的首选高被 stretch 子元素拉成极小，会被钳到
-    // min（400×300），不能依赖 preferred（对齐旧版 inner_size(800,600)）。
-    // 以 +1px 打开后同步泵帧再归位：尺寸变化迫使软件渲染器整帧重建
-    // buffer——hide→show 周期后脏区跟踪只重画变化区域，背景/头部/底栏
-    // 在 Windows 清屏后会大片露白；warm_surface 保证每步真实落盘，
-    // 两步 set_size 不依赖定时器时序、不会被 winit 合并
-    win.window().set_size(slint::LogicalSize::new(800.0, 601.0));
+    // min（400×300），不能依赖 preferred（对齐旧版 inner_size(800,600)）
+    // 整帧重绘：hide→show 后 Slint 只重绘「与上次渲染不同的区域」，静态
+    // 的窗口背景/头部/底栏保持表面销毁时的白底（尺寸变化与同步翻转均
+    // 实测无效——同步翻转在渲染前自我抵消）。在 show 之前翻转
+    // force-repaint 并保留到下一次打开再翻回：覆盖层颜色变化固化进新帧，
+    // 重开时全窗每个区域都与上次渲染不同 → 脏区覆盖全窗（0.4% 白视觉
+    // 不可感知）
+    win.set_force_repaint(!win.get_force_repaint());
+    win.window().set_size(slint::LogicalSize::new(800.0, 600.0));
     let _ = win.window().show();
     let editor_hwnd = win32_ext::window_hwnd(&win);
     if let Some(editor_hwnd) = editor_hwnd {
         win32_ext::remove_dwm_border(editor_hwnd);
-        win32_ext::warm_surface(editor_hwnd);
-        win.window().set_size(slint::LogicalSize::new(800.0, 600.0));
         win32_ext::warm_surface(editor_hwnd);
     }
     // 前台获取放在全部尺寸/显隐操作之后：从速贴打开时本进程不是前台
