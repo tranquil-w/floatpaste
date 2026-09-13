@@ -7,6 +7,13 @@
 //!   （RegisterHotKey 拿不到松键事件，这里用 WH_KEYBOARD_LL 的
 //!   keydown/keyup 精确复刻 press/release 语义）；
 //! - 其余按键一律放行（主快捷键、搜索快捷键仍由 RegisterHotKey 线程处理）。
+//!
+//! 钩子常驻：WH_KEYBOARD_LL 只在首次会话时装载、进程退出随安装线程
+//! 回收，会话结束只翻转 HOOK_ACTIVE（回调在关闭态对每个按键一次原子
+//! 读即放行，无拦截开销）。不得在会话间 Unhook/重装：实测本进程中
+//! LL 键盘钩子经卸载→重装循环后，第二次安装虽返回成功句柄，系统却
+//! 静默不再调用——速贴每轮显隐/进出编辑器都装卸一次，一轮后快捷键
+//! 即全灭（WH_MOUSE_LL 无此问题，实测可照常装卸）。
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -15,8 +22,8 @@ use std::time::Duration;
 
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, SetWindowsHookExW, UnhookWindowsHookEx, HHOOK, KBDLLHOOKSTRUCT, WH_KEYBOARD_LL,
-    WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    CallNextHookEx, SetWindowsHookExW, HHOOK, KBDLLHOOKSTRUCT, WH_KEYBOARD_LL, WM_KEYDOWN,
+    WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 
 use tracing::{error, warn};
@@ -59,7 +66,8 @@ pub type SessionKeyCallback = Box<dyn Fn(SessionAction) + Send + Sync>;
 
 static SESSION_CALLBACK: Mutex<Option<SessionKeyCallback>> = Mutex::new(None);
 
-/// 开始会话：装载 WH_KEYBOARD_LL。digit_shortcuts_enabled=false 时不拦截数字键
+/// 开始会话：装载 WH_KEYBOARD_LL（钩子常驻，重复调用只更新回调与开关）。
+/// digit_shortcuts_enabled=false 时不拦截数字键
 pub fn begin_session(digit_shortcuts_enabled: bool, callback: SessionKeyCallback) {
     if let Ok(mut config) = SESSION_CONFIG.lock() {
         *config = Some(SessionConfig {
@@ -72,8 +80,7 @@ pub fn begin_session(digit_shortcuts_enabled: bool, callback: SessionKeyCallback
     stop_navigation_repeat();
     HOOK_ACTIVE.store(true, Ordering::SeqCst);
     HOOK_HANDLE.with(|handle| {
-        let already_installed = handle.borrow().is_some();
-        if already_installed {
+        if handle.borrow().is_some() {
             return;
         }
         let installed =
@@ -88,17 +95,12 @@ pub fn begin_session(digit_shortcuts_enabled: bool, callback: SessionKeyCallback
     });
 }
 
-/// 结束会话：停连发、卸钩子、清回调
+/// 结束会话：停连发、清回调、关闭拦截开关。
+/// 不卸载钩子（常驻语义见模块文档）；回调清空后即使钩子仍被调用，
+/// 关闭态的早退分支也不触达回调
 pub fn end_session() {
     HOOK_ACTIVE.store(false, Ordering::SeqCst);
     stop_navigation_repeat();
-    HOOK_HANDLE.with(|handle| {
-        if let Some(hook) = handle.borrow_mut().take() {
-            unsafe {
-                let _ = UnhookWindowsHookEx(hook);
-            }
-        }
-    });
     if let Ok(mut slot) = SESSION_CALLBACK.lock() {
         *slot = None;
     }
