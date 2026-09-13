@@ -12,8 +12,10 @@ use windows::{
         UI::{
             Input::KeyboardAndMouse::SetFocus,
             WindowsAndMessaging::{
-                GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId, IsWindow,
-                SetForegroundWindow, GUITHREADINFO,
+                GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId, IsIconic,
+                IsWindow, SetForegroundWindow, SetWindowPos, ShowWindow, GUITHREADINFO,
+                HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+                SWP_SHOWWINDOW, SW_RESTORE,
             },
         },
     },
@@ -40,6 +42,64 @@ impl ActiveAppResolver {
     pub fn restore_foreground_window(hwnd: isize) -> bool {
         let hwnd = HWND(hwnd as *mut _);
         unsafe { IsWindow(Some(hwnd)).as_bool() && SetForegroundWindow(hwnd).as_bool() }
+    }
+
+    /// 把窗口带到前台并激活（编辑器打开路径）。
+    ///
+    /// 裸 SetForegroundWindow 受 Windows 前台锁约束：调用进程不是前台
+    /// 进程时调用被拒绝，窗口留在原 Z 序位被当前前台窗口遮挡（从速贴
+    /// 面板打开编辑器时前台在目标应用上，必踩）。绕过方式对齐旧壳 tao
+    /// set_focus：先 AttachThreadInput 到当前前台线程共享输入状态，
+    /// SetForegroundWindow 即被放行；仍失败时以 TOPMOST 提升→立即回落
+    /// 顶到 Z 序带顶，保证可见且不常驻置顶
+    pub fn force_foreground_window(hwnd: isize) -> bool {
+        let hwnd = HWND(hwnd as *mut _);
+        if !unsafe { IsWindow(Some(hwnd)) }.as_bool() {
+            return false;
+        }
+        unsafe {
+            if IsIconic(hwnd).as_bool() {
+                let _ = ShowWindow(hwnd, SW_RESTORE);
+            }
+            let foreground = GetForegroundWindow();
+            let foreground_thread = if foreground.0.is_null() {
+                0
+            } else {
+                GetWindowThreadProcessId(foreground, None)
+            };
+            let current_thread = GetCurrentThreadId();
+            let attached = foreground_thread != 0
+                && foreground_thread != current_thread
+                && AttachThreadInput(current_thread, foreground_thread, true).as_bool();
+            let foregrounded = SetForegroundWindow(hwnd).as_bool();
+            if attached {
+                let _ = AttachThreadInput(current_thread, foreground_thread, false);
+            }
+            if foregrounded && GetForegroundWindow().0 == hwnd.0 {
+                return true;
+            }
+            // 前台锁兜底：TOPMOST 提升越过所有普通窗口，随即回落普通带
+            // 顶部（不常驻置顶）；提升不带 NOACTIVATE，顺带完成激活
+            let _ = SetWindowPos(
+                hwnd,
+                Some(HWND_TOPMOST),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+            );
+            let _ = SetWindowPos(
+                hwnd,
+                Some(HWND_NOTOPMOST),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_NOACTIVATE,
+            );
+            GetForegroundWindow().0 == hwnd.0
+        }
     }
 
     pub fn current_foreground_focus_target() -> WindowFocusTarget {

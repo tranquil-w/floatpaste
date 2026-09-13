@@ -32,10 +32,13 @@ pub enum ForegroundPolicy {
     RestoreIfStolen(isize),
 }
 
-/// 启动期静默装配：show 出窗口取 HWND → 挂浮层样式（decorated 时另挂
-/// DWM 阴影与系统圆角）→ 立即 hide。winit 惰性建窗，必须在事件循环内
-/// 调用；show 与 hide 之间不泵帧，窗口不闪现
+/// 启动期静默装配：show 出窗口取 HWND → 挂浮层样式 → 停屏到屏幕外。
+/// winit 惰性建窗，必须在事件循环内调用；show 与停屏之间不泵帧，窗口不闪现。
+/// 收尾**不走 Slint hide**：hide→show 周期中 winit 清空窗口表面且 Slint
+/// 脏区跟踪失效，重现时会得到透明空壳；停屏保持 Slint「已显示」持续渲染，
+/// 此后显隐一律在屏上/屏外之间平移，表面内容始终有效
 pub fn silent_assemble<W: ComponentHandle>(win: &W, decorated: bool) -> Option<isize> {
+    let previous_foreground = ActiveAppResolver::current_foreground_hwnd();
     let _ = win.window().show();
     let hwnd = win32_ext::window_hwnd(win)?;
     win32_ext::apply_overlay_style(hwnd, true);
@@ -44,20 +47,56 @@ pub fn silent_assemble<W: ComponentHandle>(win: &W, decorated: bool) -> Option<i
         win32_ext::apply_dwm_rounded_corners(hwnd);
     }
     let _ = window_control::remove_window_system_menu(hwnd);
-    let _ = win.window().hide();
+    park_offscreen(win);
+    surrender_startup_foreground(hwnd, previous_foreground);
+    schedule_style_reassert(hwnd, true);
     Some(hwnd)
 }
 
 /// 搜索窗口的启动期静默装配：可激活（接收键盘输入）的 TOOLWINDOW 变体，
-/// 只挂阴影不挂系统圆角（旧版搜索窗为方角）
+/// 只挂阴影不挂系统圆角（旧版搜索窗为方角）。停屏语义同 [`silent_assemble`]
 pub fn silent_assemble_focusable<W: ComponentHandle>(win: &W) -> Option<isize> {
+    let previous_foreground = ActiveAppResolver::current_foreground_hwnd();
     let _ = win.window().show();
     let hwnd = win32_ext::window_hwnd(win)?;
     win32_ext::apply_overlay_style(hwnd, false);
     win32_ext::apply_dwm_shadow(hwnd);
     let _ = window_control::remove_window_system_menu(hwnd);
-    let _ = win.window().hide();
+    park_offscreen(win);
+    surrender_startup_foreground(hwnd, previous_foreground);
+    schedule_style_reassert(hwnd, false);
     Some(hwnd)
+}
+
+/// 停屏到屏幕外（Windows 坐标下限）：窗口对 Slint 保持「已显示」、
+/// 表面内容有效，重现即移回原位
+fn park_offscreen<W: ComponentHandle>(win: &W) {
+    win.window()
+        .set_position(slint::PhysicalPosition::new(-32000, -32000));
+}
+
+/// 停屏窗口保持 Win32 可见：若启动 show 激活了自己（winit 首窗语义之外
+/// 的 show 走 SW_SHOW），立即把前台归还 show 前的持有者，避免键盘焦点
+/// 落进屏幕外窗口
+fn surrender_startup_foreground(hwnd: isize, previous: Option<isize>) {
+    if ActiveAppResolver::current_foreground_hwnd() != Some(hwnd) {
+        return;
+    }
+    if let Some(previous) = previous {
+        let _ = ActiveAppResolver::restore_foreground_window(previous);
+    }
+}
+
+/// winit 会对 show 过的窗口异步按自身参数重排样式（剥 TOOLWINDOW、带回
+/// APPWINDOW/WS_SYSMENU）。停屏窗口保持 Win32 可见，样式被剥会直接长出
+/// 任务栏按钮，落地后必须补挂；落地时间不定，两拍都补
+fn schedule_style_reassert(hwnd: isize, no_activate: bool) {
+    for delay_ms in [0u64, 50] {
+        slint::Timer::single_shot(Duration::from_millis(delay_ms), move || {
+            win32_ext::apply_overlay_style(hwnd, no_activate);
+            let _ = window_control::remove_window_system_menu(hwnd);
+        });
+    }
 }
 
 /// tooltip 启动装配：同 silent_assemble，但收起走 Win32 SW_HIDE 而非

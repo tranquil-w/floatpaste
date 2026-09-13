@@ -98,15 +98,31 @@ pub fn open(app: &App) {
         return;
     };
 
-    position_on_cursor_monitor(&win);
+    // 上屏前先暖表面（同步泵一次 WM_PAINT 呈现）：停屏期间表面不会
+    // 自行落盘，暖过后移回屏上的第一帧即有内容
+    win32_ext::warm_surface(hwnd);
+    // 窗口自启动起保持 Slint 可见（停屏态），重现 = 移回屏上，不走
+    // Slint show：hide→show 周期中 winit 清空表面且脏区跟踪失效，是
+    // 开窗透明闪烁的根源。若有未消费的编辑期停屏记录，在此作废
+    if let Ok(mut slot) = PARKED_POSITION.lock() {
+        *slot = None;
+    }
+    if !position_on_cursor_monitor(&win) {
+        // 光标/工作区不可得：退回上次隐藏前的位置（等价旧行为的
+        // 「原位显示」）；无记录时保持停屏并告警
+        let fallback = LAST_HIDDEN_POSITION.lock().ok().and_then(|slot| *slot);
+        if let Some((x, y)) = fallback {
+            win.window().set_position(PhysicalPosition::new(x, y));
+        } else {
+            warn!("搜索窗口定位失败且无历史位置，保持停屏");
+        }
+    }
     reset_session_state(app);
 
-    let _ = win.window().show();
     if let Err(error) = window_control::restore_window_and_focus(hwnd) {
         warn!("搜索窗口获取焦点失败: {error}");
     }
-    // winit show 的异步样式重置会摘掉浮层属性：显示后重挂（可聚焦变体，
-    // 不带 WS_EX_NOACTIVATE）并复查置顶
+    // 兜底重挂浮层样式（可聚焦变体，不带 WS_EX_NOACTIVATE）并复查置顶
     overlay::after_show_focusable(hwnd);
 
     begin_focus_watcher(app);
@@ -123,9 +139,18 @@ pub fn hide(app: &App, restore_target: bool) {
     app.state.end_search_activation();
     let session = app.state.search_session();
     if let Some(win) = app.search.upgrade() {
-        if win.window().is_visible() {
-            let _ = win.window().hide();
+        // 记录原位后停屏到屏幕外而非 Slint hide（同 hide_for_editor）：
+        // hide→show 周期会清空窗口表面，下次显示出现透明空壳
+        let hwnd = app.state.search_hwnd.load(Ordering::SeqCst);
+        if hwnd != 0 {
+            if let Some(rect) = win32_ext::physical_rect(hwnd) {
+                if let Ok(mut slot) = LAST_HIDDEN_POSITION.lock() {
+                    *slot = Some((rect.left, rect.top));
+                }
+            }
         }
+        win.window()
+            .set_position(slint::PhysicalPosition::new(-32000, -32000));
     }
     if restore_target {
         if let Some(target_hwnd) = session.target_window_hwnd {
@@ -146,6 +171,10 @@ pub fn suspend_input(app: &App) {
 
 /// 进编辑器期间停屏的原位（物理坐标）：恢复时移回
 static PARKED_POSITION: std::sync::Mutex<Option<(i32, i32)>> = std::sync::Mutex::new(None);
+
+/// 常规隐藏（快捷键/Esc/失焦）停屏前的原位（物理坐标）：重新打开时
+/// 光标定位失败则退回这里，等价旧行为的「原位显示」
+static LAST_HIDDEN_POSITION: std::sync::Mutex<Option<(i32, i32)>> = std::sync::Mutex::new(None);
 
 /// 进入编辑器前的隐藏：结束激活、收 tooltip、停屏窗口，但**不清理
 /// 会话与列表状态**（对齐 hide_search_for_editor_transition）——
@@ -182,13 +211,16 @@ pub fn restore_after_editor(app: &App) {
     let Some(win) = app.search.upgrade() else {
         return;
     };
+    // 上屏前先暖表面（同步泵一次 WM_PAINT 呈现），移回原位即有内容
+    win32_ext::warm_surface(hwnd);
     if let Ok(mut slot) = PARKED_POSITION.lock() {
         if let Some((x, y)) = slot.take() {
             win.window()
                 .set_position(slint::PhysicalPosition::new(x, y));
         }
     }
-    let _ = win.window().show();
+    // 窗口全程保持 Slint 可见（停屏态），移回原位即原样恢复，无需
+    // Slint show；restore_window_and_focus 负责显化、置顶与聚焦
     if let Err(error) = window_control::restore_window_and_focus(hwnd) {
         warn!("搜索窗口恢复焦点失败: {error}");
     }
@@ -210,18 +242,19 @@ pub fn resume_input(app: &App) {
 }
 
 /// 打开时定位：光标所在显示器工作区居中（不持久化位置，对齐
-/// center_window_on_cursor_monitor）
-fn position_on_cursor_monitor(win: &SearchWindow) {
+/// center_window_on_cursor_monitor）。定位失败返回 false，由调用方兜底
+fn position_on_cursor_monitor(win: &SearchWindow) -> bool {
     let Ok(cursor) = current_cursor_point() else {
-        return;
+        return false;
     };
     let Ok(work) = work_area_from_point(cursor) else {
-        return;
+        return false;
     };
     let size = win.window().size();
     let x = work.left + (work.width() - size.width as i32).max(0) / 2;
     let y = work.top + (work.height() - size.height as i32).max(0) / 2;
     win.window().set_position(PhysicalPosition::new(x, y));
+    true
 }
 
 /// 会话开始重置（对齐 SEARCH_SESSION_START）：关键词/筛选/选中/滚动/错误

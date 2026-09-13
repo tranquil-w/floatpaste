@@ -96,12 +96,13 @@ fn show_editor(app: &App, session: EditorSession) {
             win.window().set_size(slint::LogicalSize::new(800.0, 600.0));
         }
     });
-    // 首显可能走 SW_SHOWNOACTIVATE（winit 首窗语义），而从速贴打开时
-    // 前台在回贴目标应用上——必须主动把前台请过来，否则 Esc/Ctrl+S
-    // 落空（对齐旧版 window.set_focus()；不能复用带 TOPMOST 的
-    // restore_window_and_focus——编辑器是普通窗口，不该常驻置顶）
+    // 从速贴打开时本进程不是前台（前台在目标应用上），裸
+    // SetForegroundWindow 会被前台锁拒绝、编辑器被目标窗口遮挡——
+    // force_foreground_window 经 AttachThreadInput 绕过（对齐旧版
+    // window.set_focus() 语义），仍失败时以 TOPMOST 提升→回落保底可见，
+    // 且不常驻置顶（不能复用带 TOPMOST 的 restore_window_and_focus）
     if let Some(hwnd) = win32_ext::window_hwnd(&win) {
-        if !ActiveAppResolver::restore_foreground_window(hwnd) {
+        if !ActiveAppResolver::force_foreground_window(hwnd) {
             warn!("编辑窗口获取前台失败");
         }
     }

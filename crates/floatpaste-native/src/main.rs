@@ -126,27 +126,15 @@ fn main() {
         }
     }
 
-    // ── 主题初值（首帧即正确，无需等会话）──
-    {
-        let settings = state.current_settings();
-        let resolved =
-            theme::resolve_theme(settings.theme_mode.clone(), theme::system_prefers_dark());
-        let tokens = theme::derive_tokens(&settings.theme_preset, &settings.theme_accent, resolved);
-        theme_bridge::apply_theme(
-            &picker_win,
-            Some(&tooltip_win),
-            Some(&search_win),
-            Some(&editor_win),
-            &tokens,
-        );
-    }
-
     wire_picker_callbacks(&app);
     wire_search_callbacks(&app);
     wire_editor_callbacks(&app, &editor_win);
 
     // ── 窗口句柄与浮层样式：事件循环首轮装配（winit 惰性建窗，
-    // show/hide 舞蹈统一在 overlay::silent_assemble）──
+    // show/停屏舞蹈统一在 overlay::silent_assemble）──
+    // 主题写入放在停屏之后：属性变化使窗口变脏，Slint 在屏外完成首帧
+    // 渲染与呈现——表面内容就绪后，任何上屏移动都立即有内容，开窗不闪
+    // 透明（写在建窗之前不会触发屏外渲染，表面是空的）
     let silent_startup = launch_mode.is_silent();
     let app_for_init = app.clone();
     let _ = slint::invoke_from_event_loop(move || {
@@ -180,8 +168,31 @@ fn main() {
             None => tracing::error!("获取搜索窗口句柄失败，搜索会话不可用"),
         }
 
+        let settings = app_for_init.state.current_settings();
+        let resolved =
+            theme::resolve_theme(settings.theme_mode.clone(), theme::system_prefers_dark());
+        let tokens = theme::derive_tokens(&settings.theme_preset, &settings.theme_accent, resolved);
+        let editor_for_theme = app_for_init.editor.upgrade();
+        theme_bridge::apply_theme(
+            &picker_win,
+            Some(&tooltip_win),
+            Some(&search_win),
+            editor_for_theme.as_ref(),
+            &tokens,
+        );
+
+        // 主题写入后同步暖一次表面：停屏窗口收不到自发 WM_PAINT，
+        // 不主动泵一次呈现，上屏首帧会是透明的
+        win32_ext::warm_surface(app_for_init.state.picker_hwnd.load(Ordering::SeqCst));
+        win32_ext::warm_surface(app_for_init.state.search_hwnd.load(Ordering::SeqCst));
+
         if !silent_startup {
-            picker::activate(&app_for_init);
+            // 延一轮事件循环再打开：先让停屏窗口在屏外完成首帧渲染，
+            // 移回屏上时表面已有有效内容，首开不闪透明
+            let app_for_activate = app_for_init.clone();
+            slint::Timer::single_shot(std::time::Duration::from_millis(0), move || {
+                picker::activate(&app_for_activate);
+            });
         }
     });
 

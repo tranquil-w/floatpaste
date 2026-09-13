@@ -8,6 +8,7 @@ use windows::Win32::Graphics::Dwm::{
     DwmExtendFrameIntoClientArea, DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE,
     DWMWCP_ROUND, DWM_WINDOW_CORNER_PREFERENCE,
 };
+use windows::Win32::Graphics::Gdi::{InvalidateRect, UpdateWindow};
 use windows::Win32::UI::Controls::MARGINS;
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -21,6 +22,18 @@ pub fn window_hwnd<W: ComponentHandle>(window: &W) -> Option<isize> {
     match handle.window_handle().ok()?.as_raw() {
         RawWindowHandle::Win32(handle) => Some(handle.hwnd.get() as isize),
         _ => None,
+    }
+}
+
+/// 强制窗口同步完成一次呈现（InvalidateRect + UpdateWindow 泵出
+/// WM_PAINT）。停屏期间 Slint 只把帧画进后备缓冲，窗口表面要等
+/// WM_PAINT 才落盘，而屏外窗口收不到自发绘制——上屏前先暖一次
+/// 表面，移回屏上的第一帧即有内容，不会闪透明
+pub fn warm_surface(hwnd: isize) {
+    let hwnd = HWND(hwnd as *mut _);
+    unsafe {
+        let _ = InvalidateRect(Some(hwnd), None, false);
+        let _ = UpdateWindow(hwnd);
     }
 }
 

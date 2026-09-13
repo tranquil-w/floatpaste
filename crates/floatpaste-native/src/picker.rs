@@ -1,7 +1,8 @@
 //! 速贴面板会话逻辑：显示/隐藏/切换、列表刷新、确认上屏、收藏、导航。
 //!
 //! 行为逐项对齐原版 WindowCoordinator / ShortcutManager / PickerShell：
-//! - 显示不抢焦点（WS_EX_NOACTIVATE + show），并把前台还给目标窗口；
+//! - 显隐不抢焦点（WS_EX_NOACTIVATE，hide/show 一律以屏幕外停屏复现），
+//!   并把前台还给目标窗口；
 //! - 会话期键盘由 LL 钩子接管（长按连发在 core::session_keyboard）；
 //! - 外击关闭经 WH_MOUSE_LL 钩子；
 //! - 尺寸/位置持久化与三种定位模式在 core::PickerPositionService。
@@ -120,6 +121,9 @@ pub fn activate(app: &App) {
         session.target_window_hwnd, session.target_focus_hwnd
     );
 
+    // 上屏前先暖表面（同步泵一次 WM_PAINT 呈现）：停屏期间表面不会
+    // 自行落盘，暖过后移回屏上的第一帧即有内容
+    win32_ext::warm_surface(hwnd);
     apply_window_position(app, &settings, session.target_window_hwnd);
 
     // 主题随设置刷新（设置可能在后台被改变）
@@ -137,11 +141,11 @@ pub fn activate(app: &App) {
 
     begin_input_session(app, hwnd, settings.picker_digit_shortcuts_enabled);
 
-    // 显示（无激活 + 置顶，对齐原版 always_on_top）。winit show 的异步
-    // 样式重置与前台抢占统一交 overlay 公共层处理：立即重挂浮层样式并
-    // 把前台还给目标窗口，50ms 后兜底复查（winit 的激活若晚于归还落地，
-    // 兜底会把前台请回来）
-    let _ = win.window().show();
+    // 重现（无激活 + 置顶，对齐原版 always_on_top）。窗口自启动起保持
+    // Slint 可见（停屏态），这里只做最小化兜位恢复，不走 Slint show：
+    // hide→show 周期中 winit 清空表面且脏区跟踪失效，是开窗透明闪烁的
+    // 根源。样式重挂与前台策略仍交 overlay 公共层处理
+    let _ = window_control::show_window_no_activate(hwnd);
     let immediate = session
         .target_window_hwnd
         .map_or(ForegroundPolicy::Keep, ForegroundPolicy::Restore);
@@ -189,9 +193,11 @@ pub fn hide(app: &App, restore_target: bool) {
         }
     }
 
-    if win.window().is_visible() {
-        let _ = win.window().hide();
-    }
+    // 停屏到屏幕外而非 Slint hide（同 hide_for_editor）：hide→show 周期中
+    // winit 清空窗口表面且 Slint 脏区跟踪失效，下次显示会出现透明空壳；
+    // 停屏保持表面内容有效，重现即原样恢复
+    win.window()
+        .set_position(slint::PhysicalPosition::new(-32000, -32000));
 
     app.state.end_picker_activation();
     tooltip::cancel(app);
@@ -307,15 +313,16 @@ pub fn restore_after_editor(app: &App, target: TargetSession) {
     );
 
     app.state.set_picker_session(target);
+    // 上屏前先暖表面（同步泵一次 WM_PAINT 呈现），移回即有内容
+    win32_ext::warm_surface(hwnd);
     apply_window_position(app, &settings, target.target_window_hwnd);
 
     app.state.begin_picker_activation();
     begin_input_session(app, hwnd, settings.picker_digit_shortcuts_enabled);
 
-    // 无激活重现（对齐旧版 show_window_no_activate）。主题刷新必须放在
-    // 显示之后：隐藏期间 winit 会抑制重绘，Slint 又不知道窗口经历过
-    // Win32 显隐——显示后写入主题属性才能强制一次全量重绘，否则恢复
-    // 出来的是完全透明的空壳
+    // 无激活兜位重现（对齐旧版 show_window_no_activate）：编辑期间窗口
+    // 只是停屏，移回屏上后表面内容原样有效；这里顺带从最小化恢复。
+    // 主题随设置刷新照常执行
     let _ = window_control::show_window_no_activate(hwnd);
 
     // 主题随设置刷新（编辑期间设置可能已被外部修改）
