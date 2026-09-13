@@ -689,6 +689,8 @@ export component SearchWindow inherits Window {
     in-out property <bool> input-suspended: false;
     in-out property <bool> loading: false;
     in-out property <bool> load-failed: false;
+    // 加载失败的具体原因（旧版 getErrorMessage 展示）
+    in-out property <string> load-error-text;
     in-out property <bool> show-result-count: true;
     in-out property <int> result-count: 0;
     in-out property <int> result-total: 0;
@@ -1121,7 +1123,7 @@ export component SearchWindow inherits Window {
                                     horizontal-alignment: center;
                                 }
                                 Text {
-                                    text: "请稍后重试";
+                                    text: root.load-error-text;
                                     color: Theme.fg-subtle;
                                     font-size: Metrics.text-xs;
                                     horizontal-alignment: center;

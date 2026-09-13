@@ -399,6 +399,8 @@ export component QuickPasteWindow inherits Window {
     in-out property <bool> digit-shortcuts-enabled: true;
     in-out property <bool> loading: false;
     in-out property <bool> load-failed: false;
+    // 加载失败的具体原因（旧版 getErrorMessage 展示）
+    in-out property <string> load-error-text;
 
     // ── 回调（Rust 接管）──
     callback row-clicked(int);
@@ -547,6 +549,12 @@ export component QuickPasteWindow inherits Window {
                         text: "记录加载失败";
                         color: Theme.fg-muted;
                         font-size: Metrics.text-sm;
+                        horizontal-alignment: center;
+                    }
+                    Text {
+                        text: root.load-error-text;
+                        color: Theme.fg-subtle;
+                        font-size: Metrics.text-xs;
                         horizontal-alignment: center;
                     }
                     retry := Rectangle {

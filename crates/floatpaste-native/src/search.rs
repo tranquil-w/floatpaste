@@ -331,6 +331,7 @@ fn run_query(app: &App) {
             Ok(result) => apply_page(&app_cb, result, seq, false),
             Err(error) => {
                 warn!("搜索查询失败: {error}");
+                let message = error.to_string();
                 let stale = QUERY.with(|state| {
                     let mut state = state.borrow_mut();
                     if state.seq != seq {
@@ -348,6 +349,7 @@ fn run_query(app: &App) {
                     if win.get_rows().row_count() == 0 {
                         win.set_loading(false);
                         win.set_load_failed(true);
+                        win.set_load_error_text(message.into());
                     }
                 });
             }

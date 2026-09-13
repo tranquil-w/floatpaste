@@ -368,7 +368,11 @@ fn refresh_list(app: &App, keep_anchor: bool) {
         }
         Err(error) => {
             warn!("加载速贴列表失败: {error}");
-            app.with_picker(|win| win.set_load_failed(true));
+            let message = error.to_string();
+            app.with_picker(|win| {
+                win.set_load_failed(true);
+                win.set_load_error_text(message.into());
+            });
         }
     }
 }
