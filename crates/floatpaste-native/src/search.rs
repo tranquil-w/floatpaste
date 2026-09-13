@@ -39,6 +39,7 @@ use crate::overlay;
 use crate::picker::{self, App};
 use crate::thumbnails;
 use crate::tooltip::{self, HoverHost};
+use crate::win32_ext;
 use crate::{SearchGeometry, SearchRow, SearchTagChip, SearchWindow};
 
 /// 单页条数（对齐旧版 SEARCH_PAGE_SIZE）
@@ -143,16 +144,30 @@ pub fn suspend_input(app: &App) {
     });
 }
 
-/// 进入编辑器前的隐藏：结束激活、收 tooltip、隐藏窗口，但**不清理
+/// 进编辑器期间停屏的原位（物理坐标）：恢复时移回
+static PARKED_POSITION: std::sync::Mutex<Option<(i32, i32)>> =
+    std::sync::Mutex::new(None);
+
+/// 进入编辑器前的隐藏：结束激活、收 tooltip、停屏窗口，但**不清理
 /// 会话与列表状态**（对齐 hide_search_for_editor_transition）——
 /// 编辑器关闭后原样恢复选中、关键词与滚动位置
 pub fn hide_for_editor(app: &App) {
     tooltip::cancel(app);
     app.state.end_search_activation();
+    let hwnd = app.state.search_hwnd.load(Ordering::SeqCst);
     if let Some(win) = app.search.upgrade() {
-        if win.window().is_visible() {
-            let _ = win.window().hide();
+        // 记录原位后停屏到屏幕外（对齐 picker::hide_for_editor）：
+        // Slint hide→show 周期会让 winit 抑制渲染，恢复出的窗口全透明；
+        // 停屏保持 Slint "已显示"状态持续渲染，移回即原样恢复
+        if hwnd != 0 {
+            if let Some(rect) = win32_ext::physical_rect(hwnd) {
+                if let Ok(mut slot) = PARKED_POSITION.lock() {
+                    *slot = Some((rect.left, rect.top));
+                }
+            }
         }
+        win.window()
+            .set_position(slint::PhysicalPosition::new(-32000, -32000));
     }
     info!("隐藏 Search（进入编辑器）");
 }
@@ -168,6 +183,11 @@ pub fn restore_after_editor(app: &App) {
     let Some(win) = app.search.upgrade() else {
         return;
     };
+    if let Ok(mut slot) = PARKED_POSITION.lock() {
+        if let Some((x, y)) = slot.take() {
+            win.window().set_position(slint::PhysicalPosition::new(x, y));
+        }
+    }
     let _ = win.window().show();
     if let Err(error) = window_control::restore_window_and_focus(hwnd) {
         warn!("搜索窗口恢复焦点失败: {error}");
