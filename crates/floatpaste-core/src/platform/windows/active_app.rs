@@ -12,8 +12,8 @@ use windows::{
         UI::{
             Input::KeyboardAndMouse::SetFocus,
             WindowsAndMessaging::{
-                GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId, IsIconic,
-                IsWindow, SetForegroundWindow, SetWindowPos, ShowWindow, GUITHREADINFO,
+                BringWindowToTop, GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId,
+                IsIconic, IsWindow, SetForegroundWindow, SetWindowPos, ShowWindow, GUITHREADINFO,
                 HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
                 SWP_SHOWWINDOW, SW_RESTORE,
             },
@@ -71,7 +71,12 @@ impl ActiveAppResolver {
             let attached = foreground_thread != 0
                 && foreground_thread != current_thread
                 && AttachThreadInput(current_thread, foreground_thread, true).as_bool();
+            // BringWindowToTop 必须显式调用：实测 AttachThreadInput 路径下
+            // SetForegroundWindow 激活成功不代表窗口 Z 序升起，视觉上仍会
+            // 被原前台窗口遮挡
+            BringWindowToTop(hwnd);
             let foregrounded = SetForegroundWindow(hwnd).as_bool();
+            let _ = SetFocus(Some(hwnd));
             if attached {
                 let _ = AttachThreadInput(current_thread, foreground_thread, false);
             }

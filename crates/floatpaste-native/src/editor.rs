@@ -83,26 +83,27 @@ fn show_editor(app: &App, session: EditorSession) {
 
     reset_delete_arm(&win);
     // 显式定尺寸：窗口根布局的首选高被 stretch 子元素拉成极小，会被钳到
-    // min（400×300），不能依赖 preferred（对齐旧版 inner_size(800,600)）
-    // 先以 +1px 打开、渲染一帧后再归位：hide→show 周期后 Slint 的脏区
-    // 跟踪只重绘变化区域（如焦点态），与上次帧相同的区域（背景/头部/
-    // 底栏）在 Windows 清屏后会永久露白；resize 迫使软件渲染器重建
-    // buffer 整帧重画。两次 set_size 必须隔开一帧，否则被 winit 合并
+    // min（400×300），不能依赖 preferred（对齐旧版 inner_size(800,600)）。
+    // 以 +1px 打开后同步泵帧再归位：尺寸变化迫使软件渲染器整帧重建
+    // buffer——hide→show 周期后脏区跟踪只重画变化区域，背景/头部/底栏
+    // 在 Windows 清屏后会大片露白；warm_surface 保证每步真实落盘，
+    // 两步 set_size 不依赖定时器时序、不会被 winit 合并
     win.window().set_size(slint::LogicalSize::new(800.0, 601.0));
     let _ = win.window().show();
-    let editor_weak = app.editor.clone();
-    slint::Timer::single_shot(std::time::Duration::from_millis(16), move || {
-        if let Some(win) = editor_weak.upgrade() {
-            win.window().set_size(slint::LogicalSize::new(800.0, 600.0));
-        }
-    });
-    // 从速贴打开时本进程不是前台（前台在目标应用上），裸
-    // SetForegroundWindow 会被前台锁拒绝、编辑器被目标窗口遮挡——
-    // force_foreground_window 经 AttachThreadInput 绕过（对齐旧版
-    // window.set_focus() 语义），仍失败时以 TOPMOST 提升→回落保底可见，
-    // 且不常驻置顶（不能复用带 TOPMOST 的 restore_window_and_focus）
-    if let Some(hwnd) = win32_ext::window_hwnd(&win) {
-        if !ActiveAppResolver::force_foreground_window(hwnd) {
+    let editor_hwnd = win32_ext::window_hwnd(&win);
+    if let Some(editor_hwnd) = editor_hwnd {
+        win32_ext::warm_surface(editor_hwnd);
+        win.window().set_size(slint::LogicalSize::new(800.0, 600.0));
+        win32_ext::warm_surface(editor_hwnd);
+    }
+    // 前台获取放在全部尺寸/显隐操作之后：从速贴打开时本进程不是前台
+    // （前台在目标应用上），裸 SetForegroundWindow 会被前台锁拒绝、
+    // 编辑器被目标窗口遮挡——force_foreground_window 经 AttachThreadInput
+    // + BringWindowToTop 绕过（对齐旧版 window.set_focus() 语义），仍
+    // 失败时以 TOPMOST 提升→回落保底可见，且不常驻置顶（不能复用带
+    // TOPMOST 的 restore_window_and_focus）
+    if let Some(editor_hwnd) = editor_hwnd {
+        if !ActiveAppResolver::force_foreground_window(editor_hwnd) {
             warn!("编辑窗口获取前台失败");
         }
     }

@@ -139,8 +139,6 @@ pub fn activate(app: &App) {
 
     app.state.begin_picker_activation();
 
-    begin_input_session(app, hwnd, settings.picker_digit_shortcuts_enabled);
-
     // 重现（无激活 + 置顶，对齐原版 always_on_top）。窗口自启动起保持
     // Slint 可见（停屏态），这里只做最小化兜位恢复，不走 Slint show：
     // hide→show 周期中 winit 清空表面且脏区跟踪失效，是开窗透明闪烁的
@@ -163,6 +161,11 @@ pub fn activate(app: &App) {
 
     // 会话开始：刷新列表、选中归零、滚回顶部、清空消息
     refresh_list_reset(app, &settings);
+
+    // 键鼠会话必须最后装配：LL 鼠标钩子回调由安装线程（事件循环）
+    // 泵出，列表查询与逐行裁排若在安装之后运行，会阻塞回调泵送、
+    // 造成全系统光标短暂冻结
+    begin_input_session(app, hwnd, settings.picker_digit_shortcuts_enabled);
 }
 
 /// 隐藏（对齐 WindowCoordinator::hide_picker + hide_picker_and_restore_target）
@@ -318,7 +321,6 @@ pub fn restore_after_editor(app: &App, target: TargetSession) {
     apply_window_position(app, &settings, target.target_window_hwnd);
 
     app.state.begin_picker_activation();
-    begin_input_session(app, hwnd, settings.picker_digit_shortcuts_enabled);
 
     // 无激活兜位重现（对齐旧版 show_window_no_activate）：编辑期间窗口
     // 只是停屏，移回屏上后表面内容原样有效；这里顺带从最小化恢复。
@@ -335,6 +337,8 @@ pub fn restore_after_editor(app: &App, target: TargetSession) {
         app.editor.upgrade().as_ref(),
         &tokens,
     );
+    // 键鼠会话最后装配（理由同 activate：LL 钩子回调泵送不能被阻塞）
+    begin_input_session(app, hwnd, settings.picker_digit_shortcuts_enabled);
     info!("从 Editor 返回 Picker");
 }
 
