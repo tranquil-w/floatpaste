@@ -48,7 +48,7 @@ thread_local! {
 /// 速贴面板 Ctrl+Enter：收起面板（不还原前台，编辑器接管），打开编辑器
 pub fn open_from_picker(app: &App, item_id: String) {
     let target = app.state.picker_session();
-    picker::hide(app, false);
+    picker::hide_for_editor(app);
     show_editor(
         app,
         EditorSession {

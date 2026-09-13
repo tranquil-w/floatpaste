@@ -219,6 +219,48 @@ pub fn hide(app: &App, restore_target: bool) {
     }
 }
 
+/// 进入编辑器前的收起：会话/监视结束、几何记忆、停激活、收 tooltip。
+/// 隐藏**不能**走 Win32 SW_HIDE 或 Slint hide：
+/// - Slint hide 让适配层认为窗口已隐藏并停止渲染；
+/// - Win32 隐藏期间 winit 抑制重绘，且 Slint 不知道窗口经历过直接
+///   显隐——之后无论 Win32 还是 Slint 重现，都只会得到透明空壳。
+/// 因此改为把窗口平移到屏幕外：Slint 全程视为已显示、持续渲染，
+/// 表面内容始终有效，返回时移回原位即恢复
+pub fn hide_for_editor(app: &App) {
+    let Some(win) = app.picker.upgrade() else {
+        return;
+    };
+    let hwnd = app
+        .state
+        .picker_hwnd
+        .load(std::sync::atomic::Ordering::SeqCst);
+
+    session_keyboard::end_session();
+    mouse_monitor::end_session();
+
+    if let Some(rect) = (hwnd != 0)
+        .then(|| win32_ext::physical_rect(hwnd))
+        .flatten()
+    {
+        let geometry = WindowGeometry {
+            x: rect.left,
+            y: rect.top,
+            width: (rect.right - rect.left).max(0) as u32,
+            height: (rect.bottom - rect.top).max(0) as u32,
+        };
+        if let Some(stored) = PickerPositionService::capture_window_position(geometry) {
+            let _ = app.core().repository.save_picker_window_state(&stored);
+        }
+    }
+
+    // 停屏到屏幕外（Windows 坐标下限），不用隐藏
+    win.window()
+        .set_position(slint::PhysicalPosition::new(-32000, -32000));
+    app.state.end_picker_activation();
+    tooltip::cancel(app);
+    info!("隐藏 Picker（进入编辑器）");
+}
+
 /// 主快捷键命中：活跃则关闭并恢复目标，否则打开。
 /// 搜索窗口活跃时先无还原收起（对齐旧版 toggle_picker_from_shortcut，
 /// 避免两窗口争抢焦点导致闪烁）
@@ -267,6 +309,15 @@ pub fn restore_after_editor(app: &App, target: TargetSession) {
     app.state.set_picker_session(target);
     apply_window_position(app, &settings, target.target_window_hwnd);
 
+    app.state.begin_picker_activation();
+    begin_input_session(app, hwnd, settings.picker_digit_shortcuts_enabled);
+
+    // 无激活重现（对齐旧版 show_window_no_activate）。主题刷新必须放在
+    // 显示之后：隐藏期间 winit 会抑制重绘，Slint 又不知道窗口经历过
+    // Win32 显隐——显示后写入主题属性才能强制一次全量重绘，否则恢复
+    // 出来的是完全透明的空壳
+    let _ = window_control::show_window_no_activate(hwnd);
+
     // 主题随设置刷新（编辑期间设置可能已被外部修改）
     let resolved = theme::resolve_theme(settings.theme_mode.clone(), theme::system_prefers_dark());
     let tokens = theme::derive_tokens(&settings.theme_preset, &settings.theme_accent, resolved);
@@ -277,10 +328,6 @@ pub fn restore_after_editor(app: &App, target: TargetSession) {
         app.editor.upgrade().as_ref(),
         &tokens,
     );
-
-    app.state.begin_picker_activation();
-    begin_input_session(app, hwnd, settings.picker_digit_shortcuts_enabled);
-    let _ = window_control::show_window_no_activate(hwnd);
     info!("从 Editor 返回 Picker");
 }
 
