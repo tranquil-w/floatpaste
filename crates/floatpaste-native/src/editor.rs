@@ -108,6 +108,8 @@ fn load_session(app: &App, win: &EditorWindow, item_id: &str) {
     win.set_image_loading(false);
     win.set_image_failed(false);
     win.set_has_image(false);
+    // 触发编辑区 changed 聚焦（同窗口再次打开时 init 不再执行）
+    win.set_session_seq(win.get_session_seq() + 1);
 
     let detail = app.core().repository.get_item_detail(item_id);
     let detail = match detail {
@@ -161,9 +163,9 @@ fn load_session(app: &App, win: &EditorWindow, item_id: &str) {
     refresh_all_tags(app);
     rebuild_suggestions_for(app, "");
 
-    if detail.r#type == "text" {
-        win.invoke_focus_input();
-    }
+    // 先挂窗口级焦点宿主（Esc/Ctrl+S 的接收者）；文本条目的输入框
+    // 再由编辑区 init 抢走焦点
+    win.invoke_focus_root_scope();
 }
 
 fn load_image_preview(app: &App, win: &EditorWindow, detail: &ClipItemDetail) {
@@ -490,7 +492,7 @@ pub fn tag_escape(app: &App) {
     // 本地消费：清空输入并保持焦点（对齐 tagEditor 的 Esc 分支）
     if let Some(win) = app.editor.upgrade() {
         win.set_tag_input_text("".into());
-        win.invoke_focus_input();
+        win.invoke_focus_tag_input();
     }
 }
 

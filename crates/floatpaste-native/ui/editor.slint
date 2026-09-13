@@ -117,6 +117,9 @@ export component EditorWindow inherits Window {
     in-out property <string> error-text;
     in-out property <bool> delete-armed: false;
     in-out property <bool> close-confirm-open: false;
+    // 每次载入条目自增：驱动编辑区 changed 重新聚焦（init 只在首次
+    // 实例化时执行，同窗口第二次打开不会再次触发）
+    in-out property <int> session-seq: 0;
 
     // 建议浮层开关：输入框聚焦且有建议（对齐 open = focused && len > 0）
     in-out property <bool> tag-open:
@@ -141,12 +144,24 @@ export component EditorWindow inherits Window {
     callback tag-remove-last();       // 空输入 Backspace 移除末位标签
     callback tag-escape();            // 标签输入本地消费 Esc（清空输入）
 
-    public function focus-input() {
-        edit-input.focus();
+    // 非文本条目（图片/文件）没有输入框可聚焦，把焦点挂在窗口级
+    // FocusScope 上，否则窗口键盘（Esc/Ctrl+S）无人接收；
+    // 文本条目的输入框聚焦由编辑区 init 承担（if 内不可外部寻址）
+    public function focus-root-scope() {
+        root-scope.focus();
     }
 
-    // 窗口级键盘（capture 先于输入框；对齐旧版 window keydown capture）
-    FocusScope {
+    // 标签 Esc 本地让位后焦点留在标签输入框（对齐旧版 tagEditor）
+    public function focus-tag-input() {
+        tag-input.focus();
+    }
+
+    // 窗口级键盘（capture 先于输入框；对齐旧版 window keydown capture）。
+    // 窗口直接子元素不自动铺满，必须显式全屏（对齐旧版 h-screen w-screen）
+    root-scope := FocusScope {
+        width: 100%;
+        height: 100%;
+
         capture-key-pressed(event) => {
             if (root.close-confirm-open) {
                 if (event.text == Key.Escape) {
@@ -214,14 +229,16 @@ export component EditorWindow inherits Window {
                 }
             }
 
-            // ── 主区 ──
+            // ── 主区（旧版 main flex-1：吃掉底栏以外的全部剩余高度）──
             Rectangle {
-                horizontal-stretch: 1;
+                vertical-stretch: 1;
                 background: Theme.canvas-default;
                 clip: true;
 
                 // 无会话：引导态
                 if (!root.has-session): VerticalLayout {
+                    width: parent.width;
+                    height: parent.height;
                     alignment: center;
                     spacing: 12px;
                     Path {
@@ -271,6 +288,8 @@ export component EditorWindow inherits Window {
 
                 // 加载中
                 if (root.has-session && root.loading): VerticalLayout {
+                    width: parent.width;
+                    height: parent.height;
                     alignment: center;
                     Text {
                         text: "正在加载条目内容...";
@@ -283,6 +302,7 @@ export component EditorWindow inherits Window {
                 // 条目缺失
                 if (root.has-session && !root.loading && root.item-missing): Text {
                     y: (parent.height - self.height) / 2;
+                    width: parent.width;
                     text: "未找到对应条目";
                     color: Theme.fg-muted;
                     font-size: Metrics.text-sm;
@@ -292,8 +312,12 @@ export component EditorWindow inherits Window {
                 // 会话内容（visible 而非 if：tag-input/edit-input 需要被
                 // 窗口级键盘与焦点函数引用，条件实例化的元素不可寻址；
                 // Slint 布局会跳过不可见元素，占位行为与 if 一致）
+                // Rectangle 的子元素同样不自动铺满，显式全屏 + 旧版 mt-2.5 行距
                 VerticalLayout {
                     visible: root.has-session && !root.loading && !root.item-missing;
+                    width: parent.width;
+                    height: parent.height;
+                    spacing: 10px;
                     // 旧版 px-5 pb-3 pt-4
                     padding-left: 20px;
                     padding-right: 20px;
@@ -516,15 +540,34 @@ export component EditorWindow inherits Window {
                         }
                     }
 
-                    // ── 主编辑区（旧版 mt-2.5 flex-1）──
+                    // ── 内容弹性区（旧版 flex-1：吃掉头部与标签区以外的
+                    // 全部剩余高度）──
+                    // 文本编辑与只读预览两态必须用 if 条件实例化：visible:false
+                    // 的元素只是不绘制，布局仍照常给它分配空间，两个 stretch
+                    // 兄弟会把剩余高度对半分掉。edit-input 的初始聚焦改由
+                    // init 承担（if 内元素无法从组件外部寻址）
                     Rectangle {
-                        visible: root.is-text;
-                        horizontal-stretch: 1;
-                        border-radius: Metrics.radius-lg;
-                        border-width: 1px;
-                        border-color: edit-input.has-focus ? Theme.border-accent : transparent;
-                        background: edit-input.has-focus ? Theme.canvas-inset : Theme.canvas-subtle;
-                        clip: true;
+                        vertical-stretch: 1;
+
+                        if (root.is-text): Rectangle {
+                            width: 100%;
+                            height: 100%;
+                            // changed 只监听本元素属性：用本地别名桥接根上的
+                            // 会话序号，每次载入条目重新聚焦
+                            property <int> focus-trigger: root.session-seq;
+                            border-radius: Metrics.radius-lg;
+                            border-width: 1px;
+                            border-color: edit-input.has-focus ? Theme.border-accent : transparent;
+                            background: edit-input.has-focus ? Theme.canvas-inset : Theme.canvas-subtle;
+                            clip: true;
+                            init => { edit-input.focus(); }
+                            changed focus-trigger => {
+                                // 光标定位到文本末尾（对齐旧版
+                                // setSelectionRange(len, len)）
+                                edit-input.focus();
+                                edit-input.set-selection-offsets(
+                                    root.char-count, root.char-count);
+                            }
 
                         edit-flick := Flickable {
                             x: 0;
@@ -535,9 +578,11 @@ export component EditorWindow inherits Window {
 
                             // 内容包裹层：宽随视口（显式断开与内容 min-width
                             // 的相互推导，多行 TextInput 的换行最小宽会撑破
-                            // 布局形成绑定环）
+                            // 布局形成绑定环）；内边距对齐旧版 px-5 py-4
                             Rectangle {
-                                width: edit-flick.width;
+                                x: 20px;
+                                y: 16px;
+                                width: edit-flick.width - 40px;
                                 height: edit-input.preferred-height;
                                 // 占位符自绘（原生 TextInput 无 placeholder 属性）
                                 if (edit-input.text == "" && !edit-input.has-focus): Text {
@@ -553,7 +598,7 @@ export component EditorWindow inherits Window {
                                 edit-input := TextInput {
                                     x: 0;
                                     y: 0;
-                                    width: edit-flick.width;
+                                    width: parent.width;
                                     min-width: 0px;
                                     height: self.preferred-height;
                                     single-line: false;
@@ -577,15 +622,15 @@ export component EditorWindow inherits Window {
                         }
                     }
 
-                    // 图片 / 文件条目的只读预览
-                    Rectangle {
-                        visible: !root.is-text;
-                        horizontal-stretch: 1;
-                        border-radius: Metrics.radius-lg;
-                        background: Theme.canvas-subtle;
-                        clip: true;
+                        if (!root.is-text): Rectangle {
+                            width: 100%;
+                            height: 100%;
+                            border-radius: Metrics.radius-lg;
+                            background: Theme.canvas-subtle;
+                            clip: true;
 
                         if (root.has-image): Image {
+                            source: root.image-preview;
                             x: 16px;
                             y: 16px;
                             width: parent.width - 32px;
@@ -642,6 +687,7 @@ export component EditorWindow inherits Window {
                             text: "此条目内容不支持预览";
                             color: Theme.fg-subtle;
                             font-size: Metrics.text-sm;
+                        }
                         }
                     }
                 }
