@@ -8,6 +8,7 @@
 //   （↑↓/Enter/Shift+Enter/Ctrl+Enter/Ctrl+Space/Del/Esc），其余按键放行输入框
 // - 挂起态（键盘交给速贴面板）：输入框失焦、底栏切换为速贴键位提示
 import { Theme, Metrics } from "theme.slint";
+import { Kbd } from "common.slint";
 import { ListScrollBar } from "picker.slint";
 
 export struct SearchRow {
@@ -96,33 +97,6 @@ component IconButton inherits Rectangle {
 
     btn-ta := TouchArea {
         clicked => { root.clicked(); }
-    }
-}
-
-// 底栏键位提示
-component Kbd inherits Rectangle {
-    in property <string> key;
-    height: 15px;
-    border-radius: 3px;
-    border-width: 1px;
-    border-color: Theme.border-subtle;
-    background: Theme.canvas-default;
-    HorizontalLayout {
-        padding-left: 4px;
-        padding-right: 4px;
-        // Consolas 无降部字形墨迹中心比行盒中心高约 3px：顶部内边距
-        // 把文本区整体下移，墨迹即与盒中心及右侧文案对齐
-        padding-top: 4px;
-        Text {
-            text: root.key;
-            color: Theme.fg-muted;
-            font-size: 10px;
-            font-family: "Consolas";
-            vertical-alignment: center;
-            // Slint 量出的文本宽与实际墨迹宽有出入且默认左对齐，
-            // 居中后框内左右留白才对称（旧版 px-1 两侧各 4px）
-            horizontal-alignment: center;
-        }
     }
 }
 

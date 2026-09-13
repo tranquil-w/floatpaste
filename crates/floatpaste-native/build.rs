@@ -9,4 +9,5 @@ fn main() {
         .expect("嵌入进程清单失败");
     println!("cargo:rerun-if-changed=floatpaste-native.rc");
     println!("cargo:rerun-if-changed=floatpaste-native.manifest");
+    println!("cargo:rerun-if-changed=assets/icon.ico");
 }

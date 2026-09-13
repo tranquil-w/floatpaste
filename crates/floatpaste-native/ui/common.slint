@@ -1,0 +1,32 @@
+// 跨窗口共享的通用小组件。窗口各自的本地组件在复刻对齐时容易漏掉
+// 修法（如 Kbd 的垂直下移只改了搜索窗），新增修复一律收敛到这里。
+import { Theme, Metrics } from "theme.slint";
+
+// 键位徽章（旧版 kbd：rounded border px-1 font-mono text-[10px] leading-3）
+export component Kbd inherits Rectangle {
+    in property <string> key;
+    height: 15px;
+    border-radius: 3px;
+    border-width: 1px;
+    border-color: Theme.border-subtle;
+    background: Theme.canvas-default;
+    HorizontalLayout {
+        padding-left: 4px;
+        padding-right: 4px;
+        // Consolas 无降部字形（Enter/Del/Esc/↑↓）墨迹中心比行盒中心
+        // 高约 3px：顶部内边距把文本区整体下移，墨迹即与盒中心及
+        // 右侧文案对齐
+        padding-top: 4px;
+        Text {
+            text: root.key;
+            color: Theme.fg-muted;
+            font-size: 10px;
+            font-family: "Consolas";
+            vertical-alignment: center;
+            // Slint 量出的文本首选宽与实际渲染墨迹有出入且默认左对齐，
+            // 居中后框内左右留白才对称（旧版 px-1 两侧各 4px）
+            horizontal-alignment: center;
+            wrap: no-wrap;
+        }
+    }
+}

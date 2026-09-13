@@ -249,8 +249,11 @@ pub fn save(app: &App) {
     let draft = win.get_draft_text().to_string();
     match ClipService::update_text(&app.core(), &session.item_id, &draft) {
         Ok(_) => {
-            // 对齐旧版 markSaved(draftText)：草稿即视为已保存基线
+            // 对齐旧版 markSaved(draftText)：草稿即视为已保存基线。
+            // UI 侧 saved-text 必须同步回写，否则 is-dirty（draft!=saved）
+            // 恒为真，保存后 Esc 仍会弹"未保存"确认框
             SAVED_TEXT.with(|slot| *slot.borrow_mut() = draft.clone());
+            win.set_saved_text(draft.into());
             show_notice(app, "已保存当前修改");
             win.set_error_text("".into());
             refresh_lists(app);

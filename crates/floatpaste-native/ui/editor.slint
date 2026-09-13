@@ -7,37 +7,13 @@
 //   Tab 补全、Backspace 删末位、Esc 本地清空让位窗口关闭）
 // - 键盘：窗口级 capture 先于输入框（对齐旧版 window keydown capture）
 import { Theme, Metrics } from "theme.slint";
+import { Kbd } from "common.slint";
 
 // 标签建议项：0=match（既有命中）1=create（新建）2=exists（已添加）
 export struct EditorTagSuggestion {
     kind: int,
     name: string,
     count-text: string,
-}
-
-// 键位徽章（旧版 kbd：rounded border px-1 font-mono text-[10px] leading-3）
-component Kbd inherits Rectangle {
-    in property <string> key;
-    height: 15px;
-    border-radius: 3px;
-    border-width: 1px;
-    border-color: Theme.border-subtle;
-    background: Theme.canvas-default;
-    HorizontalLayout {
-        padding-left: 4px;
-        padding-right: 4px;
-        Text {
-            text: root.key;
-            color: Theme.fg-muted;
-            font-size: 10px;
-            font-family: "Consolas";
-            vertical-alignment: center;
-            horizontal-alignment: center;
-            // Slint 量出的文本宽与渲染墨迹有出入，居中保证左右留白对称
-            // （对齐搜索窗 Kbd 的处理）
-            wrap: no-wrap;
-        }
-    }
 }
 
 // 两段式删除按钮（旧版 actionButtonDanger 的编辑器变体）
@@ -85,6 +61,7 @@ component DeleteButton inherits Rectangle {
 
 export component EditorWindow inherits Window {
     title: "FloatPaste · 编辑";
+    icon: @image-url("app-icon.png");
     min-width: 400px;
     min-height: 300px;
     preferred-width: 800px;
@@ -421,7 +398,12 @@ export component EditorWindow inherits Window {
                                         }
                                         tag-input := TextInput {
                                             width: parent.width;
-                                            height: parent.height;
+                                            // TextInput 无 vertical-alignment，且
+                                            // preferred-height(≈24px) 远大于墨迹高：
+                                            // 文本与光标从元素顶部画。按字号收高度
+                                            // 再在 24px 容器里垂直居中，光标才不偏上
+                                            y: (parent.height - self.font-size) / 2;
+                                            height: self.font-size;
                                             font-size: 13px;
                                             color: Theme.fg-default;
                                             selection-foreground-color: Theme.selection-fg;
@@ -578,12 +560,18 @@ export component EditorWindow inherits Window {
 
                             // 内容包裹层：宽随视口（显式断开与内容 min-width
                             // 的相互推导，多行 TextInput 的换行最小宽会撑破
-                            // 布局形成绑定环）；内边距对齐旧版 px-5 py-4
+                            // 布局形成绑定环）；内边距对齐旧版 px-5 py-4。
+                            // 高度铺到视口底：TextInput 必须覆盖空白区，
+                            // 否则点击正文下方空白无法移动光标（旧版 textarea
+                            // 整块可点，点击空白光标到文本末尾）
                             Rectangle {
                                 x: 20px;
                                 y: 16px;
                                 width: edit-flick.width - 40px;
-                                height: edit-input.preferred-height;
+                                height: Math.max(
+                                    edit-input.preferred-height,
+                                    edit-flick.height - 16px,
+                                );
                                 // 占位符自绘（原生 TextInput 无 placeholder 属性）
                                 if (edit-input.text == "" && !edit-input.has-focus): Text {
                                     x: 0;
@@ -600,7 +588,7 @@ export component EditorWindow inherits Window {
                                     y: 0;
                                     width: parent.width;
                                     min-width: 0px;
-                                    height: self.preferred-height;
+                                    height: parent.height;
                                     single-line: false;
                                     wrap: word-wrap;
                                     font-size: 14px;
@@ -701,52 +689,56 @@ export component EditorWindow inherits Window {
                     padding-left: 20px;
                     padding-right: 20px;
                     spacing: 12px;
-                    alignment: start;
+                    // 不设 alignment:start——它会禁用 stretch，弹性占位
+                    // 失效后右侧按钮组不再贴右（旧版 justify-between）
 
-                    // 左：未保存标记 + 键位提示
-                    if (root.is-dirty && root.has-session): HorizontalLayout {
-                        spacing: 6px;
+                    // 左：未保存标记 + 键位提示（start 排列收缩到左端）
+                    HorizontalLayout {
                         alignment: start;
-                        VerticalLayout {
-                            alignment: center;
-                            Rectangle {
-                                width: 6px;
-                                height: 6px;
-                                border-radius: 3px;
-                                background: Theme.warning-fg;
+                        spacing: 12px;
+                        if (root.is-dirty && root.has-session): HorizontalLayout {
+                            spacing: 6px;
+                            alignment: start;
+                            VerticalLayout {
+                                alignment: center;
+                                Rectangle {
+                                    width: 6px;
+                                    height: 6px;
+                                    border-radius: 3px;
+                                    background: Theme.warning-fg;
+                                }
+                            }
+                            Text {
+                                text: "未保存";
+                                color: Theme.warning-fg;
+                                font-size: Metrics.text-xs;
+                                font-weight: Metrics.weight-medium;
+                                vertical-alignment: center;
                             }
                         }
-                        Text {
-                            text: "未保存";
-                            color: Theme.warning-fg;
-                            font-size: Metrics.text-xs;
-                            font-weight: Metrics.weight-medium;
-                            vertical-alignment: center;
-                        }
-                    }
-                    HorizontalLayout {
-                        spacing: 6px;
-                        alignment: start;
-                        VerticalLayout {
-                            alignment: center;
-                            HorizontalLayout {
-                                spacing: 4px;
-                                alignment: start;
-                                Kbd { key: "Ctrl+S"; }
-                                Text {
-                                    text: "保存";
-                                    color: Theme.fg-muted;
-                                    font-size: 11px;
-                                    vertical-alignment: center;
-                                }
-                                Text {
-                                    text: "·";
-                                    color: Theme.fg-subtle;
-                                    font-size: 11px;
-                                    vertical-alignment: center;
-                                }
-                                Kbd { key: "Esc"; }
-                                Text {
+                        HorizontalLayout {
+                            spacing: 6px;
+                            alignment: start;
+                            VerticalLayout {
+                                alignment: center;
+                                HorizontalLayout {
+                                    spacing: 4px;
+                                    alignment: start;
+                                    Kbd { key: "Ctrl+S"; }
+                                    Text {
+                                        text: "保存";
+                                        color: Theme.fg-muted;
+                                        font-size: 11px;
+                                        vertical-alignment: center;
+                                    }
+                                    Text {
+                                        text: "·";
+                                        color: Theme.fg-subtle;
+                                        font-size: 11px;
+                                        vertical-alignment: center;
+                                    }
+                                    Kbd { key: "Esc"; }
+                                    Text {
                                     text: "关闭";
                                     color: Theme.fg-muted;
                                     font-size: 11px;
@@ -755,13 +747,20 @@ export component EditorWindow inherits Window {
                             }
                         }
                     }
+                    }
 
                     Rectangle { horizontal-stretch: 1; }
 
-                    // 右：关闭 / 保存
+                    // 右：关闭 / 保存（固定高按钮在布局交叉轴顶对齐，
+                    // 包一层居中容器才能垂直居中，对齐旧版 items-center）
                     HorizontalLayout {
                         spacing: 8px;
                         alignment: end;
+                        VerticalLayout {
+                            alignment: center;
+                            HorizontalLayout {
+                                alignment: end;
+                                spacing: 8px;
                         close-btn := Rectangle {
                             width: 68px;
                             height: 36px;
@@ -799,6 +798,8 @@ export component EditorWindow inherits Window {
                                 font-weight: Metrics.weight-semibold;
                                 horizontal-alignment: center;
                                 vertical-alignment: center;
+                            }
+                        }
                             }
                         }
                     }
