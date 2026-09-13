@@ -92,6 +92,7 @@ fn show_editor(app: &App, session: EditorSession) {
     let _ = win.window().show();
     let editor_hwnd = win32_ext::window_hwnd(&win);
     if let Some(editor_hwnd) = editor_hwnd {
+        win32_ext::remove_dwm_border(editor_hwnd);
         win32_ext::warm_surface(editor_hwnd);
         win.window().set_size(slint::LogicalSize::new(800.0, 600.0));
         win32_ext::warm_surface(editor_hwnd);

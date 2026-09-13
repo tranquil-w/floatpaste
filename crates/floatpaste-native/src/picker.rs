@@ -121,11 +121,6 @@ pub fn activate(app: &App) {
         session.target_window_hwnd, session.target_focus_hwnd
     );
 
-    // 上屏前先暖表面（同步泵一次 WM_PAINT 呈现）：停屏期间表面不会
-    // 自行落盘，暖过后移回屏上的第一帧即有内容
-    win32_ext::warm_surface(hwnd);
-    apply_window_position(app, &settings, session.target_window_hwnd);
-
     // 主题随设置刷新（设置可能在后台被改变）
     let resolved = theme::resolve_theme(settings.theme_mode.clone(), theme::system_prefers_dark());
     let tokens = theme::derive_tokens(&settings.theme_preset, &settings.theme_accent, resolved);
@@ -144,6 +139,17 @@ pub fn activate(app: &App) {
     // hide→show 周期中 winit 清空表面且脏区跟踪失效，是开窗透明闪烁的
     // 根源。样式重挂与前台策略仍交 overlay 公共层处理
     let _ = window_control::show_window_no_activate(hwnd);
+
+    // 会话开始：刷新列表、选中归零、滚回顶部、清空消息。放在上屏之前：
+    // 列表重活（查询 + 逐行裁排）跑在停屏期间，上屏即最新内容
+    refresh_list_reset(app, &settings);
+
+    // 上屏前先暖表面：停屏窗口收不到自发 WM_PAINT，同步泵一次呈现，
+    // 让数据就绪后的首帧在屏外落盘——移回屏上的第一帧即完整内容，
+    // 既不透明也不闪旧列表
+    win32_ext::warm_surface(hwnd);
+    apply_window_position(app, &settings, session.target_window_hwnd);
+
     let immediate = session
         .target_window_hwnd
         .map_or(ForegroundPolicy::Keep, ForegroundPolicy::Restore);
@@ -158,9 +164,6 @@ pub fn activate(app: &App) {
     if session.target_window_hwnd == Some(app.state.search_hwnd.load(Ordering::SeqCst)) {
         search::suspend_input(app);
     }
-
-    // 会话开始：刷新列表、选中归零、滚回顶部、清空消息
-    refresh_list_reset(app, &settings);
 
     // 键鼠会话必须最后装配：LL 鼠标钩子回调由安装线程（事件循环）
     // 泵出，列表查询与逐行裁排若在安装之后运行，会阻塞回调泵送、

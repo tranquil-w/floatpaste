@@ -98,15 +98,16 @@ pub fn open(app: &App) {
         return;
     };
 
-    // 上屏前先暖表面（同步泵一次 WM_PAINT 呈现）：停屏期间表面不会
-    // 自行落盘，暖过后移回屏上的第一帧即有内容
-    win32_ext::warm_surface(hwnd);
     // 窗口自启动起保持 Slint 可见（停屏态），重现 = 移回屏上，不走
     // Slint show：hide→show 周期中 winit 清空表面且脏区跟踪失效，是
     // 开窗透明闪烁的根源。若有未消费的编辑期停屏记录，在此作废
     if let Ok(mut slot) = PARKED_POSITION.lock() {
         *slot = None;
     }
+    // 会话状态先重置（仍停屏），同步泵帧让空关键词加载态落盘，再移回
+    // 屏上：首帧即加载态，不闪旧内容
+    reset_session_state(app);
+    win32_ext::warm_surface(hwnd);
     if !position_on_cursor_monitor(&win) {
         // 光标/工作区不可得：退回上次隐藏前的位置（等价旧行为的
         // 「原位显示」）；无记录时保持停屏并告警
@@ -117,7 +118,6 @@ pub fn open(app: &App) {
             warn!("搜索窗口定位失败且无历史位置，保持停屏");
         }
     }
-    reset_session_state(app);
 
     if let Err(error) = window_control::restore_window_and_focus(hwnd) {
         warn!("搜索窗口获取焦点失败: {error}");

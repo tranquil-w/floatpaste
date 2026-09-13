@@ -5,8 +5,8 @@ use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use slint::ComponentHandle;
 use windows::Win32::Foundation::{HWND, RECT};
 use windows::Win32::Graphics::Dwm::{
-    DwmExtendFrameIntoClientArea, DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE,
-    DWMWCP_ROUND, DWM_WINDOW_CORNER_PREFERENCE,
+    DwmExtendFrameIntoClientArea, DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE,
+    DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DWM_WINDOW_CORNER_PREFERENCE,
 };
 use windows::Win32::Graphics::Gdi::{InvalidateRect, UpdateWindow};
 use windows::Win32::UI::Controls::MARGINS;
@@ -80,6 +80,23 @@ pub fn apply_dwm_shadow(hwnd: isize) {
     };
     unsafe {
         let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
+    }
+}
+
+/// 移除 Win11 窗口边框（DWMWA_BORDER_COLOR = NONE）：装饰窗不显式
+/// 设置时 DWM 按系统「窗口边框」配色绘制边框，系统浅色模式下为白色
+/// 边条，与深色内容割裂（深色标题栏也压不住它）。Win10 无此属性，
+/// 调用失败即维持系统默认
+pub fn remove_dwm_border(hwnd: isize) {
+    let hwnd = HWND(hwnd as *mut _);
+    let color = DWMWA_COLOR_NONE;
+    unsafe {
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_BORDER_COLOR,
+            &color as *const u32 as *const _,
+            std::mem::size_of::<u32>() as u32,
+        );
     }
 }
 
