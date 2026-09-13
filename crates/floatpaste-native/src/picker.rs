@@ -49,6 +49,7 @@ pub struct App {
     pub tooltip: slint::Weak<TooltipWindow>,
     pub search: slint::Weak<SearchWindow>,
     pub editor: slint::Weak<crate::EditorWindow>,
+    pub settings: slint::Weak<crate::SettingsWindow>,
 }
 
 impl App {
@@ -129,6 +130,7 @@ pub fn activate(app: &App) {
         app.tooltip.upgrade().as_ref(),
         app.search.upgrade().as_ref(),
         app.editor.upgrade().as_ref(),
+        app.settings.upgrade().as_ref(),
         &tokens,
     );
 
@@ -338,6 +340,7 @@ pub fn restore_after_editor(app: &App, target: TargetSession) {
         app.tooltip.upgrade().as_ref(),
         app.search.upgrade().as_ref(),
         app.editor.upgrade().as_ref(),
+        app.settings.upgrade().as_ref(),
         &tokens,
     );
     // 键鼠会话最后装配（理由同 activate：LL 钩子回调泵送不能被阻塞）

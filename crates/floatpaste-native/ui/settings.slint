@@ -1,0 +1,1483 @@
+// 设置窗口：对齐旧版 SettingsShell.tsx + SettingsNav.tsx + SettingsSection.tsx
+// + ShortcutInput.tsx + ThemePresetPicker.tsx + TagsSection.tsx。
+// 独立带框窗口（旧版 label=manager，920×760 起、min 宽 880、任务栏可见、
+// 关闭=隐藏）。Tauri 运行时下 useSettingsNavigation 恒为 sidebar 布局
+// （176px 侧边导航 + 右侧滚动内容），故只复刻 sidebar 形态。
+// 数据流：全部字段以 in-out property 供 Rust 水合/回写，编辑回调触发
+// Rust 的 800ms 防抖自动保存；滚动跟随（scroll-spy）由各分区上报 y，
+// Rust 计算高亮并驱动滚动。
+import { Theme, Metrics } from "theme.slint";
+
+// 主题预设卡（所见即所得迷你预览，颜色由 Rust 用 core derive_tokens 派生）
+export struct PresetCard {
+    name: string,
+    description: string,
+    canvas-default: color,
+    canvas-subtle: color,
+    border-muted: color,
+    fg-default: color,
+    fg-muted: color,
+    accent-emphasis: color,
+    fg-on-emphasis: color,
+    selected: bool,
+}
+
+// 强调色色点（"default"=跟随预设 + 8 档安全列表，hex 为当前明暗模式实际值）
+export struct AccentSwatch {
+    id: string,
+    hex: color,
+    selected: bool,
+}
+
+// 标签行：state 0=常规 1=重命名 2=确认删除
+export struct TagRowData {
+    name: string,
+    count-text: string,
+    state: int,
+    conflict: bool,
+}
+
+// 设置行内键位徽章（旧版 KBD_BADGE：h-22px min-w-22px rounded-[4px]
+// px-1.5 font-mono text-[11px] font-semibold）
+component KbdBadge inherits Rectangle {
+    in property <string> key;
+    height: 22px;
+    min-width: 22px;
+    border-radius: Metrics.radius-sm;
+    border-width: 1px;
+    border-color: Theme.border-default;
+    background: Theme.canvas-default;
+    HorizontalLayout {
+        padding-left: Metrics.space-1_5;
+        padding-right: Metrics.space-1_5;
+        alignment: center;
+        Text {
+            text: root.key;
+            color: Theme.fg-default;
+            font-size: Metrics.text-hint;
+            font-weight: Metrics.weight-semibold;
+            font-family: "Consolas";
+            vertical-alignment: center;
+            horizontal-alignment: center;
+            wrap: no-wrap;
+        }
+    }
+}
+
+// 数字输入（旧版 FORM_INPUT + w-24 text-right；逐键钳制由 Rust 完成）
+component NumberInput inherits Rectangle {
+    in-out property <string> text;
+    in property <bool> disabled: false;
+    callback edited(string);
+    height: 32px;
+    width: 96px;
+    horizontal-stretch: 0;
+    opacity: root.disabled ? 0.6 : 1.0;
+    border-radius: 12px;
+    border-width: num.has-focus ? 2px : 1px;
+    border-color: num.has-focus ? Theme.accent-fg
+        : (root.disabled ? Theme.border-subtle : Theme.border-default);
+    background: root.disabled ? Theme.canvas-subtle : Theme.canvas-default;
+    num := TextInput {
+        x: 12px;
+        width: parent.width - 24px;
+        y: (parent.height - self.font-size) / 2;
+        height: self.font-size;
+        font-size: Metrics.text-sm;
+        color: root.disabled ? Theme.fg-subtle : Theme.fg-default;
+        text <=> root.text;
+        input-type: number;
+        horizontal-alignment: right;
+        enabled: !root.disabled;
+        edited() => { root.edited(self.text); }
+    }
+}
+
+// 快捷键录制框（旧版 ShortcutInput：h-[34px] w-56 rounded-xl border px-3，
+// 点击进入录制态，Esc 取消 / ⌫ 清除 / Ctrl|Alt|Win+主键完成；
+// 录制态的按键在此消费，Esc 不落窗口关闭路径）
+component ShortcutInput inherits Rectangle {
+    in property <[string]> value-parts;
+    in property <bool> disabled: false;
+    in-out property <string> notice;
+    in-out property <bool> recording: false;
+    callback captured(string);   // 完成捕获（主键大小写由 Rust 归一）
+    callback cleared();
+    callback cancelled();
+
+    height: 34px;
+    border-radius: 12px;
+    border-width: rec.has-focus ? 2px : 1px;
+    border-color: rec.has-focus ? Theme.accent-fg : Theme.border-default;
+    background: Theme.canvas-default;
+    opacity: root.disabled ? 0.6 : 1.0;
+
+    // 主键解析用临时属性（Slint 回调无常量局部，借用属性中转）
+    property <string> main-key;
+    property <string> combo;
+
+    ta := TouchArea {
+        enabled: !root.disabled;
+        clicked() => {
+            root.recording = !root.recording;
+            if (root.recording) {
+                root.notice = "";
+                rec.focus();
+            } else {
+                root.cancelled();
+            }
+        }
+    }
+    rec := FocusScope {
+        width: 100%;
+        height: 100%;
+        enabled: root.recording;
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.recording = false;
+                root.cancelled();
+                return accept;
+            }
+            if (event.text == Key.Backspace) {
+                root.recording = false;
+                root.cleared();
+                return accept;
+            }
+            // 主键：单字符（字母/数字/空格/,./）与 Tab、上下方向键
+            root.main-key =
+                event.text.character-count == 1
+                && ((event.text >= "a" && event.text <= "z")
+                    || (event.text >= "A" && event.text <= "Z")
+                    || (event.text >= "0" && event.text <= "9")) ? event.text
+                : event.text == " " ? "Space"
+                : event.text == "," ? "Comma"
+                : event.text == "." ? "Period"
+                : event.text == "/" ? "Slash"
+                : event.text == Key.Tab ? "Tab"
+                : event.text == Key.UpArrow ? "ArrowUp"
+                : event.text == Key.DownArrow ? "ArrowDown"
+                : event.text == Key.F1 ? "F1"
+                : event.text == Key.F2 ? "F2"
+                : event.text == Key.F3 ? "F3"
+                : event.text == Key.F4 ? "F4"
+                : event.text == Key.F5 ? "F5"
+                : event.text == Key.F6 ? "F6"
+                : event.text == Key.F7 ? "F7"
+                : event.text == Key.F8 ? "F8"
+                : event.text == Key.F9 ? "F9"
+                : event.text == Key.F10 ? "F10"
+                : event.text == Key.F11 ? "F11"
+                : event.text == Key.F12 ? "F12"
+                : "";
+            if (root.main-key == "") {
+                // 只按了修饰键等：继续等待主键（pending）
+                return accept;
+            }
+            if (!(event.modifiers.control || event.modifiers.alt
+                || event.modifiers.meta)) {
+                // "!"前缀 = 非法（缺 Ctrl/Alt/Win 修饰键），Rust 出提示
+                root.recording = false;
+                root.captured("!" + root.main-key);
+                return accept;
+            }
+            root.combo = (event.modifiers.control ? "Ctrl+" : "")
+                + (event.modifiers.alt ? "Alt+" : "")
+                + (event.modifiers.shift ? "Shift+" : "")
+                + (event.modifiers.meta ? "Super+" : "")
+                + root.main-key;
+            root.recording = false;
+            root.captured(root.combo);
+            return accept;
+        }
+        changed has-focus => {
+            // 点击录制框外任意处退出录制（对齐旧版 mousedown-outside）
+            if (!self.has-focus && root.recording) {
+                root.recording = false;
+                root.cancelled();
+            }
+        }
+        HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 12px;
+            spacing: Metrics.space-1_5;
+            alignment: center;
+            if (root.recording): HorizontalLayout {
+                spacing: Metrics.space-1_5;
+                alignment: start;
+                Text {
+                    text: "按下新组合键";
+                    color: Theme.accent-fg;
+                    font-size: Metrics.text-xs;
+                    overflow: elide;
+                    vertical-alignment: center;
+                }
+                KbdBadge { key: "Esc"; }
+                Text {
+                    text: "取消";
+                    color: Theme.accent-fg;
+                    font-size: Metrics.text-xs;
+                    vertical-alignment: center;
+                }
+                KbdBadge { key: "⌫"; }
+                Text {
+                    text: "清除";
+                    color: Theme.accent-fg;
+                    font-size: Metrics.text-xs;
+                    vertical-alignment: center;
+                }
+            }
+            if (!root.recording && root.value-parts.length > 0): HorizontalLayout {
+                spacing: Metrics.space-1_5;
+                alignment: start;
+                for part in root.value-parts: KbdBadge {
+                    key: part == "Super" ? "Win" : part;
+                }
+            }
+            if (!root.recording && root.value-parts.length == 0): Text {
+                text: "未设置，点击后按下组合键";
+                color: Theme.fg-subtle;
+                font-size: Metrics.text-sm;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+    }
+}
+
+// 分段单选（旧版 SegmentedControl：rounded-lg border p-0.5，选中项
+// accent-subtle 底 + font-medium）
+component Segmented inherits Rectangle {
+    in property <[string]> options;
+    in property <int> value: 0;
+    callback selected(int);
+    height: 30px;
+    horizontal-stretch: 0;
+    border-radius: Metrics.radius-lg;
+    border-width: 1px;
+    border-color: Theme.border-default;
+    background: Theme.canvas-default;
+    HorizontalLayout {
+        padding: 2px;
+        for opt[idx] in root.options: Rectangle {
+            width: seg-text.preferred-width + 20px;
+            border-radius: Metrics.radius-md;
+            background: root.value == idx ? Theme.accent-subtle : transparent;
+            seg-ta := TouchArea {
+                clicked() => { root.selected(idx); }
+            }
+            seg-text := Text {
+                text: opt;
+                color: root.value == idx ? Theme.fg-default
+                    : (seg-ta.has-hover ? Theme.fg-default : Theme.fg-muted);
+                font-size: Metrics.text-body;
+                font-weight: root.value == idx ? Metrics.weight-medium : Metrics.weight-normal;
+                vertical-alignment: center;
+                horizontal-alignment: center;
+            }
+        }
+    }
+}
+
+// 开关行（旧版 ToggleRow：px-4 py-2，右侧 16px 复选框，嵌套行 pl-9，
+// 禁用整行 60% 透明度 + 悬停 canvas-default）
+component ToggleRow inherits Rectangle {
+    in property <string> title;
+    in property <string> description;
+    in property <bool> checked;
+    in property <bool> disabled: false;
+    in property <bool> nested: false;
+    callback toggled(bool);
+    height: max(32px, text-col.preferred-height) + 16px;
+    opacity: root.disabled ? 0.6 : 1.0;
+    background: ta.has-hover && !root.disabled ? Theme.canvas-default : transparent;
+    ta := TouchArea {
+        enabled: !root.disabled;
+        clicked() => { root.toggled(!root.checked); }
+    }
+    HorizontalLayout {
+        x: root.nested ? 36px : 16px;
+        width: parent.width - (root.nested ? 36px : 16px) - 16px;
+        spacing: 24px;
+        text-col := VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 2px;
+            Text {
+                text: root.title;
+                color: Theme.fg-default;
+                font-size: Metrics.text-sm;
+                font-weight: Metrics.weight-medium;
+                wrap: no-wrap;
+                horizontal-alignment: left;
+            }
+            if (root.description != ""): Text {
+                text: root.description;
+                color: Theme.fg-subtle;
+                font-size: Metrics.text-xs;
+                wrap: word-wrap;
+                horizontal-alignment: left;
+            }
+        }
+        Rectangle {
+            width: 16px;
+            height: 16px;
+            border-radius: Metrics.radius-sm;
+            border-width: 1px;
+            border-color: root.checked ? Theme.accent-fg : Theme.border-default;
+            background: root.checked ? Theme.accent-fg : transparent;
+            if (root.checked): Text {
+                width: 100%;
+                height: 100%;
+                text: "✓";
+                color: Theme.fg-on-emphasis;
+                font-size: 10px;
+                font-weight: Metrics.weight-bold;
+                vertical-alignment: center;
+                horizontal-alignment: center;
+            }
+        }
+    }
+}
+
+// 设置分区卡片组（旧版 ROW_GROUP_CLASS：rounded-xl border border-muted
+// bg-canvas-subtle，行间 divide-y 分隔线）
+component RowGroup inherits Rectangle {
+    border-radius: 12px;
+    border-width: 1px;
+    border-color: Theme.border-muted;
+    background: Theme.canvas-subtle;
+    clip: true;
+    height: group-col.preferred-height;
+    group-col := VerticalLayout {
+        @children
+    }
+}
+
+// 组内分隔线（divide-pg-border-subtle）
+component RowDivider inherits Rectangle {
+    height: 1px;
+    background: Theme.border-subtle;
+}
+
+// 区块标题（旧版 SettingsSection header：title text-base semibold +
+// description text-xs fg-muted）
+component SectionHeader inherits Rectangle {
+    in property <string> title;
+    in property <string> description;
+    height: header-col.preferred-height;
+    header-col := VerticalLayout {
+        spacing: 2px;
+        Text {
+            text: root.title;
+            color: Theme.fg-default;
+            font-size: 16px;
+            font-weight: Metrics.weight-semibold;
+            horizontal-alignment: left;
+        }
+        Text {
+            text: root.description;
+            color: Theme.fg-muted;
+            font-size: Metrics.text-xs;
+            wrap: word-wrap;
+            horizontal-alignment: left;
+        }
+    }
+}
+
+// 普通设置行（旧版 SettingRow：px-4 py-2.5，左标题+描述，右控件）
+component SettingRow inherits Rectangle {
+    in property <string> title;
+    in property <string> description;
+    in property <length> control-height: 32px;
+    height: max(row-col.preferred-height, control-height + 20px);
+    row-col := HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        padding-top: 10px;
+        padding-bottom: 10px;
+        spacing: 24px;
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 2px;
+            Text {
+                text: root.title;
+                color: Theme.fg-default;
+                font-size: Metrics.text-sm;
+                font-weight: Metrics.weight-medium;
+                wrap: no-wrap;
+            }
+            if (root.description != ""): Text {
+                text: root.description;
+                color: Theme.fg-muted;
+                font-size: Metrics.text-xs;
+                wrap: word-wrap;
+            }
+        }
+    }
+}
+
+// 标签行（旧版 TagsSection 行三态：常规 / 重命名 / 确认删除；
+// 重命名草稿留在组件本地，避免模型回写打断输入）
+component TagRow inherits Rectangle {
+    in property <TagRowData> row-data;
+    in property <int> row-index;
+    callback rename-started();
+    callback draft-changed(string);
+    callback rename-committed(string);
+    callback rename-cancelled();
+    callback delete-requested();
+    callback delete-confirmed();
+    callback delete-cancelled();
+
+    in-out property <string> draft;
+    height: max(44px, row-col.preferred-height + 16px);
+    if (row-index > 0): Rectangle {
+        y: 0;
+        height: 1px;
+        width: 100%;
+        background: Theme.border-subtle;
+    }
+    row-col := HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        padding-top: 8px;
+        padding-bottom: 8px;
+        spacing: 12px;
+        alignment: center;
+        // 常规态
+        if (root.row-data.state == 0): Text {
+            text: root.row-data.name;
+            color: Theme.fg-default;
+            font-size: Metrics.text-sm;
+            font-weight: Metrics.weight-medium;
+            overflow: elide;
+            horizontal-stretch: 1;
+            vertical-alignment: center;
+        }
+        if (root.row-data.state == 0): Text {
+            text: root.row-data.count-text;
+            color: Theme.fg-subtle;
+            font-size: Metrics.text-xs;
+            vertical-alignment: center;
+        }
+        if (root.row-data.state == 0): Rectangle {
+            width: 60px;
+            height: 28px;
+            border-radius: Metrics.radius-lg;
+            border-width: 1px;
+            border-color: Theme.border-default;
+            background: rename-ta.has-hover ? Theme.canvas-default : transparent;
+            Text {
+                text: "重命名";
+                color: rename-ta.has-hover ? Theme.fg-default : Theme.fg-muted;
+                font-size: Metrics.text-xs;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            rename-ta := TouchArea {
+                clicked() => {
+                    root.draft = root.row-data.name;
+                    root.rename-started();
+                }
+            }
+        }
+        if (root.row-data.state == 0): Rectangle {
+            width: 48px;
+            height: 28px;
+            border-radius: Metrics.radius-lg;
+            border-width: 1px;
+            border-color: Theme.border-default;
+            background: del-ta.has-hover ? Theme.canvas-default : transparent;
+            Text {
+                text: "删除";
+                color: del-ta.has-hover ? Theme.danger-fg : Theme.fg-muted;
+                font-size: Metrics.text-xs;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            del-ta := TouchArea {
+                clicked() => { root.delete-requested(); }
+            }
+        }
+        // 重命名态
+        if (root.row-data.state == 1): Rectangle {
+            horizontal-stretch: 1;
+            height: 32px;
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: Theme.border-default;
+            background: Theme.canvas-default;
+            clip: true;
+            if (root.draft == ""): Text {
+                x: 12px;
+                text: "输入新名称";
+                color: Theme.fg-subtle;
+                font-size: Metrics.text-sm;
+                vertical-alignment: center;
+            }
+            rename-input := TextInput {
+                x: 12px;
+                width: parent.width - 24px;
+                y: (parent.height - self.font-size) / 2;
+                height: self.font-size;
+                font-size: Metrics.text-sm;
+                color: Theme.fg-default;
+                selection-foreground-color: Theme.selection-fg;
+                selection-background-color: Theme.selection-bg;
+                text <=> root.draft;
+                edited() => { root.draft-changed(self.text); }
+                accepted() => { root.rename-committed(self.text); }
+            }
+        }
+        if (root.row-data.state == 1 && root.row-data.conflict): Text {
+            text: "与现有标签同名，保存后将合并";
+            color: Theme.fg-subtle;
+            font-size: Metrics.text-xs;
+            vertical-alignment: center;
+        }
+        if (root.row-data.state == 1): Rectangle {
+            width: 48px;
+            height: 28px;
+            border-radius: Metrics.radius-lg;
+            background: Theme.accent-emphasis;
+            Text {
+                text: "保存";
+                color: Theme.fg-on-emphasis;
+                font-size: Metrics.text-xs;
+                font-weight: Metrics.weight-semibold;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            TouchArea {
+                clicked() => { root.rename-committed(root.draft); }
+            }
+        }
+        if (root.row-data.state == 1): Rectangle {
+            width: 48px;
+            height: 28px;
+            border-radius: Metrics.radius-lg;
+            border-width: 1px;
+            border-color: Theme.border-default;
+            Text {
+                text: "取消";
+                color: Theme.fg-muted;
+                font-size: Metrics.text-xs;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            TouchArea {
+                clicked() => { root.rename-cancelled(); }
+            }
+        }
+        // 确认删除态
+        if (root.row-data.state == 2): Text {
+            text: "确认删除标签「" + root.row-data.name + "」？其全部关联将一并移除。";
+            color: Theme.fg-default;
+            font-size: Metrics.text-sm;
+            overflow: elide;
+            horizontal-stretch: 1;
+            vertical-alignment: center;
+        }
+        if (root.row-data.state == 2): Rectangle {
+            width: 72px;
+            height: 28px;
+            border-radius: Metrics.radius-lg;
+            border-width: 1px;
+            border-color: Theme.danger-fg.with-alpha(0.4);
+            Text {
+                text: "确认删除";
+                color: Theme.danger-fg;
+                font-size: Metrics.text-xs;
+                font-weight: Metrics.weight-medium;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            TouchArea {
+                clicked() => { root.delete-confirmed(); }
+            }
+        }
+        if (root.row-data.state == 2): Rectangle {
+            width: 48px;
+            height: 28px;
+            border-radius: Metrics.radius-lg;
+            border-width: 1px;
+            border-color: Theme.border-default;
+            Text {
+                text: "取消";
+                color: Theme.fg-muted;
+                font-size: Metrics.text-xs;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            TouchArea {
+                clicked() => { root.delete-cancelled(); }
+            }
+        }
+    }
+}
+
+export component SettingsWindow inherits Window {
+    title: "FloatPaste · 设置";
+    icon: @image-url("app-icon.png");
+    // 尺寸对齐旧版 manager 窗口：inner_size 920×760 起、min 宽 880
+    // （Slint 窗口按根布局 preferred 自撑，必须显式给 preferred，
+    // 否则被 stretch 子元素拉成极小——编辑窗口同款修法）
+    min-width: 880px;
+    preferred-width: 920px;
+    preferred-height: 760px;
+    background: Theme.canvas-default;
+
+    // 整帧重绘开关（与编辑窗口同理：hide→show 后 Slint 只重绘变化区域，
+    // 重开时静态区保持表面销毁时的白底；show 前翻转强制全窗变脏）
+    in-out property <bool> force-repaint;
+
+    /* ── 设置字段（Rust 水合 + 回写） ── */
+    in-out property <string> shortcut;
+    in-out property <[string]> shortcut-parts;
+    in-out property <string> search-shortcut;
+    in-out property <[string]> search-shortcut-parts;
+    in-out property <string> search-shortcut-hint;
+    in property <string> shortcut-notice-text;
+    in property <string> search-notice-text;
+    in-out property <bool> search-shortcut-enabled: true;
+    in-out property <bool> picker-digit-enabled: true;
+    in-out property <string> history-limit-text;
+    in-out property <string> picker-limit-text;
+    in-out property <int> position-mode: 0;   // 0=mouse 1=lastPosition 2=caret
+    in-out property <int> theme-mode: 0;      // 0=system 1=light 2=dark
+    in-out property <int> theme-preset: 0;    // THEME_PRESET_IDS 下标
+    in property <string> theme-accent-id: "default";
+    in-out property <bool> launch-on-startup;
+    in-out property <bool> silent-on-startup;
+    in-out property <bool> restore-clipboard: true;
+    in-out property <bool> pause-monitoring;
+    in-out property <string> excluded-apps-text;
+
+    /* ── 保存状态（旧版 SaveStatusText）0=idle 1=saving 2=saved 3=error 4=blocked ── */
+    in-out property <int> status-kind: 0;
+    in-out property <string> status-reasons;
+    in-out property <bool> save-banner-visible: false;
+
+    /* ── 模型 ── */
+    in-out property <[PresetCard]> preset-cards;
+    in-out property <[AccentSwatch]> accent-swatches;
+    in-out property <[TagRowData]> tag-rows;
+    in-out property <string> tag-error-text;
+
+    /* ── 导航/滚动 ── */
+    in-out property <length> scroll-y <=> sv.viewport-y;
+    in-out property <length> view-height: sv.height;
+    in-out property <length> content-height: content-col.height;
+    in-out property <length> sec-y0: sec0.y;
+    in-out property <length> sec-y1: sec1.y;
+    in-out property <length> sec-y2: sec2.y;
+    in-out property <length> sec-y3: sec3.y;
+    in-out property <length> sec-y4: sec4.y;
+    in-out property <length> sec-y5: sec5.y;
+    // scroll-spy：视口顶 80px 以上最后一个分区；触底强制末分区
+    // （对齐旧版 getActiveSectionId）；程序性滚动期间 nav-override 锁定
+    in-out property <int> nav-override: -1;
+    in-out property <int> active-section:
+        root.nav-override >= 0 ? root.nav-override
+        : (content-col.height + scroll-y <= sv.height + 2px ? 5
+        : (sec5.y + scroll-y <= 80px ? 5
+        : (sec4.y + scroll-y <= 80px ? 4
+        : (sec3.y + scroll-y <= 80px ? 3
+        : (sec2.y + scroll-y <= 80px ? 2
+        : (sec1.y + scroll-y <= 80px ? 1 : 0))))));
+    callback nav-selected(int);
+
+    /* ── 编辑回调（Rust 统一防抖保存） ── */
+    callback history-limit-edited(string);
+    callback picker-limit-edited(string);
+    callback shortcut-edited(string);
+    callback shortcut-cancelled();
+    callback search-shortcut-edited(string);
+    callback search-shortcut-cancelled();
+    callback search-shortcut-enabled-toggled(bool);
+    callback picker-digit-toggled(bool);
+    callback position-mode-selected(int);
+    callback theme-mode-selected(int);
+    callback preset-selected(int);
+    callback accent-selected(string);
+    callback launch-on-startup-toggled(bool);
+    callback silent-on-startup-toggled(bool);
+    callback restore-clipboard-toggled(bool);
+    callback pause-monitoring-toggled(bool);
+    callback excluded-apps-edited(string);
+    callback save-retry();
+    callback save-error-dismiss();
+    callback request-close();
+
+    /* ── 标签管理 ── */
+    callback tag-rename-start(int);
+    callback tag-rename-draft(int, string);
+    callback tag-rename-commit(int, string);
+    callback tag-rename-cancel();
+    callback tag-delete-request(int);
+    callback tag-delete-confirm(int);
+    callback tag-delete-cancel();
+
+    // 窗口级键盘入口：开窗后 Rust 调 focus_root_scope 让 capture 生效
+    // （否则无元素获焦，Esc 无人接收）
+    public function focus-root-scope() {
+        root-scope.focus();
+    }
+
+    // ── 整帧重绘覆盖层（颜色非全透明，0.4% 白不可感知；无 TouchArea）──
+    if (root.force-repaint): Rectangle {
+        width: 100%;
+        height: 100%;
+        background: rgba(255, 255, 255, 0.004);
+    }
+
+    root-scope := FocusScope {
+        width: 100%;
+        height: 100%;
+        // 窗口级键盘 capture（先于输入框）：Esc 关窗；录制态让位
+        // （录制框自己的 key-pressed 消费 Esc）
+        capture-key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                if (shortcut-input.recording || search-shortcut-input.recording) {
+                    return reject;
+                }
+                root.request-close();
+                return accept;
+            }
+            return reject;
+        }
+
+        VerticalLayout {
+            // ── 头部（旧版 sticky header：-mx-5 border-b px-5 py-2）──
+            Rectangle {
+                height: 41px;
+                HorizontalLayout {
+                    padding-left: 20px;
+                    padding-right: 20px;
+                    padding-top: 8px;
+                    padding-bottom: 8px;
+                    spacing: 16px;
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        Text {
+                            width: parent.width;
+                            text: "设置";
+                            color: Theme.fg-default;
+                            font-size: 16px;
+                            font-weight: Metrics.weight-semibold;
+                            horizontal-alignment: left;
+                            vertical-alignment: center;
+                        }
+                    }
+                    // SaveStatusText：状态点 + 文案
+                    HorizontalLayout {
+                        spacing: Metrics.space-1_5;
+                        alignment: center;
+                        if (root.status-kind == 4): Rectangle {
+                            width: 6px;
+                            height: 6px;
+                            border-radius: Metrics.radius-pill;
+                            background: Theme.danger-fg;
+                        }
+                        if (root.status-kind == 4): Text {
+                            text: "修改暂未保存：" + root.status-reasons;
+                            color: Theme.danger-fg;
+                            font-size: Metrics.text-xs;
+                            vertical-alignment: center;
+                        }
+                        if (root.status-kind == 1): Rectangle {
+                            width: 6px;
+                            height: 6px;
+                            border-radius: Metrics.radius-pill;
+                            background: Theme.accent-fg;
+                        }
+                        if (root.status-kind == 1): Text {
+                            text: "正在保存";
+                            color: Theme.fg-subtle;
+                            font-size: Metrics.text-xs;
+                            vertical-alignment: center;
+                        }
+                        if (root.status-kind == 2): Rectangle {
+                            width: 6px;
+                            height: 6px;
+                            border-radius: Metrics.radius-pill;
+                            background: Theme.success-fg;
+                        }
+                        if (root.status-kind == 2): Text {
+                            text: "已保存";
+                            color: Theme.fg-subtle;
+                            font-size: Metrics.text-xs;
+                            vertical-alignment: center;
+                        }
+                        if (root.status-kind == 3): Rectangle {
+                            width: 6px;
+                            height: 6px;
+                            border-radius: Metrics.radius-pill;
+                            background: Theme.danger-fg;
+                        }
+                        if (root.status-kind == 3): Text {
+                            text: "保存失败";
+                            color: Theme.danger-fg;
+                            font-size: Metrics.text-xs;
+                            vertical-alignment: center;
+                        }
+                        if (root.status-kind == 0): Text {
+                            text: "更改将自动保存";
+                            color: Theme.fg-subtle;
+                            font-size: Metrics.text-xs;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+                Rectangle {
+                    y: parent.height - 1px;
+                    height: 1px;
+                    background: Theme.border-muted;
+                }
+            }
+
+            // ── 保存失败横幅（旧版 saveError：danger 边框 + 重试/关闭）──
+            if (root.save-banner-visible): Rectangle {
+                height: 46px;
+                Rectangle {
+                    x: 20px;
+                    y: 0;
+                    width: parent.width - 40px;
+                    height: parent.height - 14px;
+                    border-radius: 12px;
+                    border-width: 1px;
+                    border-color: Theme.danger-fg.with-alpha(0.4);
+                    background: Theme.danger-subtle;
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 16px;
+                        spacing: 12px;
+                        alignment: center;
+                        Text {
+                            text: "保存设置失败，请稍后重试。";
+                            color: Theme.danger-fg;
+                            font-size: Metrics.text-sm;
+                            horizontal-stretch: 1;
+                            wrap: word-wrap;
+                            horizontal-alignment: left;
+                            vertical-alignment: center;
+                        }
+                        Rectangle {
+                            width: 32px;
+                            height: 24px;
+                            Text {
+                                text: "重试";
+                                color: Theme.danger-fg;
+                                font-size: Metrics.text-xs;
+                                font-weight: Metrics.weight-semibold;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                            TouchArea {
+                                clicked() => { root.save-retry(); }
+                            }
+                        }
+                        Rectangle {
+                            width: 32px;
+                            height: 24px;
+                            Text {
+                                text: "关闭";
+                                color: Theme.danger-fg;
+                                font-size: Metrics.text-xs;
+                                font-weight: Metrics.weight-semibold;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                            TouchArea {
+                                clicked() => { root.save-error-dismiss(); }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ── 主体：普通 Rectangle 绝对定位（picker 列表同款结构）。
+            // 不进布局：Flickable 的 min/max 约束经 HorizontalLayout 传播，
+            // 要么把行高压到内容最小高、要么把窗口撑到内容总高
+            Rectangle {
+                // 侧边导航（旧版 SettingsNav sidebar：sticky top-16 self-start）
+                Rectangle {
+                    x: 20px;
+                    y: root.save-banner-visible ? 0px : 14px;
+                    width: 176px;
+                    height: nav-col.preferred-height;
+                    nav-col := VerticalLayout {
+                        spacing: 2px;
+                        VerticalLayout {
+                            padding-left: 12px;
+                            padding-bottom: 8px;
+                            Text {
+                                text: "偏好设置";
+                                color: Theme.fg-subtle;
+                                font-size: Metrics.text-xs;
+                                font-weight: Metrics.weight-medium;
+                            }
+                        }
+                        for section[idx] in [
+                            "通用", "快捷键", "外观", "行为", "排除应用", "标签",
+                        ]: Rectangle {
+                            height: 30px;
+                            border-radius: Metrics.radius-md;
+                            background: root.active-section == idx
+                                ? Theme.accent-subtle
+                                : (nav-ta.has-hover ? Theme.canvas-subtle : transparent);
+                            nav-ta := TouchArea {
+                                clicked() => { root.nav-selected(idx); }
+                            }
+                            if (root.active-section == idx): Rectangle {
+                                x: 0;
+                                y: (parent.height - 16px) / 2;
+                                width: 3px;
+                                height: 16px;
+                                border-radius: Metrics.radius-pill;
+                                background: Theme.accent-fg;
+                            }
+                            Text {
+                                x: 12px;
+                                width: parent.width - 24px;
+                                height: 100%;
+                                text: section;
+                                color: root.active-section == idx ? Theme.fg-default
+                                    : (nav-ta.has-hover ? Theme.fg-default : Theme.fg-muted);
+                                font-size: Metrics.text-sm;
+                                font-weight: root.active-section == idx
+                                    ? Metrics.weight-medium : Metrics.weight-normal;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+
+                // 滚动内容宿主：显式几何占满导航右侧余宽与主体全高
+                Rectangle {
+                    x: 216px;
+                    y: root.save-banner-visible ? 0px : 14px;
+                    width: parent.width - 216px - 20px;
+                    height: parent.height - (root.save-banner-visible ? 0px : 14px) - 14px;
+                    sv := Flickable {
+                        x: 0;
+                        y: 0;
+                        width: parent.width;
+                        height: parent.height;
+                    content-col := VerticalLayout {
+                        spacing: 16px;
+
+                        /* ═══ 通用 ═══ */
+                        sec0 := Rectangle {
+                            height: sec0-col.preferred-height;
+                            sec0-col := VerticalLayout {
+                                spacing: 6px;
+                                SectionHeader {
+                                    title: "通用";
+                                    description: "调整历史容量与速贴列表承载范围，平衡性能和浏览密度。";
+                                }
+                                RowGroup {
+                                    SettingRow {
+                                        title: "历史记录上限";
+                                        description: "超出后自动清理最早的记录。";
+                                        NumberInput {
+                                            x: parent.width - 16px - 96px;
+                                            y: (parent.height - self.height) / 2;
+                                            text <=> root.history-limit-text;
+                                            edited(text) => { root.history-limit-edited(text); }
+                                        }
+                                    }
+                                    RowDivider { }
+                                    SettingRow {
+                                        title: "速贴窗口记录数";
+                                        description: "速贴面板一次可滚动浏览的记录数，数字快捷键只覆盖前 9 条。";
+                                        NumberInput {
+                                            x: parent.width - 16px - 96px;
+                                            y: (parent.height - self.height) / 2;
+                                            text <=> root.picker-limit-text;
+                                            edited(text) => { root.picker-limit-edited(text); }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        /* ═══ 快捷键 ═══ */
+                        sec1 := Rectangle {
+                            height: sec1-col.preferred-height;
+                            sec1-col := VerticalLayout {
+                                spacing: 6px;
+                                SectionHeader {
+                                    title: "快捷键";
+                                    description: "配置全局唤起与搜索入口，保持高频操作一眼可见。";
+                                }
+                                RowGroup {
+                                    // 速贴唤起
+                                    SettingRow {
+                                        title: "速贴唤起";
+                                        description: "全局唤出速贴面板的组合键。";
+                                        control-height: 34px;
+                                        sc1-ctrl := VerticalLayout {
+                                            x: parent.width - 16px - 224px;
+                                            y: (parent.height - self.preferred-height) / 2;
+                                            width: 224px;
+                                            spacing: 6px;
+                                            shortcut-input := ShortcutInput {
+                                                width: 100%;
+                                                value-parts: root.shortcut-parts;
+                                                notice: root.shortcut-notice-text;
+                                                captured(value) => { root.shortcut-edited(value); }
+                                                cleared() => { root.shortcut-edited(""); }
+                                                cancelled() => { root.shortcut-cancelled(); }
+                                            }
+                                            if (root.shortcut-notice-text != ""): Text {
+                                                height: 18px;
+                                                text: root.shortcut-notice-text;
+                                                color: Theme.danger-fg;
+                                                font-size: Metrics.text-xs;
+                                                overflow: elide;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                    }
+                                    RowDivider { }
+                                    // 搜索窗口：启用复选 + 录制框（+ 冲突提示）
+                                    row-sc2 := SettingRow {
+                                        title: "搜索窗口";
+                                        description: "为搜索窗口单独保留一组更适合检索场景的快捷键。";
+                                        control-height: sc2-ctrl.preferred-height;
+                                        sc2-ctrl := VerticalLayout {
+                                            x: parent.width - 16px - 224px;
+                                            y: (parent.height - self.preferred-height) / 2;
+                                            width: 224px;
+                                            spacing: 6px;
+                                            HorizontalLayout {
+                                                height: 16px;
+                                                spacing: Metrics.space-1_5;
+                                                Rectangle {
+                                                    width: 16px;
+                                                    height: 16px;
+                                                    border-radius: Metrics.radius-sm;
+                                                    border-width: 1px;
+                                                    border-color: root.search-shortcut-enabled
+                                                        ? Theme.accent-fg : Theme.border-default;
+                                                    background: root.search-shortcut-enabled
+                                                        ? Theme.accent-fg : Theme.canvas-default;
+                                                    TouchArea {
+                                                        clicked() => {
+                                                            root.search-shortcut-enabled-toggled(
+                                                                !root.search-shortcut-enabled);
+                                                        }
+                                                    }
+                                                    if (root.search-shortcut-enabled): Text {
+                                                        width: 100%;
+                                                        height: 100%;
+                                                        text: "✓";
+                                                        color: Theme.fg-on-emphasis;
+                                                        font-size: 10px;
+                                                        font-weight: Metrics.weight-bold;
+                                                        vertical-alignment: center;
+                                                        horizontal-alignment: center;
+                                                    }
+                                                }
+                                                Text {
+                                                    text: "启用";
+                                                    color: Theme.fg-subtle;
+                                                    font-size: Metrics.text-xs;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                            search-shortcut-input := ShortcutInput {
+                                                width: 100%;
+                                                disabled: !root.search-shortcut-enabled;
+                                                value-parts: root.search-shortcut-parts;
+                                                notice: root.search-notice-text;
+                                                captured(value) => { root.search-shortcut-edited(value); }
+                                                cleared() => { root.search-shortcut-edited(""); }
+                                                cancelled() => { root.search-shortcut-cancelled(); }
+                                            }
+                                            if (root.search-notice-text != ""
+                                                || root.search-shortcut-hint != ""): Text {
+                                                height: 18px;
+                                                text: root.search-notice-text != ""
+                                                    ? root.search-notice-text
+                                                    : root.search-shortcut-hint;
+                                                color: root.search-notice-text != ""
+                                                    ? Theme.danger-fg : Theme.fg-subtle;
+                                                font-size: Metrics.text-xs;
+                                                overflow: elide;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        /* ═══ 外观 ═══ */
+                        sec2 := Rectangle {
+                            height: sec2-col.preferred-height;
+                            sec2-col := VerticalLayout {
+                                spacing: 6px;
+                                SectionHeader {
+                                    title: "外观";
+                                    description: "管理界面主题与速贴窗口出现方式，保证日常使用手感一致。";
+                                }
+                                RowGroup {
+                                    // 界面模式
+                                    Rectangle {
+                                        height: 52px;
+                                        SettingRow {
+                                            width: parent.width;
+                                            title: "界面模式";
+                                            description: ["自动匹配 Windows 当前的浅色或深色外观。",
+                                                "固定使用浅色界面，不受系统外观影响。",
+                                                "固定使用深色界面，适合夜间与暗光环境。"][root.theme-mode];
+                                            Segmented {
+                                                x: parent.width - self.preferred-width - 16px;
+                                                y: (parent.height - self.height) / 2;
+                                                options: ["跟随系统", "浅色", "深色"];
+                                                value <=> root.theme-mode;
+                                                selected(idx) => { root.theme-mode-selected(idx); }
+                                            }
+                                        }
+                                    }
+                                    RowDivider { }
+                                    // 主题预设（wide 行：标题描述在上，网格在下）
+                                    Rectangle {
+                                        height: ap2-col.preferred-height + 24px;
+                                        ap2-col := VerticalLayout {
+                                            padding-left: 16px;
+                                            padding-right: 16px;
+                                            padding-top: 12px;
+                                            padding-bottom: 12px;
+                                            spacing: 2px;
+                                            Text {
+                                                text: "主题预设";
+                                                color: Theme.fg-default;
+                                                font-size: Metrics.text-sm;
+                                                font-weight: Metrics.weight-medium;
+                                            }
+                                            Text {
+                                                text: "配色方案基于经过验证的公开色板，全部通过对比度门禁，跨设备观感一致。";
+                                                color: Theme.fg-muted;
+                                                font-size: Metrics.text-xs;
+                                                wrap: word-wrap;
+                                            }
+                                            VerticalLayout {
+                                                padding-top: 10px;
+                                                HorizontalLayout {
+                                                    spacing: 10px;
+                                                    for card[idx] in root.preset-cards: Rectangle {
+                                                        horizontal-stretch: 1;
+                                                        height: card-col.preferred-height;
+                                                        border-radius: 12px;
+                                                        border-width: 1px;
+                                                        border-color: card.selected ? Theme.accent-fg
+                                                            : (preset-ta.has-hover
+                                                                ? Theme.border-default : Theme.border-muted);
+                                                        background: card.selected
+                                                            ? Theme.canvas-default : transparent;
+                                                        preset-ta := TouchArea {
+                                                            clicked() => { root.preset-selected(idx); }
+                                                        }
+                                                        card-col := VerticalLayout {
+                                                            padding: 8px;
+                                                            spacing: 6px;
+                                                            Rectangle {
+                                                                height: preview-inner.preferred-height + 16px;
+                                                                border-radius: Metrics.radius-lg;
+                                                                background: card.canvas-default;
+                                                                preview-inner := VerticalLayout {
+                                                                    x: 8px;
+                                                                    y: 8px;
+                                                                    width: parent.width - 16px;
+                                                                    padding: 6px;
+                                                                    spacing: 4px;
+                                                                    Rectangle {
+                                                                        height: 6px;
+                                                                        border-radius: Metrics.radius-pill;
+                                                                        background: card.fg-default;
+                                                                    }
+                                                                    Rectangle {
+                                                                        height: 6px;
+                                                                        width: parent.width * 0.75;
+                                                                        border-radius: Metrics.radius-pill;
+                                                                        background: card.fg-muted;
+                                                                    }
+                                                                    Rectangle {
+                                                                        height: 14px;
+                                                                        width: 40px;
+                                                                        border-radius: Metrics.radius-sm;
+                                                                        background: card.accent-emphasis;
+                                                                        Rectangle {
+                                                                            x: 6px;
+                                                                            y: 6px;
+                                                                            width: parent.width - 12px;
+                                                                            height: 2px;
+                                                                            border-radius: Metrics.radius-pill;
+                                                                            background: card.fg-on-emphasis;
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                            Text {
+                                                                text: card.name;
+                                                                color: card.selected
+                                                                    ? Theme.fg-default : Theme.fg-muted;
+                                                                font-size: Metrics.text-sm;
+                                                                font-weight: Metrics.weight-medium;
+                                                            }
+                                                            Text {
+                                                                text: card.description;
+                                                                color: Theme.fg-subtle;
+                                                                font-size: Metrics.text-xs;
+                                                                wrap: word-wrap;
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    RowDivider { }
+                                    // 强调色
+                                    Rectangle {
+                                        height: 52px;
+                                        SettingRow {
+                                            width: parent.width;
+                                            title: "强调色";
+                                            description: "选中态、按钮与高亮使用的颜色。";
+                                            HorizontalLayout {
+                                                x: parent.width - self.preferred-width - 16px;
+                                                y: (parent.height - 28px) / 2;
+                                                spacing: Metrics.space-1_5;
+                                                alignment: center;
+                                                for swatch in root.accent-swatches: Rectangle {
+                                                    width: 28px;
+                                                    height: 28px;
+                                                    border-radius: Metrics.radius-pill;
+                                                    border-width: 2px;
+                                                    border-color: swatch.selected
+                                                        ? Theme.accent-fg : transparent;
+                                                    Rectangle {
+                                                        x: 2px;
+                                                        y: 2px;
+                                                        width: 20px;
+                                                        height: 20px;
+                                                        border-radius: Metrics.radius-pill;
+                                                        border-width: 1px;
+                                                        border-color: rgba(0, 0, 0, 0.08);
+                                                        background: swatch.hex;
+                                                        TouchArea {
+                                                            clicked() => { root.accent-selected(swatch.id); }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    RowDivider { }
+                                    // 速贴窗口显示位置
+                                    Rectangle {
+                                        height: 52px;
+                                        SettingRow {
+                                            width: parent.width;
+                                            title: "速贴窗口显示位置";
+                                            description: ["默认推荐，速贴窗口会贴近当前鼠标所在位置弹出。",
+                                                "保留上次拖动或关闭时的位置；首次使用会落在屏幕中心。",
+                                                "优先跟随当前输入光标；如果系统拿不到光标位置，会退回鼠标位置。"][root.position-mode];
+                                            Segmented {
+                                                x: parent.width - self.preferred-width - 16px;
+                                                y: (parent.height - self.height) / 2;
+                                                options: ["鼠标位置", "上次关闭时的位置", "光标所在位置"];
+                                                value <=> root.position-mode;
+                                                selected(idx) => { root.position-mode-selected(idx); }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        /* ═══ 行为 ═══ */
+                        sec3 := Rectangle {
+                            height: sec3-col.preferred-height;
+                            sec3-col := VerticalLayout {
+                                spacing: 6px;
+                                SectionHeader {
+                                    title: "行为";
+                                    description: "控制开机启动、监听状态与贴回行为，明确主次关系。";
+                                }
+                                RowGroup {
+                                    ToggleRow {
+                                        title: "开机自启";
+                                        description: "登录系统后自动启动 FloatPaste。";
+                                        checked: root.launch-on-startup;
+                                        toggled(checked) => { root.launch-on-startup-toggled(checked); }
+                                    }
+                                    RowDivider { }
+                                    ToggleRow {
+                                        title: "开机时静默启动";
+                                        description: "启动后不主动打断当前工作流。";
+                                        checked: root.silent-on-startup;
+                                        disabled: !root.launch-on-startup;
+                                        nested: true;
+                                        toggled(checked) => { root.silent-on-startup-toggled(checked); }
+                                    }
+                                    RowDivider { }
+                                    ToggleRow {
+                                        title: "回贴后恢复剪贴板";
+                                        description: "贴回完成后恢复原有剪贴板内容，减少对当前工作流的干扰。";
+                                        checked: root.restore-clipboard;
+                                        toggled(checked) => { root.restore-clipboard-toggled(checked); }
+                                    }
+                                    RowDivider { }
+                                    ToggleRow {
+                                        title: "暂停监听";
+                                        description: "暂停后不会继续采集新的剪贴板记录。";
+                                        checked: root.pause-monitoring;
+                                        toggled(checked) => { root.pause-monitoring-toggled(checked); }
+                                    }
+                                    RowDivider { }
+                                    ToggleRow {
+                                        title: "速贴面板数字键直达";
+                                        description: "速贴面板打开时按 1-9 直接粘贴对应条目。数字键是无修饰全局热键，若与其他软件冲突可关闭。";
+                                        checked: root.picker-digit-enabled;
+                                        toggled(checked) => { root.picker-digit-toggled(checked); }
+                                    }
+                                }
+                            }
+                        }
+
+                        /* ═══ 排除应用 ═══ */
+                        sec4 := Rectangle {
+                            height: sec4-col.preferred-height;
+                            sec4-col := VerticalLayout {
+                                spacing: 6px;
+                                SectionHeader {
+                                    title: "排除应用";
+                                    description: "按进程名忽略特定应用，避免敏感内容进入历史记录。";
+                                }
+                                RowGroup {
+                                    ex-col := VerticalLayout {
+                                        padding-left: 16px;
+                                        padding-right: 16px;
+                                        padding-top: 12px;
+                                        padding-bottom: 12px;
+                                        spacing: 2px;
+                                        Text {
+                                            text: "忽略指定进程";
+                                            color: Theme.fg-default;
+                                            font-size: Metrics.text-sm;
+                                            font-weight: Metrics.weight-medium;
+                                        }
+                                        Text {
+                                            text: "每行填写一个可执行文件名，命中的应用不会被采集进历史记录。建议使用完整进程名，避免误伤其他应用。";
+                                            color: Theme.fg-muted;
+                                            font-size: Metrics.text-xs;
+                                            wrap: word-wrap;
+                                        }
+                                        VerticalLayout {
+                                            padding-top: 10px;
+                                            Rectangle {
+                                                height: 104px;
+                                                border-radius: 12px;
+                                                border-width: ex-input.has-focus ? 2px : 1px;
+                                                border-color: ex-input.has-focus
+                                                    ? Theme.accent-fg : Theme.border-default;
+                                                background: Theme.canvas-default;
+                                                clip: true;
+                                                if (root.excluded-apps-text == ""
+                                                    && !ex-input.has-focus): Text {
+                                                    x: 12px;
+                                                    y: 6px;
+                                                    width: parent.width - 24px;
+                                                    text: "每行一个可执行文件名，例如：\nKeePass.exe\nWindowsTerminal.exe";
+                                                    color: Theme.fg-subtle;
+                                                    font-size: Metrics.text-sm;
+                                                    wrap: word-wrap;
+                                                }
+                                                ex-input := TextInput {
+                                                    x: 12px;
+                                                    y: 6px;
+                                                    width: parent.width - 24px;
+                                                    height: parent.height - 12px;
+                                                    font-size: Metrics.text-sm;
+                                                    color: Theme.fg-default;
+                                                    single-line: false;
+                                                    wrap: word-wrap;
+                                                    selection-foreground-color: Theme.selection-fg;
+                                                    selection-background-color: Theme.selection-bg;
+                                                    text <=> root.excluded-apps-text;
+                                                    edited() => { root.excluded-apps-edited(self.text); }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        /* ═══ 标签 ═══ */
+                        sec5 := Rectangle {
+                            height: sec5-col.preferred-height;
+                            sec5-col := VerticalLayout {
+                                spacing: 6px;
+                                SectionHeader {
+                                    title: "标签";
+                                    description: "管理剪贴记录标签：重命名、合并与删除。";
+                                }
+                                if (root.tag-error-text != ""): Rectangle {
+                                    height: 44px;
+                                    border-radius: 12px;
+                                    border-width: 1px;
+                                    border-color: Theme.danger-fg.with-alpha(0.4);
+                                    background: Theme.danger-subtle;
+                                    Text {
+                                        x: 16px;
+                                        width: parent.width - 32px;
+                                        text: root.tag-error-text;
+                                        color: Theme.danger-fg;
+                                        font-size: Metrics.text-sm;
+                                        wrap: word-wrap;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                if (root.tag-rows.length == 0): Text {
+                                    text: "暂无标签，可在编辑窗口为条目添加标签后回到这里管理。";
+                                    color: Theme.fg-subtle;
+                                    font-size: Metrics.text-sm;
+                                }
+                                if (root.tag-rows.length > 0): Rectangle {
+                                    height: tags-col.preferred-height;
+                                    border-radius: 12px;
+                                    border-width: 1px;
+                                    border-color: Theme.border-muted;
+                                    background: Theme.canvas-subtle;
+                                    clip: true;
+                                    tags-col := VerticalLayout {
+                                        for row[idx] in root.tag-rows: TagRow {
+                                            row-data: row;
+                                            row-index: idx;
+                                            rename-started => { root.tag-rename-start(idx); }
+                                            draft-changed(text) => { root.tag-rename-draft(idx, text); }
+                                            rename-committed(text) => { root.tag-rename-commit(idx, text); }
+                                            rename-cancelled => { root.tag-rename-cancel(); }
+                                            delete-requested => { root.tag-delete-request(idx); }
+                                            delete-confirmed => { root.tag-delete-confirm(idx); }
+                                            delete-cancelled => { root.tag-delete-cancel(); }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }   // 宿主 Rectangle
+                    }
+                }
+            }
+        }
+    }
+}
+

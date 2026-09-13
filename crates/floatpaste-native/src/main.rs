@@ -1,20 +1,23 @@
 //! FloatPaste 原生壳（Slint + 软件渲染）。
 //!
 //! 与老 Tauri 壳共用 floatpaste-core 与同一数据目录。本阶段完成速贴面板、
-//! 搜索窗口与编辑窗口的复刻（无焦点会话模型 / 长按导航 / 外击关闭 / 悬停
-//! 预览 / 三种定位 / 尺寸记忆 / 主题 / 搜索会话 / 两段式删除 / 文本编辑与
-//! 标签管理），settings/tray 按窗口逐个迁移。
+//! 搜索窗口、编辑窗口、设置窗口与系统托盘的复刻（无焦点会话模型 / 长按
+//! 导航 / 外击关闭 / 悬停预览 / 三种定位 / 尺寸记忆 / 主题 / 搜索会话 /
+//! 两段式删除 / 文本编辑与标签管理 / 设置防抖自动保存与运行时联动）。
 
+mod app_icon;
 mod app_state;
 mod editor;
 mod overlay;
 mod paste_flow;
 mod picker;
 mod search;
+mod settings;
 mod system;
 mod theme_bridge;
 mod thumbnails;
 mod tooltip;
+mod tray;
 mod win32_ext;
 
 use std::sync::atomic::Ordering;
@@ -100,6 +103,14 @@ fn main() {
             return;
         }
     };
+    // 设置窗口：普通带框窗（同旧版 label=manager），启动即建、按需显示
+    let settings_win = match SettingsWindow::new() {
+        Ok(win) => win,
+        Err(error) => {
+            tracing::error!("创建设置窗口失败: {error}");
+            return;
+        }
+    };
 
     let state = Arc::new(SharedState::new(core));
 
@@ -109,6 +120,7 @@ fn main() {
         tooltip: tooltip_win.as_weak(),
         search: search_win.as_weak(),
         editor: editor_win.as_weak(),
+        settings: settings_win.as_weak(),
     };
 
     // ── 二次启动唤醒：打开速贴会话（等价于按下主快捷键）──
@@ -129,6 +141,7 @@ fn main() {
     wire_picker_callbacks(&app);
     wire_search_callbacks(&app);
     wire_editor_callbacks(&app, &editor_win);
+    settings::wire(&app);
 
     // ── 窗口句柄与浮层样式：事件循环首轮装配（winit 惰性建窗，
     // show/停屏舞蹈统一在 overlay::silent_assemble）──
@@ -173,11 +186,13 @@ fn main() {
             theme::resolve_theme(settings.theme_mode.clone(), theme::system_prefers_dark());
         let tokens = theme::derive_tokens(&settings.theme_preset, &settings.theme_accent, resolved);
         let editor_for_theme = app_for_init.editor.upgrade();
+        let settings_for_theme = app_for_init.settings.upgrade();
         theme_bridge::apply_theme(
             &picker_win,
             Some(&tooltip_win),
             Some(&search_win),
             editor_for_theme.as_ref(),
+            settings_for_theme.as_ref(),
             &tokens,
         );
 
@@ -212,61 +227,10 @@ fn main() {
         }
     }
 
-    // ── 全局快捷键：主快捷键切换速贴，搜索快捷键切换搜索窗口 ──
-    {
-        let app_for_hotkey = app.clone();
-        let settings = state.current_settings();
-        let shortcut_text = {
-            let configured = settings.shortcut;
-            if configured.trim().is_empty() {
-                "Alt+Q".to_string()
-            } else {
-                configured
-            }
-        };
-        let search_shortcut_text = settings.search_shortcut;
-        let search_shortcut_enabled = settings.search_shortcut_enabled;
-        // 快捷键无法解析时只跳过注册，不退出进程：剪贴板监听与
-        // 二次启动唤起仍可用
-        let main_spec =
-            hotkey::parse_hotkey(&shortcut_text).or_else(|| hotkey::parse_hotkey("Alt+Q"));
-        if main_spec.is_none() {
-            tracing::error!("主快捷键无法解析（配置值与默认值均失败），跳过注册");
-        }
-        let mut hotkeys = Vec::new();
-        if let Some(main_spec) = main_spec {
-            hotkeys.push((1, main_spec, false));
-            // 搜索快捷键与主快捷键相同时跳过（同组合键 RegisterHotKey 必失败）
-            if search_shortcut_enabled {
-                match hotkey::parse_hotkey(&search_shortcut_text) {
-                    Some(search_spec) if search_spec != main_spec => {
-                        hotkeys.push((2, search_spec, true));
-                    }
-                    Some(_) => tracing::warn!("搜索快捷键与主快捷键相同，跳过注册"),
-                    None => tracing::warn!("搜索快捷键无法解析，跳过注册"),
-                }
-            }
-        }
-        if let Err(error) = hotkey::register_hotkeys(
-            hotkeys
-                .into_iter()
-                .map(|(id, spec, _)| (id, spec))
-                .collect(),
-            move |id| {
-                tracing::info!("命中全局快捷键 id={id}");
-                let app = app_for_hotkey.clone();
-                let _ = slint::invoke_from_event_loop(move || {
-                    if id == 2 {
-                        search::toggle_from_shortcut(&app);
-                    } else {
-                        picker::toggle(&app);
-                    }
-                });
-            },
-        ) {
-            tracing::error!("注册全局快捷键失败: {error}");
-        }
-    }
+    // ── 全局快捷键：主快捷键切换速贴，搜索快捷键切换搜索窗口；
+    //    托盘常驻（设置窗口「打开设置」左键单击与右键菜单）──
+    sync_global_hotkeys(&app);
+    tray::start(app.clone());
 
     // 必须用 until_quit 变体：Slint 默认在最后一个窗口关闭/隐藏时退出事件循环，
     // 而"隐藏窗口"是速贴应用的常态操作（Esc/粘贴/热键），会让整个进程静默退出
@@ -280,6 +244,66 @@ fn main() {
     ClipboardMonitor::stop();
     hotkey::stop_hotkeys();
     state.core.begin_quit();
+}
+
+/// 注册全局快捷键（主快捷键=速贴开关，搜索快捷键=搜索开关）。
+/// 设置保存后的重注册复用此函数：旧热键线程的注销是异步的（stop 后须等
+/// 其消息循环退出才释放组合键），RegisterHotKey 失败按 150ms 重试三次。
+pub(crate) fn sync_global_hotkeys(app: &App) {
+    let settings = app.state.current_settings();
+    let shortcut_text = {
+        let configured = settings.shortcut;
+        if configured.trim().is_empty() {
+            "Alt+Q".to_string()
+        } else {
+            configured
+        }
+    };
+    let search_shortcut_text = settings.search_shortcut;
+    let search_shortcut_enabled = settings.search_shortcut_enabled;
+    // 快捷键无法解析时只跳过注册，不退出进程：剪贴板监听与
+    // 二次启动唤起仍可用
+    let main_spec =
+        hotkey::parse_hotkey(&shortcut_text).or_else(|| hotkey::parse_hotkey("Alt+Q"));
+    let Some(main_spec) = main_spec else {
+        tracing::error!("主快捷键无法解析（配置值与默认值均失败），跳过注册");
+        return;
+    };
+    let mut specs: Vec<(u32, hotkey::HotkeySpec)> = vec![(1, main_spec)];
+    // 搜索快捷键与主快捷键相同时跳过（同组合键 RegisterHotKey 必失败）
+    if search_shortcut_enabled {
+        match hotkey::parse_hotkey(&search_shortcut_text) {
+            Some(search_spec) if search_spec != main_spec => {
+                specs.push((2, search_spec));
+            }
+            Some(_) => tracing::warn!("搜索快捷键与主快捷键相同，跳过注册"),
+            None => tracing::warn!("搜索快捷键无法解析，跳过注册"),
+        }
+    }
+
+    for attempt in 0..3 {
+        hotkey::stop_hotkeys();
+        let app_for_hotkey = app.clone();
+        match hotkey::register_hotkeys(specs.clone(), move |id| {
+            tracing::info!("命中全局快捷键 id={id}");
+            let app = app_for_hotkey.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if id == 2 {
+                    search::toggle_from_shortcut(&app);
+                } else {
+                    picker::toggle(&app);
+                }
+            });
+        }) {
+            Ok(()) => return,
+            // 重试等旧线程退出释放组合键；末次仍失败则放弃（保留鼠标路径）
+            Err(error) if attempt < 2 => {
+                tracing::warn!("注册全局快捷键失败（第 {} 次）：{error}", attempt + 1);
+                std::thread::sleep(std::time::Duration::from_millis(150));
+            }
+            Err(error) => tracing::error!("注册全局快捷键失败: {error}"),
+        }
+    }
 }
 
 fn wire_picker_callbacks(app: &App) {

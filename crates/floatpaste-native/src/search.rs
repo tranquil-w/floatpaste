@@ -77,6 +77,25 @@ pub fn toggle_from_shortcut(app: &App) {
     open(app);
 }
 
+/// 全局「打开搜索」语义（托盘菜单，对齐旧壳 open_search_global）：
+/// 已活跃时仅聚回前台（保留关键词与列表状态，对齐 is_search_active 分支）；
+/// 否则速贴活跃先收起（不还原目标，焦点交给搜索窗口）再走完整打开流程。
+pub fn open_global(app: &App) {
+    if app.state.is_search_active() {
+        let hwnd = app.state.search_hwnd.load(Ordering::SeqCst);
+        if hwnd != 0 {
+            if let Err(error) = window_control::restore_window_and_focus(hwnd) {
+                warn!("搜索窗口获取焦点失败: {error}");
+            }
+        }
+        return;
+    }
+    if app.state.is_picker_active() {
+        picker::hide(app, false);
+    }
+    open(app);
+}
+
 /// 打开搜索会话（对齐 open_search_global）
 pub fn open(app: &App) {
     let hwnd = app.state.search_hwnd.load(Ordering::SeqCst);

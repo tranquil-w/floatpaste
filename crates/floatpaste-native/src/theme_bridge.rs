@@ -87,12 +87,13 @@ fn write_tooltip_tokens(theme: &Theme, tokens: &ThemeTokens) {
     theme.set_shadow_color(rgba_color(tokens.shadow_color, 1.0));
 }
 
-/// 把 token 应用到速贴窗口（以及已创建的 tooltip / 搜索 / 编辑窗口）
+/// 把 token 应用到速贴窗口（以及已创建的 tooltip / 搜索 / 编辑 / 设置窗口）
 pub fn apply_theme(
     picker: &QuickPasteWindow,
     tooltip: Option<&TooltipWindow>,
     search: Option<&SearchWindow>,
     editor: Option<&EditorWindow>,
+    settings: Option<&crate::SettingsWindow>,
     tokens: &ThemeTokens,
 ) {
     write_full_tokens(&picker.global::<Theme>(), tokens);
@@ -104,5 +105,33 @@ pub fn apply_theme(
     }
     if let Some(editor) = editor {
         write_full_tokens(&editor.global::<Theme>(), tokens);
+    }
+    if let Some(settings) = settings {
+        write_full_tokens(&settings.global::<Theme>(), tokens);
+    }
+}
+
+/// 运行时主题重应用（设置保存后的联动路径）：从 App 弱引用升级全部窗口。
+/// 任一窗口升级失败则跳过该窗口（未就绪时不强求）。
+pub fn reapply_theme(app: &crate::picker::App, tokens: &ThemeTokens) {
+    let picker = app.picker.upgrade();
+    let tooltip = app.tooltip.upgrade();
+    let search = app.search.upgrade();
+    let editor = app.editor.upgrade();
+    let settings = app.settings.upgrade();
+    if let Some(picker) = picker.as_ref() {
+        write_full_tokens(&picker.global::<Theme>(), tokens);
+    }
+    if let Some(tooltip) = tooltip.as_ref() {
+        write_tooltip_tokens(&tooltip.global::<Theme>(), tokens);
+    }
+    if let Some(search) = search.as_ref() {
+        write_full_tokens(&search.global::<Theme>(), tokens);
+    }
+    if let Some(editor) = editor.as_ref() {
+        write_full_tokens(&editor.global::<Theme>(), tokens);
+    }
+    if let Some(settings) = settings.as_ref() {
+        write_full_tokens(&settings.global::<Theme>(), tokens);
     }
 }

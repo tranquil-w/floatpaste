@@ -1801,6 +1801,7 @@ dependencies = [
  "floatpaste-core",
  "image",
  "raw-window-handle",
+ "serde_json",
  "slint",
  "slint-build",
  "tracing",
