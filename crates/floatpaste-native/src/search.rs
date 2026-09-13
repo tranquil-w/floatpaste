@@ -145,8 +145,7 @@ pub fn suspend_input(app: &App) {
 }
 
 /// 进编辑器期间停屏的原位（物理坐标）：恢复时移回
-static PARKED_POSITION: std::sync::Mutex<Option<(i32, i32)>> =
-    std::sync::Mutex::new(None);
+static PARKED_POSITION: std::sync::Mutex<Option<(i32, i32)>> = std::sync::Mutex::new(None);
 
 /// 进入编辑器前的隐藏：结束激活、收 tooltip、停屏窗口，但**不清理
 /// 会话与列表状态**（对齐 hide_search_for_editor_transition）——
@@ -185,7 +184,8 @@ pub fn restore_after_editor(app: &App) {
     };
     if let Ok(mut slot) = PARKED_POSITION.lock() {
         if let Some((x, y)) = slot.take() {
-            win.window().set_position(slint::PhysicalPosition::new(x, y));
+            win.window()
+                .set_position(slint::PhysicalPosition::new(x, y));
         }
     }
     let _ = win.window().show();
@@ -194,6 +194,10 @@ pub fn restore_after_editor(app: &App) {
     }
     overlay::after_show_focusable(hwnd);
     app.state.begin_search_activation();
+    // 失焦自动关闭的监视随激活重启：旧壳是常驻 Focused(false) 监听按
+    // is_search_active 门控，编辑器返回后依然生效；本实现的轮询线程
+    // 生命周期与会话绑定，必须在此重新拉起（边沿触发不会误判首拍失焦）
+    begin_focus_watcher(app);
     info!("从 Editor 返回 Search");
 }
 
@@ -992,7 +996,8 @@ fn ensure_thumbnails(app: &App, items: &[ClipItemSummary]) {
 /// 按宽度把文本硬折到 max_lines 行内（旧版 whitespace-pre-wrap +
 /// break-words + line-clamp 的合成语义）：
 /// - 显式换行保留为行界（pre-wrap）
-/// - 行内放不下时在字符边界硬折（break-words 对长 token 的兜底）
+/// - 行内放不下时优先在词间空格断行（词整体移到下一行），长词无空格
+///   可依才按字符边界硬折（break-words 的兜底）
 /// - 超出预算行或源本身截断 → 末行以省略号收尾（line-clamp 观感）
 fn hard_wrap_preview(
     measure_width: &mut dyn FnMut(&str) -> f32,
@@ -1033,8 +1038,23 @@ fn hard_wrap_preview(
             if low == 0 {
                 low = 1; // 单字符超宽也必须推进，避免死循环
             }
-            let byte_len: usize = chars[..low].iter().map(|c| c.len_utf8()).sum();
-            lines.push(chars[..low].iter().collect());
+            // 对齐 break-words：可容纳前缀内存在空格时优先在最后一个空格
+            // 断行（词整体下移，断点空格随换行消耗）；仅长词无空格可依时
+            // 才按字符硬折，硬折后紧随的空格属词间间隔，一并消耗
+            let mut cut = low;
+            let mut consumed = low;
+            if let Some(space) = chars[..low].iter().rposition(|&c| c == ' ') {
+                if space > 0 {
+                    cut = space;
+                    consumed = space + 1;
+                }
+            } else {
+                while consumed < chars.len() && chars[consumed] == ' ' {
+                    consumed += 1;
+                }
+            }
+            let byte_len: usize = chars[..consumed].iter().map(|c| c.len_utf8()).sum();
+            lines.push(chars[..cut].iter().collect());
             rest = &rest[byte_len..];
         }
         if overflow {
@@ -1551,10 +1571,9 @@ pub fn retry(app: &App) {
     run_query(app);
 }
 
-/// Ctrl+Enter / 编辑按钮：编辑器窗口在后续迁移阶段接入
+/// Ctrl+Enter / 编辑按钮：打开编辑器（搜索窗停屏、会话让位，关闭后
+/// 原样恢复选中与关键词；对齐旧版 SEARCH_EDIT_ITEM_EVENT）
 pub fn edit_requested(app: &App) {
-    // 打开编辑器（窗口隐藏、会话让位，关闭后原样恢复；对齐旧版
-    // SEARCH_EDIT_ITEM_EVENT）
     let Some(id) = SELECTED_ID.with(|slot| slot.borrow().clone()) else {
         return;
     };
@@ -1697,6 +1716,22 @@ mod tests {
         // 每行容量 4 字符（40px），10 字符文本折成 3 行
         let out = hard_wrap_preview(&mut fake_measure(), "0123456789", 40.0, false, 3);
         assert_eq!(out, "0123\n4567\n89");
+    }
+
+    #[test]
+    fn hard_wrap_prefers_space_boundary_over_mid_word_cut() {
+        // 每行容量 6 字符（60px）："hello " 恰好可容 → 在空格断行，
+        // 词整体移到下一行（对齐 break-words），而不是切成 "hello w"
+        let out = hard_wrap_preview(&mut fake_measure(), "hello world", 60.0, false, 3);
+        assert_eq!(out, "hello\nworld");
+    }
+
+    #[test]
+    fn hard_wrap_consumes_break_space_after_hard_word_split() {
+        // 每行容量 5 字符（50px）：'hello' 无空格可依被硬折，紧随的词间
+        // 空格随断行消耗，下一行从 'world' 整词开始
+        let out = hard_wrap_preview(&mut fake_measure(), "hello world", 50.0, false, 3);
+        assert_eq!(out, "hello\nworld");
     }
 
     #[test]

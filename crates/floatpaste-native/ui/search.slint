@@ -76,20 +76,24 @@ component GlyphPath inherits Path {
     fill: transparent;
 }
 
-// ── 28×28 方形图标按钮（操作条内），图标经 @children 传入 ──
+// ── 方形图标按钮（操作条内），图标经 @children 传入 ──
+// armed：两段式删除确认态——加宽并常驻危险底色（对齐旧壳
+// actionButtonDanger 的 h-7 px-2 自适应宽 + armed 底色），文案由调用方传入
 component IconButton inherits Rectangle {
     in property <color> icon-color;
     in property <bool> emphasized: false;
     in property <bool> danger-hover: false;
+    in property <bool> armed: false;
     callback clicked();
 
-    width: 28px;
+    width: root.armed ? 64px : 28px;
     height: 28px;
     border-radius: Metrics.radius-md;
-    background: root.emphasized ? Theme.accent-emphasis
-        : (btn-ta.has-hover
-            ? (root.danger-hover ? Theme.danger-subtle : Theme.canvas-subtle)
-            : transparent);
+    background: root.armed ? Theme.danger-subtle
+        : (root.emphasized ? Theme.accent-emphasis
+            : (btn-ta.has-hover
+                ? (root.danger-hover ? Theme.danger-subtle : Theme.canvas-subtle)
+                : transparent));
 
     // 图标直接作为 Rectangle 子元素走“默认 y = 居中”规则；若套布局，
     // 固定高图标会被交叉轴顶对齐而整体偏高
@@ -551,12 +555,13 @@ component SearchRowCard inherits Rectangle {
                         }
                     }
                     del-btn := IconButton {
+                        armed: root.delete-armed;
                         icon-color: root.delete-armed ? Theme.danger-fg : Theme.fg-muted;
                         danger-hover: true;
                         clicked => { root.delete-armed-request(); }
                         if (root.delete-armed): HorizontalLayout {
-                            padding-left: 6px;
-                            padding-right: 6px;
+                            padding-left: 8px;
+                            padding-right: 8px;
                             Text {
                                 text: "确认删除";
                                 color: del-btn.icon-color;

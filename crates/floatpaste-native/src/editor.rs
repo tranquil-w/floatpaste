@@ -34,8 +34,6 @@ const MAX_TAGS_PER_ITEM: usize = 20;
 const MAX_SUGGESTIONS: usize = 8;
 
 thread_local! {
-    /// 已保存文本（dirty 判定的基准，与 slint 侧 saved-text 属性同源）
-    static SAVED_TEXT: RefCell<String> = const { RefCell::new(String::new()) };
     static NOTICE_TOKEN: Cell<u64> = const { Cell::new(0) };
     static DELETE_TOKEN: Cell<u64> = const { Cell::new(0) };
     static DELETE_ARMED: Cell<bool> = const { Cell::new(false) };
@@ -90,14 +88,12 @@ fn show_editor(app: &App, session: EditorSession) {
     // 跟踪只重绘变化区域（如焦点态），与上次帧相同的区域（背景/头部/
     // 底栏）在 Windows 清屏后会永久露白；resize 迫使软件渲染器重建
     // buffer 整帧重画。两次 set_size 必须隔开一帧，否则被 winit 合并
-    win.window()
-        .set_size(slint::LogicalSize::new(800.0, 601.0));
+    win.window().set_size(slint::LogicalSize::new(800.0, 601.0));
     let _ = win.window().show();
     let editor_weak = app.editor.clone();
     slint::Timer::single_shot(std::time::Duration::from_millis(16), move || {
         if let Some(win) = editor_weak.upgrade() {
-            win.window()
-                .set_size(slint::LogicalSize::new(800.0, 600.0));
+            win.window().set_size(slint::LogicalSize::new(800.0, 600.0));
         }
     });
     // 首显可能走 SW_SHOWNOACTIVATE（winit 首窗语义），而从速贴打开时
@@ -120,9 +116,6 @@ fn load_session(app: &App, win: &EditorWindow, item_id: &str) {
     win.set_image_loading(false);
     win.set_image_failed(false);
     win.set_has_image(false);
-    // 触发编辑区 changed 聚焦（同窗口再次打开时 init 不再执行）
-    win.set_session_seq(win.get_session_seq() + 1);
-
     let detail = app.core().repository.get_item_detail(item_id);
     let detail = match detail {
         Ok(detail) => detail,
@@ -131,6 +124,7 @@ fn load_session(app: &App, win: &EditorWindow, item_id: &str) {
             win.set_has_session(true);
             win.set_loading(false);
             win.set_item_missing(true);
+            focus_loaded(win);
             return;
         }
     };
@@ -149,13 +143,11 @@ fn load_session(app: &App, win: &EditorWindow, item_id: &str) {
     win.set_meta_time(format_relative_time_or_unused(Some(&detail.created_at)).into());
     win.set_meta_extra(build_meta_extra(&detail).into());
 
-    SAVED_TEXT.with(|slot| *slot.borrow_mut() = String::new());
     if detail.r#type == "text" {
         let full = detail.full_text.clone();
         win.set_char_count(full.chars().count() as i32);
         win.set_draft_text(full.clone().into());
-        win.set_saved_text(full.clone().into());
-        SAVED_TEXT.with(|slot| *slot.borrow_mut() = full);
+        win.set_saved_text(full.into());
     } else {
         // 非文本条目：预览区只读，无草稿
         win.set_char_count(0);
@@ -175,8 +167,16 @@ fn load_session(app: &App, win: &EditorWindow, item_id: &str) {
     refresh_all_tags(app);
     rebuild_suggestions_for(app, "");
 
-    // 先挂窗口级焦点宿主（Esc/Ctrl+S 的接收者）；文本条目的输入框
-    // 再由编辑区 init 抢走焦点
+    focus_loaded(win);
+}
+
+/// 焦点收尾（数据全部就绪后调用）：序号自增驱动文本编辑区 changed 重新
+/// 聚焦并把光标置尾——自增必须在 draft/char-count 写入之后，changed 里
+/// 读到的才是本条目值；同窗口再次打开时编辑区 init 不再执行，重开路径
+/// 全靠这条链路。非文本/缺失条目没有输入框，焦点先落在窗口级 FocusScope
+/// 接收 Esc/Ctrl+S，文本条目的输入框随后由编辑区 init/changed 抢走
+fn focus_loaded(win: &EditorWindow) {
+    win.set_session_seq(win.get_session_seq() + 1);
     win.invoke_focus_root_scope();
 }
 
@@ -188,9 +188,19 @@ fn load_image_preview(app: &App, win: &EditorWindow, detail: &ClipItemDetail) {
     win.set_image_loading(true);
     let core = app.core().clone();
     let app_cb = app.clone();
+    let item_id = detail.id.clone();
     std::thread::spawn(move || {
         let raw = thumbnails::load_full_image_raw(&core, &path);
         let _ = slint::invoke_from_event_loop(move || {
+            // 会话可能已切换条目或关闭：过期解码结果直接丢弃，避免覆盖
+            // 后开条目的预览态（对齐 search.rs 的 still_selected 守卫）
+            if !app_cb
+                .state
+                .editor_session()
+                .is_some_and(|session| session.item_id == item_id)
+            {
+                return;
+            }
             let Some(win) = app_cb.editor.upgrade() else {
                 return;
             };
@@ -252,7 +262,6 @@ pub fn save(app: &App) {
             // 对齐旧版 markSaved(draftText)：草稿即视为已保存基线。
             // UI 侧 saved-text 必须同步回写，否则 is-dirty（draft!=saved）
             // 恒为真，保存后 Esc 仍会弹"未保存"确认框
-            SAVED_TEXT.with(|slot| *slot.borrow_mut() = draft.clone());
             win.set_saved_text(draft.into());
             show_notice(app, "已保存当前修改");
             win.set_error_text("".into());

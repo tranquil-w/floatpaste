@@ -325,8 +325,11 @@ export component EditorWindow inherits Window {
                         }
                     }
 
-                    // ── 标签区（旧版 mt-2.5；建议浮层向下弹出）──
-                    Rectangle {
+                    // ── 标签区（旧版 mt-2.5）。建议浮层不在此处声明：
+                    // Slint 按声明顺序绘制且无 z-index，这里的浮层会被
+                    // 后声明的内容区盖住（旧版 HTML 靠 z-20 浮起），改为
+                    // root-scope 直挂实例（见 VerticalLayout 之后）──
+                    tag-field := Rectangle {
                         height: 38px;
                         border-radius: Metrics.radius-lg;
                         border-width: 1px;
@@ -359,7 +362,7 @@ export component EditorWindow inherits Window {
                                             Text {
                                                 text: tag-name;
                                                 color: Theme.fg-default;
-                                                font-size: 12px;
+                                                font-size: Metrics.text-xs;
                                                 vertical-alignment: center;
                                             }
                                             Rectangle {
@@ -374,7 +377,7 @@ export component EditorWindow inherits Window {
                                                     y: 4px;
                                                     text: "×";
                                                     color: tag-x-ta.has-hover ? Theme.danger-fg : Theme.fg-subtle;
-                                                    font-size: 13px;
+                                                    font-size: Metrics.text-body;
                                                 }
                                             }
                                         }
@@ -392,7 +395,7 @@ export component EditorWindow inherits Window {
                                             text: root.tags.length > 0
                                                 ? "添加标签…" : "输入标签，回车添加";
                                             color: Theme.fg-subtle;
-                                            font-size: 13px;
+                                            font-size: Metrics.text-body;
                                             vertical-alignment: center;
                                             overflow: elide;
                                         }
@@ -404,7 +407,7 @@ export component EditorWindow inherits Window {
                                             // 再在 24px 容器里垂直居中，光标才不偏上
                                             y: (parent.height - self.font-size) / 2;
                                             height: self.font-size;
-                                            font-size: 13px;
+                                            font-size: Metrics.text-body;
                                             color: Theme.fg-default;
                                             selection-foreground-color: Theme.selection-fg;
                                             selection-background-color: Theme.selection-bg;
@@ -449,78 +452,7 @@ export component EditorWindow inherits Window {
                             }
                         }
 
-                        // ── 建议浮层（向下弹出，w-72 max-h-56 → 288×224）──
-                        if (root.tag-open): Rectangle {
-                            x: 0;
-                            y: parent.height + 4px;
-                            width: 288px;
-                            height: Math.min(224px, root.tag-suggestions.length * 32px + 8px);
-                            border-radius: Metrics.radius-md;
-                            border-width: 1px;
-                            border-color: Theme.border-subtle;
-                            background: Theme.canvas-default;
-                            clip: true;
-
-                            sug-flick := Flickable {
-                                x: 0;
-                                y: 0;
-                                width: parent.width;
-                                height: parent.height;
-                                interactive: true;
-                                VerticalLayout {
-                                    padding: 4px;
-                                    spacing: 0px;
-                                    for sug[i] in root.tag-suggestions: Rectangle {
-                                        height: 28px;
-                                        border-radius: Metrics.radius-sm;
-                                        background: i == root.tag-active
-                                            ? Theme.canvas-subtle : transparent;
-                                        sug-ta := TouchArea {
-                                            mouse-cursor: default;
-                                            clicked => { root.tag-adopt(i); }
-                                        }
-                                        HorizontalLayout {
-                                            padding-left: 8px;
-                                            padding-right: 8px;
-                                            spacing: 8px;
-                                            // kind：0=match 1=create 2=exists
-                                            if (sug.kind == 0): HorizontalLayout {
-                                                spacing: 8px;
-                                                Text {
-                                                    text: sug.name;
-                                                    color: Theme.fg-default;
-                                                    font-size: 13px;
-                                                    vertical-alignment: center;
-                                                    horizontal-stretch: 1;
-                                                    overflow: elide;
-                                                }
-                                                Text {
-                                                    text: sug.count-text;
-                                                    color: Theme.fg-subtle;
-                                                    font-size: 11px;
-                                                    vertical-alignment: center;
-                                                }
-                                            }
-                                            if (sug.kind == 1): Text {
-                                                text: "创建标签「" + sug.name + "」";
-                                                color: Theme.accent-fg;
-                                                font-size: 13px;
-                                                vertical-alignment: center;
-                                                overflow: elide;
-                                            }
-                                            if (sug.kind == 2): Text {
-                                                text: "「" + sug.name + "」已添加";
-                                                color: Theme.fg-subtle;
-                                                font-size: 13px;
-                                                vertical-alignment: center;
-                                                overflow: elide;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
                         }
-                    }
 
                     // ── 内容弹性区（旧版 flex-1：吃掉头部与标签区以外的
                     // 全部剩余高度）──
@@ -542,10 +474,20 @@ export component EditorWindow inherits Window {
                             border-color: edit-input.has-focus ? Theme.border-accent : transparent;
                             background: edit-input.has-focus ? Theme.canvas-inset : Theme.canvas-subtle;
                             clip: true;
-                            init => { edit-input.focus(); }
+                            init => {
+                                // 首次实例化即聚焦并置尾（对齐旧版
+                                // setSelectionRange(len, len)）：init 在本次
+                                // 会话属性写入落地后执行，char-count 已是本
+                                // 条目值。同窗口再次打开不重新实例化，由
+                                // session-seq changed 承接
+                                edit-input.focus();
+                                edit-input.set-selection-offsets(
+                                    root.char-count, root.char-count);
+                            }
                             changed focus-trigger => {
-                                // 光标定位到文本末尾（对齐旧版
-                                // setSelectionRange(len, len)）
+                                // 再次载入条目：聚焦并把光标定位到文本末尾。
+                                // session-seq 由 Rust 在数据全部就绪后自增，
+                                // 这里读到的 char-count 是本条目值
                                 edit-input.focus();
                                 edit-input.set-selection-offsets(
                                     root.char-count, root.char-count);
@@ -580,7 +522,7 @@ export component EditorWindow inherits Window {
                                     height: 23px;
                                     text: "在此输入或修改文本...";
                                     color: Theme.fg-subtle;
-                                    font-size: 14px;
+                                    font-size: Metrics.text-sm;
                                     vertical-alignment: top;
                                 }
                                 edit-input := TextInput {
@@ -591,7 +533,7 @@ export component EditorWindow inherits Window {
                                     height: parent.height;
                                     single-line: false;
                                     wrap: word-wrap;
-                                    font-size: 14px;
+                                    font-size: Metrics.text-sm;
                                     color: Theme.fg-default;
                                     selection-foreground-color: Theme.selection-fg;
                                     selection-background-color: Theme.selection-bg;
@@ -660,7 +602,7 @@ export component EditorWindow inherits Window {
                                         Text {
                                             text: path;
                                             color: Theme.fg-muted;
-                                            font-size: 13px;
+                                            font-size: Metrics.text-body;
                                             vertical-alignment: center;
                                             overflow: elide;
                                         }
@@ -728,20 +670,20 @@ export component EditorWindow inherits Window {
                                     Text {
                                         text: "保存";
                                         color: Theme.fg-muted;
-                                        font-size: 11px;
+                                        font-size: Metrics.text-hint;
                                         vertical-alignment: center;
                                     }
                                     Text {
                                         text: "·";
                                         color: Theme.fg-subtle;
-                                        font-size: 11px;
+                                        font-size: Metrics.text-hint;
                                         vertical-alignment: center;
                                     }
                                     Kbd { key: "Esc"; }
                                     Text {
                                     text: "关闭";
                                     color: Theme.fg-muted;
-                                    font-size: 11px;
+                                    font-size: Metrics.text-hint;
                                     vertical-alignment: center;
                                 }
                             }
@@ -800,6 +742,83 @@ export component EditorWindow inherits Window {
                                 vertical-alignment: center;
                             }
                         }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── 标签建议浮层：root-scope 直挂 + 声明在 VerticalLayout 之后。
+        // Slint 按声明顺序绘制且无 z-index，放在标签区内会被后声明的
+        // 内容区盖住（旧版 HTML 靠 z-20 浮起）；定位读标签条的窗口绝对
+        // 坐标，自动跟随通知/错误条的高度变化
+        if (root.tag-open): Rectangle {
+            x: tag-field.absolute-position.x;
+            y: tag-field.absolute-position.y + tag-field.height + 4px;
+            width: 288px;
+            height: Math.min(224px, root.tag-suggestions.length * 32px + 8px);
+            border-radius: Metrics.radius-md;
+            border-width: 1px;
+            border-color: Theme.border-subtle;
+            background: Theme.canvas-default;
+            clip: true;
+
+            sug-flick := Flickable {
+                x: 0;
+                y: 0;
+                width: parent.width;
+                height: parent.height;
+                interactive: true;
+                VerticalLayout {
+                    padding: 4px;
+                    spacing: 0px;
+                    for sug[i] in root.tag-suggestions: Rectangle {
+                        // 行高 32px = 旧版 py-1.5 + leading-5；
+                        // 与浮层高度公式（length * 32px + 8px）一致
+                        height: 32px;
+                        border-radius: Metrics.radius-md;
+                        background: i == root.tag-active
+                            ? Theme.canvas-subtle : transparent;
+                        sug-ta := TouchArea {
+                            mouse-cursor: default;
+                            clicked => { root.tag-adopt(i); }
+                        }
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            padding-right: 8px;
+                            spacing: 8px;
+                            // kind：0=match 1=create 2=exists
+                            if (sug.kind == 0): HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: sug.name;
+                                    color: Theme.fg-default;
+                                    font-size: Metrics.text-body;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                    overflow: elide;
+                                }
+                                Text {
+                                    text: sug.count-text;
+                                    color: Theme.fg-subtle;
+                                    font-size: Metrics.text-hint;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            if (sug.kind == 1): Text {
+                                text: "创建标签「" + sug.name + "」";
+                                color: Theme.accent-fg;
+                                font-size: Metrics.text-body;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                            if (sug.kind == 2): Text {
+                                text: "「" + sug.name + "」已添加";
+                                color: Theme.fg-subtle;
+                                font-size: Metrics.text-body;
+                                vertical-alignment: center;
+                                overflow: elide;
                             }
                         }
                     }
