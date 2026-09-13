@@ -1,11 +1,12 @@
 //! FloatPaste 原生壳（Slint + 软件渲染）。
 //!
-//! 与老 Tauri 壳共用 floatpaste-core 与同一数据目录。本阶段完成速贴面板与
-//! 搜索窗口的完整复刻（无焦点会话模型 / 长按导航 / 外击关闭 / 悬停预览 /
-//! 三种定位 / 尺寸记忆 / 主题 / 搜索会话 / 两段式删除），editor/settings/
-//! tray 按窗口逐个迁移。
+//! 与老 Tauri 壳共用 floatpaste-core 与同一数据目录。本阶段完成速贴面板、
+//! 搜索窗口与编辑窗口的复刻（无焦点会话模型 / 长按导航 / 外击关闭 / 悬停
+//! 预览 / 三种定位 / 尺寸记忆 / 主题 / 搜索会话 / 两段式删除 / 文本编辑与
+//! 标签管理），settings/tray 按窗口逐个迁移。
 
 mod app_state;
+mod editor;
 mod overlay;
 mod paste_flow;
 mod picker;
@@ -91,6 +92,14 @@ fn main() {
             return;
         }
     };
+    // 编辑窗口：普通带框窗（任务栏可见、可缩放），启动即建、按需显示
+    let editor_win = match EditorWindow::new() {
+        Ok(win) => win,
+        Err(error) => {
+            tracing::error!("创建编辑窗口失败: {error}");
+            return;
+        }
+    };
 
     let state = Arc::new(SharedState::new(core));
 
@@ -99,6 +108,7 @@ fn main() {
         picker: picker_win.as_weak(),
         tooltip: tooltip_win.as_weak(),
         search: search_win.as_weak(),
+        editor: editor_win.as_weak(),
     };
 
     // ── 二次启动唤醒：打开速贴会话（等价于按下主快捷键）──
@@ -122,11 +132,18 @@ fn main() {
         let resolved =
             theme::resolve_theme(settings.theme_mode.clone(), theme::system_prefers_dark());
         let tokens = theme::derive_tokens(&settings.theme_preset, &settings.theme_accent, resolved);
-        theme_bridge::apply_theme(&picker_win, Some(&tooltip_win), Some(&search_win), &tokens);
+        theme_bridge::apply_theme(
+            &picker_win,
+            Some(&tooltip_win),
+            Some(&search_win),
+            Some(&editor_win),
+            &tokens,
+        );
     }
 
     wire_picker_callbacks(&app);
     wire_search_callbacks(&app);
+    wire_editor_callbacks(&app, &editor_win);
 
     // ── 窗口句柄与浮层样式：事件循环首轮装配（winit 惰性建窗，
     // show/hide 舞蹈统一在 overlay::silent_assemble）──
@@ -565,4 +582,72 @@ fn wire_search_callbacks(app: &App) {
             search::drag_finished(&app_cb);
         });
     }
+}
+
+fn wire_editor_callbacks(app: &App, editor_win: &EditorWindow) {
+    let app_cb = app.clone();
+    editor_win.on_text_edited(move |text| {
+        editor::text_edited(&app_cb, text.as_str());
+    });
+    let app_cb = app.clone();
+    editor_win.on_save_requested(move || {
+        editor::save(&app_cb);
+    });
+    let app_cb = app.clone();
+    editor_win.on_request_close(move || {
+        editor::request_close(&app_cb);
+    });
+    let app_cb = app.clone();
+    editor_win.on_close_discard(move || {
+        editor::close_editor(&app_cb);
+    });
+    let app_cb = app.clone();
+    editor_win.on_close_save(move || {
+        editor::save_then_close(&app_cb);
+    });
+    let app_cb = app.clone();
+    editor_win.on_confirm_cancel(move || {
+        editor::cancel_confirm(&app_cb);
+    });
+    let app_cb = app.clone();
+    editor_win.on_delete_requested(move || {
+        editor::delete_requested(&app_cb);
+    });
+    let app_cb = app.clone();
+    editor_win.on_tag_input_changed(move |input| {
+        editor::tag_input_changed(&app_cb, input.as_str());
+    });
+    let app_cb = app.clone();
+    editor_win.on_tag_commit_add(move || {
+        editor::tag_commit_add(&app_cb);
+    });
+    let app_cb = app.clone();
+    editor_win.on_tag_adopt(move |index| {
+        editor::tag_adopt(&app_cb, index.max(0) as usize);
+    });
+    let app_cb = app.clone();
+    editor_win.on_tag_complete(move || {
+        editor::tag_complete(&app_cb);
+    });
+    let app_cb = app.clone();
+    editor_win.on_tag_remove(move |index| {
+        editor::tag_remove(&app_cb, index.max(0) as usize);
+    });
+    let app_cb = app.clone();
+    editor_win.on_tag_remove_last(move || {
+        editor::tag_remove_last(&app_cb);
+    });
+    let app_cb = app.clone();
+    editor_win.on_tag_escape(move || {
+        editor::tag_escape(&app_cb);
+    });
+    // 标题栏 X：脏 → 确认框拦截；干净 → 隐藏并返回来源窗口
+    let app_cb = app.clone();
+    editor_win.window().on_close_requested(move || {
+        if editor::window_close_requested(&app_cb) {
+            slint::CloseRequestResponse::HideWindow
+        } else {
+            slint::CloseRequestResponse::KeepWindowShown
+        }
+    });
 }

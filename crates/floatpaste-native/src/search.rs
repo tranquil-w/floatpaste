@@ -143,6 +143,40 @@ pub fn suspend_input(app: &App) {
     });
 }
 
+/// 进入编辑器前的隐藏：结束激活、收 tooltip、隐藏窗口，但**不清理
+/// 会话与列表状态**（对齐 hide_search_for_editor_transition）——
+/// 编辑器关闭后原样恢复选中、关键词与滚动位置
+pub fn hide_for_editor(app: &App) {
+    tooltip::cancel(app);
+    app.state.end_search_activation();
+    if let Some(win) = app.search.upgrade() {
+        if win.window().is_visible() {
+            let _ = win.window().hide();
+        }
+    }
+    info!("隐藏 Search（进入编辑器）");
+}
+
+/// 从编辑器返回搜索：仅恢复窗口可见性与焦点，**不发会话开始**
+/// （对齐 restore_search_after_editor）——保留进入编辑器时的选中、
+/// 关键词与滚动位置，自然衔接原上下文
+pub fn restore_after_editor(app: &App) {
+    let hwnd = app.state.search_hwnd.load(Ordering::SeqCst);
+    if hwnd == 0 {
+        return;
+    }
+    let Some(win) = app.search.upgrade() else {
+        return;
+    };
+    let _ = win.window().show();
+    if let Err(error) = window_control::restore_window_and_focus(hwnd) {
+        warn!("搜索窗口恢复焦点失败: {error}");
+    }
+    overlay::after_show_focusable(hwnd);
+    app.state.begin_search_activation();
+    info!("从 Editor 返回 Search");
+}
+
 /// 键盘交还搜索窗口（对齐 SEARCH_INPUT_RESUME_EVENT）
 pub fn resume_input(app: &App) {
     app.with_search(|win| {
@@ -463,6 +497,12 @@ pub fn notify_clips_changed(app: &App) {
     if !app.state.is_search_active() {
         return;
     }
+    run_query(app);
+}
+
+/// 编辑器内保存/删除/改标签后的刷新：搜索窗此时处于隐藏失活态，
+/// 跳过活跃判定强制重查，保证返回时列表已反映变更
+pub fn refresh_after_editor(app: &App) {
     run_query(app);
 }
 
@@ -1074,7 +1114,7 @@ fn build_meta(item: &ClipItemSummary) -> String {
 }
 
 /// 文件大小人类可读（对齐 formatFileSize：1024 进制，按值选小数位）
-fn format_file_size(bytes: Option<i64>) -> Option<String> {
+pub(crate) fn format_file_size(bytes: Option<i64>) -> Option<String> {
     let bytes = bytes?;
     if bytes <= 0 {
         return None;
@@ -1492,8 +1532,13 @@ pub fn retry(app: &App) {
 }
 
 /// Ctrl+Enter / 编辑按钮：编辑器窗口在后续迁移阶段接入
-pub fn edit_requested(_app: &App) {
-    warn!("编辑器窗口尚未迁移，Ctrl+Enter 暂不处理");
+pub fn edit_requested(app: &App) {
+    // 打开编辑器（窗口隐藏、会话让位，关闭后原样恢复；对齐旧版
+    // SEARCH_EDIT_ITEM_EVENT）
+    let Some(id) = SELECTED_ID.with(|slot| slot.borrow().clone()) else {
+        return;
+    };
+    crate::editor::open_from_search(app, id);
 }
 
 /* ───────────────── 单元测试 ───────────────── */

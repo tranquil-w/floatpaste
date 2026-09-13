@@ -1,0 +1,865 @@
+// 编辑窗口：对齐旧版 EditorShell.tsx + tagEditor.tsx + keyboard.ts。
+// 普通带框窗口（旧版 decorations(true)，任务栏可见、可缩放、800×600 起
+// min 400×300）。会话与数据由 Rust 接管：
+// - 文本条目：多行编辑 + Ctrl+S 保存 + 未保存关闭确认 + 两段式删除
+// - 图片/文件条目：只读预览（大图 contain / 路径列表）
+// - 标签：芯片 + 内嵌输入 + 建议浮层（match/create/exists，回车采纳、
+//   Tab 补全、Backspace 删末位、Esc 本地清空让位窗口关闭）
+// - 键盘：窗口级 capture 先于输入框（对齐旧版 window keydown capture）
+import { Theme, Metrics } from "theme.slint";
+
+// 标签建议项：0=match（既有命中）1=create（新建）2=exists（已添加）
+export struct EditorTagSuggestion {
+    kind: int,
+    name: string,
+    count-text: string,
+}
+
+// 键位徽章（旧版 kbd：rounded border px-1 font-mono text-[10px] leading-3）
+component Kbd inherits Rectangle {
+    in property <string> key;
+    height: 15px;
+    border-radius: 3px;
+    border-width: 1px;
+    border-color: Theme.border-subtle;
+    background: Theme.canvas-default;
+    HorizontalLayout {
+        padding-left: 4px;
+        padding-right: 4px;
+        Text {
+            text: root.key;
+            color: Theme.fg-muted;
+            font-size: 10px;
+            font-family: "Consolas";
+            vertical-alignment: center;
+            horizontal-alignment: center;
+            // Slint 量出的文本宽与渲染墨迹有出入，居中保证左右留白对称
+            // （对齐搜索窗 Kbd 的处理）
+            wrap: no-wrap;
+        }
+    }
+}
+
+// 两段式删除按钮（旧版 actionButtonDanger 的编辑器变体）
+component DeleteButton inherits Rectangle {
+    in property <bool> armed;
+    in property <bool> enabled;
+    callback clicked();
+
+    height: 28px;
+    width: armed ? 68px : 28px;
+    border-radius: Metrics.radius-md;
+    background: armed ? Theme.danger-subtle
+        : (del-ta.has-hover ? Theme.danger-subtle : transparent);
+    animate background { duration: 120ms; }
+
+    del-ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? default : not-allowed;
+        clicked => { root.clicked(); }
+    }
+
+    if (root.armed): HorizontalLayout {
+        alignment: center;
+        Text {
+            text: "确认删除";
+            color: Theme.danger-fg;
+            font-size: Metrics.text-xs;
+            font-weight: Metrics.weight-medium;
+            vertical-alignment: center;
+        }
+    }
+    if (!root.armed): Path {
+        width: 16px;
+        height: 16px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        stroke: del-ta.has-hover ? Theme.danger-fg : Theme.fg-muted;
+        // Slint 描边不随视框缩放：1.8 @24 → 16px 显示折算 1.2px
+        stroke-width: 1.2px;
+        commands: "M 4 7 L 20 7 M 9.5 4.75 L 14.5 4.75 L 14.5 7 L 9.5 7 Z M 6.5 7 L 7.3 19.25 L 16.7 19.25 L 17.5 7 M 10 10.5 L 10 16.5 M 14 10.5 L 14 16.5";
+    }
+}
+
+export component EditorWindow inherits Window {
+    title: "FloatPaste · 编辑";
+    min-width: 400px;
+    min-height: 300px;
+    preferred-width: 800px;
+    preferred-height: 600px;
+    background: Theme.canvas-default;
+
+    // ── 会话与数据（Rust 接管）──
+    in-out property <bool> has-session: false;
+    in-out property <bool> loading: false;
+    in-out property <bool> item-missing: false;
+    in-out property <bool> is-text: false;
+    in-out property <string> meta-source;
+    in-out property <string> meta-time;
+    in-out property <string> meta-extra;
+    in-out property <int> char-count: 0;
+    in-out property <string> draft-text;
+    in-out property <string> saved-text;
+    // 旧版 store：isDirty = draft !== saved
+    in-out property <bool> is-dirty: root.draft-text != root.saved-text;
+    in-out property <bool> has-image: false;
+    in-out property <bool> image-loading: false;
+    in-out property <bool> image-failed: false;
+    in property <image> image-preview;
+    in-out property <[string]> file-paths;
+    in-out property <[string]> tags;
+    in-out property <[EditorTagSuggestion]> tag-suggestions;
+    in-out property <string> tag-input-text;
+    in-out property <int> tag-highlight: 0;
+    in-out property <string> notice-text;
+    in-out property <string> error-text;
+    in-out property <bool> delete-armed: false;
+    in-out property <bool> close-confirm-open: false;
+
+    // 建议浮层开关：输入框聚焦且有建议（对齐 open = focused && len > 0）
+    in-out property <bool> tag-open:
+        tag-input.has-focus && root.tag-suggestions.length > 0;
+    // 高亮收拢到合法范围（对齐 activeIndex = min(highlight, len-1)）
+    in-out property <int> tag-active:
+        Math.min(root.tag-highlight, root.tag-suggestions.length - 1);
+
+    // ── 回调（Rust 接管）──
+    callback text-edited(string);
+    callback save-requested();
+    callback request-close();
+    callback close-discard();
+    callback close-save();
+    callback confirm-cancel();
+    callback delete-requested();
+    callback tag-input-changed(string);
+    callback tag-commit-add();        // 回车：采纳高亮建议或按输入添加
+    callback tag-adopt(int);          // 点击建议行直接采纳
+    callback tag-complete();          // Tab：建议文本补全进输入框
+    callback tag-remove(int);         // × 移除指定标签
+    callback tag-remove-last();       // 空输入 Backspace 移除末位标签
+    callback tag-escape();            // 标签输入本地消费 Esc（清空输入）
+
+    public function focus-input() {
+        edit-input.focus();
+    }
+
+    // 窗口级键盘（capture 先于输入框；对齐旧版 window keydown capture）
+    FocusScope {
+        capture-key-pressed(event) => {
+            if (root.close-confirm-open) {
+                if (event.text == Key.Escape) {
+                    root.confirm-cancel();
+                    return accept;
+                }
+                if (event.text == Key.Return) {
+                    root.close-save();
+                    return accept;
+                }
+                return reject; // Tab 走默认对话框焦点穿梭
+            }
+            if (event.text == Key.Escape) {
+                // 标签输入的本地让位（data-esc-scope="local"）：有输入或
+                // 浮层开着时，Esc 只清空输入，不触发窗口关闭
+                if (tag-input.has-focus
+                    && (root.tag-input-text != "" || root.tag-open))
+                {
+                    root.tag-escape();
+                    return accept;
+                }
+                root.request-close();
+                return accept;
+            }
+            if ((event.modifiers.control || event.modifiers.meta)
+                && (event.text == "s" || event.text == "S"))
+            {
+                root.save-requested();
+                return accept;
+            }
+            return reject;
+        }
+
+        VerticalLayout {
+            // ── 顶部通知条（成功 3 秒自动消失，由 Rust 计时）──
+            if (root.notice-text != ""): Rectangle {
+                height: 36px;
+                background: Theme.success-subtle;
+                HorizontalLayout {
+                    padding-left: 20px;
+                    padding-right: 20px;
+                    Text {
+                        text: root.notice-text;
+                        color: Theme.success-fg;
+                        font-size: Metrics.text-sm;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+            }
+            // ── 错误条（持续到下一次动作）──
+            if (root.error-text != ""): Rectangle {
+                height: 36px;
+                background: Theme.danger-subtle;
+                HorizontalLayout {
+                    padding-left: 20px;
+                    padding-right: 20px;
+                    Text {
+                        text: root.error-text;
+                        color: Theme.danger-fg;
+                        font-size: Metrics.text-sm;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+            }
+
+            // ── 主区 ──
+            Rectangle {
+                horizontal-stretch: 1;
+                background: Theme.canvas-default;
+                clip: true;
+
+                // 无会话：引导态
+                if (!root.has-session): VerticalLayout {
+                    alignment: center;
+                    spacing: 12px;
+                    Path {
+                        width: 40px;
+                        height: 40px;
+                        viewbox-width: 24;
+                        viewbox-height: 24;
+                        stroke: Theme.fg-subtle;
+                        // 1.5 @24 → 40px 显示折算 2.5px
+                        stroke-width: 2.5px;
+                        commands: "M 8 3 L 16 3 A 1 1 0 0 1 17 4 L 17 7 L 7 7 L 7 4 A 1 1 0 0 1 8 3 Z M 16 5 L 18 5 A 2 2 0 0 1 20 7 L 20 19 A 2 2 0 0 1 18 21 L 6 21 A 2 2 0 0 1 4 19 L 4 7 A 2 2 0 0 1 6 5 L 8 5";
+                    }
+                    VerticalLayout {
+                        spacing: 6px;
+                        Text {
+                            text: "选择一个文本条目开始编辑";
+                            color: Theme.fg-muted;
+                            font-size: Metrics.text-sm;
+                            horizontal-alignment: center;
+                        }
+                        HorizontalLayout {
+                            alignment: center;
+                            spacing: 4px;
+                            Text {
+                                text: "在速贴面板或搜索结果中选中文本后按";
+                                color: Theme.fg-subtle;
+                                font-size: Metrics.text-xs;
+                                vertical-alignment: center;
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                Kbd { key: "Ctrl"; }
+                            }
+                            Text {
+                                text: "+";
+                                color: Theme.fg-subtle;
+                                font-size: Metrics.text-xs;
+                                vertical-alignment: center;
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                Kbd { key: "Enter"; }
+                            }
+                        }
+                    }
+                }
+
+                // 加载中
+                if (root.has-session && root.loading): VerticalLayout {
+                    alignment: center;
+                    Text {
+                        text: "正在加载条目内容...";
+                        color: Theme.fg-muted;
+                        font-size: Metrics.text-sm;
+                        horizontal-alignment: center;
+                    }
+                }
+
+                // 条目缺失
+                if (root.has-session && !root.loading && root.item-missing): Text {
+                    y: (parent.height - self.height) / 2;
+                    text: "未找到对应条目";
+                    color: Theme.fg-muted;
+                    font-size: Metrics.text-sm;
+                    horizontal-alignment: center;
+                }
+
+                // 会话内容（visible 而非 if：tag-input/edit-input 需要被
+                // 窗口级键盘与焦点函数引用，条件实例化的元素不可寻址；
+                // Slint 布局会跳过不可见元素，占位行为与 if 一致）
+                VerticalLayout {
+                    visible: root.has-session && !root.loading && !root.item-missing;
+                    // 旧版 px-5 pb-3 pt-4
+                    padding-left: 20px;
+                    padding-right: 20px;
+                    padding-top: 16px;
+                    padding-bottom: 12px;
+
+                    // ── 头部：元信息 + 两段删除 ──
+                    HorizontalLayout {
+                        spacing: Metrics.space-3;
+                        alignment: start;
+                        Text {
+                            horizontal-stretch: 1;
+                            wrap: word-wrap;
+                            overflow: elide;
+                            vertical-alignment: center;
+                            // 元信息：来源 · 时间 (+ 字数 / 尺寸 / 文件与大小)
+                            text: root.is-text
+                                ? "{root.meta-source} · {root.meta-time} · {root.char-count} 字"
+                                : (root.meta-extra == ""
+                                    ? "{root.meta-source} · {root.meta-time}"
+                                    : "{root.meta-source} · {root.meta-time} · {root.meta-extra}");
+                            color: Theme.fg-subtle;
+                            font-size: Metrics.text-xs;
+                        }
+                        DeleteButton {
+                            armed: root.delete-armed;
+                            clicked => { root.delete-requested(); }
+                        }
+                    }
+
+                    // ── 标签区（旧版 mt-2.5；建议浮层向下弹出）──
+                    Rectangle {
+                        height: 38px;
+                        border-radius: Metrics.radius-lg;
+                        border-width: 1px;
+                        border-color: tag-input.has-focus ? Theme.border-accent : transparent;
+                        background: tag-input.has-focus ? Theme.canvas-inset : Theme.canvas-subtle;
+                        clip: false;
+
+                        tag-flick := Flickable {
+                            x: 0;
+                            y: 0;
+                            width: parent.width;
+                            height: parent.height;
+                            interactive: true;
+                            VerticalLayout {
+                                alignment: center;
+                                HorizontalLayout {
+                                    padding-left: 8px;
+                                    padding-right: 8px;
+                                    spacing: 6px;
+                                    alignment: start;
+
+                                    for tag-name[i] in root.tags: Rectangle {
+                                        height: 24px;
+                                        border-radius: Metrics.radius-pill;
+                                        background: Theme.canvas-default;
+                                        HorizontalLayout {
+                                            padding-left: 10px;
+                                            padding-right: 4px;
+                                            spacing: 4px;
+                                            alignment: start;
+                                            Text {
+                                                text: tag-name;
+                                                color: Theme.fg-default;
+                                                font-size: 12px;
+                                                vertical-alignment: center;
+                                            }
+                                            Rectangle {
+                                                width: 14px;
+                                                height: 24px;
+                                                background: transparent;
+                                                tag-x-ta := TouchArea {
+                                                    mouse-cursor: default;
+                                                    clicked => { root.tag-remove(i); }
+                                                }
+                                                Text {
+                                                    y: 4px;
+                                                    text: "×";
+                                                    color: tag-x-ta.has-hover ? Theme.danger-fg : Theme.fg-subtle;
+                                                    font-size: 13px;
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // 占位符自绘（原生 TextInput 无 placeholder 属性）
+                                    Rectangle {
+                                        min-width: 112px;
+                                        horizontal-stretch: 1;
+                                        height: 24px;
+                                        if (tag-input.text == "" && !tag-input.has-focus): Text {
+                                            x: 0;
+                                            width: parent.width;
+                                            height: parent.height;
+                                            text: root.tags.length > 0
+                                                ? "添加标签…" : "输入标签，回车添加";
+                                            color: Theme.fg-subtle;
+                                            font-size: 13px;
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                        }
+                                        tag-input := TextInput {
+                                            width: parent.width;
+                                            height: parent.height;
+                                            font-size: 13px;
+                                            color: Theme.fg-default;
+                                            selection-foreground-color: Theme.selection-fg;
+                                            selection-background-color: Theme.selection-bg;
+                                            text <=> root.tag-input-text;
+                                            edited() => { root.tag-input-changed(self.text); }
+                                        key-pressed(event) => {
+                                            if (root.tag-open
+                                                && (event.text == Key.DownArrow
+                                                    || event.text == Key.UpArrow))
+                                            {
+                                                root.tag-highlight = Math.mod(
+                                                    root.tag-active
+                                                        + (event.text == Key.DownArrow ? 1 : -1),
+                                                    root.tag-suggestions.length,
+                                                );
+                                                return accept;
+                                            }
+                                            if (event.text == Key.Return) {
+                                                if (root.tag-open) {
+                                                    root.tag-adopt(root.tag-active);
+                                                } else {
+                                                    root.tag-commit-add();
+                                                }
+                                                return accept;
+                                            }
+                                            if (event.text == Key.Tab && root.tag-open) {
+                                                root.tag-complete();
+                                                return accept;
+                                            }
+                                            if (event.text == Key.Backspace
+                                                && root.tag-input-text == ""
+                                                && root.tags.length > 0)
+                                            {
+                                                root.tag-remove-last();
+                                                return accept;
+                                            }
+                                            return reject;
+                                        }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // ── 建议浮层（向下弹出，w-72 max-h-56 → 288×224）──
+                        if (root.tag-open): Rectangle {
+                            x: 0;
+                            y: parent.height + 4px;
+                            width: 288px;
+                            height: Math.min(224px, root.tag-suggestions.length * 32px + 8px);
+                            border-radius: Metrics.radius-md;
+                            border-width: 1px;
+                            border-color: Theme.border-subtle;
+                            background: Theme.canvas-default;
+                            clip: true;
+
+                            sug-flick := Flickable {
+                                x: 0;
+                                y: 0;
+                                width: parent.width;
+                                height: parent.height;
+                                interactive: true;
+                                VerticalLayout {
+                                    padding: 4px;
+                                    spacing: 0px;
+                                    for sug[i] in root.tag-suggestions: Rectangle {
+                                        height: 28px;
+                                        border-radius: Metrics.radius-sm;
+                                        background: i == root.tag-active
+                                            ? Theme.canvas-subtle : transparent;
+                                        sug-ta := TouchArea {
+                                            mouse-cursor: default;
+                                            clicked => { root.tag-adopt(i); }
+                                        }
+                                        HorizontalLayout {
+                                            padding-left: 8px;
+                                            padding-right: 8px;
+                                            spacing: 8px;
+                                            // kind：0=match 1=create 2=exists
+                                            if (sug.kind == 0): HorizontalLayout {
+                                                spacing: 8px;
+                                                Text {
+                                                    text: sug.name;
+                                                    color: Theme.fg-default;
+                                                    font-size: 13px;
+                                                    vertical-alignment: center;
+                                                    horizontal-stretch: 1;
+                                                    overflow: elide;
+                                                }
+                                                Text {
+                                                    text: sug.count-text;
+                                                    color: Theme.fg-subtle;
+                                                    font-size: 11px;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                            if (sug.kind == 1): Text {
+                                                text: "创建标签「" + sug.name + "」";
+                                                color: Theme.accent-fg;
+                                                font-size: 13px;
+                                                vertical-alignment: center;
+                                                overflow: elide;
+                                            }
+                                            if (sug.kind == 2): Text {
+                                                text: "「" + sug.name + "」已添加";
+                                                color: Theme.fg-subtle;
+                                                font-size: 13px;
+                                                vertical-alignment: center;
+                                                overflow: elide;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ── 主编辑区（旧版 mt-2.5 flex-1）──
+                    Rectangle {
+                        visible: root.is-text;
+                        horizontal-stretch: 1;
+                        border-radius: Metrics.radius-lg;
+                        border-width: 1px;
+                        border-color: edit-input.has-focus ? Theme.border-accent : transparent;
+                        background: edit-input.has-focus ? Theme.canvas-inset : Theme.canvas-subtle;
+                        clip: true;
+
+                        edit-flick := Flickable {
+                            x: 0;
+                            y: 0;
+                            width: parent.width;
+                            height: parent.height;
+                            interactive: true;
+
+                            // 内容包裹层：宽随视口（显式断开与内容 min-width
+                            // 的相互推导，多行 TextInput 的换行最小宽会撑破
+                            // 布局形成绑定环）
+                            Rectangle {
+                                width: edit-flick.width;
+                                height: edit-input.preferred-height;
+                                // 占位符自绘（原生 TextInput 无 placeholder 属性）
+                                if (edit-input.text == "" && !edit-input.has-focus): Text {
+                                    x: 0;
+                                    y: 0;
+                                    width: parent.width;
+                                    height: 23px;
+                                    text: "在此输入或修改文本...";
+                                    color: Theme.fg-subtle;
+                                    font-size: 14px;
+                                    vertical-alignment: top;
+                                }
+                                edit-input := TextInput {
+                                    x: 0;
+                                    y: 0;
+                                    width: edit-flick.width;
+                                    min-width: 0px;
+                                    height: self.preferred-height;
+                                    single-line: false;
+                                    wrap: word-wrap;
+                                    font-size: 14px;
+                                    color: Theme.fg-default;
+                                    selection-foreground-color: Theme.selection-fg;
+                                    selection-background-color: Theme.selection-bg;
+                                    text <=> root.draft-text;
+                                    edited() => { root.text-edited(self.text); }
+                                    cursor-position-changed(cursor) => {
+                                        // 光标跟随滚动（垂直方向保持在视口内）
+                                        if (cursor.y < -edit-flick.viewport-y + 8px) {
+                                            edit-flick.viewport-y = -cursor.y + 8px;
+                                        } else if (cursor.y + 23px > -edit-flick.viewport-y + edit-flick.height - 8px) {
+                                            edit-flick.viewport-y = -(cursor.y + 23px - edit-flick.height + 8px);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 图片 / 文件条目的只读预览
+                    Rectangle {
+                        visible: !root.is-text;
+                        horizontal-stretch: 1;
+                        border-radius: Metrics.radius-lg;
+                        background: Theme.canvas-subtle;
+                        clip: true;
+
+                        if (root.has-image): Image {
+                            x: 16px;
+                            y: 16px;
+                            width: parent.width - 32px;
+                            height: parent.height - 32px;
+                            image-fit: contain;
+                        }
+                        if (root.image-loading): Text {
+                            y: (parent.height - self.height) / 2;
+                            x: (parent.width - self.width) / 2;
+                            text: "正在加载图片...";
+                            color: Theme.fg-subtle;
+                            font-size: Metrics.text-sm;
+                        }
+                        if (root.image-failed): Text {
+                            y: (parent.height - self.height) / 2;
+                            x: (parent.width - self.width) / 2;
+                            text: "图片预览不可用";
+                            color: Theme.fg-subtle;
+                            font-size: Metrics.text-sm;
+                        }
+                        // 文件条目：路径列表
+                        if (!root.has-image && !root.image-loading && !root.image-failed
+                            && root.file-paths.length > 0): Flickable {
+                            x: 16px;
+                            y: 16px;
+                            width: parent.width - 32px;
+                            height: parent.height - 32px;
+                            interactive: true;
+                            VerticalLayout {
+                                spacing: 4px;
+                                alignment: start;
+                                for path in root.file-paths: Rectangle {
+                                    height: 30px;
+                                    border-radius: Metrics.radius-md;
+                                    background: Theme.canvas-default;
+                                    HorizontalLayout {
+                                        padding-left: 12px;
+                                        padding-right: 12px;
+                                        Text {
+                                            text: path;
+                                            color: Theme.fg-muted;
+                                            font-size: 13px;
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if (!root.has-image && !root.image-loading && !root.image-failed
+                            && root.file-paths.length == 0): Text {
+                            y: (parent.height - self.height) / 2;
+                            x: (parent.width - self.width) / 2;
+                            text: "此条目内容不支持预览";
+                            color: Theme.fg-subtle;
+                            font-size: Metrics.text-sm;
+                        }
+                    }
+                }
+            }
+
+            // ── 底栏（bg-canvas-subtle px-5 py-2 justify-between）──
+            footer := Rectangle {
+                height: 52px;
+                background: Theme.canvas-subtle;
+                HorizontalLayout {
+                    padding-left: 20px;
+                    padding-right: 20px;
+                    spacing: 12px;
+                    alignment: start;
+
+                    // 左：未保存标记 + 键位提示
+                    if (root.is-dirty && root.has-session): HorizontalLayout {
+                        spacing: 6px;
+                        alignment: start;
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 6px;
+                                height: 6px;
+                                border-radius: 3px;
+                                background: Theme.warning-fg;
+                            }
+                        }
+                        Text {
+                            text: "未保存";
+                            color: Theme.warning-fg;
+                            font-size: Metrics.text-xs;
+                            font-weight: Metrics.weight-medium;
+                            vertical-alignment: center;
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        alignment: start;
+                        VerticalLayout {
+                            alignment: center;
+                            HorizontalLayout {
+                                spacing: 4px;
+                                alignment: start;
+                                Kbd { key: "Ctrl+S"; }
+                                Text {
+                                    text: "保存";
+                                    color: Theme.fg-muted;
+                                    font-size: 11px;
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    text: "·";
+                                    color: Theme.fg-subtle;
+                                    font-size: 11px;
+                                    vertical-alignment: center;
+                                }
+                                Kbd { key: "Esc"; }
+                                Text {
+                                    text: "关闭";
+                                    color: Theme.fg-muted;
+                                    font-size: 11px;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle { horizontal-stretch: 1; }
+
+                    // 右：关闭 / 保存
+                    HorizontalLayout {
+                        spacing: 8px;
+                        alignment: end;
+                        close-btn := Rectangle {
+                            width: 68px;
+                            height: 36px;
+                            border-radius: Metrics.radius-md;
+                            border-width: 1px;
+                            border-color: Theme.border-default;
+                            background: close-ta.has-hover ? Theme.canvas-default : transparent;
+                            close-ta := TouchArea {
+                                mouse-cursor: default;
+                                clicked => { root.request-close(); }
+                            }
+                            Text {
+                                text: "关闭";
+                                color: Theme.fg-default;
+                                font-size: Metrics.text-sm;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                        save-btn := Rectangle {
+                            width: 68px;
+                            height: 36px;
+                            border-radius: Metrics.radius-md;
+                            background: root.is-text && root.is-dirty
+                                ? Theme.accent-emphasis : Theme.accent-emphasis.with-alpha(0.5);
+                            save-ta := TouchArea {
+                                enabled: root.is-text && root.is-dirty;
+                                mouse-cursor: root.is-text && root.is-dirty ? default : not-allowed;
+                                clicked => { root.save-requested(); }
+                            }
+                            Text {
+                                text: "保存";
+                                color: Theme.fg-on-emphasis;
+                                font-size: Metrics.text-sm;
+                                font-weight: Metrics.weight-semibold;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── 未保存关闭确认（旧版 role=dialog，max-w-sm p-6）──
+        // visible 而非 if：dlg-save 需在会话打开时被 focus（对齐旧版
+        // closeConfirmOpen effect 聚焦主按钮）
+        Rectangle {
+            visible: root.close-confirm-open;
+            background: rgba(0, 0, 0, 0.45);
+            HorizontalLayout {
+                alignment: center;
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 384px;
+                        border-radius: Metrics.radius-lg + 4px;
+                        background: Theme.canvas-default;
+                        drop-shadow-blur: 24px;
+                        drop-shadow-color: Theme.shadow-color.with-alpha(0.25);
+                        VerticalLayout {
+                            padding: 24px;
+                            spacing: 8px;
+                            Text {
+                                text: "有未保存的修改";
+                                color: Theme.fg-default;
+                                font-size: 18px;
+                                font-weight: Metrics.weight-semibold;
+                            }
+                            Text {
+                                text: "保存修改还是放弃并关闭？";
+                                color: Theme.fg-muted;
+                                font-size: Metrics.text-sm;
+                                wrap: word-wrap;
+                            }
+                            Rectangle { height: 12px; }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                alignment: end;
+                                dlg-cancel := Rectangle {
+                                    width: 64px;
+                                    height: 36px;
+                                    border-radius: Metrics.radius-md;
+                                    border-width: 1px;
+                                    border-color: Theme.border-default;
+                                    background: dlg-cancel-ta.has-hover ? Theme.canvas-subtle : transparent;
+                                    dlg-cancel-ta := TouchArea {
+                                        mouse-cursor: default;
+                                        clicked => { root.confirm-cancel(); }
+                                    }
+                                    Text {
+                                        text: "取消";
+                                        color: Theme.fg-default;
+                                        font-size: Metrics.text-sm;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                dlg-discard := Rectangle {
+                                    width: 88px;
+                                    height: 36px;
+                                    border-radius: Metrics.radius-md;
+                                    border-width: 1px;
+                                    border-color: Theme.border-default;
+                                    background: dlg-discard-ta.has-hover ? Theme.canvas-subtle : transparent;
+                                    dlg-discard-ta := TouchArea {
+                                        mouse-cursor: default;
+                                        clicked => { root.close-discard(); }
+                                    }
+                                    Text {
+                                        text: "放弃修改";
+                                        color: Theme.danger-fg;
+                                        font-size: Metrics.text-sm;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                dlg-save := Rectangle {
+                                    width: 100px;
+                                    height: 36px;
+                                    border-radius: Metrics.radius-md;
+                                    background: Theme.accent-emphasis;
+                                    dlg-save-ta := TouchArea {
+                                        mouse-cursor: default;
+                                        clicked => { root.close-save(); }
+                                    }
+                                    Text {
+                                        text: "保存并关闭";
+                                        color: Theme.fg-on-emphasis;
+                                        font-size: Metrics.text-sm;
+                                        font-weight: Metrics.weight-semibold;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        // 确认框的键盘（Esc=取消 / Enter=保存并关闭）由窗口级 capture
+        // 统一处理，不依赖按钮焦点
+        }
+    }
+
+}

@@ -590,6 +590,11 @@ pub struct ThemeTokens {
     /// accent-hover，light=#ffffff/accent-emphasis）
     pub selection_fg: String,
     pub selection_bg: String,
+
+    /// 编辑框聚焦边框（旧版 --pg-border-accent：不随用户强调色的固定蓝）
+    pub border_accent: &'static str,
+    /// 警告点/徽标的原色（旧版 --pg-warning-emphasis，未做对比度调整）
+    pub warning_emphasis: &'static str,
 }
 
 /// 门禁常量：正文 AA+ 余量、组件边界非文本线
@@ -716,6 +721,8 @@ pub fn derive_tokens(preset_id: &str, theme_accent: &str, resolved: ResolvedThem
             scale.canvas.to_string()
         },
         selection_bg: if is_light { emphasis } else { accent_hover },
+        border_accent: if is_light { "#0074d0" } else { "#3b9eff" },
+        warning_emphasis: scale.warning,
     }
 }
 

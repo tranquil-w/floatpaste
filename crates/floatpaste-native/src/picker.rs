@@ -47,6 +47,7 @@ pub struct App {
     pub picker: slint::Weak<QuickPasteWindow>,
     pub tooltip: slint::Weak<TooltipWindow>,
     pub search: slint::Weak<SearchWindow>,
+    pub editor: slint::Weak<crate::EditorWindow>,
 }
 
 impl App {
@@ -128,6 +129,7 @@ pub fn activate(app: &App) {
         &win,
         app.tooltip.upgrade().as_ref(),
         app.search.upgrade().as_ref(),
+        app.editor.upgrade().as_ref(),
         &tokens,
     );
 
@@ -231,6 +233,57 @@ pub fn toggle(app: &App) {
     activate(app);
 }
 
+/// 从编辑器返回速贴：恢复会话快捷键与外击关闭，窗口以无激活方式重现，
+/// **故意不重置列表与选中**（对齐旧版 restore_picker_after_editor 不发
+/// SESSION_START，保留进入编辑器时的上下文与滚动位置）。前台留在用户
+/// 此前所在位置，键盘会话经 LL 钩子接回，无需窗口持有焦点
+pub fn restore_after_editor(app: &App, target: TargetSession) {
+    let Some(win) = app.picker.upgrade() else {
+        return;
+    };
+    let hwnd = app
+        .state
+        .picker_hwnd
+        .load(std::sync::atomic::Ordering::SeqCst);
+    if hwnd == 0 {
+        warn!("速贴窗口 HWND 尚未就绪，无法从编辑器返回");
+        return;
+    }
+    let settings = app.state.refresh_settings();
+
+    // 恢复记忆尺寸（无记忆则用默认）
+    let (width, height) = PickerPositionService::resolve_window_size(&app.core().repository)
+        .ok()
+        .flatten()
+        .unwrap_or((PICKER_DEFAULT_WIDTH, PICKER_DEFAULT_HEIGHT));
+    win.window()
+        .set_size(slint::PhysicalSize::new(width, height));
+    window_control::set_window_min_size(
+        hwnd,
+        (PICKER_MIN_WIDTH as f32 * win.window().scale_factor()) as i32,
+        (PICKER_MIN_HEIGHT as f32 * win.window().scale_factor()) as i32,
+    );
+
+    app.state.set_picker_session(target);
+    apply_window_position(app, &settings, target.target_window_hwnd);
+
+    // 主题随设置刷新（编辑期间设置可能已被外部修改）
+    let resolved = theme::resolve_theme(settings.theme_mode.clone(), theme::system_prefers_dark());
+    let tokens = theme::derive_tokens(&settings.theme_preset, &settings.theme_accent, resolved);
+    theme_bridge::apply_theme(
+        &win,
+        app.tooltip.upgrade().as_ref(),
+        app.search.upgrade().as_ref(),
+        app.editor.upgrade().as_ref(),
+        &tokens,
+    );
+
+    app.state.begin_picker_activation();
+    begin_input_session(app, hwnd, settings.picker_digit_shortcuts_enabled);
+    let _ = window_control::show_window_no_activate(hwnd);
+    info!("从 Editor 返回 Picker");
+}
+
 fn begin_input_session(app: &App, hwnd: isize, digit_shortcuts_enabled: bool) {
     let app_for_mouse = app.clone();
     // 外击关闭不还原前台：用户点击的位置已取得焦点，此时再把原目标
@@ -271,8 +324,13 @@ fn handle_session_action(app: &App, action: session_keyboard::SessionAction) {
         SessionAction::Dismiss => hide(app, true),
         SessionAction::ToggleFavorite => toggle_favorite(app),
         SessionAction::OpenEditor => {
-            // 编辑器窗口在后续迁移阶段接入；保持面板可见避免"按键没反应"
-            warn!("编辑器窗口尚未迁移，Ctrl+Enter 暂不处理");
+            // 打开编辑器（面板隐藏、会话让位，关闭后回到本面板；
+            // 对齐旧版 PICKER_OPEN_EDITOR_EVENT）
+            let index = current_index(app);
+            let Some(item) = app.state.item_at(index) else {
+                return;
+            };
+            crate::editor::open_from_picker(app, item.id);
         }
         SessionAction::SelectIndex(digit) => {
             let count = app.state.items().len();
@@ -324,6 +382,12 @@ pub fn refresh_list_changed(app: &App) {
     if !app.state.is_picker_active() {
         return;
     }
+    refresh_list(app, true);
+}
+
+/// 编辑器内保存/删除/改标签后的刷新：速贴此时处于失活态，
+/// 跳过活跃判定强制重排，保证返回时列表已反映变更
+pub fn refresh_after_editor(app: &App) {
     refresh_list(app, true);
 }
 

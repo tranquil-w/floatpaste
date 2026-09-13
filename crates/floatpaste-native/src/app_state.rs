@@ -23,6 +23,16 @@ pub struct SearchSession {
     pub target_window_hwnd: Option<isize>,
 }
 
+/// 编辑会话：正在编辑的条目与关闭后的返回目标（对齐旧版 EditorSession）
+#[derive(Debug, Clone, Default)]
+pub struct EditorSession {
+    pub item_id: String,
+    /// 0=速贴 1=搜索
+    pub return_to: u8,
+    pub target_window_hwnd: Option<isize>,
+    pub target_focus_hwnd: Option<isize>,
+}
+
 pub struct SharedState {
     pub core: CoreState,
     session: Mutex<TargetSession>,
@@ -32,6 +42,7 @@ pub struct SharedState {
     search_active: AtomicBool,
     pub search_hwnd: AtomicIsize,
     search_session: Mutex<SearchSession>,
+    editor_session: Mutex<Option<EditorSession>>,
     /// 列表缓存：会话键（Enter/Esc 路径按 id 取条目，避免与 UI 行模型竞态）
     items: Mutex<Vec<ClipItemSummary>>,
     /// 搜索窗口结果列表缓存（分页累积，与速贴列表相互独立）
@@ -54,6 +65,7 @@ impl SharedState {
             search_active: AtomicBool::new(false),
             search_hwnd: AtomicIsize::new(0),
             search_session: Mutex::new(SearchSession::default()),
+            editor_session: Mutex::new(None),
             items: Mutex::new(Vec::new()),
             search_items: Mutex::new(Vec::new()),
             selected_id: Mutex::new(None),
@@ -128,6 +140,20 @@ impl SharedState {
             .search_session
             .lock()
             .unwrap_or_else(|error| error.into_inner())
+    }
+
+    pub fn set_editor_session(&self, session: Option<EditorSession>) {
+        *self
+            .editor_session
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = session;
+    }
+
+    pub fn editor_session(&self) -> Option<EditorSession> {
+        self.editor_session
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
     }
 
     pub fn set_search_items(&self, items: Vec<ClipItemSummary>) {

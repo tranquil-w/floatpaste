@@ -4,7 +4,7 @@ use slint::{Color, ComponentHandle};
 
 use floatpaste_core::theme::ThemeTokens;
 
-use crate::{QuickPasteWindow, SearchWindow, Theme, TooltipWindow};
+use crate::{EditorWindow, QuickPasteWindow, SearchWindow, Theme, TooltipWindow};
 
 fn hex_color(hex: &str) -> Color {
     let bytes = hex.as_bytes();
@@ -26,11 +26,12 @@ fn rgba_color(rgb: [u8; 3], alpha: f32) -> Color {
     )
 }
 
-/// 把 token 应用到速贴窗口（以及已创建的 tooltip / 搜索窗口）
+/// 把 token 应用到速贴窗口（以及已创建的 tooltip / 搜索 / 编辑窗口）
 pub fn apply_theme(
     picker: &QuickPasteWindow,
     tooltip: Option<&TooltipWindow>,
     search: Option<&SearchWindow>,
+    editor: Option<&EditorWindow>,
     tokens: &ThemeTokens,
 ) {
     let theme = picker.global::<Theme>();
@@ -73,6 +74,8 @@ pub fn apply_theme(
     theme.set_shadow_color(rgba_color(tokens.shadow_color, 1.0));
     theme.set_selection_fg(hex_color(&tokens.selection_fg));
     theme.set_selection_bg(hex_color(&tokens.selection_bg));
+    theme.set_border_accent(hex_color(tokens.border_accent));
+    theme.set_warning_emphasis(hex_color(tokens.warning_emphasis));
 
     if let Some(tooltip) = tooltip {
         let theme = tooltip.global::<Theme>();
@@ -123,6 +126,52 @@ pub fn apply_theme(
         ));
         theme.set_done_fg(hex_color(&tokens.done_fg));
         theme.set_done_subtle(rgba_color(tokens.done_subtle_rgb, tokens.done_subtle_alpha));
+        theme.set_favorite(hex_color(tokens.favorite));
+        theme.set_shadow_color(rgba_color(tokens.shadow_color, 1.0));
+        theme.set_selection_fg(hex_color(&tokens.selection_fg));
+        theme.set_selection_bg(hex_color(&tokens.selection_bg));
+        theme.set_border_accent(hex_color(tokens.border_accent));
+        theme.set_warning_emphasis(hex_color(tokens.warning_emphasis));
+    }
+
+    // 编辑窗口：完整 token 集（正文/边框/强调/状态色/选区都有消费）
+    if let Some(editor) = editor {
+        let theme = editor.global::<Theme>();
+        theme.set_canvas_default(hex_color(tokens.canvas_default));
+        theme.set_canvas_subtle(hex_color(tokens.canvas_subtle));
+        theme.set_canvas_inset(hex_color(tokens.canvas_inset));
+        theme.set_fg_default(hex_color(&tokens.fg_default));
+        theme.set_fg_muted(hex_color(&tokens.fg_muted));
+        theme.set_fg_subtle(hex_color(&tokens.fg_subtle));
+        theme.set_fg_on_emphasis(hex_color(&tokens.fg_on_emphasis));
+        theme.set_accent_fg(hex_color(&tokens.accent_fg));
+        theme.set_accent_emphasis(hex_color(&tokens.accent_emphasis));
+        theme.set_accent_hover(hex_color(&tokens.accent_hover));
+        theme.set_accent_subtle(rgba_color(
+            tokens.accent_subtle_rgb,
+            tokens.accent_subtle_alpha,
+        ));
+        theme.set_border_default(hex_color(&tokens.border_default));
+        theme.set_border_window(hex_color(&tokens.border_window));
+        theme.set_border_muted(hex_color(tokens.border_muted));
+        theme.set_border_subtle(hex_color(&tokens.border_subtle));
+        theme.set_border_accent(hex_color(tokens.border_accent));
+        theme.set_success_fg(hex_color(&tokens.success_fg));
+        theme.set_success_subtle(rgba_color(
+            tokens.success_subtle_rgb,
+            tokens.success_subtle_alpha,
+        ));
+        theme.set_danger_fg(hex_color(&tokens.danger_fg));
+        theme.set_danger_subtle(rgba_color(
+            tokens.danger_subtle_rgb,
+            tokens.danger_subtle_alpha,
+        ));
+        theme.set_warning_fg(hex_color(&tokens.warning_fg));
+        theme.set_warning_subtle(rgba_color(
+            tokens.warning_subtle_rgb,
+            tokens.warning_subtle_alpha,
+        ));
+        theme.set_warning_emphasis(hex_color(tokens.warning_emphasis));
         theme.set_favorite(hex_color(tokens.favorite));
         theme.set_shadow_color(rgba_color(tokens.shadow_color, 1.0));
         theme.set_selection_fg(hex_color(&tokens.selection_fg));
