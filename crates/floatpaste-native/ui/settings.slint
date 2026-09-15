@@ -200,7 +200,7 @@ component ShortcutInput inherits Rectangle {
             padding-left: 12px;
             padding-right: 12px;
             spacing: Metrics.space-1_5;
-            alignment: center;
+            alignment: start;
             if (root.recording): HorizontalLayout {
                 spacing: Metrics.space-1_5;
                 alignment: start;
@@ -244,19 +244,21 @@ component ShortcutInput inherits Rectangle {
     }
 }
 
-// 分段单选（旧版 SegmentedControl：rounded-lg border p-0.5，选中项
-// accent-subtle 底 + font-medium）
+// 分段单选（旧版 SegmentedControl：rounded-lg border p-0.5，按钮 px-2.5
+// py-1 text-[13px]，选中项 accent-subtle 底 + font-medium；容器宽由内容
+// 决定——旧版 flex 内容自适应，这里绑定内部布局 preferred 宽）
 component Segmented inherits Rectangle {
     in property <[string]> options;
     in property <int> value: 0;
     callback selected(int);
-    height: 30px;
+    height: 34px;
+    width: seg-row.preferred-width + 4px;
     horizontal-stretch: 0;
     border-radius: Metrics.radius-lg;
     border-width: 1px;
     border-color: Theme.border-default;
     background: Theme.canvas-default;
-    HorizontalLayout {
+    seg-row := HorizontalLayout {
         padding: 2px;
         for opt[idx] in root.options: Rectangle {
             width: seg-text.preferred-width + 20px;
@@ -269,7 +271,7 @@ component Segmented inherits Rectangle {
                 text: opt;
                 color: root.value == idx ? Theme.fg-default
                     : (seg-ta.has-hover ? Theme.fg-default : Theme.fg-muted);
-                font-size: Metrics.text-body;
+                font-size: 13px;
                 font-weight: root.value == idx ? Metrics.weight-medium : Metrics.weight-normal;
                 vertical-alignment: center;
                 horizontal-alignment: center;
@@ -384,12 +386,13 @@ component SectionHeader inherits Rectangle {
     }
 }
 
-// 普通设置行（旧版 SettingRow：px-4 py-2.5，左标题+描述，右控件）
+// 普通设置行（旧版 SettingRow：flex items-center gap-6 px-4 py-2.5，左
+// 标题+描述 flex-1，右控件 shrink-0——控件经 @children 进入行布局，行高
+// 由文本列与控件取大后加内边距自适应，与旧版一致）
 component SettingRow inherits Rectangle {
     in property <string> title;
     in property <string> description;
-    in property <length> control-height: 32px;
-    height: max(row-col.preferred-height, control-height + 20px);
+    height: row-col.preferred-height;
     row-col := HorizontalLayout {
         padding-left: 16px;
         padding-right: 16px;
@@ -406,6 +409,7 @@ component SettingRow inherits Rectangle {
                 font-size: Metrics.text-sm;
                 font-weight: Metrics.weight-medium;
                 wrap: no-wrap;
+                overflow: elide;
             }
             if (root.description != ""): Text {
                 text: root.description;
@@ -414,6 +418,7 @@ component SettingRow inherits Rectangle {
                 wrap: word-wrap;
             }
         }
+        @children
     }
 }
 
@@ -444,7 +449,6 @@ component TagRow inherits Rectangle {
         padding-top: 8px;
         padding-bottom: 8px;
         spacing: 12px;
-        alignment: center;
         // 常规态
         if (root.row-data.state == 0): Text {
             text: root.row-data.name;
@@ -982,8 +986,6 @@ export component SettingsWindow inherits Window {
                                         title: "历史记录上限";
                                         description: "超出后自动清理最早的记录。";
                                         NumberInput {
-                                            x: parent.width - 16px - 96px;
-                                            y: (parent.height - self.height) / 2;
                                             text <=> root.history-limit-text;
                                             edited(text) => { root.history-limit-edited(text); }
                                         }
@@ -993,8 +995,6 @@ export component SettingsWindow inherits Window {
                                         title: "速贴窗口记录数";
                                         description: "速贴面板一次可滚动浏览的记录数，数字快捷键只覆盖前 9 条。";
                                         NumberInput {
-                                            x: parent.width - 16px - 96px;
-                                            y: (parent.height - self.height) / 2;
                                             text <=> root.picker-limit-text;
                                             edited(text) => { root.picker-limit-edited(text); }
                                         }
@@ -1013,15 +1013,13 @@ export component SettingsWindow inherits Window {
                                     description: "配置全局唤起与搜索入口，保持高频操作一眼可见。";
                                 }
                                 RowGroup {
-                                    // 速贴唤起
+                                    // 速贴唤起（旧版右列 w-56 = 224px 固定宽）
                                     SettingRow {
                                         title: "速贴唤起";
                                         description: "全局唤出速贴面板的组合键。";
-                                        control-height: 34px;
                                         sc1-ctrl := VerticalLayout {
-                                            x: parent.width - 16px - 224px;
-                                            y: (parent.height - self.preferred-height) / 2;
                                             width: 224px;
+                                            height: self.preferred-height;
                                             spacing: 6px;
                                             shortcut-input := ShortcutInput {
                                                 width: 100%;
@@ -1032,26 +1030,22 @@ export component SettingsWindow inherits Window {
                                                 cancelled() => { root.shortcut-cancelled(); }
                                             }
                                             if (root.shortcut-notice-text != ""): Text {
-                                                height: 18px;
                                                 text: root.shortcut-notice-text;
                                                 color: Theme.danger-fg;
                                                 font-size: Metrics.text-xs;
-                                                overflow: elide;
-                                                vertical-alignment: center;
+                                                wrap: word-wrap;
                                             }
                                         }
                                     }
                                     RowDivider { }
-                                    // 搜索窗口：启用复选 + 录制框（+ 冲突提示）
+                                    // 搜索窗口：启用复选 + 录制框同行并排
+                                    // （旧版右列 flex items-center gap-4），冲突提示在框下
                                     row-sc2 := SettingRow {
                                         title: "搜索窗口";
                                         description: "为搜索窗口单独保留一组更适合检索场景的快捷键。";
-                                        control-height: sc2-ctrl.preferred-height;
-                                        sc2-ctrl := VerticalLayout {
-                                            x: parent.width - 16px - 224px;
-                                            y: (parent.height - self.preferred-height) / 2;
-                                            width: 224px;
-                                            spacing: 6px;
+                                        sc2-wrap := HorizontalLayout {
+                                            height: self.preferred-height;
+                                            spacing: 16px;
                                             HorizontalLayout {
                                                 height: 16px;
                                                 spacing: Metrics.space-1_5;
@@ -1088,26 +1082,29 @@ export component SettingsWindow inherits Window {
                                                     vertical-alignment: center;
                                                 }
                                             }
-                                            search-shortcut-input := ShortcutInput {
-                                                width: 100%;
-                                                disabled: !root.search-shortcut-enabled;
-                                                value-parts: root.search-shortcut-parts;
-                                                notice: root.search-notice-text;
-                                                captured(value) => { root.search-shortcut-edited(value); }
-                                                cleared() => { root.search-shortcut-edited(""); }
-                                                cancelled() => { root.search-shortcut-cancelled(); }
-                                            }
-                                            if (root.search-notice-text != ""
-                                                || root.search-shortcut-hint != ""): Text {
-                                                height: 18px;
-                                                text: root.search-notice-text != ""
-                                                    ? root.search-notice-text
-                                                    : root.search-shortcut-hint;
-                                                color: root.search-notice-text != ""
-                                                    ? Theme.danger-fg : Theme.fg-subtle;
-                                                font-size: Metrics.text-xs;
-                                                overflow: elide;
-                                                vertical-alignment: center;
+                                            sc2-ctrl := VerticalLayout {
+                                                width: 224px;
+                                                height: self.preferred-height;
+                                                spacing: 6px;
+                                                search-shortcut-input := ShortcutInput {
+                                                    width: 100%;
+                                                    disabled: !root.search-shortcut-enabled;
+                                                    value-parts: root.search-shortcut-parts;
+                                                    notice: root.search-notice-text;
+                                                    captured(value) => { root.search-shortcut-edited(value); }
+                                                    cleared() => { root.search-shortcut-edited(""); }
+                                                    cancelled() => { root.search-shortcut-cancelled(); }
+                                                }
+                                                if (root.search-notice-text != ""
+                                                    || root.search-shortcut-hint != ""): Text {
+                                                    text: root.search-notice-text != ""
+                                                        ? root.search-notice-text
+                                                        : root.search-shortcut-hint;
+                                                    color: root.search-notice-text != ""
+                                                        ? Theme.danger-fg : Theme.fg-subtle;
+                                                    font-size: Metrics.text-xs;
+                                                    wrap: word-wrap;
+                                                }
                                             }
                                         }
                                     }
@@ -1126,21 +1123,15 @@ export component SettingsWindow inherits Window {
                                 }
                                 RowGroup {
                                     // 界面模式
-                                    Rectangle {
-                                        height: 52px;
-                                        SettingRow {
-                                            width: parent.width;
-                                            title: "界面模式";
-                                            description: ["自动匹配 Windows 当前的浅色或深色外观。",
-                                                "固定使用浅色界面，不受系统外观影响。",
-                                                "固定使用深色界面，适合夜间与暗光环境。"][root.theme-mode];
-                                            Segmented {
-                                                x: parent.width - self.preferred-width - 16px;
-                                                y: (parent.height - self.height) / 2;
-                                                options: ["跟随系统", "浅色", "深色"];
-                                                value <=> root.theme-mode;
-                                                selected(idx) => { root.theme-mode-selected(idx); }
-                                            }
+                                    SettingRow {
+                                        title: "界面模式";
+                                        description: ["自动匹配 Windows 当前的浅色或深色外观。",
+                                            "固定使用浅色界面，不受系统外观影响。",
+                                            "固定使用深色界面，适合夜间与暗光环境。"][root.theme-mode];
+                                        Segmented {
+                                            options: ["跟随系统", "浅色", "深色"];
+                                            value <=> root.theme-mode;
+                                            selected(idx) => { root.theme-mode-selected(idx); }
                                         }
                                     }
                                     RowDivider { }
@@ -1242,37 +1233,31 @@ export component SettingsWindow inherits Window {
                                         }
                                     }
                                     RowDivider { }
-                                    // 强调色
-                                    Rectangle {
-                                        height: 52px;
-                                        SettingRow {
-                                            width: parent.width;
-                                            title: "强调色";
-                                            description: "选中态、按钮与高亮使用的颜色。";
-                                            HorizontalLayout {
-                                                x: parent.width - self.preferred-width - 16px;
-                                                y: (parent.height - 28px) / 2;
-                                                spacing: Metrics.space-1_5;
-                                                alignment: center;
-                                                for swatch in root.accent-swatches: Rectangle {
-                                                    width: 28px;
-                                                    height: 28px;
+                                    // 强调色（旧版 h-7 色点 gap-1.5，右列随内容自适应）
+                                    SettingRow {
+                                        title: "强调色";
+                                        description: "选中态、按钮与高亮使用的颜色。";
+                                        HorizontalLayout {
+                                            spacing: Metrics.space-1_5;
+                                            alignment: start;
+                                            for swatch in root.accent-swatches: Rectangle {
+                                                width: 28px;
+                                                height: 28px;
+                                                border-radius: Metrics.radius-pill;
+                                                border-width: 2px;
+                                                border-color: swatch.selected
+                                                    ? Theme.accent-fg : transparent;
+                                                Rectangle {
+                                                    x: 2px;
+                                                    y: 2px;
+                                                    width: 20px;
+                                                    height: 20px;
                                                     border-radius: Metrics.radius-pill;
-                                                    border-width: 2px;
-                                                    border-color: swatch.selected
-                                                        ? Theme.accent-fg : transparent;
-                                                    Rectangle {
-                                                        x: 2px;
-                                                        y: 2px;
-                                                        width: 20px;
-                                                        height: 20px;
-                                                        border-radius: Metrics.radius-pill;
-                                                        border-width: 1px;
-                                                        border-color: rgba(0, 0, 0, 0.08);
-                                                        background: swatch.hex;
-                                                        TouchArea {
-                                                            clicked() => { root.accent-selected(swatch.id); }
-                                                        }
+                                                    border-width: 1px;
+                                                    border-color: rgba(0, 0, 0, 0.08);
+                                                    background: swatch.hex;
+                                                    TouchArea {
+                                                        clicked() => { root.accent-selected(swatch.id); }
                                                     }
                                                 }
                                             }
@@ -1280,21 +1265,15 @@ export component SettingsWindow inherits Window {
                                     }
                                     RowDivider { }
                                     // 速贴窗口显示位置
-                                    Rectangle {
-                                        height: 52px;
-                                        SettingRow {
-                                            width: parent.width;
-                                            title: "速贴窗口显示位置";
-                                            description: ["默认推荐，速贴窗口会贴近当前鼠标所在位置弹出。",
-                                                "保留上次拖动或关闭时的位置；首次使用会落在屏幕中心。",
-                                                "优先跟随当前输入光标；如果系统拿不到光标位置，会退回鼠标位置。"][root.position-mode];
-                                            Segmented {
-                                                x: parent.width - self.preferred-width - 16px;
-                                                y: (parent.height - self.height) / 2;
-                                                options: ["鼠标位置", "上次关闭时的位置", "光标所在位置"];
-                                                value <=> root.position-mode;
-                                                selected(idx) => { root.position-mode-selected(idx); }
-                                            }
+                                    SettingRow {
+                                        title: "速贴窗口显示位置";
+                                        description: ["默认推荐，速贴窗口会贴近当前鼠标所在位置弹出。",
+                                            "保留上次拖动或关闭时的位置；首次使用会落在屏幕中心。",
+                                            "优先跟随当前输入光标；如果系统拿不到光标位置，会退回鼠标位置。"][root.position-mode];
+                                        Segmented {
+                                            options: ["鼠标位置", "上次关闭时的位置", "光标所在位置"];
+                                            value <=> root.position-mode;
+                                            selected(idx) => { root.position-mode-selected(idx); }
                                         }
                                     }
                                 }

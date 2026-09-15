@@ -1,3 +1,6 @@
+// release 不带控制台窗口（日志落文件，debug 保留终端便于排查）
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 //! FloatPaste 原生壳（Slint + 软件渲染）。
 //!
 //! 与老 Tauri 壳共用 floatpaste-core 与同一数据目录。本阶段完成速贴面板、
