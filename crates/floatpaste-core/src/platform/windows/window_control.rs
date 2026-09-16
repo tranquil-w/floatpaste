@@ -11,13 +11,13 @@ use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, W
 use windows::Win32::UI::Input::KeyboardAndMouse::SetActiveWindow;
 use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
-    BringWindowToTop, GetCursorPos, GetWindowLongPtrW, GetWindowRect, IsIconic,
-    SetForegroundWindow, SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowPos, ShowWindow,
-    GWL_EXSTYLE, GWL_STYLE, HWND_TOPMOST, LWA_ALPHA, SC_KEYMENU, SWP_FRAMECHANGED, SWP_NOACTIVATE,
-    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SW_HIDE, SW_RESTORE, SW_SHOW,
-    SW_SHOWNOACTIVATE, WM_GETMINMAXINFO, WM_SYSCOMMAND, WS_EX_LAYERED, WS_EX_NOACTIVATE,
-    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
-    WS_SYSMENU,
+    BringWindowToTop, GetCursorPos, GetWindow, GetWindowLongPtrW, GetWindowRect, IsIconic,
+    IsWindowVisible, SetForegroundWindow, SetLayeredWindowAttributes, SetWindowLongPtrW,
+    SetWindowPos, ShowWindow, GW_HWNDPREV, GWL_EXSTYLE, GWL_STYLE, HWND_TOPMOST, LWA_ALPHA,
+    SC_KEYMENU, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+    SWP_SHOWWINDOW, SW_HIDE, SW_RESTORE, SW_SHOW, SW_SHOWNOACTIVATE, WM_GETMINMAXINFO,
+    WM_SYSCOMMAND, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+    WS_EX_TRANSPARENT, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_SYSMENU,
 };
 
 use crate::domain::error::AppError;
@@ -133,6 +133,46 @@ pub fn is_topmost(hwnd: isize) -> bool {
     (unsafe { GetWindowLongPtrW(handle, GWL_EXSTYLE) } & WS_EX_TOPMOST.0 as isize) != 0
 }
 
+/// 置顶带内 hwnd 之上是否还有与它相交的可见外部窗口（skip 里的自身
+/// 窗口如 tooltip 不算）。离开置顶带即停止——非置顶窗口盖不住置顶窗口
+pub fn is_covered_by_visible_window(hwnd: isize, skip: &[isize]) -> bool {
+    let handle = hwnd_of(hwnd);
+    let mut rect = RECT::default();
+    if unsafe { GetWindowRect(handle, &mut rect) }.is_err() {
+        return false;
+    }
+    let skip_handles: Vec<_> = skip.iter().map(|s| hwnd_of(*s)).collect();
+    let mut cur = unsafe { GetWindow(handle, GW_HWNDPREV) }.ok();
+    for _ in 0..64 {
+        let Some(h) = cur else {
+            break;
+        };
+        if unsafe { IsWindowVisible(h) }.as_bool()
+            && !skip_handles.contains(&h)
+        {
+            let mut other = RECT::default();
+            if unsafe { GetWindowRect(h, &mut other) }.is_ok() {
+                let intersects = other.left < rect.right
+                    && other.right > rect.left
+                    && other.top < rect.bottom
+                    && other.bottom > rect.top;
+                let wide_enough = other.right - other.left > 4;
+                let tall_enough = other.bottom - other.top > 4;
+                if intersects && wide_enough && tall_enough {
+                    return true;
+                }
+            }
+        }
+        // 上方窗口不带置顶位：它盖不住本窗口，无需继续
+        let ex = unsafe { GetWindowLongPtrW(h, GWL_EXSTYLE) };
+        if ex & WS_EX_TOPMOST.0 as isize == 0 {
+            break;
+        }
+        cur = unsafe { GetWindow(h, GW_HWNDPREV) }.ok();
+    }
+    false
+}
+
 /// 点击穿透（tooltip）：鼠标命中与滚轮全部落到下层窗口。
 /// Windows 命中测试只跳过 LAYERED+TRANSPARENT 组合的窗口——单设
 /// WS_EX_TRANSPARENT 不生效；配合 SetLayeredWindowAttributes(alpha=255)
@@ -160,7 +200,6 @@ pub fn is_window_minimized(hwnd: isize) -> bool {
 }
 
 pub fn is_window_visible(hwnd: isize) -> bool {
-    use windows::Win32::UI::WindowsAndMessaging::IsWindowVisible;
     unsafe { IsWindowVisible(hwnd_of(hwnd)).as_bool() }
 }
 

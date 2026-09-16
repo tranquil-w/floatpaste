@@ -39,8 +39,10 @@ export struct TagRowData {
 
 // 设置行内键位徽章（旧版 KBD_BADGE：h-22px min-w-22px rounded-[4px]
 // px-1.5 font-mono text-[11px] font-semibold）。
-// padding-top 3px：Consolas 大写/数字无降部，墨迹中心比行盒中心高约
-// 2-3px，下移对齐；"⌫"字形默认字体缺失不渲染，用 Path 画 backspace
+// Text 路径 padding-top 3px：Consolas 大写/数字无降部，墨迹中心比行盒
+// 中心高约 2-3px，下移对齐；横向留 4px 内距防粗体字形出格被裁。
+// "⌫"字形默认字体缺失不渲染，用 Path 画并显式居中（不进带 padding 的
+// 布局，避免继承 3px 下移而偏位）
 component KbdBadge inherits Rectangle {
     in property <string> key;
     height: 22px;
@@ -49,19 +51,21 @@ component KbdBadge inherits Rectangle {
     border-width: 1px;
     border-color: Theme.border-default;
     background: Theme.canvas-default;
-    HorizontalLayout {
-        padding-left: Metrics.space-1_5;
-        padding-right: Metrics.space-1_5;
+    if (root.key == "⌫"): Path {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: 13px;
+        height: 10px;
+        stroke: Theme.fg-default;
+        stroke-width: 1.2px;
+        commands: "M 1 5 L 4.5 1 L 12 1 L 12 9 L 4.5 9 Z M 6.5 3 L 10.5 7 M 10.5 3 L 6.5 7";
+    }
+    if (root.key != "⌫"): HorizontalLayout {
+        padding-left: 4px;
+        padding-right: 4px;
         padding-top: 3px;
         alignment: center;
-        if (root.key == "⌫"): Path {
-            width: 13px;
-            height: 10px;
-            stroke: Theme.fg-default;
-            stroke-width: 1.2px;
-            commands: "M 1 5 L 4.5 1 L 12 1 L 12 9 L 4.5 9 Z M 6.5 3 L 10.5 7 M 10.5 3 L 6.5 7";
-        }
-        if (root.key != "⌫"): Text {
+        Text {
             text: root.key;
             color: Theme.fg-default;
             font-size: Metrics.text-hint;
@@ -308,7 +312,9 @@ component ToggleRow inherits Rectangle {
     callback toggled(bool);
     height: max(44px, text-col.preferred-height + 16px);
     opacity: root.disabled ? 0.6 : 1.0;
-    background: ta.has-hover && !root.disabled ? Theme.canvas-default : transparent;
+    // 悬停提亮一档（border-subtle）。不用 canvas-default：深色主题下它与
+    // 窗口背景同色，行会视觉上"融进"页面像没变化
+    background: ta.has-hover && !root.disabled ? Theme.border-subtle : transparent;
     ta := TouchArea {
         enabled: !root.disabled;
         clicked() => { root.toggled(!root.checked); }
@@ -355,8 +361,8 @@ component ToggleRow inherits Rectangle {
                     viewbox-width: 16;
                     viewbox-height: 16;
                     stroke: #FFFFFF;
-                    stroke-width: 1.8px;
-                    commands: "M 4.5 8.5 L 6.8 10.8 L 11.5 5.5";
+                    stroke-width: 2px;
+                    commands: "M 3.8 8.6 L 6.6 11.3 L 12.4 4.6";
                 }
             }
         }
@@ -1158,8 +1164,8 @@ export component SettingsWindow inherits Window {
                                                         viewbox-width: 16;
                                                         viewbox-height: 16;
                                                         stroke: #FFFFFF;
-                                                        stroke-width: 1.8px;
-                                                        commands: "M 4.5 8.5 L 6.8 10.8 L 11.5 5.5";
+                                                        stroke-width: 2px;
+                                                        commands: "M 3.8 8.6 L 6.6 11.3 L 12.4 4.6";
                                                     }
                                                 }
                                                 Text {
@@ -1330,11 +1336,11 @@ export component SettingsWindow inherits Window {
                                                 spacing: Metrics.space-1_5;
                                                 alignment: start;
                                                 for swatch in root.accent-swatches: Rectangle {
-                                                    // 旧版 hover:scale-105：悬停外圈放大、
-                                                    // 按下回落；非选中悬停时描边提示
-                                                    width: sw-ta.has-hover && !sw-ta.pressed
-                                                        ? 29px : 28px;
-                                                    height: self.width;
+                                                    // 旧版 hover:scale-105 的等效反馈用
+                                                    // 描边环表达：尺寸动画会改变行首选宽，
+                                                    // 悬停点间移动时所有圆点跟着重排闪动
+                                                    width: 28px;
+                                                    height: 28px;
                                                     border-radius: Metrics.radius-pill;
                                                     border-width: 2px;
                                                     border-color: swatch.selected
@@ -1345,10 +1351,12 @@ export component SettingsWindow inherits Window {
                                                         clicked() => { root.accent-selected(swatch.id); }
                                                     }
                                                     Rectangle {
-                                                        x: (parent.width - 20px) / 2;
-                                                        y: (parent.height - 20px) / 2;
-                                                        width: 20px;
-                                                        height: 20px;
+                                                        // 按下内圆回缩（按压反馈）；在固定
+                                                        // 外圈内变化，不影响布局尺寸
+                                                        x: (parent.width - self.width) / 2;
+                                                        y: (parent.height - self.height) / 2;
+                                                        width: sw-ta.pressed ? 17px : 20px;
+                                                        height: self.width;
                                                         border-radius: Metrics.radius-pill;
                                                         border-width: 1px;
                                                         border-color: rgba(0, 0, 0, 0.08);

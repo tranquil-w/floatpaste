@@ -134,7 +134,13 @@ pub fn open(app: &App) {
     let geo = win.global::<SearchGeometry>();
     let width_px = (geo.get_window_width() * scale).round() as i32;
     let last = LAST_HEIGHT.with(|value| value.get()) as i32;
-    let height_px = if last > 0 { last } else { (420.0 * scale).round() as i32 };
+    // 首开（无历史高度）直接用最大高度：内容加载后棘轮目标通常也是
+    // max，避免开窗后再 resize 造成跳动/闪烁
+    let height_px = if last > 0 {
+        last
+    } else {
+        (geo.get_window_max_height() * scale).round() as i32
+    };
     win.window().set_size(PhysicalSize::new(
         width_px.max(1) as u32,
         height_px.max(1) as u32,

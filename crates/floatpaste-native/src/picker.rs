@@ -68,9 +68,10 @@ impl App {
 
 /* ───────────────── 显示 / 隐藏 / 切换 ───────────────── */
 
-// 会话期置顶位守护：速贴靠 WS_EX_TOPMOST 压住普通窗口，winit 异步样式
-// 重排或系统操作可能把该位剥掉（剥掉即被任何普通窗口覆盖）。会话期间
-// 每 500ms 检查一次，丢失即重挂；会话结束停表。仅在事件循环线程触达。
+// 会话期置顶位守护：速贴靠 WS_EX_TOPMOST 压住普通窗口。两种失效都要
+// 兜住——① winit 异步样式重排/系统操作把置顶位剥掉；② 另一个置顶
+// 窗口在速贴之后抬升（topmost 带内后来者在上有权盖住速贴）。会话期间
+// 每 500ms 检查一次，失效即重抬；会话结束停表。仅在事件循环线程触达。
 thread_local! {
     static TOPMOST_GUARD: std::cell::RefCell<Option<slint::Timer>> =
         const { std::cell::RefCell::new(None) };
@@ -90,8 +91,15 @@ fn start_topmost_guard(app: &App) {
                 return;
             }
             let hwnd = app.state.picker_hwnd.load(Ordering::SeqCst);
-            if hwnd != 0 && !window_control::is_topmost(hwnd) {
-                warn!("速贴置顶位丢失，重挂 TOPMOST");
+            if hwnd == 0 {
+                return;
+            }
+            // 自家 tooltip 悬浮在速贴之上属正常预览，不算被覆盖
+            let tooltip_hwnd = app.state.tooltip_hwnd.load(Ordering::SeqCst);
+            let covered =
+                window_control::is_covered_by_visible_window(hwnd, &[tooltip_hwnd]);
+            if !window_control::is_topmost(hwnd) || covered {
+                warn!("速贴置顶失效（位丢失或被覆盖），重抬 TOPMOST");
                 window_control::set_window_topmost_no_activate(hwnd);
             }
         },
