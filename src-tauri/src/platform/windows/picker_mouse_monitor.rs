@@ -118,12 +118,13 @@ extern "system" fn mouse_hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) ->
                 if let Some(app_clone) = app {
                     debug!("点击了速贴窗口外部，准备隐藏窗口");
                     std::thread::spawn(move || {
-                        if let Some(state) = app_clone.try_state::<crate::app_bootstrap::AppState>()
-                        {
-                            let _ = crate::services::window_coordinator::WindowCoordinator::hide_picker_and_restore_target(
-                                &app_clone, &state,
-                            );
-                        }
+                        // 外击关闭不还原前台：用户点击的位置已取得前台，
+                        // 此时把原目标拉回前台会被前台所有权检查拒绝，
+                        // Windows 拒绝时闪烁目标任务栏图标（对齐原生壳
+                        // 外击关闭语义；Esc/主快捷键关闭仍走还原路径）
+                        let _ = crate::services::window_coordinator::WindowCoordinator::hide_picker(
+                            &app_clone,
+                        );
                     });
                 }
             }
