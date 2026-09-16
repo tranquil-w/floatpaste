@@ -1,5 +1,5 @@
 use tauri::{
-    menu::{Menu, MenuBuilder, MenuItemBuilder},
+    menu::{Menu, MenuBuilder, MenuItem, MenuItemBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Manager,
 };
@@ -13,6 +13,15 @@ use crate::{
 
 pub struct TrayService;
 
+/// 托盘「切换监听」菜单项句柄。
+///
+/// 菜单文案更新必须走 `set_text` 原地改写：`tray.set_menu` 整体重建会让
+/// muda 在托盘窗口上重新挂载/卸载子类，实测重建后的菜单第一次点击事件
+/// 被吞掉（第二次才生效）。菜单在 setup 时一次性建好，生命周期内不再替换。
+pub struct TrayMenuHandles {
+    toggle_monitoring: MenuItem<tauri::Wry>,
+}
+
 /// 监听菜单文案跟随当前状态，避免用户误判监听是否已暂停
 fn monitoring_menu_label(paused: bool) -> &'static str {
     if paused {
@@ -22,7 +31,10 @@ fn monitoring_menu_label(paused: bool) -> &'static str {
     }
 }
 
-fn build_menu(app: &AppHandle, monitoring_paused: bool) -> Result<Menu<tauri::Wry>, AppError> {
+fn build_menu(
+    app: &AppHandle,
+    monitoring_paused: bool,
+) -> Result<(Menu<tauri::Wry>, MenuItem<tauri::Wry>), AppError> {
     let open_settings = MenuItemBuilder::with_id("open-settings", "打开设置").build(app)?;
     let open_picker = MenuItemBuilder::with_id("open-picker", "打开速贴面板").build(app)?;
     let open_search = MenuItemBuilder::with_id("open-search", "打开搜索").build(app)?;
@@ -33,7 +45,7 @@ fn build_menu(app: &AppHandle, monitoring_paused: bool) -> Result<Menu<tauri::Wr
     .build(app)?;
     let quit = MenuItemBuilder::with_id("quit", "退出").build(app)?;
 
-    Ok(MenuBuilder::new(app)
+    let menu = MenuBuilder::new(app)
         .items(&[
             &open_picker,
             &open_search,
@@ -41,10 +53,12 @@ fn build_menu(app: &AppHandle, monitoring_paused: bool) -> Result<Menu<tauri::Wr
             &toggle_monitoring,
             &quit,
         ])
-        .build()?)
+        .build()?;
+
+    Ok((menu, toggle_monitoring))
 }
 
-/// 托盘固定 id：refresh_menu 通过 tray_by_id 定位重建菜单
+/// 托盘固定 id：托盘图标的稳定标识
 const TRAY_ID: &str = "floatpaste-tray";
 
 impl TrayService {
@@ -55,7 +69,8 @@ impl TrayService {
             .map(|settings| settings.pause_monitoring)
             .unwrap_or(false);
 
-        let menu = build_menu(app, monitoring_paused)?;
+        let (menu, toggle_monitoring) = build_menu(app, monitoring_paused)?;
+        app.manage(TrayMenuHandles { toggle_monitoring });
 
         // 按 DPI 精确尺寸加载托盘图标，避免单一 RGBA 位图被系统拉伸导致模糊；
         // 加载失败时回退 Tauri 默认窗口图标
@@ -159,25 +174,27 @@ impl TrayService {
         Ok(())
     }
 
-    /// 设置变更后刷新托盘菜单文案（如监听状态切换）。
+    /// 设置变更后同步托盘菜单文案（如监听状态切换）。
+    ///
+    /// 原地 `set_text` 更新监听项文案，**不得** `set_menu` 整体重建：
+    /// 重建后菜单的第一次点击事件会被 muda 子类重挂过程吞掉，
+    /// 表现为「暂停/恢复监听要点两次才生效」（见 TrayMenuHandles）。
     pub fn refresh_menu(app: &AppHandle) {
-        let Some(tray) = app.tray_by_id(TRAY_ID) else {
-            return;
-        };
-
         let monitoring_paused = app
             .try_state::<AppState>()
             .and_then(|state| state.current_settings().ok())
             .map(|settings| settings.pause_monitoring)
             .unwrap_or(false);
 
-        match build_menu(app, monitoring_paused) {
-            Ok(menu) => {
-                if let Err(error) = tray.set_menu(Some(menu)) {
-                    warn!("刷新托盘菜单失败: {error}");
-                }
-            }
-            Err(error) => warn!("重建托盘菜单失败: {error}"),
+        let Some(handles) = app.try_state::<TrayMenuHandles>() else {
+            warn!("托盘菜单句柄未就绪，跳过监听文案同步");
+            return;
+        };
+        if let Err(error) = handles
+            .toggle_monitoring
+            .set_text(monitoring_menu_label(monitoring_paused))
+        {
+            warn!("更新托盘监听文案失败: {error}");
         }
     }
 }
