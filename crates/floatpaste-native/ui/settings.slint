@@ -60,12 +60,14 @@ component KbdBadge inherits Rectangle {
         stroke-width: 1.2px;
         commands: "M 1 5 L 4.5 1 L 12 1 L 12 9 L 4.5 9 Z M 6.5 3 L 10.5 7 M 10.5 3 L 6.5 7";
     }
-    if (root.key != "⌫"): HorizontalLayout {
-        padding-left: 4px;
-        padding-right: 4px;
+    // 布局必须无条件存在：if 条件布局不向组件贡献首选宽，徽章会塌到
+    // min-width 下限、文本溢出边框；文本用 visible 切换（占位不绘制）
+    HorizontalLayout {
+        padding-left: Metrics.space-1_5;
+        padding-right: Metrics.space-1_5;
         padding-top: 3px;
-        alignment: center;
         Text {
+            visible: root.key != "⌫";
             text: root.key;
             color: Theme.fg-default;
             font-size: Metrics.text-hint;
@@ -74,6 +76,9 @@ component KbdBadge inherits Rectangle {
             vertical-alignment: center;
             horizontal-alignment: center;
             wrap: no-wrap;
+            // 首选宽按字符 advance 计算，粗体墨迹会超出 advance——加 6px
+            // 余量并居中；布局不能设 alignment: center（会忽略显式宽度）
+            width: self.preferred-width + 3px;
         }
     }
 }
@@ -221,7 +226,7 @@ component ShortcutInput inherits Rectangle {
             spacing: Metrics.space-1_5;
             alignment: start;
             if (root.recording): HorizontalLayout {
-                spacing: Metrics.space-1_5;
+                spacing: 4px;
                 alignment: start;
                 Text {
                     text: "按下新组合键";
