@@ -68,6 +68,46 @@ impl App {
 
 /* ───────────────── 显示 / 隐藏 / 切换 ───────────────── */
 
+// 会话期置顶位守护：速贴靠 WS_EX_TOPMOST 压住普通窗口，winit 异步样式
+// 重排或系统操作可能把该位剥掉（剥掉即被任何普通窗口覆盖）。会话期间
+// 每 500ms 检查一次，丢失即重挂；会话结束停表。仅在事件循环线程触达。
+thread_local! {
+    static TOPMOST_GUARD: std::cell::RefCell<Option<slint::Timer>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn start_topmost_guard(app: &App) {
+    stop_topmost_guard();
+    let app_cb = app.clone();
+    let timer = slint::Timer::default();
+    timer.start(
+        slint::TimerMode::Repeated,
+        std::time::Duration::from_millis(500),
+        move || {
+            let app = app_cb.clone();
+            if !app.state.is_picker_active() {
+                stop_topmost_guard();
+                return;
+            }
+            let hwnd = app.state.picker_hwnd.load(Ordering::SeqCst);
+            if hwnd != 0 && !window_control::is_topmost(hwnd) {
+                warn!("速贴置顶位丢失，重挂 TOPMOST");
+                window_control::set_window_topmost_no_activate(hwnd);
+            }
+        },
+    );
+    TOPMOST_GUARD.with(|slot| *slot.borrow_mut() = Some(timer));
+}
+
+fn stop_topmost_guard() {
+    TOPMOST_GUARD.with(|slot| {
+        if let Some(timer) = slot.borrow_mut().as_ref() {
+            timer.stop();
+        }
+        *slot.borrow_mut() = None;
+    });
+}
+
 /// 打开速贴面板（对齐 WindowCoordinator::activate_picker）
 pub fn activate(app: &App) {
     let Some(win) = app.picker.upgrade() else {
@@ -89,6 +129,9 @@ pub fn activate(app: &App) {
         // 重置状态后走完整显示流程，避免后续打开沦为空操作
         if window_control::is_window_visible(hwnd) {
             apply_window_position(app, &settings, None);
+            // 该路径绕过 after_show：置顶与守护需自行保证
+            window_control::set_window_topmost_no_activate(hwnd);
+            start_topmost_guard(app);
             return;
         }
         warn!("Picker 标志位为激活但窗口实际不可见，重置状态后重新显示");
@@ -159,6 +202,7 @@ pub fn activate(app: &App) {
         .target_window_hwnd
         .map_or(ForegroundPolicy::Keep, ForegroundPolicy::RestoreIfStolen);
     overlay::after_show(hwnd, false, immediate, deferred);
+    start_topmost_guard(app);
 
     // 搜索窗口正被作为回贴目标（用户在搜索中按了主快捷键）：键盘交给
     // 速贴会话，搜索侧输入框失焦、底栏切换为速贴键位（对齐
@@ -175,6 +219,7 @@ pub fn activate(app: &App) {
 
 /// 隐藏（对齐 WindowCoordinator::hide_picker + hide_picker_and_restore_target）
 pub fn hide(app: &App, restore_target: bool) {
+    stop_topmost_guard();
     let Some(win) = app.picker.upgrade() else {
         return;
     };
@@ -271,6 +316,7 @@ pub fn hide_for_editor(app: &App) {
     win.window()
         .set_position(slint::PhysicalPosition::new(-32000, -32000));
     app.state.end_picker_activation();
+    stop_topmost_guard();
     tooltip::cancel(app);
     info!("隐藏 Picker（进入编辑器）");
 }

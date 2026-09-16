@@ -38,7 +38,9 @@ export struct TagRowData {
 }
 
 // 设置行内键位徽章（旧版 KBD_BADGE：h-22px min-w-22px rounded-[4px]
-// px-1.5 font-mono text-[11px] font-semibold）
+// px-1.5 font-mono text-[11px] font-semibold）。
+// padding-top 3px：Consolas 大写/数字无降部，墨迹中心比行盒中心高约
+// 2-3px，下移对齐；"⌫"字形默认字体缺失不渲染，用 Path 画 backspace
 component KbdBadge inherits Rectangle {
     in property <string> key;
     height: 22px;
@@ -50,8 +52,16 @@ component KbdBadge inherits Rectangle {
     HorizontalLayout {
         padding-left: Metrics.space-1_5;
         padding-right: Metrics.space-1_5;
+        padding-top: 3px;
         alignment: center;
-        Text {
+        if (root.key == "⌫"): Path {
+            width: 13px;
+            height: 10px;
+            stroke: Theme.fg-default;
+            stroke-width: 1.2px;
+            commands: "M 1 5 L 4.5 1 L 12 1 L 12 9 L 4.5 9 Z M 6.5 3 L 10.5 7 M 10.5 3 L 6.5 7";
+        }
+        if (root.key != "⌫"): Text {
             text: root.key;
             color: Theme.fg-default;
             font-size: Metrics.text-hint;
@@ -336,13 +346,17 @@ component ToggleRow inherits Rectangle {
                 border-radius: Metrics.radius-sm;
                 border-width: 1px;
                 border-color: root.checked ? Theme.accent-fg : Theme.border-default;
-                background: root.checked ? Theme.accent-fg : Theme.canvas-default;
+                // 未选态填充用 border-subtle：canvas-default 会与悬停行
+                // 背景同色导致复选框隐形（对齐浏览器深色原生复选框的灰底）
+                background: root.checked ? Theme.accent-fg : Theme.border-subtle;
                 if (root.checked): Path {
                     width: 16px;
                     height: 16px;
+                    viewbox-width: 16;
+                    viewbox-height: 16;
                     stroke: #FFFFFF;
-                    stroke-width: 2px;
-                    commands: "M 3.5 8.5 L 6.5 11.5 L 12.5 4.5";
+                    stroke-width: 1.8px;
+                    commands: "M 4.5 8.5 L 6.8 10.8 L 11.5 5.5";
                 }
             }
         }
@@ -788,11 +802,16 @@ export component SettingsWindow inherits Window {
                     HorizontalLayout {
                         spacing: Metrics.space-1_5;
                         alignment: center;
+                        // 状态点为固定高子元素，交叉轴顶对齐——包一层居中
                         if (root.status-kind == 4): Rectangle {
                             width: 6px;
-                            height: 6px;
-                            border-radius: Metrics.radius-pill;
-                            background: Theme.danger-fg;
+                            Rectangle {
+                                y: (parent.height - 6px) / 2;
+                                width: 6px;
+                                height: 6px;
+                                border-radius: Metrics.radius-pill;
+                                background: Theme.danger-fg;
+                            }
                         }
                         if (root.status-kind == 4): Text {
                             text: "修改暂未保存：" + root.status-reasons;
@@ -802,9 +821,13 @@ export component SettingsWindow inherits Window {
                         }
                         if (root.status-kind == 1): Rectangle {
                             width: 6px;
-                            height: 6px;
-                            border-radius: Metrics.radius-pill;
-                            background: Theme.accent-fg;
+                            Rectangle {
+                                y: (parent.height - 6px) / 2;
+                                width: 6px;
+                                height: 6px;
+                                border-radius: Metrics.radius-pill;
+                                background: Theme.accent-fg;
+                            }
                         }
                         if (root.status-kind == 1): Text {
                             text: "正在保存";
@@ -814,9 +837,13 @@ export component SettingsWindow inherits Window {
                         }
                         if (root.status-kind == 2): Rectangle {
                             width: 6px;
-                            height: 6px;
-                            border-radius: Metrics.radius-pill;
-                            background: Theme.success-fg;
+                            Rectangle {
+                                y: (parent.height - 6px) / 2;
+                                width: 6px;
+                                height: 6px;
+                                border-radius: Metrics.radius-pill;
+                                background: Theme.success-fg;
+                            }
                         }
                         if (root.status-kind == 2): Text {
                             text: "已保存";
@@ -826,9 +853,13 @@ export component SettingsWindow inherits Window {
                         }
                         if (root.status-kind == 3): Rectangle {
                             width: 6px;
-                            height: 6px;
-                            border-radius: Metrics.radius-pill;
-                            background: Theme.danger-fg;
+                            Rectangle {
+                                y: (parent.height - 6px) / 2;
+                                width: 6px;
+                                height: 6px;
+                                border-radius: Metrics.radius-pill;
+                                background: Theme.danger-fg;
+                            }
                         }
                         if (root.status-kind == 3): Text {
                             text: "保存失败";
@@ -1120,13 +1151,15 @@ export component SettingsWindow inherits Window {
                                                     border-color: root.search-shortcut-enabled
                                                         ? Theme.accent-fg : Theme.border-default;
                                                     background: root.search-shortcut-enabled
-                                                        ? Theme.accent-fg : Theme.canvas-default;
+                                                        ? Theme.accent-fg : Theme.border-subtle;
                                                     if (root.search-shortcut-enabled): Path {
                                                         width: 16px;
                                                         height: 16px;
+                                                        viewbox-width: 16;
+                                                        viewbox-height: 16;
                                                         stroke: #FFFFFF;
-                                                        stroke-width: 2px;
-                                                        commands: "M 3.5 8.5 L 6.5 11.5 L 12.5 4.5";
+                                                        stroke-width: 1.8px;
+                                                        commands: "M 4.5 8.5 L 6.8 10.8 L 11.5 5.5";
                                                     }
                                                 }
                                                 Text {
@@ -1284,24 +1317,29 @@ export component SettingsWindow inherits Window {
                                                 spacing: Metrics.space-1_5;
                                                 alignment: start;
                                                 for swatch in root.accent-swatches: Rectangle {
-                                                    width: 28px;
-                                                    height: 28px;
+                                                    // 旧版 hover:scale-105：悬停外圈放大、
+                                                    // 按下回落；非选中悬停时描边提示
+                                                    width: sw-ta.has-hover && !sw-ta.pressed
+                                                        ? 29px : 28px;
+                                                    height: self.width;
                                                     border-radius: Metrics.radius-pill;
                                                     border-width: 2px;
                                                     border-color: swatch.selected
-                                                        ? Theme.accent-fg : transparent;
+                                                        ? Theme.accent-fg
+                                                        : (sw-ta.has-hover
+                                                            ? Theme.border-default : transparent);
+                                                    sw-ta := TouchArea {
+                                                        clicked() => { root.accent-selected(swatch.id); }
+                                                    }
                                                     Rectangle {
-                                                        x: 4px;
-                                                        y: 4px;
+                                                        x: (parent.width - 20px) / 2;
+                                                        y: (parent.height - 20px) / 2;
                                                         width: 20px;
                                                         height: 20px;
                                                         border-radius: Metrics.radius-pill;
                                                         border-width: 1px;
                                                         border-color: rgba(0, 0, 0, 0.08);
                                                         background: swatch.hex;
-                                                        TouchArea {
-                                                            clicked() => { root.accent-selected(swatch.id); }
-                                                        }
                                                     }
                                                 }
                                             }

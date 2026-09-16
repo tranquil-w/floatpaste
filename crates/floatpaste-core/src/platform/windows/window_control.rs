@@ -16,7 +16,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GWL_EXSTYLE, GWL_STYLE, HWND_TOPMOST, LWA_ALPHA, SC_KEYMENU, SWP_FRAMECHANGED, SWP_NOACTIVATE,
     SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SW_HIDE, SW_RESTORE, SW_SHOW,
     SW_SHOWNOACTIVATE, WM_GETMINMAXINFO, WM_SYSCOMMAND, WS_EX_LAYERED, WS_EX_NOACTIVATE,
-    WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_SYSMENU,
+    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
+    WS_SYSMENU,
 };
 
 use crate::domain::error::AppError;
@@ -123,6 +124,13 @@ pub fn set_window_topmost_no_activate(hwnd: isize) -> bool {
     };
     tracing::debug!("set_window_topmost hwnd={hwnd} ok={}", result.is_ok());
     result.is_ok()
+}
+
+/// 查询窗口是否仍带 WS_EX_TOPMOST 位（速贴会话期守护：位被剥即会被
+/// 普通窗口覆盖）
+pub fn is_topmost(hwnd: isize) -> bool {
+    let handle = hwnd_of(hwnd);
+    (unsafe { GetWindowLongPtrW(handle, GWL_EXSTYLE) } & WS_EX_TOPMOST.0 as isize) != 0
 }
 
 /// 点击穿透（tooltip）：鼠标命中与滚轮全部落到下层窗口。

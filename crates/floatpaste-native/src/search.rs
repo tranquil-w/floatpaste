@@ -127,7 +127,20 @@ pub fn open(app: &App) {
     // 屏上：首帧即加载态，不闪旧内容
     reset_session_state(app);
     win32_ext::warm_surface(hwnd);
-    if !position_on_cursor_monitor(&win) {
+    // 尺寸先于定位：首开会话时窗口还是装配期自然尺寸（根布局钳制，不是
+    // 设计尺寸），直接拿 window().size() 居中必偏（winit set_size 亦非
+    // 同步可读回）。定位用同一组计算值，不经窗口回读
+    let scale = win.window().scale_factor();
+    let geo = win.global::<SearchGeometry>();
+    let width_px = (geo.get_window_width() * scale).round() as i32;
+    let last = LAST_HEIGHT.with(|value| value.get()) as i32;
+    let height_px = if last > 0 { last } else { (420.0 * scale).round() as i32 };
+    win.window().set_size(PhysicalSize::new(
+        width_px.max(1) as u32,
+        height_px.max(1) as u32,
+    ));
+    JUST_OPENED.with(|flag| flag.set(true));
+    if !position_on_cursor_monitor(&win, width_px, height_px) {
         // 光标/工作区不可得：退回上次隐藏前的位置（等价旧行为的
         // 「原位显示」）；无记录时保持停屏并告警
         let fallback = LAST_HIDDEN_POSITION.lock().ok().and_then(|slot| *slot);
@@ -195,6 +208,12 @@ static PARKED_POSITION: std::sync::Mutex<Option<(i32, i32)>> = std::sync::Mutex:
 /// 光标定位失败则退回这里，等价旧行为的「原位显示」
 static LAST_HIDDEN_POSITION: std::sync::Mutex<Option<(i32, i32)>> = std::sync::Mutex::new(None);
 
+thread_local! {
+    /// 打开后首次内容高度落定的一次性重居中标记：open 按默认/历史高度
+    /// 居中，内容加载完成后棘轮变高，若不重居中会保持左上角锚定而偏下
+    static JUST_OPENED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// 进入编辑器前的隐藏：结束激活、收 tooltip、停屏窗口，但**不清理
 /// 会话与列表状态**（对齐 hide_search_for_editor_transition）——
 /// 编辑器关闭后原样恢复选中、关键词与滚动位置
@@ -261,17 +280,18 @@ pub fn resume_input(app: &App) {
 }
 
 /// 打开时定位：光标所在显示器工作区居中（不持久化位置，对齐
-/// center_window_on_cursor_monitor）。定位失败返回 false，由调用方兜底
-fn position_on_cursor_monitor(win: &SearchWindow) -> bool {
+/// center_window_on_cursor_monitor）。尺寸由调用方算好后传入——
+/// winit set_size 不同步反映到 window().size()，回读会拿到旧值。
+/// 定位失败返回 false，由调用方兜底
+fn position_on_cursor_monitor(win: &SearchWindow, width_px: i32, height_px: i32) -> bool {
     let Ok(cursor) = current_cursor_point() else {
         return false;
     };
     let Ok(work) = work_area_from_point(cursor) else {
         return false;
     };
-    let size = win.window().size();
-    let x = work.left + (work.width() - size.width as i32).max(0) / 2;
-    let y = work.top + (work.height() - size.height as i32).max(0) / 2;
+    let x = work.left + (work.width() - width_px).max(0) / 2;
+    let y = work.top + (work.height() - height_px).max(0) / 2;
     win.window().set_position(PhysicalPosition::new(x, y));
     true
 }
@@ -1581,6 +1601,17 @@ pub fn sync_height(app: &App, allow_shrink: bool) {
             (geo.get_window_width() * scale).round() as u32,
             target as u32,
         ));
+        // 打开后首次高度落定：以新尺寸重新居中（左上角锚定的增长会让
+        // 窗口偏离打开时的居中位置；后续会话内的高度变化不再干预，
+        // 用户拖动后的位置也不受影响）
+        if JUST_OPENED.with(|flag| flag.get()) {
+            JUST_OPENED.with(|flag| flag.set(false));
+            let _ = position_on_cursor_monitor(
+                &win,
+                (geo.get_window_width() * scale).round() as i32,
+                target,
+            );
+        }
     });
 }
 
