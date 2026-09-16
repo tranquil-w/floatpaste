@@ -1231,6 +1231,12 @@ export component SettingsWindow inherits Window {
                                                 HorizontalLayout {
                                                     spacing: 10px;
                                                     for card[idx] in root.preset-cards: Rectangle {
+                                                        // 旧版 grid sm:grid-cols-3：三列严格
+                                                        // 等宽。直接绑 parent.width 会成绑定环，
+                                                        // 改为首选宽归零 + 等拉伸（stretch 只
+                                                        // 均分剩余空间，基础宽仍随内容长不等）
+                                                        min-width: 0px;
+                                                        preferred-width: 0px;
                                                         horizontal-stretch: 1;
                                                         height: card-col.preferred-height;
                                                         border-radius: 12px;
@@ -1244,6 +1250,9 @@ export component SettingsWindow inherits Window {
                                                             clicked() => { root.preset-selected(idx); }
                                                         }
                                                         card-col := VerticalLayout {
+                                                            x: 0;
+                                                            y: 0;
+                                                            width: 100%;
                                                             padding: 8px;
                                                             spacing: 6px;
                                                             Rectangle {
@@ -1295,6 +1304,10 @@ export component SettingsWindow inherits Window {
                                                                 color: Theme.fg-subtle;
                                                                 font-size: Metrics.text-xs;
                                                                 wrap: word-wrap;
+                                                                // 固定两行高：三张卡描述区等高，
+                                                                // 卡片高度随之完全一致（grid 行为）
+                                                                height: 33px;
+                                                                vertical-alignment: top;
                                                             }
                                                         }
                                                     }
