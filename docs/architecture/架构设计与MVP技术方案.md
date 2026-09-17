@@ -1,5 +1,12 @@
 # FloatPaste / 浮贴 架构设计与 MVP 技术方案
 
+> **现状说明**：桌面端为 Slint 软件渲染原生壳，仓库由两个 crate 组成：
+> `crates/floatpaste-core`（领域 / 仓储 / 服务 / Win32 平台层，与 GUI 无关）与
+> `crates/floatpaste-native`（唯一桌面壳：`ui/*.slint` 界面 + `src/` 窗口会话逻辑）。
+> §18 目录结构、§20 实现状态、§21 运行调试描述当前结构；
+> 其余章节为 Tauri + WebView MVP 时期的设计记录，产品与领域设计结论仍然有效，
+> 其中涉及的 Tauri / 前端实现细节以本说明的 crate 结构为准。
+
 ## 1. 文档目标
 
 本文档用于将 FloatPaste 的产品形态与技术选型收敛为一版可执行、可排期、可开发的正式方案。
@@ -1135,124 +1142,41 @@ interface UserSetting {
 
 ```text
 floatpaste/
-  src/
-    app/
-      App.tsx
-      queryClient.ts
-    bridge/
-      commands.ts
-      events.ts
-      runtime.ts
-      window.ts
-      imageUrl.ts
-      mockBackend.ts
-    features/
-      picker/
-        PickerShell.tsx
-        queries.ts
-        favoriteToggle.ts
-        tooltipHtml.ts
-        tooltipState.ts
-        previewLayout.ts
-      search/
-        SearchShell.tsx
-        queries.ts
-        state.ts
-        store.ts
-        keyboard.ts
-        filterKeyboard.ts
-        favoritedState.ts
-        itemPointer.ts
-      editor/
-        EditorShell.tsx
-        store.ts
-        keyboard.ts
-      settings/
-        SettingsShell.tsx
-        SettingsNav.tsx
-        SettingsSection.tsx
-        settingsSections.ts
-        useSettingsNavigation.ts
-        queries.ts
-      workbench/
-        state.ts
-        keyboard.ts
-    shared/
-      ui/
-        Panel.tsx
-        StatusBadge.tsx
-        LoadingSpinner.tsx
-        WindowResizeHandles.tsx
-        tooltipConfig.ts
-      utils/
-        time.ts
-        clipDisplay.ts
-        error.ts
-      types/
-        settings.ts
-        clips.ts
-      queries/
-        clipQueries.ts
-      theme.ts
-      themeColors.ts
-  src-tauri/
-    src/
-      main.rs
-      lib.rs
-      app_bootstrap.rs
-      launch_mode.rs
-      commands/
-        clips.rs
-        settings.rs
-        windows.rs
-      services/
-        history_service.rs
-        search_service.rs
-        normalize_service.rs
-        dedup_service.rs
-        privacy_service.rs
-        paste_executor.rs
-        shortcut_manager.rs
-        tray_service.rs
-        window_coordinator.rs
-        tooltip_window.rs
-        image_storage.rs
-        picker_position_service.rs
-        settings_service.rs
-        startup_service.rs
-      repository/
-        sqlite_repository.rs
-      domain/
-        clip_item.rs
-        settings.rs
-        events.rs
-        error.rs
-        editor_session.rs
-        search_session.rs
-      platform/
-        windows/
-          clipboard_monitor.rs
-          picker_mouse_monitor.rs
-          picker_position.rs
-          active_app.rs
-          shortcuts.rs
-          tray.rs
-          window_utils.rs
-          single_instance.rs
-          startup.rs
-          image_clipboard.rs
-          file_clipboard.rs
-          paste_executor.rs
-      migrations/
-        0001_init.sql
-      capabilities/
-        background.json
-        picker.json
-        search.json
-        editor.json
-        settings.json
-        tooltip.json
-      tauri.conf.json
+  crates/
+    floatpaste-core/            # 与 GUI 无关的共享核心
+      src/
+        domain/                 # clip_item / settings / events / search_session / editor_session / error
+        repository/             # sqlite_repository（含 FTS5 与迁移）/ schema / settings
+        services/               # clip / search / history / normalize / dedup / privacy / retention /
+                                # paste_support / picker_position / image_storage / startup / tag /
+                                # time_format / clip_display（展示格式化）
+        platform/windows/       # clipboard_monitor / session_keyboard / mouse_monitor / hotkey /
+                                # window_control（拖拽与八方向拉伸手势）/ active_app / picker_position /
+                                # image_clipboard / file_clipboard / single_instance / startup / clipboard_error / wide_string
+        state.rs                # CoreState：仓储 + 图片存储 + 设置缓存 + 自写保护
+        theme.rs                # 色板 / 强调色 / 语义 token 派生与对比度校正
+        launch_mode.rs          # --silent 启动模式
+    floatpaste-native/          # 唯一桌面壳（Slint 软件渲染）
+      src/
+        main.rs                 # 启动装配：窗口创建、热键、托盘、监听接线、退出收尾
+        system.rs               # 日志初始化与核心状态构建（数据目录解析）
+        picker.rs               # 速贴面板会话（显隐/列表/导航/收藏/确认上屏）+ wire()
+        search.rs               # 搜索会话（关键词防抖/筛选/分页/两段式删除）+ wire()
+        editor.rs               # 文本编辑与标签管理 + wire()
+        settings.rs             # 设置防抖自动保存与运行时联动 + wire()
+        tooltip.rs              # 悬停预览（400ms 调度、边缘自适应）
+        overlay.rs              # 窗口屏外停屏与上屏装配（防首帧闪烁）
+        paste_flow.rs           # 回贴流程编排
+        tray.rs                 # 系统托盘
+        thumbnails.rs           # 缩略图缓存与异步解码（两窗口共享）
+        theme_bridge.rs         # core token → Slint Theme 全局
+        win32_ext.rs / app_icon.rs / app_state.rs
+      ui/                       # picker / search / editor / settings / tooltip / theme / common .slint
+      assets/icon.ico
+      floatpaste-native.rc / .manifest
+  packaging/                    # Inno 安装包脚本（floatpaste.iss）
+  scripts/                      # bump-version / render-release-notes / make_icon / win-cargo
+  docs/
 ```
 
 ---
@@ -1274,274 +1198,104 @@ floatpaste/
 
 ---
 
-## 20. 当前实现状态（截至 2026-04-21）
+## 20. 当前实现状态
 
-下面内容用于同步”设计稿”与”仓库现状”，避免文档与代码脱节。当前版本为 **v0.2.3**。
+桌面端为 Slint 原生壳单实现，核心域在 `floatpaste-core`，两个 crate 共同构成 Cargo workspace。
 
 ### 20.1 已完成
 
-当前仓库已经完成以下实现：
-
 **基础架构**
-- 前端工程骨架：React + Vite + Tailwind + Zustand + TanStack Query
-- Tauri 2 + Rust 后端工程骨架
-- SQLite 初始化迁移与 FTS5 搜索
-- `clip_items`、`clip_items_fts`、`settings`、`excluded_apps` 持久化
-- 前端依据当前 `WebviewWindow` 标签在不同 Shell 间切换（Picker / Search / Editor / Settings）
-
-**多窗口架构**
-- Picker 窗口：预创建隐藏窗口，运行时显示/隐藏切换
-- Search 窗口：独立全局快捷键唤起的搜索窗口
-- Editor 窗口：从 Picker 或 Search 唤出的文本编辑窗口
-- Settings 窗口：独立设置窗口
-- Tooltip 窗口：轻量级悬浮预览窗口，不抢焦点
-- 六个 capability 配置文件：background、picker、search、editor、settings、tooltip
+- Cargo workspace：`floatpaste-core`（domain / repository / services / platform 四层）+ `floatpaste-native`（Slint 壳）
+- SQLite 初始化迁移与 FTS5 搜索；`clip_items`、`clip_items_fts`、`settings`、`excluded_apps` 持久化
+- 五窗口单进程模型：速贴 / 搜索 / 编辑 / 设置 / Tooltip 共享一个事件循环，启动即建、按需显示
 
 **剪贴板监听**
-- Windows 剪贴板文本监听
-- 图片剪贴板监听（支持 PNG 直传和 DIB 标准格式）
-- 文件剪贴板监听
-- 图片存储服务（PNG 编解码、本地文件存储、哈希去重）
-- 基于哈希的重复内容处理：8 秒内重复跳过，历史重复刷新既有记录
+- 文本 / 图片（PNG 直传与 DIB）/ 文件三类剪贴项监听与入库
+- 图片存储（PNG 编解码、本地文件、哈希去重）；8 秒内重复跳过，历史重复刷新既有记录
 - 排除应用、暂停监听、自写回抑制
 
 **速贴面板（Picker）**
-- 最近活跃列表（文本 + 图片缩略图 + 文件摘要）
-- 无焦点显示：`WS_EX_NOACTIVATE` + `ShowWindow(SW_SHOWNOACTIVATE)`
-- 会话快捷键控制：`Up / Down / Enter / Esc / Tab / Digit1..Digit9`
-- 方向键长按连续导航，记录数上限可配置
-- 三种显示位置模式：鼠标位置、上次关闭位置、目标窗口光标位置
-- 鼠标点击窗口外部自动关闭
-- Tooltip 悬浮预览（图片大图/文本摘要）
-- 收藏快捷键（Ctrl+Space）
-- 窗口宽度拖拽调整
-- 图片条目 Shift+Enter 粘贴为文件路径
+- 最近活跃列表（文本 + 图片缩略图 + 文件摘要）、无焦点显示（`WS_EX_NOACTIVATE` + 停屏/上屏切换）
+- 会话快捷键（`Up / Down / Enter / Esc / Tab / Digit1..9`，LL 键盘钩子接管，方向键长按连发）
+- 三种定位（鼠标 / 上次位置 / 目标插入符）、尺寸记忆、外击自动关闭、Tooltip 悬停预览
+- 收藏、八方向拉伸（最小尺寸约束）、图片 Shift+Enter 按文件粘贴
 
 **搜索窗口（Search）**
-- 全文搜索（FTS5）+ 250ms 防抖 + 分页加载
-- 类型筛选（全部 / 文本 / 图片 / 文件 / 收藏）
-- 筛选器键盘导航
-- 收藏快捷键统一为 Ctrl+Space
-- 图片 Tooltip 预览与内联展开
+- 全文搜索（FTS5）+ 防抖 + 触底分页；类型筛选（全部 / 文本 / 图片 / 文件 / 收藏）与标签筛选
+- 两段式删除（首次待确认 3 秒）、收藏视图联动、高度棘轮与头部拖拽
 
 **编辑器（Editor）**
-- 独立窗口文本编辑
-- 从 Picker 或 Search 唤出，编辑完成后返回来源窗口
+- 独立窗口文本编辑，脏内容关闭确认；从 Picker 或 Search 唤出，关闭后原样返回来源窗口
+- 标签管理（追加 / 采纳建议 / 补全 / 移除）
 
 **设置（Settings）**
-- 快捷键配置（Picker + 搜索窗口）
-- 通用设置（历史上限、速贴记录数）
-- 外观设置（主题模式、自定义颜色、速贴位置模式）
-- 行为设置（开机自启、静默启动、恢复剪贴板）
-- 排除应用管理
-- 设置更新失败时回滚持久化与运行时副作用
+- 快捷键捕获、通用 / 外观 / 行为 / 排除应用管理
+- 防抖自动保存 + 运行时联动（热键重注册、自启同步、全窗主题重应用）
 
 **主题系统**
-- 浅色 / 深色 / 跟随系统三种模式
-- 自定义颜色配置（窗口背景、卡片背景、强调色）
-- CSS 变量动态注入
-- Tooltip 窗口主题同步
+- 浅色 / 深色 / 跟随系统 × 预设（默认 / Catppuccin / Tokyo Night）× 强调色安全列表
+- 派生与对比度校正在 `core::theme`，经 `theme_bridge` 写入各窗口 Slint 全局
 
-**回贴**
-- 回贴主链路：写入剪贴板、恢复目标窗口、发送 Ctrl+V
-- 文本回贴、图片回贴、图片文件路径回贴
-- 可选恢复原剪贴板内容
-- 回贴结果状态码
+**回贴与系统集成**
+- 回贴链路：写入剪贴板 → 恢复目标窗口 → 注入 Ctrl+V；图片可按文件路径回贴
+- 托盘菜单（打开速贴 / 搜索 / 设置、切换监听、退出）、开机自启、`--silent` 静默启动、单实例二次唤起
 
-**系统集成**
-- 托盘菜单：打开搜索、打开速贴面板、打开设置、暂停/恢复监听、退出
-- Windows 开机自启、`--silent` 静默启动与单实例唤醒机制
-- 窗口关闭后隐藏到托盘
-- 默认快捷键迁移：`Ctrl+`` → `Alt+Q`，`Win+F` → `Alt+S`
+### 20.2 关键文件索引
 
-### 20.2 当前实现与设计稿的对应关系
+**floatpaste-native（壳）**
+- 启动装配：`crates/floatpaste-native/src/main.rs`、`system.rs`
+- 窗口会话：`picker.rs`、`search.rs`、`editor.rs`、`settings.rs`（各含 `wire()` 回调装配）
+- 悬停预览：`tooltip.rs`；停屏与上屏：`overlay.rs`；回贴编排：`paste_flow.rs`；托盘：`tray.rs`
+- 缩略图：`thumbnails.rs`；主题桥：`theme_bridge.rs`；共享状态：`app_state.rs`
+- 界面：`crates/floatpaste-native/ui/*.slint`
 
-按实施阶段看，当前状态为：
-
-- `Phase 1`（后台核心闭环）：已完成
-- `Phase 2`（资料库窗口）：已完成（已从 Manager 重构为 Search + Editor + Settings 多窗口）
-- `Phase 3`（速贴主链路）：已完成
-- `Phase 4`（收口与稳定性）：已完成基础稳定性收口
-
-当前代码中已经落地的关键文件包括：
-
-- 前端入口：`src/app/App.tsx`
-- Picker：`src/features/picker/PickerShell.tsx`
-- Search：`src/features/search/SearchShell.tsx`
-- Editor：`src/features/editor/EditorShell.tsx`
-- Settings：`src/features/settings/SettingsShell.tsx`
-- 前端桥接：`src/bridge/commands.ts`、`src/bridge/events.ts`、`src/bridge/window.ts`、`src/bridge/runtime.ts`、`src/bridge/imageUrl.ts`
-- 前端主题：`src/shared/theme.ts`、`src/shared/themeColors.ts`
-- 应用启动：`src-tauri/src/lib.rs`、`src-tauri/src/app_bootstrap.rs`
-- 启动模式与单实例：`src-tauri/src/launch_mode.rs`、`src-tauri/src/platform/windows/single_instance.rs`
-- 窗口命令：`src-tauri/src/commands/windows.rs`
-- 设置命令与运行时同步：`src-tauri/src/commands/settings.rs`、`src-tauri/src/services/settings_service.rs`、`src-tauri/src/services/startup_service.rs`
-- 剪贴监听：`src-tauri/src/platform/windows/clipboard_monitor.rs`
-- 图片剪贴板：`src-tauri/src/platform/windows/image_clipboard.rs`
-- 文件剪贴板：`src-tauri/src/platform/windows/file_clipboard.rs`
-- 图片存储：`src-tauri/src/services/image_storage.rs`
-- Picker 鼠标会话监控：`src-tauri/src/platform/windows/picker_mouse_monitor.rs`
-- Tooltip 窗口：`src-tauri/src/services/tooltip_window.rs`
-- Picker 定位：`src-tauri/src/platform/windows/picker_position.rs`、`src-tauri/src/services/picker_position_service.rs`
-- 快捷键：`src-tauri/src/services/shortcut_manager.rs`
-- 托盘：`src-tauri/src/services/tray_service.rs`
-- 窗口协调：`src-tauri/src/services/window_coordinator.rs`
-- 回贴执行：`src-tauri/src/services/paste_executor.rs`
-- SQLite 仓储：`src-tauri/src/repository/sqlite_repository.rs`
+**floatpaste-core（核心域）**
+- 剪贴监听：`platform/windows/clipboard_monitor.rs`；图片 / 文件剪贴板：`image_clipboard.rs`、`file_clipboard.rs`
+- 会话键盘（LL 钩子）：`session_keyboard.rs`；外击关闭（LL 鼠标钩子）：`mouse_monitor.rs`
+- 窗口手势（拖拽 / 拉伸）：`window_control.rs`；前台与焦点解析：`active_app.rs`
+- 定位：`picker_position.rs` + `services/picker_position_service.rs`
+- 全局热键：`hotkey.rs`；单实例：`single_instance.rs`；开机自启：`startup.rs`
+- 仓储：`repository/sqlite_repository.rs`；展示格式化：`services/clip_display.rs`
+- 主题：`theme.rs`；回贴支撑：`services/paste_support.rs`
 
 ### 20.3 已知实现取舍
 
-- Picker 已采用”无焦点窗口 + 会话期全局快捷键 + 鼠标移出关闭”的实现，在不同输入法与前台应用中基本稳定
-- 原先的 Manager 窗口已拆分为 Search + Editor + Settings 三个独立窗口，各自有独立的 WebviewWindow 和 capability 配置
-- 所有窗口切换通过 Rust 侧 WindowCoordinator 统一编排，隐藏后加入适当延迟以规避窗口切换竞态
-- 回贴当前优先保证”写入剪贴板 + 尝试恢复目标窗口 + 注入 Ctrl+V”
-- 光标定位模式依赖 Win32 `GetGUIThreadInfo`；若目标线程没有可用插入符，会自动回退到鼠标定位
-- Tooltip 是独立 WebviewWindow，通过前后端协作完成定位与尺寸适配
-- 浏览器预览模式下前端自动切换到本地 mock 数据，只能验证 UI，无法验证真实系统能力
-- 全局快捷键按规范化结果进行注册和匹配；设置中仍允许简写输入，运行时自动转换
-- 默认快捷键已从 `Ctrl+`` 迁移为 `Alt+Q`，从 `Win+F` 迁移为 `Alt+S`，旧配置自动升级
-
----
+- 无焦点体验依赖 Win32 焦点恢复、低级键盘 / 鼠标钩子与热键注册时序；窗口显隐走「屏外停屏 + 上屏移动」，避免 `ShowWindow` 的焦点副作用与首帧闪烁
+- 头部拖拽与八方向拉伸使用非模态手势（Slint 事件驱动 down/move/up），规避系统模态循环吞掉指针抬起事件
+- 回贴优先保证「写入剪贴板 + 尝试恢复目标窗口 + 注入 Ctrl+V」，注入失败时提示手动粘贴
+- 光标定位依赖 `GetGUIThreadInfo`；目标线程无插入符时回退鼠标定位
+- Slint 软件渲染，五窗口单进程；`slint::Image` 非 `Send`，缩略图跨线程只传原始像素
 
 ## 21. 运行与调试说明
 
 ### 21.1 环境要求
 
-当前仓库的本地开发环境要求：
+- Rust 稳定版工具链（MSVC 目标）
+- Windows 10 或 Windows 11 x64
 
-- Node.js
-- pnpm
-- Rust 工具链
-- Windows 10 或 Windows 11
+### 21.2 常用命令
 
-若要运行 Tauri 桌面应用，还需要安装：
+| 命令 | 说明 |
+|------|------|
+| `cargo run -p floatpaste-native` | 运行桌面应用（debug 构建保留控制台日志） |
+| `cargo test` | 运行 `floatpaste-core` 与 `floatpaste-native` 全部测试 |
+| `cargo build --release -p floatpaste-native` | 发布构建（产物 `target/release/floatpaste.exe`） |
+| `node scripts/bump-version.mjs <版本>` | 同步 package.json / native Cargo.toml / Cargo.lock 三处版本 |
 
-```bash
-pnpm install
-```
+发版由 tag 驱动的 GitHub Actions 完成（Inno 安装包 + 便携 zip），见 `docs/release/流程.md`。
 
-说明：
+### 21.3 运行时调试
 
-- 当前仓库已将 `@tauri-apps/cli` 作为本地开发依赖
-- 默认不再要求手动全局安装 Cargo 版 Tauri CLI
-- 如果确实需要全局安装，正确命令是 `cargo install tauri-cli`
+- 日志：debug 构建同时输出控制台并按天滚动写入 `%APPDATA%\com.floatpaste\logs\floatpaste-native.log`
+- 数据：`%APPDATA%\com.floatpaste\floatpaste.db`（SQLite + FTS5），图片存同目录 `images/`
+- 静默启动：命令行 `--silent`（跳过自动开面板，托盘 / 快捷键 / 监听照常）
+- 二次启动：单实例命名事件唤醒已有实例的速贴会话后退出
 
-### 21.2 安装依赖
-
-在仓库根目录执行：
-
-```bash
-pnpm install
-```
-
-### 21.3 仅运行前端预览
-
-用于开发界面、验证布局和交互，不依赖 Tauri：
-
-```bash
-pnpm dev
-```
-
-说明：
-
-- 该模式下前端会自动使用 `src/bridge/mockBackend.ts`
-- 可用于调试 Search、Picker、Editor 和 Settings 的静态 UI
-- 可用于调试 Manager 和 Picker 的静态 UI
-- 不会调用真实剪贴板监听、全局快捷键、托盘和回贴注入
-
-### 21.4 运行桌面开发模式
-
-用于调试真实的 Windows 剪贴板、快捷键、托盘和回贴链路：
-
-```bash
-pnpm tauri dev
-```
-
-等价命令为：
-
-```bash
-pnpm dev
-pnpm exec tauri dev
-```
-
-说明：
-
-- `pnpm tauri dev` 会通过项目内的 `@tauri-apps/cli` 调用 Tauri 开发模式
-- Tauri 运行时会预创建 `picker`、`search`、`editor`、`settings`、`tooltip` 五个窗口标签
-- `src/app/App.tsx` 会根据当前窗口标签分别渲染 `PickerShell`、`SearchShell`、`EditorShell` 或 `SettingsShell`
-- Picker 默认隐藏，运行时主要通过显示/隐藏切换
-- 当前交互上通常只保留一个主界面可见：从 Manager 打开 Picker 时会隐藏 Manager；从外部应用唤起 Picker 时只显示 Picker
-- 静默启动模式会跳过自动打开 Manager，但托盘、快捷键、剪贴板监听仍会继续初始化
-
-### 21.5 生产构建校验
-
-前端构建：
-
-```bash
-pnpm build
-```
-
-后端编译检查：
-
-```bash
-cargo check --manifest-path src-tauri\Cargo.toml
-```
-
-当前仓库至少应保证以上两个命令可以通过。
-
-### 21.6 运行时调试建议
-
-#### 调试前端界面
-
-推荐方式：
-
-- 先用 `pnpm dev` 调整界面和交互
-- 浏览器预览模式下验证 Manager 搜索、详情编辑、Picker 布局
-
-重点文件：
-
-- `src/features/manager/ManagerShell.tsx`
-- `src/features/picker/PickerShell.tsx`
-- `src/bridge/commands.ts`
-- `src/bridge/events.ts`
-- `src/bridge/window.ts`
-
-#### 调试桌面链路
-
-推荐方式：
-
-- 使用 `pnpm tauri dev`
-- 在终端直接观察 Rust `tracing` 输出
-- 重点验证复制文本、唤起 Picker、选择条目、回贴到目标应用的闭环
-
-重点文件：
-
-- `src-tauri/src/platform/windows/clipboard_monitor.rs`
-- `src-tauri/src/platform/windows/picker_mouse_monitor.rs`
-- `src-tauri/src/services/shortcut_manager.rs`
-- `src-tauri/src/services/window_coordinator.rs`
-- `src-tauri/src/services/paste_executor.rs`
-- `src-tauri/src/services/tray_service.rs`
-
-#### 调试数据库与配置
-
-当前数据默认保存在应用数据目录；若 Tauri 运行时未能解析应用目录，则回退到仓库根目录下的：
-
-```text
-.floatpaste-data/floatpaste.db
-```
-
-重点文件：
-
-- `src-tauri/src/repository/sqlite_repository.rs`
-- `src-tauri/migrations/0001_init.sql`
-- `src-tauri/src/domain/settings.rs`
-
-### 21.7 调试场景建议
+### 21.4 调试场景建议
 
 建议按下面顺序验证：
 
-1. 运行 `pnpm tauri dev`
+1. 运行 `cargo run -p floatpaste-native`
 2. 在任意文本应用中复制一段文本，确认自动入库
 3. 通过全局快捷键（默认 `Alt+Q`）唤起 Picker
 4. 用 `Up / Down / Enter / Esc / 1..9` 验证 Picker 会话快捷键操作，方向键长按可连续导航
@@ -1553,16 +1307,13 @@ cargo check --manifest-path src-tauri\Cargo.toml
 10. 使用筛选下拉框切换类型（文本/图片/文件/收藏），确认筛选结果正确
 11. 在搜索窗口点击条目进入编辑器，编辑后保存
 12. 在设置中切换主题模式（浅色/深色/跟随系统），确认所有窗口主题同步
-13. 在设置中自定义颜色，确认窗口背景、卡片背景和强调色生效
+13. 在设置中切换预设与强调色，确认各窗口生效
 14. 在记事本、浏览器输入框、编辑器中验证回贴行为
 15. 在设置中加入排除应用，确认对应前台应用不再入库
 16. 通过托盘切换监听状态，确认暂停后不再继续入库
 
-### 21.8 当前调试限制
+### 21.5 当前调试限制
 
-截至 2026-04-21，调试时需要明确以下限制：
-
-- 浏览器预览模式无法验证真实系统能力
 - 不同应用对 `Ctrl+V` 注入的响应存在差异
 - Picker 的无焦点体验依赖 Win32 焦点恢复、低级鼠标钩子和快捷键注册时序
-- 当前尚未提供单独的日志查看器界面，主要依赖终端输出和数据库结果观察
+- 尚未提供单独的日志查看器界面，主要依赖日志文件与数据库结果观察
