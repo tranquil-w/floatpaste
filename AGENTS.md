@@ -39,7 +39,7 @@
 | `pnpm test` | 前端单元测试（Node 内置 test runner） |
 | `pnpm preflight` | 一次执行 lint + build + test + Rust 测试 |
 | `pnpm tauri build` | 桌面应用打包 |
-| `cargo test` | 运行 Rust 测试（在 `src-tauri/` 下执行） |
+| `cargo test` | 运行 Rust 测试（workspace 根执行，覆盖 `floatpaste-core` 与 `floatpaste-native`） |
 
 ### 环境限制（WSL）
 
@@ -102,7 +102,7 @@
 
 ### Rust
 - 建议为逻辑变更补充单元测试
-- 测试可就近写在模块内，或放入 `src-tauri/tests/`
+- 测试就近写在模块内，或放入所属 crate 的 `tests/` 目录
 - 测试名应描述行为，例如：`ingest_text_skips_self_write`
 
 ---

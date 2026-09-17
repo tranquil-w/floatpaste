@@ -56,8 +56,7 @@ jobs:
       - name: Rust 依赖缓存
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: .
 
       - name: 运行 cargo test
-        working-directory: src-tauri
-        run: cargo test --verbose
+        run: cargo test -p floatpaste-core -p floatpaste-native --verbose

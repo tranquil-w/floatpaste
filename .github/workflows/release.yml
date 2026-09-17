@@ -50,23 +50,15 @@ jobs:
           set -euo pipefail
           TAG="${GITHUB_REF_NAME#v}"
           PKG=$(node -p "require('./package.json').version")
-          CARGO=$(grep -m1 '^version' src-tauri/Cargo.toml | sed 's/^version *= *"\(.*\)".*/\1/' | tr -d '\r')
-          TAURI=$(node -p "require('./src-tauri/tauri.conf.json').version")
-          echo "tag=${TAG} package=${PKG} cargo=${CARGO} tauri=${TAURI}"
+          NATIVE=$(grep -m1 '^version' crates/floatpaste-native/Cargo.toml | sed 's/^version *= *"\(.*\)".*/\1/' | tr -d '\r')
+          echo "tag=${TAG} package=${PKG} native=${NATIVE}"
           test "${TAG}" = "${PKG}"
-          test "${TAG}" = "${CARGO}"
-          test "${TAG}" = "${TAURI}"
-
-      - name: 安装 pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
+          test "${TAG}" = "${NATIVE}"
 
       - name: 安装 Node
         uses: actions/setup-node@v5
         with:
           node-version: 22
-          cache: pnpm
 
       - name: 安装 Rust 工具链
         uses: dtolnay/rust-toolchain@stable
@@ -74,26 +66,10 @@ jobs:
       - name: Rust 依赖缓存
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
-
-      - name: 安装前端依赖
-        run: pnpm install --frozen-lockfile
-
-      - name: ESLint 检查
-        run: pnpm lint
-
-      - name: Prettier 格式检查
-        run: pnpm format:check
-
-      - name: TypeScript 构建
-        run: pnpm build
-
-      - name: 前端单元测试
-        run: pnpm test
+          workspaces: .
 
       - name: Rust 测试
-        working-directory: src-tauri
-        run: cargo test --quiet
+        run: cargo test -p floatpaste-core -p floatpaste-native --quiet
 
       - name: 渲染发布说明
         shell: bash
@@ -106,19 +82,40 @@ jobs:
             echo "EB_${GITHUB_RUN_ID}"
           } >> "${GITHUB_ENV}"
 
-      - name: 构建并上传安装包到草稿 Release
-        uses: tauri-apps/tauri-action@v0
+      - name: 构建 Slint 壳
+        run: cargo build --release -p floatpaste-native
+
+      - name: 编译 Inno 安装包
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          if command -v iscc >/dev/null 2>&1; then
+            ISCC=iscc
+          else
+            ISCC="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
+          fi
+          # Git Bash 会把 /D 参数当路径转换，必须禁用
+          MSYS_NO_PATHCONV=1 "$ISCC" /DAppVersion="${VERSION}" packaging/floatpaste.iss
+
+      - name: 创建草稿 Release 并上传安装包
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ github.token }}
-        with:
-          tagName: ${{ github.ref_name }}
-          releaseName: ${{ github.ref_name }}
-          releaseBody: ${{ env.RELEASE_BODY }}
-          releaseDraft: true
-          prerelease: ${{ contains(github.ref_name, '-') }}
-          tauriScript: pnpm tauri
-          # 预发布版本号（如 0.6.0-beta.1）不被 WiX 支持，此时只打 NSIS
-          args: ${{ contains(github.ref_name, '-') && '--bundles nsis' || '' }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          SETUP_EXE="packaging/output/FloatPaste_${VERSION}_x64-setup.exe"
+          test -f "${SETUP_EXE}"
+          # 重跑流水线时 Release 可能已存在，跳过创建
+          gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 || {
+            PRERELEASE_FLAG=""
+            if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+              PRERELEASE_FLAG="--prerelease"
+            fi
+            gh release create "${GITHUB_REF_NAME}" --draft --title "${GITHUB_REF_NAME}" --notes-file release-body.md ${PRERELEASE_FLAG}
+          }
+          gh release upload "${GITHUB_REF_NAME}" "${SETUP_EXE}" --clobber
 
       - name: 打包便携版并生成校验文件
         shell: bash
@@ -130,17 +127,12 @@ jobs:
           STAGE="tmp/portable/FloatPaste-v${VERSION}-windows-x64-portable"
           ZIP_NAME="FloatPaste-v${VERSION}-windows-x64-portable.zip"
           mkdir -p "${STAGE}"
-          # Cargo 工作区化后产物在仓库根 target/；兼容旧的单包 src-tauri/target/ 布局
-          if [[ -f "target/release/floatpaste.exe" ]]; then
-            cp "target/release/floatpaste.exe" "${STAGE}/floatpaste.exe"
-          else
-            cp "src-tauri/target/release/floatpaste.exe" "${STAGE}/floatpaste.exe"
-          fi
+          cp "target/release/floatpaste.exe" "${STAGE}/floatpaste.exe"
           node scripts/render-release-notes.mjs "${VERSION}" "$(date +%F)" - "${STAGE}/README-使用说明.md" --template docs/release/使用说明模板.md
           powershell -Command "Compress-Archive -Path 'tmp/portable/FloatPaste-v${VERSION}-windows-x64-portable/*' -DestinationPath 'tmp/${ZIP_NAME}' -Force"
           mkdir -p tmp/assets
           cp "tmp/${ZIP_NAME}" tmp/assets/
-          gh release download "${GITHUB_REF_NAME}" --dir tmp/assets --clobber
+          cp packaging/output/FloatPaste_${VERSION}_x64-setup.exe tmp/assets/
           (cd tmp/assets && sha256sum --binary * > "../SHA256SUMS.txt")
           gh release upload "${GITHUB_REF_NAME}" "tmp/${ZIP_NAME}" "tmp/SHA256SUMS.txt" --clobber
 
@@ -150,6 +142,6 @@ jobs:
           {
             echo "## Release 草稿已就绪"
             echo ""
-            echo "产物: NSIS 安装包 + 便携版 zip + SHA256SUMS.txt（预发布版本仅 NSIS 与便携版）"
+            echo "产物: Inno 安装包 + 便携版 zip + SHA256SUMS.txt（预发布版本号自动勾选 Pre-release）"
             echo "后续: 补充手动验证建议 → 本机验收 → \`gh release edit ${GITHUB_REF_NAME} --draft=false\` 正式发布"
           } >> "${GITHUB_STEP_SUMMARY}"

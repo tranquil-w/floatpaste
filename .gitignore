@@ -48,3 +48,6 @@ smoke/
 
 # Cargo workspace 根 target
 target/
+
+# 本地 Inno 安装包编译产物
+packaging/output/

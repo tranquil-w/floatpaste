@@ -8,8 +8,7 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$cargoRoot = Join-Path $repoRoot "src-tauri"
-Set-Location $cargoRoot
+Set-Location $repoRoot
 
 $rtkCommand = Get-Command "rtk.exe" -ErrorAction SilentlyContinue
 

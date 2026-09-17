@@ -32,7 +32,7 @@ git add -A && git commit -m "chore: 升级版本至 <新版本号>"
 git tag -a v<新版本号> -m "v<新版本号>" && git push --follow-tags
 ```
 
-脚本会统一更新 `package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.lock`，不要手工改版本号。
+脚本会统一更新 `package.json`、`crates/floatpaste-native/Cargo.toml`、根 `Cargo.lock`，不要手工改版本号。
 
 ### 4. 跟踪 Release 流水线
 
@@ -40,7 +40,7 @@ git tag -a v<新版本号> -m "v<新版本号>" && git push --follow-tags
 gh run watch    # 或 gh run list --limit 3 查看 Release 工作流状态
 ```
 
-流水线内容：版本一致性校验 → lint / 格式检查 / 构建 / 前端与 Rust 测试 → git-cliff 生成本版变更 → 构建安装包与便携版 → 创建草稿 Release（含 `SHA256SUMS.txt`）。
+流水线内容：版本一致性校验 → Rust 测试 → git-cliff 生成本版变更 → 构建 Inno 安装包与便携版 → 创建草稿 Release（含 `SHA256SUMS.txt`）。
 
 若流水线失败：
 
@@ -65,6 +65,6 @@ gh release edit v<版本号> --notes-file notes.md --draft=false
 ## 注意事项
 
 - 版本号一律通过 `scripts/bump-version.mjs` 升级，不要手工改文件
-- MSI 不支持预发布版本号；tag 带预发布后缀时流水线自动只打 NSIS，无需干预
+- tag 带预发布后缀时流水线自动勾选 Pre-release，无需干预
 - 出现阻塞问题后发下一个版本号，不要覆盖原有 Release 资产
 - 不要在发布信息中标注"熟人内测版"
