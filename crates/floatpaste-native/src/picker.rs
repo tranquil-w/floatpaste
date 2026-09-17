@@ -16,7 +16,9 @@ use tracing::{info, warn};
 
 use floatpaste_core::domain::clip_item::{ClipItemSummary, PasteOption};
 use floatpaste_core::platform::windows::active_app::ActiveAppResolver;
-use floatpaste_core::platform::windows::{mouse_monitor, session_keyboard, window_control};
+use floatpaste_core::platform::windows::window_control::{self, GestureMode, ResizeDirection};
+use floatpaste_core::platform::windows::{mouse_monitor, session_keyboard};
+use floatpaste_core::services::clip_display::clip_type_label;
 use floatpaste_core::services::clip_service::ClipService;
 use floatpaste_core::services::picker_position_service::{
     PickerPositionService, WindowGeometry, PICKER_DEFAULT_HEIGHT, PICKER_DEFAULT_WIDTH,
@@ -122,7 +124,7 @@ pub fn activate(app: &App) {
         return;
     };
 
-    let settings = app.state.refresh_settings();
+    let settings = app.state.current_settings();
     let hwnd = app
         .state
         .picker_hwnd
@@ -177,7 +179,7 @@ pub fn activate(app: &App) {
     let resolved = theme::resolve_theme(settings.theme_mode.clone(), theme::system_prefers_dark());
     let tokens = theme::derive_tokens(&settings.theme_preset, &settings.theme_accent, resolved);
     theme_bridge::apply_theme(
-        &win,
+        Some(&win),
         app.tooltip.upgrade().as_ref(),
         app.search.upgrade().as_ref(),
         app.editor.upgrade().as_ref(),
@@ -359,7 +361,7 @@ pub fn restore_after_editor(app: &App, target: TargetSession) {
         warn!("速贴窗口 HWND 尚未就绪，无法从编辑器返回");
         return;
     }
-    let settings = app.state.refresh_settings();
+    let settings = app.state.current_settings();
 
     // 恢复记忆尺寸（无记忆则用默认）
     let (width, height) = PickerPositionService::resolve_window_size(&app.core().repository)
@@ -390,7 +392,7 @@ pub fn restore_after_editor(app: &App, target: TargetSession) {
     let resolved = theme::resolve_theme(settings.theme_mode.clone(), theme::system_prefers_dark());
     let tokens = theme::derive_tokens(&settings.theme_preset, &settings.theme_accent, resolved);
     theme_bridge::apply_theme(
-        &win,
+        Some(&win),
         app.tooltip.upgrade().as_ref(),
         app.search.upgrade().as_ref(),
         app.editor.upgrade().as_ref(),
@@ -766,41 +768,9 @@ pub fn schedule_preview_reclamp(app: &App) {
 /// 异步补齐缩略图：先渲染已有缓存，后台解码缺失项后回填行模型
 /// （对齐原版 img loading=lazy 的非阻塞观感）
 fn ensure_thumbnails(app: &App, items: &[ClipItemSummary]) {
-    let missing: Vec<(String, String)> = items
-        .iter()
-        .filter(|item| item.r#type == "image" && item.image_path.is_some())
-        .filter(|item| !thumbnails::contains(&item.id))
-        .filter_map(|item| {
-            let path = item.image_path.clone()?;
-            Some((item.id.clone(), path))
-        })
-        .collect();
-
-    if missing.is_empty() {
-        return;
-    }
-
-    let version = thumbnails::list_version();
-    let core = app.core().clone();
-    let app_for_cb = app.clone();
-    std::thread::spawn(move || {
-        // 跨线程只传原始像素；slint::Image 非 Send，事件循环侧再构造
-        let mut decoded: Vec<(String, Option<thumbnails::RawImage>)> = Vec::new();
-        for (id, path) in missing {
-            let raw = thumbnails::load_thumbnail_raw(&core, &path);
-            decoded.push((id, raw));
-        }
-
-        let _ = slint::invoke_from_event_loop(move || {
-            if thumbnails::list_version() != version {
-                return; // 列表已刷新，等待下一轮 ensure_thumbnails
-            }
-            for (id, raw) in decoded {
-                thumbnails::insert(id, raw.map(thumbnails::image_from_rgba));
-            }
-            let items = app_for_cb.state.items();
-            app_for_cb.with_picker(|win| build_rows(&win, &items));
-        });
+    thumbnails::ensure(app, items, |app| {
+        let items = app.state.items();
+        app.with_picker(|win| build_rows(&win, &items));
     });
 }
 
@@ -887,11 +857,7 @@ pub fn navigate(app: &App, up: bool) {
         return;
     }
     let current = current_index(app);
-    let next = if up {
-        (current + count - 1) % count
-    } else {
-        (current + 1) % count
-    };
+    let next = search::next_navigation_index(count, current, up);
     set_selected(app, next);
 }
 
@@ -936,38 +902,153 @@ fn apply_window_position(
     }
 }
 
-/* ───────────────── 类型徽章（对齐 getClipTypeLabel）───────────────── */
-
-pub fn clip_type_label(item: &ClipItemSummary) -> String {
-    match item.r#type.as_str() {
-        "text" => "文本".to_string(),
-        "image" => "图片".to_string(),
-        "file" => {
-            let file_count = item.file_count.max(0) as usize;
-            let directory_count = (item.directory_count.max(0) as usize).min(file_count);
-            if file_count == 0 {
-                "文件".to_string()
-            } else if directory_count == file_count {
-                "文件夹".to_string()
-            } else if directory_count > 0 {
-                "文件/文件夹".to_string()
-            } else {
-                "文件".to_string()
-            }
-        }
-        _ => "未知".to_string(),
-    }
-}
+// 类型徽章文案（对齐旧版 getClipTypeLabel）见 core::clip_display::clip_type_label
 
 /// 粘贴完成后由 paste_flow 调用：刷新列表顺序（mark_used 改变活动排序）
 pub fn notify_pasted(app: &App) {
     refresh_list_changed(app);
 }
 
+/* ───────────────── 回调装配 ───────────────── */
+
+/// 速贴窗口回调绑定（main 装配期调用一次）
+pub fn wire(app: &App) {
+    let Some(win) = app.picker.upgrade() else {
+        return;
+    };
+
+    // 单击选中（不上屏）
+    {
+        let app_cb = app.clone();
+        win.on_row_clicked(move |index| {
+            set_selected(&app_cb, index.max(0) as usize);
+        });
+    }
+
+    // 双击上屏
+    {
+        let app_cb = app.clone();
+        win.on_row_double_clicked(move |index| {
+            let index = index.max(0) as usize;
+            set_selected(&app_cb, index);
+            confirm(&app_cb, index, false);
+        });
+    }
+
+    // 悬停（移动即重置 400ms 计时）
+    {
+        let app_cb = app.clone();
+        win.on_row_hover(move |index, x, y| {
+            tooltip::schedule(&app_cb, index.max(0) as usize, x, y);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_row_hover_left(move || {
+            tooltip::cancel(&app_cb);
+        });
+    }
+
+    // 列表实测预览可用宽（含窗口缩放）→ 按新宽度重裁预览
+    {
+        let app_cb = app.clone();
+        win.on_preview_widths_changed(move || {
+            schedule_preview_reclamp(&app_cb);
+        });
+    }
+
+    // 头部拖拽移动（非模态手势：down/moved/up 全程由 Slint 事件驱动；
+    // 系统模态循环会吞掉指针抬起事件，面板此后收不到任何条目点击）
+    {
+        let state_cb = app.state.clone();
+        win.on_header_drag_started(move || {
+            let hwnd = state_cb.picker_hwnd.load(Ordering::SeqCst);
+            if hwnd != 0 {
+                window_control::begin_window_gesture(hwnd, GestureMode::Move, 0, 0);
+            }
+        });
+    }
+    {
+        let state_cb = app.state.clone();
+        win.on_header_drag_moved(move || {
+            let hwnd = state_cb.picker_hwnd.load(Ordering::SeqCst);
+            if hwnd != 0 {
+                window_control::update_window_gesture(hwnd);
+            }
+        });
+    }
+    {
+        let state_cb = app.state.clone();
+        win.on_header_drag_finished(move || {
+            let hwnd = state_cb.picker_hwnd.load(Ordering::SeqCst);
+            if hwnd != 0 {
+                window_control::end_window_gesture(hwnd);
+            }
+        });
+    }
+
+    // 八方向拉伸（同一非模态手势，带最小尺寸约束）
+    {
+        let app_cb = app.clone();
+        win.on_resize_started(move |direction| {
+            let hwnd = app_cb.state.picker_hwnd.load(Ordering::SeqCst);
+            if hwnd == 0 {
+                return;
+            }
+            let direction = match direction {
+                0 => ResizeDirection::North,
+                1 => ResizeDirection::South,
+                2 => ResizeDirection::West,
+                3 => ResizeDirection::East,
+                4 => ResizeDirection::NorthWest,
+                5 => ResizeDirection::NorthEast,
+                6 => ResizeDirection::SouthWest,
+                _ => ResizeDirection::SouthEast,
+            };
+            let scale = app_cb
+                .picker
+                .upgrade()
+                .map(|win| win.window().scale_factor())
+                .unwrap_or(1.0);
+            window_control::begin_window_gesture(
+                hwnd,
+                GestureMode::Resize(direction),
+                (PICKER_MIN_WIDTH as f32 * scale) as i32,
+                (PICKER_MIN_HEIGHT as f32 * scale) as i32,
+            );
+        });
+    }
+    {
+        let state_cb = app.state.clone();
+        win.on_resize_moved(move || {
+            let hwnd = state_cb.picker_hwnd.load(Ordering::SeqCst);
+            if hwnd != 0 {
+                window_control::update_window_gesture(hwnd);
+            }
+        });
+    }
+    {
+        let state_cb = app.state.clone();
+        win.on_resize_finished(move || {
+            let hwnd = state_cb.picker_hwnd.load(Ordering::SeqCst);
+            if hwnd != 0 {
+                window_control::end_window_gesture(hwnd);
+            }
+        });
+    }
+
+    // 加载失败重试
+    {
+        let app_cb = app.clone();
+        win.on_retry_clicked(move || {
+            refresh_list_changed(&app_cb);
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{clamp_preview_with, clip_type_label};
-    use floatpaste_core::domain::clip_item::ClipItemSummary;
+    use super::clamp_preview_with;
 
     /// 确定性排版模型：每个字符（含省略号）占一格，每 CAPACITY 字符折一行，
     /// 行高 LINE_HEIGHT。足以驱动裁排语义，不依赖真实字体
@@ -989,27 +1070,6 @@ mod tests {
             LINE_HEIGHT,
             max_lines,
         )
-    }
-
-    fn item_of(kind: &str, file_count: i32, directory_count: i32) -> ClipItemSummary {
-        ClipItemSummary {
-            id: "id".into(),
-            r#type: kind.into(),
-            content_preview: String::new(),
-            source_app: None,
-            is_favorited: false,
-            file_count,
-            directory_count,
-            created_at: String::new(),
-            updated_at: String::new(),
-            last_used_at: None,
-            image_path: None,
-            image_width: None,
-            image_height: None,
-            image_format: None,
-            file_size: None,
-            tags: Vec::new(),
-        }
     }
 
     #[test]
@@ -1055,18 +1115,5 @@ mod tests {
     #[test]
     fn empty_text_returns_empty() {
         assert_eq!(clamp("", 4, false), "");
-    }
-
-    #[test]
-    fn clip_type_label_maps_kinds_and_file_composition() {
-        let label =
-            |kind: &str, files: i32, dirs: i32| clip_type_label(&item_of(kind, files, dirs));
-        assert_eq!(label("text", 0, 0), "文本");
-        assert_eq!(label("image", 0, 0), "图片");
-        assert_eq!(label("file", 0, 0), "文件");
-        assert_eq!(label("file", 3, 3), "文件夹");
-        assert_eq!(label("file", 3, 1), "文件/文件夹");
-        assert_eq!(label("file", 3, 0), "文件");
-        assert_eq!(label("unknown", 0, 0), "未知");
     }
 }

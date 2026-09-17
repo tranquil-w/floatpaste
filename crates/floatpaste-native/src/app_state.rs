@@ -50,12 +50,10 @@ pub struct SharedState {
     /// 选中项 id 锚点：新剪贴插入列表头部时按 id 恢复，避免选区漂移
     selected_id: Mutex<Option<String>>,
     pub favorite_pending: AtomicBool,
-    pub settings: Mutex<UserSetting>,
 }
 
 impl SharedState {
     pub fn new(core: CoreState) -> Self {
-        let settings = core.current_settings().unwrap_or_default();
         Self {
             core,
             session: Mutex::new(TargetSession::default()),
@@ -70,24 +68,12 @@ impl SharedState {
             search_items: Mutex::new(Vec::new()),
             selected_id: Mutex::new(None),
             favorite_pending: AtomicBool::new(false),
-            settings: Mutex::new(settings),
         }
     }
 
-    pub fn refresh_settings(&self) -> UserSetting {
-        let settings = self.core.current_settings().unwrap_or_default();
-        *self
-            .settings
-            .lock()
-            .unwrap_or_else(|error| error.into_inner()) = settings.clone();
-        settings
-    }
-
+    /// 设置读取：直接读核心缓存（CoreState 内 RwLock），保存路径写回后即生效
     pub fn current_settings(&self) -> UserSetting {
-        self.settings
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .clone()
+        self.core.current_settings().unwrap_or_default()
     }
 
     pub fn is_picker_active(&self) -> bool {

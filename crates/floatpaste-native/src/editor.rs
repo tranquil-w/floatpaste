@@ -16,6 +16,7 @@ use tracing::{info, warn};
 
 use floatpaste_core::domain::clip_item::ClipItemDetail;
 use floatpaste_core::platform::windows::active_app::ActiveAppResolver;
+use floatpaste_core::services::clip_display::format_file_size;
 use floatpaste_core::services::clip_service::ClipService;
 use floatpaste_core::services::tag_service::TagService;
 use floatpaste_core::services::time_format::format_relative_time_or_unused;
@@ -236,7 +237,7 @@ fn build_meta_extra(detail: &ClipItemDetail) -> String {
     } else {
         detail.file_size
     };
-    if let Some(label) = crate::search::format_file_size(size_bytes) {
+    if let Some(label) = format_file_size(size_bytes) {
         parts.push(label);
     }
     parts.join(" · ")
@@ -682,4 +683,79 @@ fn build_suggestions(
         });
     }
     suggestions
+}
+
+/* ───────────────── 回调装配 ───────────────── */
+
+/// 编辑窗口回调绑定（main 装配期调用一次）
+pub fn wire(app: &App) {
+    let Some(win) = app.editor.upgrade() else {
+        return;
+    };
+
+    let app_cb = app.clone();
+    win.on_text_edited(move |text| {
+        text_edited(&app_cb, text.as_str());
+    });
+    let app_cb = app.clone();
+    win.on_save_requested(move || {
+        save(&app_cb);
+    });
+    let app_cb = app.clone();
+    win.on_request_close(move || {
+        request_close(&app_cb);
+    });
+    let app_cb = app.clone();
+    win.on_close_discard(move || {
+        close_editor(&app_cb);
+    });
+    let app_cb = app.clone();
+    win.on_close_save(move || {
+        save_then_close(&app_cb);
+    });
+    let app_cb = app.clone();
+    win.on_confirm_cancel(move || {
+        cancel_confirm(&app_cb);
+    });
+    let app_cb = app.clone();
+    win.on_delete_requested(move || {
+        delete_requested(&app_cb);
+    });
+    let app_cb = app.clone();
+    win.on_tag_input_changed(move |input| {
+        tag_input_changed(&app_cb, input.as_str());
+    });
+    let app_cb = app.clone();
+    win.on_tag_commit_add(move || {
+        tag_commit_add(&app_cb);
+    });
+    let app_cb = app.clone();
+    win.on_tag_adopt(move |index| {
+        tag_adopt(&app_cb, index.max(0) as usize);
+    });
+    let app_cb = app.clone();
+    win.on_tag_complete(move || {
+        tag_complete(&app_cb);
+    });
+    let app_cb = app.clone();
+    win.on_tag_remove(move |index| {
+        tag_remove(&app_cb, index.max(0) as usize);
+    });
+    let app_cb = app.clone();
+    win.on_tag_remove_last(move || {
+        tag_remove_last(&app_cb);
+    });
+    let app_cb = app.clone();
+    win.on_tag_escape(move || {
+        tag_escape(&app_cb);
+    });
+    // 标题栏 X：脏 → 确认框拦截；干净 → 隐藏并返回来源窗口
+    let app_cb = app.clone();
+    win.window().on_close_requested(move || {
+        if window_close_requested(&app_cb) {
+            slint::CloseRequestResponse::HideWindow
+        } else {
+            slint::CloseRequestResponse::KeepWindowShown
+        }
+    });
 }

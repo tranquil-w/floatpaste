@@ -74,7 +74,7 @@ impl ActiveAppResolver {
             // BringWindowToTop 必须显式调用：实测 AttachThreadInput 路径下
             // SetForegroundWindow 激活成功不代表窗口 Z 序升起，视觉上仍会
             // 被原前台窗口遮挡
-            BringWindowToTop(hwnd);
+            let _ = BringWindowToTop(hwnd);
             let foregrounded = SetForegroundWindow(hwnd).as_bool();
             let _ = SetFocus(Some(hwnd));
             if attached {

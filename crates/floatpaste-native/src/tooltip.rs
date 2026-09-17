@@ -17,10 +17,11 @@ use floatpaste_core::platform::windows::picker_position::{
     current_cursor_point, work_area_from_point,
 };
 use floatpaste_core::platform::windows::window_control;
+use floatpaste_core::services::clip_display::clip_type_label;
 use floatpaste_core::services::time_format::format_relative_time_or_unused;
 
 use crate::overlay::{self, ForegroundPolicy};
-use crate::picker::{self, App};
+use crate::picker::App;
 use crate::thumbnails;
 use crate::win32_ext;
 use crate::TooltipMetaBadge;
@@ -322,7 +323,7 @@ fn build_badges(item: &ClipItemSummary) -> ModelRc<TooltipMetaBadge> {
     let mut badges: Vec<TooltipMetaBadge> = Vec::new();
     badges.push(TooltipMetaBadge {
         kind: 0,
-        text: picker::clip_type_label(item).into(),
+        text: clip_type_label(item).into(),
     });
     if item.r#type == "image" {
         if let (Some(width), Some(height)) = (item.image_width, item.image_height) {

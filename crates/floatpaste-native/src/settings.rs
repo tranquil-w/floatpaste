@@ -24,6 +24,7 @@ use floatpaste_core::theme::ResolvedTheme;
 use floatpaste_core::theme;
 
 use crate::picker::App;
+use crate::theme_bridge::hex_color;
 use crate::{app_icon, theme_bridge, win32_ext};
 use crate::{AccentSwatch, PresetCard, SettingsWindow, TagRowData};
 
@@ -624,7 +625,7 @@ fn flush_pending_save(app: &App) {
 /// 热键重注册 + 自启动同步 + 主题 token 全窗重应用 + 预览模型刷新。
 /// 托盘菜单文案右键现建，无需推送刷新。
 pub fn apply_side_effects(app: &App) {
-    let settings = app.state.refresh_settings();
+    let settings = app.state.current_settings();
     crate::sync_global_hotkeys(app);
     if let Err(error) = StartupService::sync_from_settings(&settings) {
         warn!("同步开机自启失败: {error}");
@@ -689,17 +690,6 @@ fn rebuild_preview_models(win: &SettingsWindow, settings: &UserSetting, resolved
         selected: settings.theme_accent == choice.id,
     }));
     win.set_accent_swatches(slint::ModelRc::new(VecModel::from(swatches)));
-}
-
-fn hex_color(hex: &str) -> slint::Color {
-    let bytes = hex.as_bytes();
-    if bytes.len() == 7 && bytes[0] == b'#' {
-        let channel = |range: std::ops::Range<usize>| -> u8 {
-            u8::from_str_radix(std::str::from_utf8(&bytes[range]).unwrap_or("0"), 16).unwrap_or(0)
-        };
-        return slint::Color::from_rgb_u8(channel(1..3), channel(3..5), channel(5..7));
-    }
-    slint::Color::from_rgb_u8(0, 0, 0)
 }
 
 /* ───────────────── 滚动跟随导航 ───────────────── */

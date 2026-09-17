@@ -11,7 +11,8 @@ use floatpaste_core::theme::ThemeTokens;
 
 use crate::{EditorWindow, QuickPasteWindow, SearchWindow, Theme, TooltipWindow};
 
-fn hex_color(hex: &str) -> Color {
+/// `#rrggbb` → Slint 颜色（非法输入回退黑色）。设置窗口的预览色板共用。
+pub(crate) fn hex_color(hex: &str) -> Color {
     let bytes = hex.as_bytes();
     if bytes.len() == 7 && bytes[0] == b'#' {
         let channel = |range: std::ops::Range<usize>| -> u8 {
@@ -87,16 +88,18 @@ fn write_tooltip_tokens(theme: &Theme, tokens: &ThemeTokens) {
     theme.set_shadow_color(rgba_color(tokens.shadow_color, 1.0));
 }
 
-/// 把 token 应用到速贴窗口（以及已创建的 tooltip / 搜索 / 编辑 / 设置窗口）
+/// 把 token 写入各窗口（窗口未就绪时传 None 跳过，不强求）
 pub fn apply_theme(
-    picker: &QuickPasteWindow,
+    picker: Option<&QuickPasteWindow>,
     tooltip: Option<&TooltipWindow>,
     search: Option<&SearchWindow>,
     editor: Option<&EditorWindow>,
     settings: Option<&crate::SettingsWindow>,
     tokens: &ThemeTokens,
 ) {
-    write_full_tokens(&picker.global::<Theme>(), tokens);
+    if let Some(picker) = picker {
+        write_full_tokens(&picker.global::<Theme>(), tokens);
+    }
     if let Some(tooltip) = tooltip {
         write_tooltip_tokens(&tooltip.global::<Theme>(), tokens);
     }
@@ -111,27 +114,14 @@ pub fn apply_theme(
     }
 }
 
-/// 运行时主题重应用（设置保存后的联动路径）：从 App 弱引用升级全部窗口。
-/// 任一窗口升级失败则跳过该窗口（未就绪时不强求）。
+/// 运行时主题重应用（设置保存后的联动路径）：从 App 弱引用升级全部窗口
 pub fn reapply_theme(app: &crate::picker::App, tokens: &ThemeTokens) {
-    let picker = app.picker.upgrade();
-    let tooltip = app.tooltip.upgrade();
-    let search = app.search.upgrade();
-    let editor = app.editor.upgrade();
-    let settings = app.settings.upgrade();
-    if let Some(picker) = picker.as_ref() {
-        write_full_tokens(&picker.global::<Theme>(), tokens);
-    }
-    if let Some(tooltip) = tooltip.as_ref() {
-        write_tooltip_tokens(&tooltip.global::<Theme>(), tokens);
-    }
-    if let Some(search) = search.as_ref() {
-        write_full_tokens(&search.global::<Theme>(), tokens);
-    }
-    if let Some(editor) = editor.as_ref() {
-        write_full_tokens(&editor.global::<Theme>(), tokens);
-    }
-    if let Some(settings) = settings.as_ref() {
-        write_full_tokens(&settings.global::<Theme>(), tokens);
-    }
+    apply_theme(
+        app.picker.upgrade().as_ref(),
+        app.tooltip.upgrade().as_ref(),
+        app.search.upgrade().as_ref(),
+        app.editor.upgrade().as_ref(),
+        app.settings.upgrade().as_ref(),
+        tokens,
+    );
 }

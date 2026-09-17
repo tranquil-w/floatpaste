@@ -5,8 +5,11 @@
 //! 列表缩略图缓存（id → 图像）按窗口共享：速贴与搜索展示同一批条目，
 //! 共用一份解码结果与失败哨兵，避免双份内存与重复解码。
 
+use floatpaste_core::domain::clip_item::ClipItemSummary;
 use floatpaste_core::state::CoreState;
 use slint::{Rgba8Pixel, SharedPixelBuffer};
+
+use crate::picker::App;
 
 thread_local! {
     /// 缩略图缓存：id -> Some(图像) | None(解码失败哨兵，避免反复重试)
@@ -102,4 +105,44 @@ pub fn image_from_rgba(raw: RawImage) -> slint::Image {
     let buffer =
         SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&raw.pixels, raw.width, raw.height);
     slint::Image::from_rgba8(buffer)
+}
+
+/// 异步补齐列表缺失的图片缩略图（速贴 / 搜索共用）：
+/// 工作线程解码缺失项，回到事件循环后校验列表版本未变再写缓存，
+/// 最后由 `rebuild` 重建各自窗口的行模型。
+pub(crate) fn ensure(app: &App, items: &[ClipItemSummary], rebuild: impl FnOnce(&App) + Send + 'static) {
+    let missing: Vec<(String, String)> = items
+        .iter()
+        .filter(|item| item.r#type == "image" && item.image_path.is_some())
+        .filter(|item| !contains(&item.id))
+        .filter_map(|item| {
+            let path = item.image_path.clone()?;
+            Some((item.id.clone(), path))
+        })
+        .collect();
+    if missing.is_empty() {
+        return;
+    }
+
+    let version = list_version();
+    let core = app.core().clone();
+    let app_for_cb = app.clone();
+    std::thread::spawn(move || {
+        // 跨线程只传原始像素；slint::Image 非 Send，事件循环侧再构造
+        let mut decoded: Vec<(String, Option<RawImage>)> = Vec::new();
+        for (id, path) in missing {
+            let raw = load_thumbnail_raw(&core, &path);
+            decoded.push((id, raw));
+        }
+
+        let _ = slint::invoke_from_event_loop(move || {
+            if list_version() != version {
+                return; // 列表已刷新，等待下一轮 ensure
+            }
+            for (id, raw) in decoded {
+                insert(id, raw.map(image_from_rgba));
+            }
+            rebuild(&app_for_cb);
+        });
+    });
 }

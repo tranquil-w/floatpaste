@@ -30,6 +30,7 @@ use floatpaste_core::platform::windows::picker_position::{
     current_cursor_point, work_area_from_point,
 };
 use floatpaste_core::platform::windows::window_control;
+use floatpaste_core::services::clip_display::build_meta;
 use floatpaste_core::services::clip_service::ClipService;
 use floatpaste_core::services::paste_support;
 use floatpaste_core::services::time_format::format_relative_time_or_unused;
@@ -781,7 +782,8 @@ pub fn navigate(app: &App, up: bool) {
     set_selected(app, next_navigation_index(count, current, up));
 }
 
-fn next_navigation_index(count: usize, current: usize, up: bool) -> usize {
+/// 循环导航的下一索引（速贴 / 搜索共用，对齐 (i ± 1 + n) % n）
+pub(crate) fn next_navigation_index(count: usize, current: usize, up: bool) -> usize {
     if up {
         (current + count - 1) % count
     } else {
@@ -1036,39 +1038,7 @@ fn build_rows(app: &App) {
 
 /// 异步补齐缩略图（与速贴共用缓存；解码回填后重建搜索行模型）
 fn ensure_thumbnails(app: &App, items: &[ClipItemSummary]) {
-    let missing: Vec<(String, String)> = items
-        .iter()
-        .filter(|item| item.r#type == "image" && item.image_path.is_some())
-        .filter(|item| !thumbnails::contains(&item.id))
-        .filter_map(|item| {
-            let path = item.image_path.clone()?;
-            Some((item.id.clone(), path))
-        })
-        .collect();
-    if missing.is_empty() {
-        return;
-    }
-
-    let version = thumbnails::list_version();
-    let core = app.core().clone();
-    let app_cb = app.clone();
-    thread::spawn(move || {
-        // 跨线程只传原始像素；slint::Image 非 Send，事件循环侧再构造
-        let mut decoded: Vec<(String, Option<thumbnails::RawImage>)> = Vec::new();
-        for (id, path) in missing {
-            let raw = thumbnails::load_thumbnail_raw(&core, &path);
-            decoded.push((id, raw));
-        }
-        let _ = slint::invoke_from_event_loop(move || {
-            if thumbnails::list_version() != version {
-                return; // 列表已刷新，等待下一轮 ensure_thumbnails
-            }
-            for (id, raw) in decoded {
-                thumbnails::insert(id, raw.map(thumbnails::image_from_rgba));
-            }
-            build_rows(&app_cb);
-        });
-    });
+    thumbnails::ensure(app, items, |app| build_rows(&app));
 }
 
 /// 按宽度把文本硬折到 max_lines 行内（旧版 whitespace-pre-wrap +
@@ -1201,60 +1171,8 @@ fn flatten_preview_newlines(text: &str) -> String {
     result
 }
 
-/* ───────────────── 元信息行（对齐 getItemDetailMeta）───────────────── */
-
-fn build_meta(item: &ClipItemSummary) -> String {
-    let mut parts = vec![
-        item.source_app.clone().unwrap_or_else(|| "未知来源".into()),
-        format_relative_time_or_unused(
-            item.last_used_at
-                .as_deref()
-                .or(Some(item.created_at.as_str())),
-        ),
-    ];
-    if item.r#type == "image" {
-        if let (Some(width), Some(height)) = (item.image_width, item.image_height) {
-            parts.push(format!("{width} × {height}"));
-        }
-    }
-    if let Some(label) = format_file_size(item.file_size) {
-        parts.push(label);
-    }
-    if item.r#type == "file" {
-        if item.file_count > 0 {
-            parts.push(format!("{} 个文件", item.file_count));
-        }
-        if item.directory_count > 0 {
-            parts.push(format!("{} 个文件夹", item.directory_count));
-        }
-    }
-    parts.join(" • ")
-}
-
-/// 文件大小人类可读（对齐 formatFileSize：1024 进制，按值选小数位）
-pub(crate) fn format_file_size(bytes: Option<i64>) -> Option<String> {
-    let bytes = bytes?;
-    if bytes <= 0 {
-        return None;
-    }
-    const UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
-    let mut value = bytes as f64;
-    let mut unit_index = 0usize;
-    while value >= 1024.0 && unit_index < UNITS.len() - 1 {
-        value /= 1024.0;
-        unit_index += 1;
-    }
-    let digits = if unit_index == 0 {
-        0
-    } else if value >= 100.0 {
-        0
-    } else if value >= 10.0 {
-        1
-    } else {
-        2
-    };
-    Some(format!("{value:.digits$} {}", UNITS[unit_index]))
-}
+/* ───────────────── 元信息行 ───────────────── */
+// 元信息与文件大小文案见 core::clip_display（build_meta / format_file_size）。
 
 /* ───────────────── 空状态与错误 ───────────────── */
 
@@ -1669,6 +1587,186 @@ pub fn edit_requested(app: &App) {
     crate::editor::open_from_search(app, id);
 }
 
+/* ───────────────── 回调装配 ───────────────── */
+
+/// 搜索窗口回调绑定（main 装配期调用一次）
+pub fn wire(app: &App) {
+    let Some(win) = app.search.upgrade() else {
+        return;
+    };
+
+    // 搜索框
+    {
+        let app_cb = app.clone();
+        win.on_keyword_edited(move |_text| {
+            keyword_edited(&app_cb);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_clear_keyword(move || {
+            clear_keyword(&app_cb);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_filter_selected(move |filter| {
+            filter_selected(&app_cb, filter);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_tag_toggled(move |index| {
+            tag_toggled(&app_cb, index.max(0) as usize);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_clear_filters(move || {
+            clear_filters(&app_cb);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_retry_clicked(move || {
+            retry(&app_cb);
+        });
+    }
+
+    // 行交互
+    {
+        let app_cb = app.clone();
+        win.on_row_clicked(move |index| {
+            set_selected(&app_cb, index.max(0) as usize);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_row_double_clicked(move |index| {
+            paste_index(&app_cb, index.max(0) as usize, false);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_row_hover(move |index, x, y| {
+            row_hover(&app_cb, index.max(0) as usize, x, y);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_row_hover_left(move || {
+            hover_left(&app_cb);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_action_paste(move |index| {
+            paste_index(&app_cb, index.max(0) as usize, false);
+        });
+    }
+    // 图片按文件粘贴的按钮只在选中行上出现，作用于当前选中
+    {
+        let app_cb = app.clone();
+        win.on_action_paste_as_file(move || {
+            paste_selected(&app_cb, true);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_action_edit(move || {
+            edit_requested(&app_cb);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_action_toggle_favorite(move || {
+            toggle_favorite(&app_cb);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_action_delete(move || {
+            request_delete(&app_cb);
+        });
+    }
+
+    // 键盘会话（capture 阶段拦截）
+    {
+        let app_cb = app.clone();
+        win.on_key_navigate_up(move || {
+            navigate(&app_cb, true);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_key_navigate_down(move || {
+            navigate(&app_cb, false);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_key_paste(move |as_file| {
+            paste_selected(&app_cb, as_file);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_key_edit(move || {
+            edit_requested(&app_cb);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_key_toggle_favorite(move || {
+            toggle_favorite(&app_cb);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_key_delete(move || {
+            request_delete(&app_cb);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_key_close(move || {
+            hide(&app_cb, false);
+        });
+    }
+
+    // 触底预载 / 高度棘轮 / 头部拖拽
+    {
+        let app_cb = app.clone();
+        win.on_near_bottom(move || {
+            fetch_next(&app_cb);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_heights_changed(move || {
+            heights_changed(&app_cb);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_drag_started(move || {
+            drag_started(&app_cb);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_drag_moved(move || {
+            drag_moved(&app_cb);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_drag_finished(move || {
+            drag_finished(&app_cb);
+        });
+    }
+}
+
 /* ───────────────── 单元测试 ───────────────── */
 
 #[cfg(test)]
@@ -1702,29 +1800,6 @@ mod tests {
         assert_eq!(next_navigation_index(5, 4, true), 3);
         assert_eq!(next_navigation_index(5, 4, false), 0);
         assert_eq!(next_navigation_index(1, 0, true), 0);
-    }
-
-    #[test]
-    fn file_size_matches_legacy_digit_rules() {
-        assert_eq!(format_file_size(None), None);
-        assert_eq!(format_file_size(Some(0)), None);
-        assert_eq!(format_file_size(Some(-5)), None);
-        assert_eq!(format_file_size(Some(512)), Some("512 B".into()));
-        assert_eq!(format_file_size(Some(2048)), Some("2.00 KB".into()));
-        assert_eq!(format_file_size(Some(15 * 1024)), Some("15.0 KB".into()));
-        assert_eq!(format_file_size(Some(200 * 1024)), Some("200 KB".into()));
-    }
-
-    #[test]
-    fn meta_joins_source_time_and_details() {
-        let mut item = summary_of("image");
-        item.image_width = Some(1920);
-        item.image_height = Some(1080);
-        item.file_size = Some(2048);
-        let meta = build_meta(&item);
-        assert!(meta.starts_with("浏览器 • "));
-        assert!(meta.contains("1920 × 1080"));
-        assert!(meta.contains("2.00 KB"));
     }
 
     #[test]
