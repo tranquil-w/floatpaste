@@ -1,6 +1,0 @@
-dist
-src-tauri
-node_modules
-pnpm-lock.yaml
-Cargo.lock
-docs/superpowers

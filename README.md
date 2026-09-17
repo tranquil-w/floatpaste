@@ -10,21 +10,21 @@
 
 **主题定制**：支持浅色/深色/跟随系统三种模式，可自定义窗口背景、卡片背景和强调色。
 
-**本地优先**：SQLite 本地存储，Tauri 2 + Rust 构建，启动驻留托盘。
+**本地优先**：SQLite 本地存储，Slint + Rust 原生构建，启动驻留托盘。
 
 ## 快速开始
 
 ```bash
-pnpm install
-pnpm tauri dev
+cargo run -p floatpaste-native
 ```
+
+测试：`cargo test`（覆盖 `floatpaste-core` 与 `floatpaste-native`）。
 
 发版与构建产物由 tag 驱动的 GitHub Actions 流水线生成，见[发布流程](docs/release/流程.md)。
 
 ## 系统要求
 
 - Windows 10 / Windows 11 x64
-- WebView2 运行时（Windows 11 已内置）
 
 ## 下载
 

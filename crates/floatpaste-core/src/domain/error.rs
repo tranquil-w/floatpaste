@@ -8,11 +8,6 @@ pub enum AppError {
     Io(#[from] std::io::Error),
     #[error("序列化错误: {0}")]
     SerdeJson(#[from] serde_json::Error),
-    /// 仅供老 Tauri 壳启用 `tauri` 特性后使用，使壳层代码可对
-    /// `tauri::Error` 直接 `?`；原生壳不启用该特性。
-    #[cfg(feature = "tauri")]
-    #[error("Tauri 运行时错误: {0}")]
-    Tauri(#[from] tauri::Error),
     #[error("Windows 系统调用错误: {0}")]
     Windows(#[from] windows::core::Error),
     #[error("系统剪贴板不可用: {0}")]

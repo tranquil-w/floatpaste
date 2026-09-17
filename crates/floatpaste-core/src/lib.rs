@@ -1,4 +1,4 @@
-//! FloatPaste 核心域：与 GUI 运行时（Tauri / Slint）无关的领域模型、
+//! FloatPaste 核心域：与 GUI 壳（Slint）无关的领域模型、
 //! SQLite 仓储、业务服务与 Windows 平台集成。
 //!
 //! 分层约束：

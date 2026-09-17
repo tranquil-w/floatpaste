@@ -14,9 +14,9 @@
 
 用法：python scripts/make_icon.py
 输出：
-- src-tauri/icons/icon.ico      （16/20/24/28/30/32/36/40/42/48/64 BMP + 256 PNG）
-- src-tauri/icons/icon-512.png  （512 高清源图，用于展示与再生成）
-- src-tauri/icons/_preview_pngs/preview_sheet.png（多尺寸 + 像素放大预览）
+- crates/floatpaste-native/assets/icon.ico（16/20/24/28/30/32/36/40/42/48/64 BMP + 256 PNG）
+- crates/floatpaste-native/assets/icon-512.png（512 高清源图，用于展示与再生成）
+- crates/floatpaste-native/assets/_preview_pngs/preview_sheet.png（多尺寸 + 像素放大预览）
 
 依赖：Pillow、numpy
 """
@@ -32,7 +32,7 @@ import numpy as np
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 REPO = Path(__file__).resolve().parent.parent
-ICONS = REPO / "src-tauri" / "icons"
+ICONS = REPO / "crates" / "floatpaste-native" / "assets"
 PREVIEW = ICONS / "_preview_pngs"
 
 # ---- 大尺寸向量几何（1024 基准画布） ----
@@ -364,7 +364,7 @@ def main() -> None:
     master.save(ICONS / "icon-512.png")
 
     # 托盘源图：16px 小尺寸规格的 8x 超采样画布（无光斑/投影），
-    # 供运行时按 DPI 精确缩放（src-tauri/src/platform/windows/app_icon.rs）
+    # 供运行时按 DPI 精确缩放（floatpaste-native/src/app_icon.rs）
     render_small_canvas(16, supersample=8).save(ICONS / "icon-tray.png")
 
     sizes = [16, 20, 24, 28, 30, 32, 36, 40, 42, 48, 64, 256]

@@ -28,9 +28,3 @@ windows = { version = "0.61.3", features = [
   "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging"
 ] }
-# 仅老 Tauri 壳启用：AppError::Tauri 变体供壳层 `?` 直接转换，
-# 原生壳（Slint）不启用该特性，core 本体不依赖任何 GUI 运行时。
-tauri = { version = "2.9.2", optional = true }
-
-[features]
-tauri = ["dep:tauri"]

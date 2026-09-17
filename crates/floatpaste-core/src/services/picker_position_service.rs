@@ -18,7 +18,7 @@ pub const PICKER_MIN_HEIGHT: u32 = 280;
 
 pub struct PickerPositionService;
 
-/// 窗口几何快照：调用方从实际窗口（Tauri / Slint）读出后传入
+/// 窗口几何快照：调用方从实际窗口（Slint）读出后传入
 #[derive(Debug, Clone, Copy)]
 pub struct WindowGeometry {
     pub x: i32,

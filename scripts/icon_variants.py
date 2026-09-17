@@ -1,7 +1,7 @@
 """图标重设计候选变体生成：图形 + 色块，无细笔画。
 
 在深夜蓝渐变底板上探索 6 个实心色块构图，渲染 256/48/32/24/16 全档位，
-输出对比图 src-tauri/icons/_preview_pngs/variants_sheet.png 供选择。
+输出对比图 crates/floatpaste-native/assets/_preview_pngs/variants_sheet.png 供选择。
 
 用法：python scripts/icon_variants.py
 依赖：Pillow、numpy（并复用 make_icon.py 的底板与降采样函数）
@@ -18,7 +18,7 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 import make_icon as mi
 
 REPO = Path(__file__).resolve().parent.parent
-PREVIEW = REPO / "src-tauri" / "icons" / "_preview_pngs"
+PREVIEW = REPO / "crates" / "floatpaste-native" / "assets" / "_preview_pngs"
 
 WHITE_TOP, WHITE_BOTTOM = "#FFFFFF", "#DCE9FB"
 BLUE_TOP, BLUE_BOTTOM = "#2E8BFF", "#0A5ED7"

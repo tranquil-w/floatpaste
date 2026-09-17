@@ -1,7 +1,6 @@
-//! 原生窗口控制：全部以裸 HWND 为参数，供 Tauri 壳与 Slint 原生壳共用。
+//! 原生窗口控制：全部以裸 HWND 为参数，不绑定任何 GUI 框架。
 //!
-//! 与旧 `src-tauri` 的 `window_utils.rs` 行为对齐，并补充原版依赖的
-//! 最小尺寸约束（WM_GETMINMAXINFO 子类）、Alt 系统菜单拦截、
+//! 覆盖最小尺寸约束（WM_GETMINMAXINFO 子类）、Alt 系统菜单拦截、
 //! 无激活显示/隐藏、置顶、点击穿透、标题栏拖拽与八方向拉伸。
 
 use std::sync::atomic::{AtomicIsize, Ordering};

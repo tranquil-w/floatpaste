@@ -1,12 +1,4 @@
-# Node / Vite 构建产物
-node_modules/
-dist/
-coverage/
-*.tsbuildinfo
-
-# Tauri / Rust 生成目录
-src-tauri/target/
-src-tauri/gen/
+# Rust 构建产物（workspace 根 target/）
 
 # 应用本地运行数据
 .floatpaste-data/
@@ -14,9 +6,6 @@ src-tauri/gen/
 
 # 日志文件
 *.log
-npm-debug.log*
-yarn-debug.log*
-pnpm-debug.log*
 
 # 本地环境变量
 .env
@@ -42,7 +31,7 @@ docs/superpowers/*-comparison.html
 
 # 图标生成脚本的本地产物
 scripts/__pycache__/
-src-tauri/icons/_preview_pngs/
+crates/floatpaste-native/assets/_preview_pngs/
 # 原生化冒烟测试工程（临时）
 smoke/
 

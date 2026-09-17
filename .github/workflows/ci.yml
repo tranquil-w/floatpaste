@@ -12,38 +12,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  frontend:
-    name: 前端 lint / 构建 / 测试
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: 安装 pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
-
-      - name: 安装 Node
-        uses: actions/setup-node@v5
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - name: 安装依赖
-        run: pnpm install --frozen-lockfile
-
-      - name: ESLint 检查
-        run: pnpm lint
-
-      - name: Prettier 格式检查
-        run: pnpm format:check
-
-      - name: TypeScript 构建
-        run: pnpm build
-
-      - name: 前端单元测试
-        run: pnpm test
-
   rust:
     name: Rust 测试
     runs-on: windows-latest

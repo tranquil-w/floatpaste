@@ -1,8 +1,8 @@
 //! 应用图标的 Windows 原生加载（窗口标题栏/任务栏图标 + 托盘图标）。
 //!
-//! 与旧壳 src-tauri/platform/windows/app_icon.rs 同一策略：按系统 DPI 的
-//! SM_CXSMICON / SM_CXICON·3/4 档位从内嵌 ICO 资源 LoadImageW，让 Windows
-//! 从 ICO 组里挑最近条目，避免单一 RGBA 位图被系统拉伸发糊。
+//! 按系统 DPI 的 SM_CXSMICON / SM_CXICON·3/4 档位从内嵌 ICO 资源
+//! LoadImageW，让 Windows 从 ICO 组里挑最近条目，避免单一 RGBA
+//! 位图被系统拉伸发糊。
 //! 资源 ID=1（floatpaste-native.rc: `1 ICON "assets/icon.ico"`）。
 
 use std::sync::OnceLock;
