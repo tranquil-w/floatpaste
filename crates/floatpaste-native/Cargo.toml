@@ -3,6 +3,11 @@ name = "floatpaste-native"
 version = "0.9.0"
 edition = "2021"
 
+# 产物沿用旧壳二进制名 floatpaste.exe，便携版覆盖与用户感知路径保持一致
+[[bin]]
+name = "floatpaste"
+path = "src/main.rs"
+
 [dependencies]
 arboard = "3.4.1"
 floatpaste-core = { path = "../floatpaste-core" }
