@@ -691,6 +691,7 @@ export component SettingsWindow inherits Window {
     in-out property <string> history-limit-text;
     in-out property <string> picker-limit-text;
     in-out property <int> position-mode: 0;   // 0=mouse 1=lastPosition 2=caret
+    in-out property <int> paste-trigger: 0;   // 0=click 1=doubleClick
     in-out property <int> theme-mode: 0;      // 0=system 1=light 2=dark
     in-out property <int> theme-preset: 0;    // THEME_PRESET_IDS 下标
     in property <string> theme-accent-id: "default";
@@ -744,6 +745,7 @@ export component SettingsWindow inherits Window {
     callback search-shortcut-enabled-toggled(bool);
     callback picker-digit-toggled(bool);
     callback position-mode-selected(int);
+    callback paste-trigger-selected(int);
     callback theme-mode-selected(int);
     callback preset-selected(int);
     callback accent-selected(string);
@@ -1445,6 +1447,23 @@ export component SettingsWindow inherits Window {
                                         description: "速贴面板打开时按 1-9 直接粘贴对应条目。数字键是无修饰全局热键，若与其他软件冲突可关闭。";
                                         checked: root.picker-digit-enabled;
                                         toggled(checked) => { root.picker-digit-toggled(checked); }
+                                    }
+                                    RowDivider { }
+                                    // 鼠标上屏触发方式
+                                    SettingRow {
+                                        title: "粘贴触发方式";
+                                        description: ["单击条目立即上屏。",
+                                            "单击选中条目，双击上屏。"][root.paste-trigger];
+                                        Rectangle {
+                                            width: seg-paste-trigger.width;
+                                            seg-paste-trigger := Segmented {
+                                                x: 0;
+                                                y: (parent.height - self.height) / 2;
+                                                options: ["单击上屏", "双击上屏"];
+                                                value <=> root.paste-trigger;
+                                                selected(idx) => { root.paste-trigger-selected(idx); }
+                                            }
+                                        }
                                     }
                                 }
                             }

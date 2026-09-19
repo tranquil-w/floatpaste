@@ -15,7 +15,7 @@ use windows::core::PCWSTR;
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Shell::{
-    Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW,
+    Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DispatchMessageW, DestroyMenu,
@@ -82,6 +82,9 @@ fn dispatch(action: impl FnOnce(&App) + Send + 'static) {
     }
 }
 
+/// 托盘图标悬停提示（szTip；explorer 重启重挂后同文案）
+const TIP_TEXT: &str = "FloatPaste · 剪贴板历史";
+
 unsafe fn add_icon(hwnd: HWND) {
     let Some(lock) = TRAY_APP.get() else {
         return;
@@ -98,12 +101,20 @@ unsafe fn add_icon(hwnd: HWND) {
         hWnd: hwnd,
         uID: 1,
         uFlags: if hicon != 0 {
-            NIF_MESSAGE | NIF_ICON
+            NIF_MESSAGE | NIF_ICON | NIF_TIP
         } else {
-            NIF_MESSAGE
+            NIF_MESSAGE | NIF_TIP
         },
         uCallbackMessage: WM_APP_TRAY,
         hIcon: HICON(hicon as *mut _),
+        // szTip 是定长 UTF-16 数组，须以 NUL 结尾
+        szTip: {
+            let mut tip = [0u16; 128];
+            for (slot, unit) in tip.iter_mut().zip(TIP_TEXT.encode_utf16()) {
+                *slot = unit;
+            }
+            tip
+        },
         ..Default::default()
     };
     if !Shell_NotifyIconW(NIM_ADD, &mut nid).as_bool() {

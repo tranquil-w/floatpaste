@@ -24,6 +24,8 @@ export component TooltipWindow inherits Window {
     in-out property <[TooltipMetaBadge]> badges;
     in-out property <string> source-app;
     in-out property <string> time-text;
+    // 静态提示模式（工具栏按钮等固定文案）：只显示一行文案，无元信息行
+    in-out property <bool> simple-mode: false;
 
     // ── 卡片固定几何：Rust 定窗口尺寸时读取（单一事实来源，禁双边手抄）──
     // 横向：内容宽之外的总占用 = 左右 padding + 1px 边框×2
@@ -34,6 +36,8 @@ export component TooltipWindow inherits Window {
     // 纵向：内容高之外的总占用 = 上下 padding + 分隔线 + 元信息行 + 边框×2
     out property <length> card-chrome-v:
         2 * Metrics.space-2 + 1px + meta-gap + meta-badge-height + 2px;
+    // 静态模式的纵向占用 = 上下 padding + 边框×2（无分隔线与元信息行）
+    out property <length> card-chrome-v-simple: 2 * Metrics.space-2 + 2px;
 
     // 排版度量标尺：Rust 据此设置窗口高度——度量与渲染同引擎，
     // 与内容 Text（13px + word-wrap）完全一致，窗口不会过矮裁掉尾部行
@@ -52,6 +56,15 @@ export component TooltipWindow inherits Window {
         natural-ruler.text = text;
         natural-ruler.preferred-width
     }
+
+    // 静态提示度量：无换行单行排版，宽度取自然宽；行高经 simple-line-height
+    // 供 Rust 读（单行无折行，无需高度标尺回调）
+    callback measure-simple-width(string) -> length;
+    measure-simple-width(text) => {
+        simple-ruler.text = text;
+        simple-ruler.preferred-width
+    }
+    out property <length> simple-line-height: simple-ruler.height;
 
     Rectangle {
         background: Theme.canvas-subtle;
@@ -84,26 +97,26 @@ export component TooltipWindow inherits Window {
             if (!root.has-image): Text {
                 text: root.content-text;
                 color: Theme.fg-default;
-                font-size: Metrics.text-body;
+                font-size: root.simple-mode ? Metrics.text-xs : Metrics.text-body;
                 wrap: word-wrap;
                 // 布局引擎对换行文本的最小高度按“最窄词宽折行”估计，长文
                 // 会撑出数百像素的窗口最小高度，把 Rust set_size 的目标尺寸
                 // 顶开（卡片下方成片空白）——高度用同排版参数的标尺实测，
                 // 显式 height 同时锁定最小高度，min-width 归零解除宽度约束
                 min-width: 0px;
-                height: content-ruler.height;
+                height: root.simple-mode ? root.simple-line-height : content-ruler.height;
                 vertical-alignment: top;
                 horizontal-stretch: 1;
             }
 
             // 元信息行上方分隔线（对齐原版 border-top + margin/padding）
-            Rectangle {
+            if (!root.simple-mode): Rectangle {
                 height: 1px;
                 background: Theme.border-muted;
             }
 
-            // ── 元信息行 ──
-            HorizontalLayout {
+            // ── 元信息行：类型与来源靠左成组，相对时间推到行尾 ──
+            if (!root.simple-mode): HorizontalLayout {
                 padding-top: root.meta-gap;
                 spacing: Metrics.space-1_5;
                 alignment: start;
@@ -111,7 +124,6 @@ export component TooltipWindow inherits Window {
                 HorizontalLayout {
                     spacing: Metrics.space-1_5;
                     alignment: start;
-                    horizontal-stretch: 1;
 
                     for badge in root.badges: Rectangle {
                         height: root.meta-badge-height;
@@ -133,11 +145,16 @@ export component TooltipWindow inherits Window {
 
                 Text {
                     text: root.source-app;
-                    color: Theme.fg-subtle;
+                    color: Theme.fg-muted;
                     font-size: Metrics.text-hint;
                     font-weight: Metrics.weight-medium;
                     vertical-alignment: center;
                 }
+
+                Rectangle {
+                    horizontal-stretch: 1;
+                }
+
                 Text {
                     text: root.time-text;
                     color: Theme.fg-subtle;
@@ -166,6 +183,17 @@ export component TooltipWindow inherits Window {
             y: 0;
             font-size: Metrics.text-body;
             wrap: no-wrap;
+        }
+
+        // 静态提示标尺：无换行单行（文案与字号与静态内容 Text 一致）
+        simple-ruler := Text {
+            opacity: 0;
+            x: 0;
+            y: 0;
+            font-size: Metrics.text-xs;
+            font-weight: Metrics.weight-medium;
+            wrap: no-wrap;
+            text: "";
         }
 
         // 内容高度标尺：与内容 Text 同文本/字号/换行、同宽度（卡片内宽

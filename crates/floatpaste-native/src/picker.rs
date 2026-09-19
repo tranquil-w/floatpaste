@@ -15,6 +15,7 @@ use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use tracing::{info, warn};
 
 use floatpaste_core::domain::clip_item::{ClipItemSummary, PasteOption};
+use floatpaste_core::domain::settings::PasteTrigger;
 use floatpaste_core::platform::windows::active_app::ActiveAppResolver;
 use floatpaste_core::platform::windows::window_control::{self, GestureMode, ResizeDirection};
 use floatpaste_core::platform::windows::{mouse_monitor, session_keyboard};
@@ -174,6 +175,9 @@ pub fn activate(app: &App) {
         "显示 Picker，hwnd={hwnd}, target_window={:?}, target_focus={:?}",
         session.target_window_hwnd, session.target_focus_hwnd
     );
+
+    // 空态快捷键提示跟随当前设置（用户改过热键后提示不失效）
+    win.set_empty_shortcut(settings.shortcut.clone().into());
 
     // 主题随设置刷新（设置可能在后台被改变）
     let resolved = theme::resolve_theme(settings.theme_mode.clone(), theme::system_prefers_dark());
@@ -917,11 +921,15 @@ pub fn wire(app: &App) {
         return;
     };
 
-    // 单击选中（不上屏）
+    // 单击：单击触发模式下立即上屏，否则仅选中
     {
         let app_cb = app.clone();
         win.on_row_clicked(move |index| {
-            set_selected(&app_cb, index.max(0) as usize);
+            let index = index.max(0) as usize;
+            set_selected(&app_cb, index);
+            if app_cb.state.current_settings().paste_trigger == PasteTrigger::Click {
+                confirm(&app_cb, index, false);
+            }
         });
     }
 

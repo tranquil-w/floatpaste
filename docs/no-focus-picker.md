@@ -4,7 +4,7 @@
 
 ## 1. 架构概述
 
-速贴窗口（Picker）在用户按下全局快捷键（默认 `Alt+Q`）时瞬间呼出，并且**尽量不抢占当前正在工作的目标软件（如 Word、代码编辑器）的输入焦点**。用户在速贴中可以使用会话快捷键（`Up / Down / Enter / Escape / 1-9`）、双击条目，或直接点击窗口外部结束本次速贴会话。速贴支持文本、图片和文件条目的展示与上屏，图片条目支持悬浮大图预览和 Shift+Enter 按文件路径上屏。
+速贴窗口（Picker）在用户按下全局快捷键（默认 `Ctrl+Q`）时瞬间呼出，并且**尽量不抢占当前正在工作的目标软件（如 Word、代码编辑器）的输入焦点**。用户在速贴中可以使用会话快捷键（`Up / Down / Enter / Escape / 1-9`）、双击条目，或直接点击窗口外部结束本次速贴会话。速贴支持文本、图片和文件条目的展示与上屏，图片条目支持悬浮大图预览和 Shift+Enter 按文件路径上屏。
 
 当前实现（Slint 原生壳）的关键链路：
 
@@ -39,7 +39,7 @@ sequenceDiagram
     participant Mouse as mouse_monitor
     participant Target as 目标输入软件
 
-    User->>Hook: 按下主快捷键（默认 Alt+Q）
+    User->>Hook: 按下主快捷键（默认 Ctrl+Q）
     Hook->>Hotkey: 触发回调
     Hotkey->>Hotkey: 转发主线程，不在钩子线程做事
     Hotkey->>Picker: show_session()

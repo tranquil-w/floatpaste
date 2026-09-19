@@ -259,7 +259,7 @@ pub(crate) fn sync_global_hotkeys(app: &App) {
     let shortcut_text = {
         let configured = settings.shortcut;
         if configured.trim().is_empty() {
-            "Alt+Q".to_string()
+            "Ctrl+Q".to_string()
         } else {
             configured
         }
@@ -269,7 +269,7 @@ pub(crate) fn sync_global_hotkeys(app: &App) {
     // 快捷键无法解析时只跳过注册，不退出进程：剪贴板监听与
     // 二次启动唤起仍可用
     let main_spec =
-        hotkey::parse_hotkey(&shortcut_text).or_else(|| hotkey::parse_hotkey("Alt+Q"));
+        hotkey::parse_hotkey(&shortcut_text).or_else(|| hotkey::parse_hotkey("Ctrl+Q"));
     let Some(main_spec) = main_spec else {
         tracing::error!("主快捷键无法解析（配置值与默认值均失败），跳过注册");
         return;

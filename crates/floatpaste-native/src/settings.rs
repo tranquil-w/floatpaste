@@ -16,7 +16,7 @@ use slint::{ComponentHandle, Model, VecModel};
 use tracing::{info, warn};
 
 use floatpaste_core::domain::clip_item::TagInfo;
-use floatpaste_core::domain::settings::{PickerPositionMode, ThemeMode, UserSetting};
+use floatpaste_core::domain::settings::{PasteTrigger, PickerPositionMode, ThemeMode, UserSetting};
 use floatpaste_core::platform::windows::active_app::ActiveAppResolver;
 use floatpaste_core::services::startup_service::StartupService;
 use floatpaste_core::services::tag_service::TagService;
@@ -155,6 +155,15 @@ pub fn wire(app: &App) {
         win.on_picker_digit_toggled(move |enabled| {
             if let Some(win) = app_cb.settings.upgrade() {
                 win.set_picker_digit_enabled(enabled);
+                schedule_save(&app_cb);
+            }
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_paste_trigger_selected(move |mode| {
+            if let Some(win) = app_cb.settings.upgrade() {
+                win.set_paste_trigger(mode);
                 schedule_save(&app_cb);
             }
         });
@@ -451,6 +460,10 @@ fn hydrate(app: &App, win: &SettingsWindow) {
         PickerPositionMode::LastPosition => 1,
         PickerPositionMode::Caret => 2,
     });
+    win.set_paste_trigger(match settings.paste_trigger {
+        PasteTrigger::Click => 0,
+        PasteTrigger::DoubleClick => 1,
+    });
     win.set_theme_mode(match settings.theme_mode {
         ThemeMode::System => 0,
         ThemeMode::Light => 1,
@@ -505,6 +518,10 @@ fn current_draft(win: &SettingsWindow) -> UserSetting {
             1 => PickerPositionMode::LastPosition,
             2 => PickerPositionMode::Caret,
             _ => PickerPositionMode::Mouse,
+        },
+        paste_trigger: match win.get_paste_trigger() {
+            1 => PasteTrigger::DoubleClick,
+            _ => PasteTrigger::Click,
         },
         excluded_apps: win
             .get_excluded_apps_text()

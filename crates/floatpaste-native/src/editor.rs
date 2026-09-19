@@ -9,6 +9,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use slint::{ComponentHandle, Model, VecModel};
@@ -26,13 +27,16 @@ use crate::picker::{self, App};
 use crate::search;
 use crate::thumbnails;
 use crate::win32_ext;
-use crate::{EditorTagSuggestion, EditorWindow};
+use crate::{app_icon, EditorTagSuggestion, EditorWindow};
 
 const NOTICE_TIMEOUT_MS: u64 = 3000;
 const DELETE_ARM_TIMEOUT_MS: u64 = 3000;
 const MAX_TAG_NAME_LEN: usize = 32;
 const MAX_TAGS_PER_ITEM: usize = 20;
 const MAX_SUGGESTIONS: usize = 8;
+/// 编辑窗口逻辑尺寸（对齐旧版 inner_size(800,600)）
+const EDITOR_LOGICAL_WIDTH: f32 = 800.0;
+const EDITOR_LOGICAL_HEIGHT: f32 = 600.0;
 
 thread_local! {
     static NOTICE_TOKEN: Cell<u64> = const { Cell::new(0) };
@@ -40,6 +44,10 @@ thread_local! {
     static DELETE_ARMED: Cell<bool> = const { Cell::new(false) };
     /// 全部标签缓存（name, item_count）：建议浮层的数据源
     static ALL_TAGS: RefCell<Vec<(String, u32)>> = const { RefCell::new(Vec::new()) };
+    /// 编辑窗口本会话位置记忆（物理像素）。SLINT_DESTROY_WINDOW_ON_HIDE
+    /// 在 hide 时销毁 winit 窗口、位置随之丢失，须在 hide 前读取暂存；
+    /// None = 本会话尚未打开过，首开落在宿主窗口所在屏的中心
+    static LAST_POSITION: Cell<Option<(i32, i32)>> = const { Cell::new(None) };
 }
 
 // ── 打开入口 ──────────────────────────────────────────────
@@ -92,7 +100,23 @@ fn show_editor(app: &App, session: EditorSession) {
     // 重开时全窗每个区域都与上次渲染不同 → 脏区覆盖全窗（0.4% 白视觉
     // 不可感知）
     win.set_force_repaint(!win.get_force_repaint());
-    win.window().set_size(slint::LogicalSize::new(800.0, 600.0));
+    win.window()
+        .set_size(slint::LogicalSize::new(EDITOR_LOGICAL_WIDTH, EDITOR_LOGICAL_HEIGHT));
+    // 位置：本会话有用过则原样还原（用户拖过的位置不丢）；否则以宿主窗口
+    // （速贴/搜索）所在显示器工作区中心弹出，编辑器不出现在别的屏
+    match LAST_POSITION.get() {
+        Some((x, y)) => win.window().set_position(slint::PhysicalPosition::new(x, y)),
+        None => {
+            let host_hwnd = if session.return_to == 0 {
+                app.state.picker_hwnd.load(Ordering::SeqCst)
+            } else {
+                app.state.search_hwnd.load(Ordering::SeqCst)
+            };
+            if let Some((x, y)) = center_over_host(host_hwnd) {
+                win.window().set_position(slint::PhysicalPosition::new(x, y));
+            }
+        }
+    }
     let _ = win.window().show();
     load_session(app, &win, &session.item_id);
     info!("打开 Editor，item={}", session.item_id);
@@ -111,6 +135,7 @@ fn show_editor(app: &App, session: EditorSession) {
                 return;
             }
             if let Some(editor_hwnd) = win32_ext::window_hwnd(&win) {
+                app_icon::apply_window_icon(editor_hwnd);
                 win32_ext::remove_dwm_border(editor_hwnd);
                 win32_ext::warm_surface(editor_hwnd);
                 // 前台获取放在全部尺寸/显隐操作之后：从速贴打开时本进程
@@ -127,6 +152,21 @@ fn show_editor(app: &App, session: EditorSession) {
             }
         }
     });
+}
+
+/// 以宿主窗口中心为目标计算编辑器物理位置（逻辑 800×600 × 宿主 DPI）；
+/// 宿主不可用时返回 None，交给系统默认摆位
+fn center_over_host(host_hwnd: isize) -> Option<(i32, i32)> {
+    if host_hwnd <= 0 {
+        return None;
+    }
+    let rect = win32_ext::physical_rect(host_hwnd)?;
+    let dpi = win32_ext::window_dpi(host_hwnd).max(96) as f32 / 96.0;
+    let width = EDITOR_LOGICAL_WIDTH * dpi;
+    let height = EDITOR_LOGICAL_HEIGHT * dpi;
+    let center_x = rect.left as f32 + (rect.right - rect.left) as f32 / 2.0;
+    let center_y = rect.top as f32 + (rect.bottom - rect.top) as f32 / 2.0;
+    Some(((center_x - width / 2.0) as i32, (center_y - height / 2.0) as i32))
 }
 
 /// 载入条目详情并填充界面（同步读库：单条查询延迟可忽略，省去加载态）
@@ -334,6 +374,9 @@ pub fn close_editor(app: &App) {
     };
     win.set_close_confirm_open(false);
     win.set_error_text("".into());
+    // 位置记忆须在 hide 前读取：SLINT_DESTROY_WINDOW_ON_HIDE 会销毁 winit 窗口
+    let position = win.window().position();
+    LAST_POSITION.set(Some((position.x, position.y)));
     let _ = win.window().hide();
     hide_and_restore_source(app);
 }

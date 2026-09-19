@@ -24,6 +24,7 @@ use tracing::{info, warn};
 use floatpaste_core::domain::clip_item::{
     ClipItemSummary, ClipType, PasteOption, SearchFilters, SearchQuery, SearchResult, SearchSort,
 };
+use floatpaste_core::domain::settings::PasteTrigger;
 use floatpaste_core::domain::error::AppError;
 use floatpaste_core::platform::windows::active_app::ActiveAppResolver;
 use floatpaste_core::platform::windows::picker_position::{
@@ -1291,7 +1292,17 @@ pub fn wire(app: &App) {
     {
         let app_cb = app.clone();
         win.on_row_clicked(move |index| {
-            set_selected(&app_cb, index.max(0) as usize);
+            let index = index.max(0) as usize;
+            set_selected(&app_cb, index);
+            // 单击触发模式：点击即上屏（双击模式的两次 click 也会到达，
+            // 但首次 click 已结束会话，不会双重上屏）。挂起态（键盘已交给
+            // 速贴面板）跳过，避免破坏进行中的速贴会话
+            let suspended = app_cb
+                .with_search(|win| win.get_input_suspended())
+                .unwrap_or(false);
+            if !suspended && app_cb.state.current_settings().paste_trigger == PasteTrigger::Click {
+                paste_index(&app_cb, index, false);
+            }
         });
     }
     {
@@ -1309,6 +1320,27 @@ pub fn wire(app: &App) {
     {
         let app_cb = app.clone();
         win.on_row_hover_left(move || {
+            hover_left(&app_cb);
+        });
+    }
+    // 图标按钮静态提示（悬浮气泡 simple 模式，锚点=按钮下方）
+    {
+        let app_cb = app.clone();
+        win.on_button_hint(move |text, x, y| {
+            let hwnd = app_cb.state.search_hwnd.load(Ordering::SeqCst);
+            if hwnd == 0 {
+                return;
+            }
+            let host = HoverHost {
+                hwnd,
+                is_active: search_is_active,
+            };
+            tooltip::schedule_static(&app_cb, host, text.to_string(), x, y);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_button_hint_left(move || {
             hover_left(&app_cb);
         });
     }

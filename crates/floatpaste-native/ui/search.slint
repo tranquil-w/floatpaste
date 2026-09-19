@@ -74,7 +74,11 @@ component IconButton inherits Rectangle {
     in property <bool> emphasized: false;
     in property <bool> danger-hover: false;
     in property <bool> armed: false;
+    // 静态提示文案（悬停经悬浮气泡显示，空串 = 无提示）
+    in property <string> hint;
     callback clicked();
+    callback hover(string, length, length);
+    callback hover-left();
 
     width: root.armed ? 64px : 28px;
     height: 28px;
@@ -98,6 +102,16 @@ component IconButton inherits Rectangle {
 
     btn-ta := TouchArea {
         clicked => { root.clicked(); }
+        changed has-hover => {
+            // 提示锚点取按钮下方，气泡稳定悬于按钮之下而非跟随鼠标
+            if (self.has-hover && root.hint != "") {
+                root.hover(root.hint,
+                    self.absolute-position.x,
+                    self.absolute-position.y + self.height + 4px);
+            } else {
+                root.hover-left();
+            }
+        }
     }
 }
 
@@ -208,7 +222,7 @@ component TypeGlyph inherits Rectangle {
     }
 }
 
-// ── 行卡片：非选中单行；选中内联展开（3 行预览 + 大图 + 操作条）──
+// ── 行卡片：恒定行高；选中只换高亮/左条/操作条浮层，不展开 ──
 component SearchRowCard inherits Rectangle {
     in property <SearchRow> data;
     in property <bool> selected;
@@ -218,6 +232,8 @@ component SearchRowCard inherits Rectangle {
     callback double-clicked();
     callback hover(length, length);
     callback hover-left();
+    callback button-hint(string, length, length);
+    callback button-hint-left();
     callback paste();
     callback paste-as-file();
     callback edit();
@@ -477,7 +493,10 @@ component SearchRowCard inherits Rectangle {
                     paste-btn := IconButton {
                         emphasized: true;
                         icon-color: Theme.fg-on-emphasis;
+                        hint: "粘贴（Enter）";
                         clicked => { root.paste(); }
+                        hover(t, x, y) => { root.button-hint(t, x, y); }
+                        hover-left => { root.button-hint-left(); }
                         Path {
                             width: 16px;
                             height: 16px;
@@ -490,7 +509,10 @@ component SearchRowCard inherits Rectangle {
                     }
                     if (data.kind == 1): IconButton {
                         icon-color: Theme.fg-default;
+                        hint: "粘贴为文件路径（Shift+Enter）";
                         clicked => { root.paste-as-file(); }
+                        hover(t, x, y) => { root.button-hint(t, x, y); }
+                        hover-left => { root.button-hint-left(); }
                         // 折角文档（与类型图标 file 同源）：直白表达"粘贴为
                         // 文件路径"；旧版 T 形路径表意模糊已弃用
                         Path {
@@ -505,7 +527,10 @@ component SearchRowCard inherits Rectangle {
                     }
                     if (data.kind == 0): IconButton {
                         icon-color: Theme.fg-default;
+                        hint: "编辑内容（Ctrl+Enter）";
                         clicked => { root.edit(); }
+                        hover(t, x, y) => { root.button-hint(t, x, y); }
+                        hover-left => { root.button-hint-left(); }
                         Path {
                             width: 16px;
                             height: 16px;
@@ -518,7 +543,10 @@ component SearchRowCard inherits Rectangle {
                     }
                     fav-btn := IconButton {
                         icon-color: data.favorited ? Theme.favorite : Theme.fg-default;
+                        hint: data.favorited ? "取消收藏（Ctrl+Space）" : "收藏（Ctrl+Space）";
                         clicked => { root.toggle-favorite(); }
+                        hover(t, x, y) => { root.button-hint(t, x, y); }
+                        hover-left => { root.button-hint-left(); }
                         Path {
                             width: 16px;
                             height: 16px;
@@ -534,7 +562,10 @@ component SearchRowCard inherits Rectangle {
                         armed: root.delete-armed;
                         icon-color: root.delete-armed ? Theme.danger-fg : Theme.fg-muted;
                         danger-hover: true;
+                        hint: "删除（Del）";
                         clicked => { root.delete-armed-request(); }
+                        hover(t, x, y) => { root.button-hint(t, x, y); }
+                        hover-left => { root.button-hint-left(); }
                         if (root.delete-armed): HorizontalLayout {
                             padding-left: 8px;
                             padding-right: 8px;
@@ -678,6 +709,9 @@ export component SearchWindow inherits Window {
     callback row-double-clicked(int);
     callback row-hover(int, length, length);
     callback row-hover-left();
+    // 图标按钮静态提示（悬浮气泡 simple 模式）：文案/锚点由按钮给出
+    callback button-hint(string, length, length);
+    callback button-hint-left();
     callback action-paste(int);
     callback action-paste-as-file();
     callback action-edit();
@@ -875,6 +909,15 @@ export component SearchWindow inherits Window {
                                             clicked => {
                                                 root.clear-keyword();
                                                 search-input.focus();
+                                            }
+                                            changed has-hover => {
+                                                if (self.has-hover) {
+                                                    root.button-hint("清除关键词",
+                                                        self.absolute-position.x,
+                                                        self.absolute-position.y + self.height + 4px);
+                                                } else {
+                                                    root.button-hint-left();
+                                                }
                                             }
                                         }
                                         Path {
@@ -1161,6 +1204,8 @@ export component SearchWindow inherits Window {
                                     double-clicked => { root.row-double-clicked(i); }
                                     hover(x, y) => { root.row-hover(i, x, y); }
                                     hover-left => { root.row-hover-left(); }
+                                    button-hint(t, x, y) => { root.button-hint(t, x, y); }
+                                    button-hint-left => { root.button-hint-left(); }
                                     paste => { root.action-paste(i); }
                                     paste-as-file => { root.action-paste-as-file(); }
                                     edit => { root.action-edit(); }

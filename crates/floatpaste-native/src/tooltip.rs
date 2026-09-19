@@ -3,7 +3,8 @@
 //! 对齐原版 useHoverTooltip + tooltip.html + TooltipWindow：
 //! - 悬停移动每帧重置计时；离开条目立即取消并隐藏；
 //! - 文本条目按需取全文（detail），图片条目解码原图预览（≤560×420）；
-//! - 定位：面板窗口位置 + (条目内鼠标 + 12,16)×scale，越界时按光标翻转（gap 4）；
+//!   静态文案模式（工具栏按钮提示）由调用方给定文案与锚点；
+//! - 定位：面板窗口位置 + 锚点×scale，越界时按光标翻转（gap 4）；
 //! - 点击穿透 + 置顶不激活显示（winit 样式重置统一交 overlay 公共层处理）。
 
 use std::rc::Rc;
@@ -24,7 +25,7 @@ use crate::overlay::{self, ForegroundPolicy};
 use crate::picker::App;
 use crate::thumbnails;
 use crate::win32_ext;
-use crate::TooltipMetaBadge;
+use crate::{TooltipMetaBadge, TooltipWindow};
 
 const SHOW_DELAY_MS: u64 = 400;
 /// tooltip.slint 的 preferred 尺寸（隐藏复位用，与 ui 保持一致）
@@ -40,6 +41,10 @@ const IMAGE_MAX_WIDTH: f32 = 560.0;
 const IMAGE_MAX_HEIGHT: f32 = 420.0;
 /// 高度安全余量：字体度量与窗口装配存在边缘差异时防止裁掉尾行
 const HEIGHT_SAFETY: f32 = 8.0;
+/// 静态提示为单行短文案，余量收小避免卡片下方留白
+const HEIGHT_SAFETY_STATIC: f32 = 4.0;
+/// 静态提示的宽度下限：单行短文案不需要长文预览的阅读下限
+const MIN_WIDTH_STATIC: f32 = 40.0;
 
 thread_local! {
     /// 悬停调度的请求 id（对齐前端 requestIdRef：新请求使旧回调失效）
@@ -156,6 +161,26 @@ pub fn schedule_with(
     });
 }
 
+/// 静态文案提示（工具栏按钮等固定文案）：文案与锚点由调用方给定，
+/// anchor 为宿主窗口坐标（通常取按钮下方）。400ms 延迟与请求失效令牌
+/// 与条目预览共用，悬停目标切换时互相打断
+pub fn schedule_static(app: &App, host: HoverHost, text: String, anchor_x: f32, anchor_y: f32) {
+    let token = PENDING_TOKEN.with(|value| {
+        value.set(value.get() + 1);
+        value.get()
+    });
+    let host_hwnd = host.hwnd;
+    let host_active = host.is_active;
+    let app = app.clone();
+
+    slint::Timer::single_shot(std::time::Duration::from_millis(SHOW_DELAY_MS), move || {
+        if PENDING_TOKEN.with(|value| value.get()) != token || !host_active(&app) {
+            return;
+        }
+        render_static(&app, host_hwnd, &text, anchor_x, anchor_y);
+    });
+}
+
 /// 取消挂起的显示并隐藏当前 tooltip（离开条目/会话结束/粘贴前调用）
 pub fn cancel(app: &App) {
     PENDING_TOKEN.with(|value| value.set(value.get() + 1));
@@ -188,6 +213,8 @@ fn render(
     let Some(win) = app.tooltip.upgrade() else {
         return;
     };
+    // 条目预览总是带元信息行（静态提示可能刚用过 simple-mode）
+    win.set_simple_mode(false);
 
     let dpi = if host_hwnd > 0 {
         win32_ext::window_dpi(host_hwnd) as f32 / 96.0
@@ -257,14 +284,58 @@ fn render(
     // ── 窗口尺寸（chrome 读 slint 属性 + 安全余量）──
     let width = (content_width + inset_h).clamp(MIN_WIDTH, MAX_WIDTH);
     let height = content_height + chrome_v + HEIGHT_SAFETY;
+    present(
+        app,
+        &win,
+        host_hwnd,
+        dpi,
+        width,
+        height,
+        (mouse_x + OFFSET_X, mouse_y + OFFSET_Y),
+    );
+}
 
+/// 静态提示渲染：单行短文案（text-xs/medium），无元信息行，锚点取按钮下方
+fn render_static(app: &App, host_hwnd: isize, text: &str, anchor_x: f32, anchor_y: f32) {
+    let Some(win) = app.tooltip.upgrade() else {
+        return;
+    };
+    let dpi = if host_hwnd > 0 {
+        win32_ext::window_dpi(host_hwnd) as f32 / 96.0
+    } else {
+        1.0
+    };
+
+    let natural_width = win.invoke_measure_simple_width(text.into());
+    let width = (natural_width + win.get_card_inset_h()).clamp(MIN_WIDTH_STATIC, MAX_WIDTH);
+    let height = win.get_simple_line_height()
+        + win.get_card_chrome_v_simple()
+        + HEIGHT_SAFETY_STATIC;
+
+    win.set_simple_mode(true);
+    win.set_has_image(false);
+    win.set_content_text(text.into());
+    win.set_badges(ModelRc::new(Rc::new(VecModel::from(Vec::new()))));
+    present(app, &win, host_hwnd, dpi, width, height, (anchor_x, anchor_y));
+}
+
+/// 定尺寸、定位并显示：条目预览与静态提示共用的收尾（anchor 已含偏移）
+fn present(
+    app: &App,
+    win: &TooltipWindow,
+    host_hwnd: isize,
+    dpi: f32,
+    width: f32,
+    height: f32,
+    anchor: (f32, f32),
+) {
     let physical_w = (width * dpi).round().max(1.0) as u32;
     let physical_h = (height * dpi).round().max(1.0) as u32;
     win.window()
         .set_size(slint::PhysicalSize::new(physical_w, physical_h));
 
-    // ── 定位：宿主窗口原点 + (条目内鼠标 + 偏移)×scale，越界翻转 ──
-    let position = resolve_position(host_hwnd, mouse_x, mouse_y, dpi, physical_w, physical_h);
+    // ── 定位：宿主窗口原点 + 锚点×scale，越界按光标翻转 ──
+    let position = resolve_position(host_hwnd, anchor.0, anchor.1, dpi, physical_w, physical_h);
     win.window()
         .set_position(slint::PhysicalPosition::new(position.0, position.1));
 
@@ -300,11 +371,12 @@ fn render(
 }
 
 /// 定位与翻转（对齐 TooltipWindow::resolve_clamped_position：
-/// 默认右下展开，超出工作区时按当前光标位置翻到对侧，留 4px 间隙）
+/// anchor 为相对宿主窗口原点的逻辑锚点（已含偏移），默认向右下展开，
+/// 超出工作区时按当前光标位置翻到对侧，留 4px 间隙）
 fn resolve_position(
     picker_hwnd: isize,
-    mouse_x: f32,
-    mouse_y: f32,
+    anchor_x: f32,
+    anchor_y: f32,
     scale: f32,
     width: u32,
     height: u32,
@@ -314,8 +386,8 @@ fn resolve_position(
         .flatten();
     let (mut x, mut y) = match picker_rect {
         Some(rect) => (
-            rect.left + ((mouse_x + OFFSET_X) * scale) as i32,
-            rect.top + ((mouse_y + OFFSET_Y) * scale) as i32,
+            rect.left + (anchor_x * scale) as i32,
+            rect.top + (anchor_y * scale) as i32,
         ),
         None => (0, 0),
     };

@@ -1,8 +1,9 @@
 use serde::{Deserialize, Deserializer, Serialize};
 
-const DEFAULT_MAIN_SHORTCUT: &str = "Alt+Q";
+const DEFAULT_MAIN_SHORTCUT: &str = "Ctrl+Q";
 const DEFAULT_SEARCH_SHORTCUT: &str = "Alt+S";
-const LEGACY_MAIN_SHORTCUT: &str = "Ctrl+`";
+/// 历史默认值：sanitized 时迁移到当前默认，未改过快捷键的用户无感升级
+const LEGACY_MAIN_SHORTCUTS: [&str; 2] = ["Ctrl+`", "Alt+Q"];
 const LEGACY_SEARCH_SHORTCUTS: [&str; 2] = ["Win+F", "Super+F"];
 const DEFAULT_THEME_PRESET: &str = "default";
 const DEFAULT_THEME_ACCENT: &str = "default";
@@ -66,6 +67,35 @@ impl<'de> Deserialize<'de> for ThemeMode {
     }
 }
 
+/// 速贴/搜索条目的鼠标上屏触发方式
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PasteTrigger {
+    /// 单击条目立即上屏（默认）
+    Click,
+    /// 单击选中，双击上屏
+    DoubleClick,
+}
+
+impl Default for PasteTrigger {
+    fn default() -> Self {
+        Self::Click
+    }
+}
+
+impl<'de> Deserialize<'de> for PasteTrigger {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = Option::<String>::deserialize(deserializer)?.unwrap_or_default();
+        Ok(match value.as_str() {
+            "doubleClick" => Self::DoubleClick,
+            _ => Self::Click,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct StoredWindowPosition {
@@ -110,7 +140,7 @@ pub struct CustomThemeColors {
 /// use crate::domain::settings::UserSetting;
 ///
 /// let settings = UserSetting::default();
-/// assert_eq!(settings.shortcut, "Alt+Q");
+/// assert_eq!(settings.shortcut, "Ctrl+Q");
 /// assert_eq!(settings.search_shortcut, "Alt+S");
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -123,6 +153,8 @@ pub struct UserSetting {
     pub history_limit: u32,
     pub picker_record_limit: u32,
     pub picker_position_mode: PickerPositionMode,
+    /// 速贴/搜索条目的鼠标上屏触发方式，见 [PasteTrigger]
+    pub paste_trigger: PasteTrigger,
     pub excluded_apps: Vec<String>,
     pub restore_clipboard_after_paste: bool,
     pub pause_monitoring: bool,
@@ -155,6 +187,7 @@ impl Default for UserSetting {
             history_limit: 1_000,
             picker_record_limit: 50,
             picker_position_mode: PickerPositionMode::Mouse,
+            paste_trigger: PasteTrigger::Click,
             excluded_apps: vec![
                 "KeePass.exe".to_string(),
                 "Bitwarden.exe".to_string(),
@@ -178,9 +211,10 @@ impl UserSetting {
         self.shortcut = self.shortcut.trim().to_string();
         if self.shortcut.is_empty() {
             self.shortcut = DEFAULT_MAIN_SHORTCUT.to_string();
-        } else if normalize_shortcut_for_compare(&self.shortcut)
-            == normalize_shortcut_for_compare(LEGACY_MAIN_SHORTCUT)
-        {
+        } else if LEGACY_MAIN_SHORTCUTS.iter().any(|legacy| {
+            normalize_shortcut_for_compare(&self.shortcut)
+                == normalize_shortcut_for_compare(legacy)
+        }) {
             self.shortcut = DEFAULT_MAIN_SHORTCUT.to_string();
         }
 
@@ -340,9 +374,28 @@ mod tests {
     }
 
     #[test]
-    fn shortcut_defaults_to_alt_q() {
+    fn shortcut_defaults_to_ctrl_q() {
         let settings = UserSetting::default();
-        assert_eq!(settings.shortcut, "Alt+Q");
+        assert_eq!(settings.shortcut, "Ctrl+Q");
+    }
+
+    #[test]
+    fn paste_trigger_defaults_to_click() {
+        let settings = UserSetting::default();
+        assert_eq!(settings.paste_trigger, super::PasteTrigger::Click);
+    }
+
+    #[test]
+    fn deserialize_unknown_paste_trigger_falls_back_to_click() {
+        let settings: UserSetting = serde_json::from_str(
+            r#"{"pasteTrigger":"tripleClick"}"#,
+        )
+        .unwrap();
+        assert_eq!(settings.paste_trigger, super::PasteTrigger::Click);
+
+        let double: UserSetting =
+            serde_json::from_str(r#"{"pasteTrigger":"doubleClick"}"#).unwrap();
+        assert_eq!(double.paste_trigger, super::PasteTrigger::DoubleClick);
     }
 
     #[test]
@@ -473,14 +526,25 @@ mod tests {
     }
 
     #[test]
-    fn sanitized_migrates_legacy_ctrl_backtick_to_alt_q() {
+    fn sanitized_migrates_legacy_ctrl_backtick_to_default() {
         let settings = UserSetting {
             shortcut: "Ctrl+`".to_string(),
             ..UserSetting::default()
         }
         .sanitized();
 
-        assert_eq!(settings.shortcut, "Alt+Q");
+        assert_eq!(settings.shortcut, "Ctrl+Q");
+    }
+
+    #[test]
+    fn sanitized_migrates_legacy_alt_q_to_default() {
+        let settings = UserSetting {
+            shortcut: "Alt+Q".to_string(),
+            ..UserSetting::default()
+        }
+        .sanitized();
+
+        assert_eq!(settings.shortcut, "Ctrl+Q");
     }
 
     #[test]
@@ -572,9 +636,10 @@ mod tests {
 
     #[test]
     fn search_shortcut_resets_to_default_when_conflicts_with_main_shortcut() {
+        // 用非遗留组合：遗留值（如 Alt+Q）会先迁移到新默认，冲突随之消失
         let settings = UserSetting {
-            shortcut: "Alt+Q".to_string(),
-            search_shortcut: "Alt+Q".to_string(),
+            shortcut: "Ctrl+R".to_string(),
+            search_shortcut: "Ctrl+R".to_string(),
             search_shortcut_enabled: true,
             ..UserSetting::default()
         }
