@@ -18,6 +18,7 @@ use tracing::{info, warn};
 use floatpaste_core::domain::clip_item::TagInfo;
 use floatpaste_core::domain::settings::{PasteTrigger, PickerPositionMode, ThemeMode, UserSetting};
 use floatpaste_core::platform::windows::active_app::ActiveAppResolver;
+use floatpaste_core::platform::windows::picker_position::{current_cursor_point, work_area_from_point};
 use floatpaste_core::services::startup_service::StartupService;
 use floatpaste_core::services::tag_service::TagService;
 use floatpaste_core::theme::ResolvedTheme;
@@ -425,6 +426,15 @@ pub fn open(app: &App) {
         if let Some(win) = app_cb.settings.upgrade() {
             win.window()
                 .set_size(slint::LogicalSize::new(920.0 as f32, 760.0 as f32));
+            // 默认摆位：光标所在显示器工作区中心（设置窗不保留位置记忆；
+            // 尺寸此时刚落到真实物理值，直接取窗口尺寸求中心）
+            if let Ok(area) = current_cursor_point().and_then(work_area_from_point) {
+                let size = win.window().size();
+                win.window().set_position(slint::PhysicalPosition::new(
+                    (area.left + area.right) / 2 - size.width as i32 / 2,
+                    (area.top + area.bottom) / 2 - size.height as i32 / 2,
+                ));
+            }
             win.invoke_focus_root_scope();
             if let Some(hwnd) = win32_ext::window_hwnd(&win) {
                 app_icon::apply_window_icon(hwnd);

@@ -1,5 +1,5 @@
 // 悬停预览：对齐原版 tooltip.html 的卡片（canvas-subtle 底、1px 边框、
-// 6px 圆角、8/12 内边距、图片最大 560×420 居中、元信息分隔行）。
+// 6px 圆角、12/12 内边距、图片最大 560×420 居中、元信息分隔行）。
 // 点击穿透与置顶不激活由 Rust 侧 Win32 处理；窗口尺寸由 Rust 度量后设置。
 import { Theme, Metrics } from "theme.slint";
 
@@ -31,13 +31,13 @@ export component TooltipWindow inherits Window {
     // 横向：内容宽之外的总占用 = 左右 padding + 1px 边框×2
     out property <length> card-inset-h: 2 * Metrics.space-3 + 2px;
     // 元信息行的组成原子（分隔线 1px + 行上间距 + 徽章高）
-    out property <length> meta-gap: 5px;
+    out property <length> meta-gap: 8px;
     out property <length> meta-badge-height: 18px;
     // 纵向：内容高之外的总占用 = 上下 padding + 分隔线 + 元信息行 + 边框×2
     out property <length> card-chrome-v:
-        2 * Metrics.space-2 + 1px + meta-gap + meta-badge-height + 2px;
+        2 * Metrics.space-3 + 1px + meta-gap + meta-badge-height + 2px;
     // 静态模式的纵向占用 = 上下 padding + 边框×2（无分隔线与元信息行）
-    out property <length> card-chrome-v-simple: 2 * Metrics.space-2 + 2px;
+    out property <length> card-chrome-v-simple: 2 * Metrics.space-3 + 2px;
 
     // 排版度量标尺：Rust 据此设置窗口高度——度量与渲染同引擎，
     // 与内容 Text（13px + word-wrap）完全一致，窗口不会过矮裁掉尾部行
@@ -79,8 +79,8 @@ export component TooltipWindow inherits Window {
         VerticalLayout {
             padding-left: Metrics.space-3;
             padding-right: Metrics.space-3;
-            padding-top: Metrics.space-2;
-            padding-bottom: Metrics.space-2;
+            padding-top: Metrics.space-3;
+            padding-bottom: Metrics.space-3;
 
             if (root.has-image): Rectangle {
                 height: root.image-height;

@@ -17,6 +17,7 @@ use tracing::{info, warn};
 
 use floatpaste_core::domain::clip_item::ClipItemDetail;
 use floatpaste_core::platform::windows::active_app::ActiveAppResolver;
+use floatpaste_core::platform::windows::picker_position::{ScreenPoint, work_area_from_point};
 use floatpaste_core::services::clip_display::format_file_size;
 use floatpaste_core::services::clip_service::ClipService;
 use floatpaste_core::services::tag_service::TagService;
@@ -50,11 +51,41 @@ thread_local! {
     static LAST_POSITION: Cell<Option<(i32, i32)>> = const { Cell::new(None) };
 }
 
+/// 宿主锚点：宿主窗口在停屏/隐藏**前**捕获的物理中心与 DPI。
+/// 速贴的「隐藏」是平移到 (-32000,-32000) 停屏，隐藏后取 rect 只会得到
+/// 屏外坐标——首开居中必须用停屏前的锚点
+struct HostAnchor {
+    center: (i32, i32),
+    dpi: f32,
+}
+
+fn host_anchor(hwnd: isize) -> Option<HostAnchor> {
+    if hwnd <= 0 {
+        return None;
+    }
+    let rect = win32_ext::physical_rect(hwnd)?;
+    let dpi = win32_ext::window_dpi(hwnd).max(96) as f32 / 96.0;
+    Some(HostAnchor {
+        center: ((rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2),
+        dpi,
+    })
+}
+
+/// 位置记忆有效性：点必须落在某显示器工作区内（拦截停屏坐标等屏外值，
+/// 避免一次异常位置让编辑器此后每次都开在屏外）
+fn position_is_visible((x, y): (i32, i32)) -> bool {
+    work_area_from_point(ScreenPoint { x, y })
+        .map(|area| x >= area.left && x < area.right && y >= area.top && y < area.bottom)
+        .unwrap_or(false)
+}
+
 // ── 打开入口 ──────────────────────────────────────────────
 
 /// 速贴面板 Ctrl+Enter：收起面板（不还原前台，编辑器接管），打开编辑器
 pub fn open_from_picker(app: &App, item_id: String) {
     let target = app.state.picker_session();
+    // 锚点须在停屏前捕获：hide_for_editor 把速贴平移到屏外
+    let anchor = host_anchor(app.state.picker_hwnd.load(Ordering::SeqCst));
     picker::hide_for_editor(app);
     show_editor(
         app,
@@ -64,12 +95,14 @@ pub fn open_from_picker(app: &App, item_id: String) {
             target_window_hwnd: target.target_window_hwnd,
             target_focus_hwnd: target.target_focus_hwnd,
         },
+        anchor,
     );
 }
 
 /// 搜索窗口 Ctrl+Enter / 铅笔按钮：隐藏窗口（保留列表状态），打开编辑器
 pub fn open_from_search(app: &App, item_id: String) {
     let target = app.state.search_session();
+    let anchor = host_anchor(app.state.search_hwnd.load(Ordering::SeqCst));
     search::hide_for_editor(app);
     show_editor(
         app,
@@ -79,10 +112,11 @@ pub fn open_from_search(app: &App, item_id: String) {
             target_window_hwnd: target.target_window_hwnd,
             target_focus_hwnd: None,
         },
+        anchor,
     );
 }
 
-fn show_editor(app: &App, session: EditorSession) {
+fn show_editor(app: &App, session: EditorSession, anchor: Option<HostAnchor>) {
     app.state.set_editor_session(Some(session.clone()));
     let Some(win) = app.editor.upgrade() else {
         app.state.set_editor_session(None);
@@ -102,18 +136,18 @@ fn show_editor(app: &App, session: EditorSession) {
     win.set_force_repaint(!win.get_force_repaint());
     win.window()
         .set_size(slint::LogicalSize::new(EDITOR_LOGICAL_WIDTH, EDITOR_LOGICAL_HEIGHT));
-    // 位置：本会话有用过则原样还原（用户拖过的位置不丢）；否则以宿主窗口
-    // （速贴/搜索）所在显示器工作区中心弹出，编辑器不出现在别的屏
-    match LAST_POSITION.get() {
+    // 位置：本会话有用过且位置可见则原样还原（用户拖过的位置不丢）；
+    // 否则以停屏前捕获的宿主中心弹出，编辑器不出现在别的屏
+    match LAST_POSITION.get().filter(|pos| position_is_visible(*pos)) {
         Some((x, y)) => win.window().set_position(slint::PhysicalPosition::new(x, y)),
         None => {
-            let host_hwnd = if session.return_to == 0 {
-                app.state.picker_hwnd.load(Ordering::SeqCst)
-            } else {
-                app.state.search_hwnd.load(Ordering::SeqCst)
-            };
-            if let Some((x, y)) = center_over_host(host_hwnd) {
-                win.window().set_position(slint::PhysicalPosition::new(x, y));
+            if let Some(anchor) = anchor {
+                let width = (EDITOR_LOGICAL_WIDTH * anchor.dpi) as i32;
+                let height = (EDITOR_LOGICAL_HEIGHT * anchor.dpi) as i32;
+                win.window().set_position(slint::PhysicalPosition::new(
+                    anchor.center.0 - width / 2,
+                    anchor.center.1 - height / 2,
+                ));
             }
         }
     }
@@ -152,21 +186,6 @@ fn show_editor(app: &App, session: EditorSession) {
             }
         }
     });
-}
-
-/// 以宿主窗口中心为目标计算编辑器物理位置（逻辑 800×600 × 宿主 DPI）；
-/// 宿主不可用时返回 None，交给系统默认摆位
-fn center_over_host(host_hwnd: isize) -> Option<(i32, i32)> {
-    if host_hwnd <= 0 {
-        return None;
-    }
-    let rect = win32_ext::physical_rect(host_hwnd)?;
-    let dpi = win32_ext::window_dpi(host_hwnd).max(96) as f32 / 96.0;
-    let width = EDITOR_LOGICAL_WIDTH * dpi;
-    let height = EDITOR_LOGICAL_HEIGHT * dpi;
-    let center_x = rect.left as f32 + (rect.right - rect.left) as f32 / 2.0;
-    let center_y = rect.top as f32 + (rect.bottom - rect.top) as f32 / 2.0;
-    Some(((center_x - width / 2.0) as i32, (center_y - height / 2.0) as i32))
 }
 
 /// 载入条目详情并填充界面（同步读库：单条查询延迟可忽略，省去加载态）
