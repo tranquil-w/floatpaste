@@ -10,4 +10,5 @@ pub mod session_keyboard;
 pub mod single_instance;
 pub mod startup;
 pub mod wide_string;
+pub mod winv_takeover;
 pub mod window_control;

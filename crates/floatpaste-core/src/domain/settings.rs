@@ -252,6 +252,10 @@ pub struct UserSetting {
     /// 与其他应用的快捷键冲突面大，允许用户关闭后仅保留方向/回车/Escape 等核心键。
     #[serde(default = "default_true")]
     pub picker_digit_shortcuts_enabled: bool,
+    /// 接管系统 Win+V（docs/adr-0001）：写入 DisabledHotkeys 释放组合后
+    /// 由本应用注册为速贴唤起；需重启资源管理器生效，关闭开关即回退
+    #[serde(default)]
+    pub takeover_winv: bool,
     /// 会话期动作键位（上屏/编辑/收藏/关闭/导航/删除），见 [SessionKeys]
     #[serde(default)]
     pub session_keys: SessionKeys,
@@ -287,6 +291,7 @@ impl Default for UserSetting {
             search_shortcut: DEFAULT_SEARCH_SHORTCUT.to_string(),
             search_shortcut_enabled: true,
             picker_digit_shortcuts_enabled: true,
+            takeover_winv: false,
             session_keys: SessionKeys::default(),
             theme_preset: default_theme_preset(),
             theme_accent: default_theme_accent(),
@@ -722,6 +727,27 @@ mod tests {
         )
         .unwrap();
         assert!(!disabled.picker_digit_shortcuts_enabled);
+    }
+
+    #[test]
+    fn deserialize_old_settings_defaults_takeover_winv_to_disabled() {
+        let settings: UserSetting = serde_json::from_str(
+            r#"{
+                "shortcut":"Alt+Q",
+                "launchOnStartup":false,
+                "historyLimit":1000,
+                "excludedApps":[],
+                "restoreClipboardAfterPaste":true,
+                "pauseMonitoring":false
+            }"#,
+        )
+        .unwrap();
+
+        assert!(!settings.takeover_winv);
+
+        let enabled: UserSetting =
+            serde_json::from_str(r#"{"takeoverWinv":true}"#).unwrap();
+        assert!(enabled.takeover_winv);
     }
 
     #[test]

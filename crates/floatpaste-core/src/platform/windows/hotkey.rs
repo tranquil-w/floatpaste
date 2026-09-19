@@ -100,31 +100,54 @@ fn modifiers_mask(spec: &HotkeySpec) -> HOT_KEY_MODIFIERS {
     mask
 }
 
+/// 一批快捷键的注册结果：`registered` 为已注册并监听触发的 id，
+/// `failed` 为注册失败的 (id, Win32 错误码)（如 1409=组合已被占用）。
+/// 部分失败不阻塞其余热键照常工作
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HotkeyOutcome {
+    pub registered: Vec<u32>,
+    pub failed: Vec<(u32, u32)>,
+}
+
 /// 在专用线程上注册一批全局快捷键并进入消息循环。
 ///
 /// `specs` 为 `(id, 描述)` 列表，触发时以 id 调用 `on_trigger`。
-/// 返回错误时（注册失败或线程启动失败）不产生任何已注册快捷键。
+/// 至少一个 id 注册成功即进入消息循环；全部失败时线程直接退出并清理。
+/// 线程启动失败/超时返回 `Err`。
 pub fn register_hotkeys(
     specs: Vec<(u32, HotkeySpec)>,
     on_trigger: impl Fn(u32) + Send + 'static,
-) -> Result<(), AppError> {
+) -> Result<HotkeyOutcome, AppError> {
     if specs.is_empty() {
-        return Ok(());
+        return Ok(HotkeyOutcome::default());
     }
 
     let (ready_tx, ready_rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || unsafe {
+        let mut outcome = HotkeyOutcome::default();
         for (id, spec) in &specs {
-            if let Err(error) = RegisterHotKey(None, *id as i32, modifiers_mask(spec), spec.vk) {
-                error!("注册全局快捷键 id={id} 失败: {error}");
-                let _ = ready_tx.send(Err(AppError::Windows(error)));
-                return;
+            match RegisterHotKey(None, *id as i32, modifiers_mask(spec), spec.vk) {
+                Ok(()) => outcome.registered.push(*id),
+                Err(error) => {
+                    // Win32 错误码在 HRESULT 低 16 位（HRESULT_FROM_WIN32）
+                    let code = (error.code().0 as u32) & 0xFFFF;
+                    error!("注册全局快捷键 id={id} 失败: {error}");
+                    outcome.failed.push((*id, code));
+                }
             }
         }
 
+        // 全部失败：无线程驻留必要，直接退出（无孤儿注册残留）
+        let registered_count = outcome.registered.len();
+        let failed_count = outcome.failed.len();
+        if registered_count == 0 {
+            let _ = ready_tx.send(outcome);
+            return;
+        }
+
         HOTKEY_THREAD_ID.store(GetCurrentThreadId(), Ordering::SeqCst);
-        let _ = ready_tx.send(Ok(()));
-        info!("全局快捷键已注册（{} 组）", specs.len());
+        let _ = ready_tx.send(outcome);
+        info!("全局快捷键已注册（{registered_count} 组，{failed_count} 组失败）");
 
         let mut message = MSG::default();
         loop {
@@ -146,9 +169,10 @@ pub fn register_hotkeys(
         HOTKEY_THREAD_ID.store(0, Ordering::SeqCst);
     });
 
-    ready_rx
+    let outcome = ready_rx
         .recv_timeout(std::time::Duration::from_secs(5))
-        .map_err(|_| AppError::Message("等待全局快捷键初始化超时".to_string()))?
+        .map_err(|_| AppError::Message("等待全局快捷键初始化超时".to_string()))?;
+    Ok(outcome)
 }
 
 /// 请求快捷键线程退出并注销全部快捷键，幂等。

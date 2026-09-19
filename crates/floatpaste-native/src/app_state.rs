@@ -50,6 +50,9 @@ pub struct SharedState {
     /// 选中项 id 锚点：新剪贴插入列表头部时按 id 恢复，避免选区漂移
     selected_id: Mutex<Option<String>>,
     pub favorite_pending: AtomicBool,
+    /// 最近一次全局快捷键注册失败的 (id, Win32 错误码) 列表
+    /// （id：1=主快捷键 2=搜索 3=Win+V 接管），供设置页展示用户可见反馈
+    hotkey_failures: Mutex<Vec<(u32, u32)>>,
 }
 
 impl SharedState {
@@ -68,6 +71,7 @@ impl SharedState {
             search_items: Mutex::new(Vec::new()),
             selected_id: Mutex::new(None),
             favorite_pending: AtomicBool::new(false),
+            hotkey_failures: Mutex::new(Vec::new()),
         }
     }
 
@@ -198,5 +202,19 @@ impl SharedState {
             .selected_id
             .lock()
             .unwrap_or_else(|error| error.into_inner()) = id;
+    }
+
+    pub fn set_hotkey_failures(&self, failures: Vec<(u32, u32)>) {
+        *self
+            .hotkey_failures
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = failures;
+    }
+
+    pub fn hotkey_failures(&self) -> Vec<(u32, u32)> {
+        self.hotkey_failures
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
     }
 }

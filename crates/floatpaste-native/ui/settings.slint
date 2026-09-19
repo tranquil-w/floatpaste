@@ -845,6 +845,13 @@ export component SettingsWindow inherits Window {
     in property <string> shortcut-notice-text;
     in property <string> search-notice-text;
     in-out property <bool> search-shortcut-enabled: true;
+    // 全局快捷键注册状态（Rust 侧写入，空=正常）：1409 占用等用户可见反馈
+    in-out property <string> main-hotkey-status;
+    in-out property <string> search-hotkey-status;
+    // Win+V 接管（ADR-0001）
+    in-out property <bool> winv-enabled: false;
+    in-out property <string> winv-status-text;
+    in-out property <bool> winv-restart-armed: false;
     in-out property <bool> picker-digit-enabled: true;
     in-out property <string> history-limit-text;
     in-out property <string> picker-limit-text;
@@ -902,6 +909,10 @@ export component SettingsWindow inherits Window {
     callback search-shortcut-cancelled();
     callback search-shortcut-enabled-toggled(bool);
     callback picker-digit-toggled(bool);
+    // Win+V 接管：toggled 切换开关（写/清注册表并重注册）；restart-explorer
+    // 为两段式确认（第一次点击进入确认态，3 秒内再点执行）
+    callback winv-toggled(bool);
+    callback winv-restart-explorer();
     // 会话键位（行模型）：captured 完成捕获，cancelled 仅清该行提示；
     // session-recorder-id 记录录制中的行（0=无），供根 Esc 捕获让位
     in-out property <[SessionKeyRow]> session-key-rows;
@@ -1276,6 +1287,12 @@ export component SettingsWindow inherits Window {
                                                     font-size: Metrics.text-xs;
                                                     wrap: word-wrap;
                                                 }
+                                                if (root.main-hotkey-status != ""): Text {
+                                                    text: root.main-hotkey-status;
+                                                    color: Theme.danger-fg;
+                                                    font-size: Metrics.text-xs;
+                                                    wrap: word-wrap;
+                                                }
                                             }
                                         }
                                     }
@@ -1310,6 +1327,12 @@ export component SettingsWindow inherits Window {
                                                         : root.search-shortcut-hint;
                                                     color: root.search-notice-text != ""
                                                         ? Theme.danger-fg : Theme.fg-subtle;
+                                                    font-size: Metrics.text-xs;
+                                                    wrap: word-wrap;
+                                                }
+                                                if (root.search-hotkey-status != ""): Text {
+                                                    text: root.search-hotkey-status;
+                                                    color: Theme.danger-fg;
                                                     font-size: Metrics.text-xs;
                                                     wrap: word-wrap;
                                                 }
@@ -1355,6 +1378,52 @@ export component SettingsWindow inherits Window {
                                                     color: Theme.fg-subtle;
                                                     font-size: Metrics.text-xs;
                                                     vertical-alignment: center;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    RowDivider { }
+                                    // 接管系统 Win+V（ADR-0001）：写注册表
+                                    // 释放系统组合，本应用注册为速贴唤起；
+                                    // 关闭开关清注册表回退
+                                    ToggleRow {
+                                        title: "接管系统 Win+V";
+                                        description: "用 FloatPaste 速贴面板接替系统剪贴板历史：Win+V 改为打开速贴面板。开启需重启资源管理器生效；关闭开关并重启资源管理器即恢复系统原状。";
+                                        checked: root.winv-enabled;
+                                        toggled(checked) => { root.winv-toggled(checked); }
+                                    }
+                                    if (root.winv-enabled): VerticalLayout {
+                                        spacing: 6px;
+                                        RowDivider { }
+                                        SettingRow {
+                                            title: "生效状态";
+                                            description: root.winv-status-text;
+                                            Rectangle {
+                                                width: restart-btn.width;
+                                                restart-btn := Rectangle {
+                                                    x: 0;
+                                                    y: (parent.height - self.height) / 2;
+                                                    width: restart-btn-text.preferred-width + 24px;
+                                                    height: 30px;
+                                                    border-radius: 8px;
+                                                    border-width: 1px;
+                                                    border-color: root.winv-restart-armed
+                                                        ? Theme.accent-fg : Theme.border-default;
+                                                    background: root.winv-restart-armed
+                                                        ? Theme.accent-subtle : Theme.canvas-default;
+                                                    TouchArea {
+                                                        clicked() => { root.winv-restart-explorer(); }
+                                                    }
+                                                    restart-btn-text := Text {
+                                                        text: root.winv-restart-armed
+                                                            ? "确认重启？任务栏会短暂消失"
+                                                            : "重启资源管理器生效";
+                                                        color: root.winv-restart-armed
+                                                            ? Theme.accent-fg : Theme.fg-default;
+                                                        font-size: Metrics.text-xs;
+                                                        vertical-alignment: center;
+                                                        horizontal-alignment: center;
+                                                    }
                                                 }
                                             }
                                         }

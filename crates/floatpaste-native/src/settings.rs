@@ -29,7 +29,7 @@ use floatpaste_core::theme;
 
 use crate::picker::App;
 use crate::theme_bridge::hex_color;
-use crate::{app_icon, theme_bridge, win32_ext};
+use crate::{app_icon, theme_bridge, win32_ext, winv_takeover};
 use crate::{AccentSwatch, PresetCard, SessionKeyRow, SettingsWindow, TagRowData};
 
 const SAVE_DEBOUNCE: Duration = Duration::from_millis(800);
@@ -68,6 +68,8 @@ thread_local! {
     static SCROLL_ANIM: RefCell<Option<ScrollAnim>> = const { RefCell::new(None) };
     /// 最近一次服务端设置：与本地草稿比对判定脏（对齐 lastServerSettingsRef）
     static SAVED: RefCell<Option<UserSetting>> = const { RefCell::new(None) };
+    /// Win+V「重启资源管理器」两段式确认的自动复位定时器
+    static RESTART_ARM_TIMER: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
 }
 
 struct ScrollAnim {
@@ -172,6 +174,58 @@ pub fn wire(app: &App) {
             if let Some(win) = app_cb.settings.upgrade() {
                 win.set_picker_digit_enabled(enabled);
                 schedule_save(&app_cb);
+            }
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_winv_toggled(move |checked| {
+            let Some(win) = app_cb.settings.upgrade() else {
+                return;
+            };
+            win.set_winv_enabled(checked);
+            // 注册表立即写/清（ADR-0001：重启 Explorer 生效，可逆）
+            let result = if checked {
+                winv_takeover::enable_in_registry()
+            } else {
+                winv_takeover::disable_in_registry()
+            };
+            if let Err(error) = result {
+                warn!("Win+V 接管注册表写入失败: {error}");
+            }
+            // 立即保存并重注册（走 apply_side_effects 的统一联动），随后
+            // 刷新生效状态提示
+            perform_save(&app_cb);
+            let failures = app_cb.state.hotkey_failures();
+            refresh_hotkey_status_hints(&win, &failures);
+            refresh_winv_status(&win, &failures);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_winv_restart_explorer(move || {
+            let Some(win) = app_cb.settings.upgrade() else {
+                return;
+            };
+            if win.get_winv_restart_armed() {
+                win.set_winv_restart_armed(false);
+                info!("用户确认重启资源管理器（Win+V 接管生效）");
+                winv_takeover::restart_explorer();
+            } else {
+                // 两段式确认：3 秒内再点执行，超时自动复位
+                win.set_winv_restart_armed(true);
+                let app_cb_arm = app_cb.clone();
+                let timer = slint::Timer::default();
+                timer.start(
+                    slint::TimerMode::SingleShot,
+                    Duration::from_millis(3000),
+                    move || {
+                        if let Some(win) = app_cb_arm.settings.upgrade() {
+                            win.set_winv_restart_armed(false);
+                        }
+                    },
+                );
+                RESTART_ARM_TIMER.with(|slot| *slot.borrow_mut() = Some(timer));
             }
         });
     }
@@ -521,6 +575,12 @@ fn hydrate(app: &App, win: &SettingsWindow) {
         &settings,
     ))));
     win.set_session_recorder_id(0);
+    win.set_winv_enabled(settings.takeover_winv);
+    win.set_winv_restart_armed(false);
+    // 全局快捷键注册状态（启动或保存路径的失败记录在此呈现给用户）
+    let failures = app.state.hotkey_failures();
+    refresh_hotkey_status_hints(win, &failures);
+    refresh_winv_status(win, &failures);
     win.set_history_limit_text(settings.history_limit.to_string().into());
     win.set_picker_limit_text(settings.picker_record_limit.to_string().into());
     win.set_position_mode(match settings.picker_position_mode {
@@ -608,6 +668,7 @@ fn current_draft(win: &SettingsWindow) -> UserSetting {
         search_shortcut: win.get_search_shortcut().to_string(),
         search_shortcut_enabled: win.get_search_shortcut_enabled(),
         picker_digit_shortcuts_enabled: win.get_picker_digit_enabled(),
+        takeover_winv: win.get_winv_enabled(),
         session_keys: session_keys_from_rows(win),
         theme_preset: theme::THEME_PRESET_IDS
             .get(win.get_theme_preset().max(0) as usize)
@@ -818,7 +879,43 @@ pub fn apply_side_effects(app: &App) {
     theme_bridge::reapply_theme(app, &tokens);
     if let Some(win) = app.settings.upgrade() {
         rebuild_preview_models(&win, &settings, resolved);
+        // 保存路径可能改变快捷键（含 Win+V 接管），注册结果即时呈现
+        let failures = app.state.hotkey_failures();
+        refresh_hotkey_status_hints(&win, &failures);
+        refresh_winv_status(&win, &failures);
     }
+}
+
+/// 全局快捷键注册失败的用户可见反馈（1409=组合被其他程序占用）。
+/// 空串 = 该键位注册正常
+fn refresh_hotkey_status_hints(win: &SettingsWindow, failures: &[(u32, u32)]) {
+    let text_for = |id: u32| {
+        failures
+            .iter()
+            .find(|(failed_id, _)| *failed_id == id)
+            .map(|(_, code)| match *code {
+                crate::ERROR_HOTKEY_OCCUPIED => "注册失败：组合键已被其他程序占用，请换一组组合。".to_string(),
+                code => format!("注册失败（错误码 {code}）。"),
+            })
+            .unwrap_or_default()
+    };
+    win.set_main_hotkey_status(text_for(1).into());
+    win.set_search_hotkey_status(text_for(2).into());
+}
+
+/// Win+V 接管生效状态：开关关闭不显示；开启时区分「已注册」与
+/// 「未注册」（未重启 Explorer 前注册失败是预期态，给出指引而非报错）
+fn refresh_winv_status(win: &SettingsWindow, failures: &[(u32, u32)]) {
+    if !win.get_winv_enabled() {
+        win.set_winv_status_text("".into());
+        return;
+    }
+    let registered = !failures.iter().any(|(id, _)| *id == 3);
+    win.set_winv_status_text(if registered {
+        "已接管：Win+V 现在打开速贴面板；重启资源管理器前的提示可忽略。".into()
+    } else {
+        "尚未生效：重启资源管理器后 Win+V 即由 FloatPaste 接管；若重启后仍显示被占用，说明组合被其他程序持有。".into()
+    });
 }
 
 /* ───────────────── 预览模型（主题预设卡 / 强调色） ───────────────── */

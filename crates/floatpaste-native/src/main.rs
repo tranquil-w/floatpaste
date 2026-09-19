@@ -33,12 +33,16 @@ use floatpaste_core::platform::windows::clipboard_monitor::ClipboardMonitor;
 use floatpaste_core::platform::windows::hotkey;
 use floatpaste_core::platform::windows::mouse_monitor;
 use floatpaste_core::platform::windows::session_keyboard;
+use floatpaste_core::platform::windows::winv_takeover;
 use floatpaste_core::theme;
 
 use app_state::SharedState;
 use picker::App;
 
 slint::include_modules!();
+
+/// ERROR_HOTKEY_ALREADY_REGISTERED：组合键已被其他程序（或系统）注册
+const ERROR_HOTKEY_OCCUPIED: u32 = 1409;
 
 fn main() {
     // Slint 内置开关：Windows 上隐藏窗口即销毁 winit 窗口与软渲染帧缓冲，
@@ -251,9 +255,11 @@ fn main() {
     state.core.begin_quit();
 }
 
-/// 注册全局快捷键（主快捷键=速贴开关，搜索快捷键=搜索开关）。
-/// 设置保存后的重注册复用此函数：旧热键线程的注销是异步的（stop 后须等
-/// 其消息循环退出才释放组合键），RegisterHotKey 失败按 150ms 重试三次。
+/// 注册全局快捷键（主快捷键=速贴开关，搜索快捷键=搜索开关，Win+V 接管
+/// 开启时追加速贴唤起入口）。设置保存后的重注册复用此函数：旧热键线程
+/// 的注销是异步的（stop 后须等其消息循环退出才释放组合键），注册失败按
+/// 150ms 重试三次；末次仍有失败的 id 记入 state 供设置页展示
+/// （1409=组合被其他程序占用，用户可见反馈）。
 pub(crate) fn sync_global_hotkeys(app: &App) {
     let settings = app.state.current_settings();
     let shortcut_text = {
@@ -285,28 +291,79 @@ pub(crate) fn sync_global_hotkeys(app: &App) {
             None => tracing::warn!("搜索快捷键无法解析，跳过注册"),
         }
     }
+    // Win+V 接管（ADR-0001）：先自愈注册表（设置开启但值被外部清除时
+    // 补写）；与主/搜索快捷键相同则不注册（失败记录会让设置页给出提示）
+    let winv_spec = hotkey::parse_hotkey("Win+V");
+    if settings.takeover_winv {
+        match winv_takeover::is_enabled_in_registry() {
+            Ok(true) => {}
+            Ok(false) => {
+                if let Err(error) = winv_takeover::enable_in_registry() {
+                    tracing::warn!("补写 Win+V 接管注册表失败: {error}");
+                }
+            }
+            Err(error) => tracing::warn!("读取 Win+V 接管注册表状态失败: {error}"),
+        }
+        let occupied = |spec: &hotkey::HotkeySpec| {
+            specs.iter().any(|(_, existing)| existing == spec)
+        };
+        match winv_spec {
+            Some(spec) if !occupied(&spec) => specs.push((3, spec)),
+            Some(_) => {
+                tracing::warn!("Win+V 与已有全局快捷键相同，跳过接管注册");
+                app.state
+                    .set_hotkey_failures(vec![(3, ERROR_HOTKEY_OCCUPIED)]);
+            }
+            None => tracing::warn!("Win+V 组合无法解析，跳过接管注册"),
+        }
+    }
 
+    let mut last_failures: Vec<(u32, u32)> = Vec::new();
+    let mut last_hard_error = false;
     for attempt in 0..3 {
         hotkey::stop_hotkeys();
         let app_for_hotkey = app.clone();
-        match hotkey::register_hotkeys(specs.clone(), move |id| {
+        let on_trigger = move |id: u32| {
             tracing::info!("命中全局快捷键 id={id}");
             let app = app_for_hotkey.clone();
             let _ = slint::invoke_from_event_loop(move || {
                 if id == 2 {
                     search::toggle_from_shortcut(&app);
                 } else {
+                    // 主快捷键与 Win+V 接管均打开速贴面板
                     picker::toggle(&app);
                 }
             });
-        }) {
-            Ok(()) => return,
-            // 重试等旧线程退出释放组合键；末次仍失败则放弃（保留鼠标路径）
+        };
+        match hotkey::register_hotkeys(specs.clone(), on_trigger) {
+            Ok(outcome) if outcome.failed.is_empty() => {
+                app.state.set_hotkey_failures(Vec::new());
+                return;
+            }
+            Ok(outcome) => {
+                // 部分失败：可用热键照常工作；重试等旧线程退出释放
+                // 组合键（新一轮 stop 已在循环头执行），末次结果记录
+                last_failures = outcome.failed;
+                last_hard_error = false;
+            }
+            // 线程启动失败等硬错误：保留鼠标路径
             Err(error) if attempt < 2 => {
                 tracing::warn!("注册全局快捷键失败（第 {} 次）：{error}", attempt + 1);
+                last_hard_error = true;
                 std::thread::sleep(std::time::Duration::from_millis(150));
+                continue;
             }
-            Err(error) => tracing::error!("注册全局快捷键失败: {error}"),
+            Err(error) => {
+                tracing::error!("注册全局快捷键失败: {error}");
+                last_hard_error = true;
+            }
+        }
+        if attempt < 2 {
+            std::thread::sleep(std::time::Duration::from_millis(150));
         }
     }
+    if last_hard_error {
+        last_failures = specs.iter().map(|(id, _)| (*id, 0)).collect();
+    }
+    app.state.set_hotkey_failures(last_failures);
 }
