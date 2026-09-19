@@ -28,9 +28,6 @@ use crate::win32_ext;
 use crate::{TooltipLine, TooltipMetaBadge, TooltipWindow};
 
 const SHOW_DELAY_MS: u64 = 400;
-/// tooltip.slint 的 preferred 尺寸（隐藏复位用，与 ui 保持一致）
-const PREFERRED_WIDTH: f32 = 200.0;
-const PREFERRED_HEIGHT: f32 = 80.0;
 /// 鼠标右下偏移（逻辑像素）
 const OFFSET_X: f32 = 12.0;
 const OFFSET_Y: f32 = 16.0;
@@ -39,8 +36,9 @@ const MAX_WIDTH: f32 = 600.0;
 const MIN_WIDTH: f32 = 120.0;
 const IMAGE_MAX_WIDTH: f32 = 560.0;
 const IMAGE_MAX_HEIGHT: f32 = 420.0;
-/// 高度安全余量：字体度量与窗口装配存在边缘差异时防止裁掉尾行
-const HEIGHT_SAFETY: f32 = 8.0;
+/// 高度安全余量：字体度量与窗口装配存在边缘差异时防止裁掉尾行。
+/// 仅 2px——逐行 ceil 后度量误差已很小，余量由 slint 底部弹性占位吸收
+const HEIGHT_SAFETY: f32 = 2.0;
 /// 静态提示为单行短文案，余量收小避免卡片下方留白
 const HEIGHT_SAFETY_STATIC: f32 = 4.0;
 /// 静态提示的宽度下限：单行短文案不需要长文预览的阅读下限
@@ -185,15 +183,13 @@ pub fn schedule_static(app: &App, host: HoverHost, text: String, anchor_x: f32, 
 pub fn cancel(app: &App) {
     PENDING_TOKEN.with(|value| value.set(value.get() + 1));
     if let Some(win) = app.tooltip.upgrade() {
-        // 软件渲染按窗口尺寸分配帧缓冲：大图预览会把窗口顶到最大显示
-        // 尺寸，隐藏时复位到 preferred，避免小内容期 buffer 顶格常驻
-        let _ = win
-            .window()
-            .set_size(slint::LogicalSize::new(PREFERRED_WIDTH, PREFERRED_HEIGHT));
         let hwnd = app.state.tooltip_hwnd.load(Ordering::SeqCst);
         if hwnd != 0 {
             // 只用 Win32 SW_HIDE：Slint hide 会翻转 winit 可见标志，
-            // 下次显示将退回 SW_SHOW 路径并激活窗口
+            // 下次显示将退回 SW_SHOW 路径并激活窗口。
+            // 不复位窗口尺寸（曾按内容回落 preferred 省帧缓冲）：尺寸
+            // 往返会让下次显示时软件渲染器脏区跟踪失准，表面残留上次
+            // 的透明竖带；buffer 按最大内容尺寸常驻（约 1-3MB）
             let _ = window_control::hide_window(hwnd);
         } else if win.window().is_visible() {
             // 装配失败降级路径：tooltip 由 Slint show 显示，需 Slint hide
@@ -228,10 +224,8 @@ fn render(
     let (content_width, content_height) = match &payload {
         Payload::Text(text) => {
             // 正文按源行拆行渲染（Slint Text 无 line-height）：行距取
-            // content-line-spacing，空行以单个空格占住一行的高度。
-            // 行尾空白裁掉：不可见却计入自然宽，把右边距撑得比左边大；
-            // 自然宽度 = 最宽源行不换行所需，行高逐行实测（向上取整，
-            // 对齐渲染器整像素行盒）后随模型下发
+            // content-line-spacing，行尾空白裁掉（不可见却计入自然宽，
+            // 把右边距撑得比左边大），空行以单个空格占住一行的高度
             let raw_lines: Vec<SharedString> = text
                 .split('\n')
                 .map(|line| {
@@ -243,17 +237,44 @@ fn render(
                     }
                 })
                 .collect();
-            let natural_width = raw_lines
+            let naturals: Vec<f32> = raw_lines
                 .iter()
                 .map(|line| win.invoke_measure_natural_width(line.clone()))
-                .fold(0.0f32, f32::max);
-            let card_width = (natural_width + inset_h).clamp(MIN_WIDTH, MAX_WIDTH);
+                .collect();
+            let natural_width = naturals.iter().copied().fold(0.0f32, f32::max);
+            let initial_width = (natural_width + inset_h).clamp(MIN_WIDTH, MAX_WIDTH)
+                - inset_h;
+            // 宽度收敛：折行行的断行残端会让右边距比左边大出一个词的
+            // 空白。对每个折行行二分「保持行数不变的最小宽度」（行高在
+            // 宽度上单调不增），不折行行以其自然宽为下限；卡片取约束
+            // 最大值，内容即贴满实际占宽
+            let mut required = 0.0f32;
+            for (line, &natural) in raw_lines.iter().zip(&naturals) {
+                let limit = if natural <= initial_width {
+                    natural
+                } else {
+                    let rows = win.invoke_measure_text(line.clone(), initial_width);
+                    let (mut lo, mut hi) = (0.0f32, initial_width);
+                    while lo + 0.5 < hi {
+                        let mid = (lo + hi) / 2.0;
+                        if win.invoke_measure_text(line.clone(), mid) <= rows {
+                            hi = mid;
+                        } else {
+                            lo = mid;
+                        }
+                    }
+                    hi
+                };
+                required = required.max(limit);
+            }
+            let card_width = (required + inset_h).clamp(MIN_WIDTH, MAX_WIDTH);
             let text_width = card_width - inset_h;
             let spacing = win.get_content_line_spacing();
             let lines: Vec<TooltipLine> = raw_lines
                 .iter()
                 .map(|line| TooltipLine {
                     text: line.clone(),
+                    // ceil：对齐渲染器整像素行盒，多行累计误差不再吃掉下边距
                     height: win.invoke_measure_text(line.clone(), text_width).ceil(),
                 })
                 .collect();

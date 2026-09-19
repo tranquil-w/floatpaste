@@ -77,7 +77,11 @@ export component TooltipWindow inherits Window {
     }
     out property <length> simple-line-height: simple-ruler.height;
 
+    // 卡片显式铺满窗口：窗口尺寸完全由 Rust 按内容度量设定（Window 直子
+    // 不自动铺满，取首选尺寸会在四周露出透明区、透出背景窗口）
     Rectangle {
+        width: 100%;
+        height: 100%;
         background: Theme.canvas-subtle;
         border-width: 1px;
         border-color: Theme.border-muted;
@@ -118,8 +122,11 @@ export component TooltipWindow inherits Window {
                 horizontal-stretch: 1;
             }
             // 条目正文：按源行拆行，行距由布局 spacing 提供，行高用
-            // Rust 实测值（与窗口定高的度量同源）
+            // Rust 实测值（与窗口定高的度量同源）。stretch 归零：内容块
+            // 保持实测高度，不参与剩余空间分配（否则度量余量会在正文与
+            // 分隔线之间撑出空隙）
             if (!root.has-image && !root.simple-mode): VerticalLayout {
+                vertical-stretch: 0;
                 spacing: root.content-line-spacing;
                 for line in root.content-lines: Text {
                     text: line.text;
