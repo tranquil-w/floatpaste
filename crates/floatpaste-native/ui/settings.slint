@@ -37,6 +37,17 @@ export struct TagRowData {
     conflict: bool,
 }
 
+// 会话键行（速贴/搜索会话动作键位）：action = SessionKeys 字段序号，
+// value 为「修饰键+键名」串，parts 为键帽展示拆分，notice 为录制提示
+export struct SessionKeyRow {
+    action: int,
+    title: string,
+    description: string,
+    value: string,
+    parts: [string],
+    notice: string,
+}
+
 // 设置行内键位徽章（旧版 KBD_BADGE：h-22px min-w-22px rounded-[4px]
 // px-1.5 font-mono text-[11px] font-semibold）。
 // Text 路径 padding-top 3px：Consolas 大写/数字无降部，墨迹中心比行盒
@@ -264,6 +275,153 @@ component ShortcutInput inherits Rectangle {
                 font-size: Metrics.text-sm;
                 vertical-alignment: center;
                 overflow: elide;
+            }
+        }
+    }
+}
+
+// 会话键录制框：与 ShortcutInput 同外观，录制语义不同——会话键允许
+// 裸键（Enter/Esc/方向键等本身即合法键位），因此 Esc 不再是「取消」、
+// ⌫ 不再是「清除」：任意主键按下即完成捕获；取消 = 点击框外（焦点丢失）。
+// 键名表与 Rust 侧 parse_session_combo 对齐（F13 以后、IME 组合串不支持）
+component SessionKeyInput inherits Rectangle {
+    in property <[string]> value-parts;
+    in property <int> instance-id;   // 行序号，录制归属上报用
+    // 录制归属镜像：实例化处与窗口的 session-recorder-id 双向绑定
+    in-out property <int> recorder-id;
+    in-out property <string> notice;
+    in-out property <bool> recording: false;
+    callback captured(string);   // 完成捕获（主键大小写由 Rust 归一）
+    callback cancelled();
+
+    // 录制归属：开始置 recorder-id 为本行，结束仅当归属仍是本行才清零
+    // ——切换录制行时新旧置位无论先后都不会错杀新行
+    changed recording => {
+        if (self.recording) {
+            root.recorder-id = root.instance-id;
+        } else if (root.recorder-id == root.instance-id) {
+            root.recorder-id = 0;
+        }
+    }
+
+    height: 34px;
+    border-radius: 12px;
+    border-width: rec.has-focus ? 2px : 1px;
+    border-color: rec.has-focus || ta.has-hover ? Theme.accent-fg : Theme.border-default;
+    background: Theme.canvas-default;
+    opacity: root.notice != "" ? 0.6 : 1.0;
+
+    // 主键解析用临时属性（Slint 回调无常量局部，借用属性中转）
+    property <string> main-key;
+    property <string> combo;
+
+    ta := TouchArea {
+        clicked() => {
+            root.recording = !root.recording;
+            if (root.recording) {
+                root.notice = "";
+                rec.focus();
+            } else {
+                root.cancelled();
+            }
+        }
+    }
+    rec := FocusScope {
+        width: 100%;
+        height: 100%;
+        enabled: root.recording;
+        key-pressed(event) => {
+            // 主键：字母/数字/标点与编辑、导航、功能键（特殊键取 Slint
+            // 控制字符/私有区码位，与搜索窗 Rust 解析同表）
+            root.main-key =
+                event.text.character-count == 1
+                && ((event.text >= "a" && event.text <= "z")
+                    || (event.text >= "A" && event.text <= "Z")
+                    || (event.text >= "0" && event.text <= "9")) ? event.text
+                : event.text == " " ? "Space"
+                : event.text == "," ? "Comma"
+                : event.text == "." ? "Period"
+                : event.text == "/" ? "Slash"
+                : event.text == "`" ? "`"
+                : event.text == Key.Tab ? "Tab"
+                : event.text == Key.Return ? "Enter"
+                : event.text == Key.Escape ? "Escape"
+                : event.text == Key.Backspace ? "Backspace"
+                : event.text == Key.Delete ? "Delete"
+                : event.text == Key.Insert ? "Insert"
+                : event.text == Key.Home ? "Home"
+                : event.text == Key.End ? "End"
+                : event.text == Key.PageUp ? "PageUp"
+                : event.text == Key.PageDown ? "PageDown"
+                : event.text == Key.UpArrow ? "Up"
+                : event.text == Key.DownArrow ? "Down"
+                : event.text == Key.LeftArrow ? "Left"
+                : event.text == Key.RightArrow ? "Right"
+                : event.text == Key.F1 ? "F1"
+                : event.text == Key.F2 ? "F2"
+                : event.text == Key.F3 ? "F3"
+                : event.text == Key.F4 ? "F4"
+                : event.text == Key.F5 ? "F5"
+                : event.text == Key.F6 ? "F6"
+                : event.text == Key.F7 ? "F7"
+                : event.text == Key.F8 ? "F8"
+                : event.text == Key.F9 ? "F9"
+                : event.text == Key.F10 ? "F10"
+                : event.text == Key.F11 ? "F11"
+                : event.text == Key.F12 ? "F12"
+                : "";
+            if (root.main-key == "") {
+                // 修饰键等不可识别按键：继续等待主键
+                return accept;
+            }
+            root.combo = (event.modifiers.control ? "Ctrl+" : "")
+                + (event.modifiers.alt ? "Alt+" : "")
+                + (event.modifiers.shift ? "Shift+" : "")
+                + (event.modifiers.meta ? "Super+" : "")
+                + root.main-key;
+            root.recording = false;
+            root.captured(root.combo);
+            return accept;
+        }
+        changed has-focus => {
+            if (!self.has-focus && root.recording) {
+                root.recording = false;
+                root.cancelled();
+            }
+        }
+        HorizontalLayout {
+            x: 0;
+            width: 100%;
+            // 键帽为固定高子元素，交叉轴顶对齐——布局显式取首选高并居中
+            y: (parent.height - self.preferred-height) / 2;
+            height: self.preferred-height;
+            padding-left: 12px;
+            padding-right: 12px;
+            spacing: Metrics.space-1_5;
+            alignment: start;
+            if (root.recording): HorizontalLayout {
+                spacing: 4px;
+                alignment: start;
+                Text {
+                    text: "按下新键位";
+                    color: Theme.accent-fg;
+                    font-size: Metrics.text-xs;
+                    overflow: elide;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: "点击框外取消";
+                    color: Theme.fg-subtle;
+                    font-size: Metrics.text-xs;
+                    vertical-alignment: center;
+                }
+            }
+            if (!root.recording && root.value-parts.length > 0): HorizontalLayout {
+                spacing: Metrics.space-1_5;
+                alignment: start;
+                for part in root.value-parts: KbdBadge {
+                    key: part == "Super" ? "Win" : part;
+                }
             }
         }
     }
@@ -744,6 +902,12 @@ export component SettingsWindow inherits Window {
     callback search-shortcut-cancelled();
     callback search-shortcut-enabled-toggled(bool);
     callback picker-digit-toggled(bool);
+    // 会话键位（行模型）：captured 完成捕获，cancelled 仅清该行提示；
+    // session-recorder-id 记录录制中的行（0=无），供根 Esc 捕获让位
+    in-out property <[SessionKeyRow]> session-key-rows;
+    in-out property <int> session-recorder-id: 0;
+    callback session-key-captured(int, string);
+    callback session-key-cancelled(int);
     callback position-mode-selected(int);
     callback paste-trigger-selected(int);
     callback theme-mode-selected(int);
@@ -784,10 +948,12 @@ export component SettingsWindow inherits Window {
         width: 100%;
         height: 100%;
         // 窗口级键盘 capture（先于输入框）：Esc 关窗；录制态让位
-        // （录制框自己的 key-pressed 消费 Esc）
+        // （录制框自己的 key-pressed 消费 Esc；会话键录制允许把 Esc
+        // 录成键位，由 session-recorder-id 判断）
         capture-key-pressed(event) => {
             if (event.text == Key.Escape) {
-                if (shortcut-input.recording || search-shortcut-input.recording) {
+                if (shortcut-input.recording || search-shortcut-input.recording
+                    || root.session-recorder-id != 0) {
                     return reject;
                 }
                 root.request-close();
@@ -1081,7 +1247,7 @@ export component SettingsWindow inherits Window {
                                 spacing: 6px;
                                 SectionHeader {
                                     title: "快捷键";
-                                    description: "配置全局唤起与搜索入口，保持高频操作一眼可见。";
+                                    description: "全局唤起与会话动作键位均可自定义；此处展示全部键位，冲突时不会保存。";
                                 }
                                 RowGroup {
                                     // 速贴唤起（旧版右列 w-56 = 224px 固定宽）
@@ -1191,6 +1357,89 @@ export component SettingsWindow inherits Window {
                                                     vertical-alignment: center;
                                                 }
                                             }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // ── 会话动作键位（速贴面板与搜索窗口共用，
+                            //    数字 1-9 直达保留，见下方开关）──
+                            RowGroup {
+                                for row[idx] in root.session-key-rows: VerticalLayout {
+                                    if (idx > 0): RowDivider { }
+                                    SettingRow {
+                                        title: row.title;
+                                        description: row.description;
+                                        Rectangle {
+                                            width: 224px;
+                                            sk-ctrl := VerticalLayout {
+                                                x: 0;
+                                                y: (parent.height - self.preferred-height) / 2;
+                                                width: 224px;
+                                                height: self.preferred-height;
+                                                spacing: 6px;
+                                                SessionKeyInput {
+                                                    width: 100%;
+                                                    instance-id: idx;
+                                                    recorder-id <=> root.session-recorder-id;
+                                                    value-parts: row.parts;
+                                                    notice: row.notice;
+                                                    captured(value) => {
+                                                        root.session-key-captured(row.action, value);
+                                                    }
+                                                    cancelled() => {
+                                                        root.session-key-cancelled(row.action);
+                                                    }
+                                                }
+                                                if (row.notice != ""): Text {
+                                                    text: row.notice;
+                                                    color: Theme.danger-fg;
+                                                    font-size: Metrics.text-xs;
+                                                    wrap: word-wrap;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                RowDivider { }
+                                ToggleRow {
+                                    title: "数字键 1-9 直达";
+                                    description: "速贴面板打开时按 1-9 直接粘贴对应条目。数字键是无修饰全局热键，若与其他软件冲突可关闭。";
+                                    checked: root.picker-digit-enabled;
+                                    toggled(checked) => { root.picker-digit-toggled(checked); }
+                                }
+                                RowDivider { }
+                                // 编辑窗口固定键位（只读展示，重设计在
+                                // 编辑窗口迭代中一并处理）
+                                SettingRow {
+                                    title: "编辑窗口保存";
+                                    description: "保存正在编辑的内容（关闭时未保存会先询问）。";
+                                    Rectangle {
+                                        width: 120px;
+                                        HorizontalLayout {
+                                            x: 0;
+                                            y: (parent.height - self.preferred-height) / 2;
+                                            height: self.preferred-height;
+                                            spacing: Metrics.space-1_5;
+                                            alignment: start;
+                                            KbdBadge { key: "Ctrl"; }
+                                            KbdBadge { key: "S"; }
+                                        }
+                                    }
+                                }
+                                RowDivider { }
+                                SettingRow {
+                                    title: "编辑窗口关闭";
+                                    description: "关闭编辑窗口返回原面板。";
+                                    Rectangle {
+                                        width: 120px;
+                                        HorizontalLayout {
+                                            x: 0;
+                                            y: (parent.height - self.preferred-height) / 2;
+                                            height: self.preferred-height;
+                                            spacing: Metrics.space-1_5;
+                                            alignment: start;
+                                            KbdBadge { key: "Esc"; }
                                         }
                                     }
                                 }
@@ -1440,13 +1689,6 @@ export component SettingsWindow inherits Window {
                                         description: "暂停后不会继续采集新的剪贴板记录。";
                                         checked: root.pause-monitoring;
                                         toggled(checked) => { root.pause-monitoring-toggled(checked); }
-                                    }
-                                    RowDivider { }
-                                    ToggleRow {
-                                        title: "速贴面板数字键直达";
-                                        description: "速贴面板打开时按 1-9 直接粘贴对应条目。数字键是无修饰全局热键，若与其他软件冲突可关闭。";
-                                        checked: root.picker-digit-enabled;
-                                        toggled(checked) => { root.picker-digit-toggled(checked); }
                                     }
                                     RowDivider { }
                                     // 鼠标上屏触发方式

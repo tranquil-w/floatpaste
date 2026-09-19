@@ -724,6 +724,9 @@ export component SearchWindow inherits Window {
     callback key-toggle-favorite();
     callback key-delete();
     callback key-close();
+    // 会话键位判定（Rust 侧按设置解析）：入参 = 事件文本 + 四修饰键，
+    // 返回动作码（见 capture-key-pressed 注释）
+    callback resolve-session-action(string, bool, bool, bool, bool) -> int;
     callback near-bottom();
     callback drag-started();
     callback drag-moved();
@@ -748,38 +751,52 @@ export component SearchWindow inherits Window {
 
     key-scope := FocusScope {
         // 键盘会话：capture 阶段先于输入框消费会话键（对齐旧版 window 级
-        // keydown + preventDefault），其余按键 reject 放行给输入框
+        // keydown + preventDefault）。键位判定在 Rust 侧按当前设置解析
+        // （resolve-session-action 动作码：1=向上 2=向下 3=上屏 4=粘贴为
+        // 文件路径 5=编辑 6=收藏 7=关闭 8=删除，0=放行），其余按键 reject
+        // 放行给输入框
         capture-key-pressed(event) => {
-            if (event.text == Key.Escape) {
+            let action = root.resolve-session-action(
+                event.text,
+                event.modifiers.control,
+                event.modifiers.alt,
+                event.modifiers.shift,
+                event.modifiers.meta,
+            );
+            if (action == 7) {
                 root.key-close();
                 return accept;
             }
             if (root.input-suspended) {
                 // 挂起态：键盘已交给速贴面板（原生由 LL 钩子全局接管，
-                // 窗口内只剩兜底 Esc）
+                // 窗口内只剩兜底关闭键）
                 return reject;
             }
-            if (event.text == Key.UpArrow) {
+            if (action == 1) {
                 root.key-navigate-up();
                 return accept;
             }
-            if (event.text == Key.DownArrow) {
+            if (action == 2) {
                 root.key-navigate-down();
                 return accept;
             }
-            if (event.text == Key.Return) {
-                if (event.modifiers.control) {
-                    root.key-edit();
-                } else {
-                    root.key-paste(event.modifiers.shift);
-                }
+            if (action == 5) {
+                root.key-edit();
                 return accept;
             }
-            if (event.text == Key.Delete) {
+            if (action == 4) {
+                root.key-paste(true);
+                return accept;
+            }
+            if (action == 3) {
+                root.key-paste(false);
+                return accept;
+            }
+            if (action == 8) {
                 root.key-delete();
                 return accept;
             }
-            if (event.text == Key.Space && event.modifiers.control) {
+            if (action == 6) {
                 root.key-toggle-favorite();
                 return accept;
             }

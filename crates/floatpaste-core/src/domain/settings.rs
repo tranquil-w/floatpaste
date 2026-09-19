@@ -96,6 +96,91 @@ impl<'de> Deserialize<'de> for PasteTrigger {
     }
 }
 
+/// 速贴/搜索会话期的动作键位（数字 1-9 直达除外，见
+/// `picker_digit_shortcuts_enabled`）。值为「修饰键+键名」串（如
+/// "Enter"、"Shift+Enter"、"Ctrl+Space"），键名与修饰键大小写不敏感；
+/// 非法或缺失的值按字段回退默认，见 [SessionKeys::sanitized]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionKeys {
+    /// 上屏
+    pub confirm: String,
+    /// 粘贴为文件路径
+    pub confirm_as_file: String,
+    /// 打开编辑器
+    pub open_editor: String,
+    /// 收藏/取消收藏
+    pub toggle_favorite: String,
+    /// 关闭会话
+    pub dismiss: String,
+    /// 向上选择
+    pub navigate_up: String,
+    /// 向下选择
+    pub navigate_down: String,
+    /// 删除条目（仅搜索窗口）
+    pub delete_entry: String,
+}
+
+impl Default for SessionKeys {
+    fn default() -> Self {
+        Self {
+            confirm: "Enter".to_string(),
+            confirm_as_file: "Shift+Enter".to_string(),
+            open_editor: "Ctrl+Enter".to_string(),
+            toggle_favorite: "Ctrl+Space".to_string(),
+            dismiss: "Escape".to_string(),
+            navigate_up: "Up".to_string(),
+            navigate_down: "Down".to_string(),
+            delete_entry: "Delete".to_string(),
+        }
+    }
+}
+
+impl SessionKeys {
+    /// 动作序号 → 字段的统一读写入口（设置界面按行模型存取用）
+    pub fn field(&self, action: usize) -> &str {
+        match action {
+            0 => &self.confirm,
+            1 => &self.confirm_as_file,
+            2 => &self.open_editor,
+            3 => &self.toggle_favorite,
+            4 => &self.dismiss,
+            5 => &self.navigate_up,
+            6 => &self.navigate_down,
+            7 => &self.delete_entry,
+            _ => "",
+        }
+    }
+
+    pub fn set_field(&mut self, action: usize, value: String) {
+        match action {
+            0 => self.confirm = value,
+            1 => self.confirm_as_file = value,
+            2 => self.open_editor = value,
+            3 => self.toggle_favorite = value,
+            4 => self.dismiss = value,
+            5 => self.navigate_up = value,
+            6 => self.navigate_down = value,
+            7 => self.delete_entry = value,
+            _ => {}
+        }
+    }
+
+    pub fn sanitized(mut self) -> Self {
+        let default = Self::default();
+        for action in 0..8 {
+            let trimmed = self.field(action).trim().to_string();
+            let value = if trimmed.is_empty() {
+                default.field(action).to_string()
+            } else {
+                trimmed
+            };
+            self.set_field(action, value);
+        }
+        self
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct StoredWindowPosition {
@@ -167,6 +252,9 @@ pub struct UserSetting {
     /// 与其他应用的快捷键冲突面大，允许用户关闭后仅保留方向/回车/Escape 等核心键。
     #[serde(default = "default_true")]
     pub picker_digit_shortcuts_enabled: bool,
+    /// 会话期动作键位（上屏/编辑/收藏/关闭/导航/删除），见 [SessionKeys]
+    #[serde(default)]
+    pub session_keys: SessionKeys,
     #[serde(default = "default_theme_preset")]
     pub theme_preset: String,
     /// "default"=跟随预设 | 安全列表 id | 旧版迁移保留的 #RRGGBB；
@@ -199,6 +287,7 @@ impl Default for UserSetting {
             search_shortcut: DEFAULT_SEARCH_SHORTCUT.to_string(),
             search_shortcut_enabled: true,
             picker_digit_shortcuts_enabled: true,
+            session_keys: SessionKeys::default(),
             theme_preset: default_theme_preset(),
             theme_accent: default_theme_accent(),
             custom_theme_colors: CustomThemeColors::default(),
@@ -247,6 +336,7 @@ impl UserSetting {
             self.theme_accent = migrate_legacy_theme_accent(&self.custom_theme_colors);
         }
         self.resolve_search_shortcut_conflict();
+        self.session_keys = std::mem::take(&mut self.session_keys).sanitized();
         self
     }
 
@@ -632,6 +722,90 @@ mod tests {
         )
         .unwrap();
         assert!(!disabled.picker_digit_shortcuts_enabled);
+    }
+
+    #[test]
+    fn session_keys_default_to_classic_combinations() {
+        use super::SessionKeys;
+
+        let keys = SessionKeys::default();
+        assert_eq!(keys.confirm, "Enter");
+        assert_eq!(keys.confirm_as_file, "Shift+Enter");
+        assert_eq!(keys.open_editor, "Ctrl+Enter");
+        assert_eq!(keys.toggle_favorite, "Ctrl+Space");
+        assert_eq!(keys.dismiss, "Escape");
+        assert_eq!(keys.navigate_up, "Up");
+        assert_eq!(keys.navigate_down, "Down");
+        assert_eq!(keys.delete_entry, "Delete");
+    }
+
+    #[test]
+    fn deserialize_old_settings_defaults_session_keys() {
+        let settings: UserSetting = serde_json::from_str(
+            r#"{
+                "shortcut":"Alt+Q",
+                "launchOnStartup":false,
+                "historyLimit":1000,
+                "excludedApps":[],
+                "restoreClipboardAfterPaste":true,
+                "pauseMonitoring":false
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(settings.session_keys, super::SessionKeys::default());
+    }
+
+    #[test]
+    fn session_keys_round_trip_through_serialization() {
+        let settings = UserSetting {
+            session_keys: super::SessionKeys {
+                confirm: "Space".to_string(),
+                ..super::SessionKeys::default()
+            },
+            ..UserSetting::default()
+        };
+        let json = serde_json::to_string(&settings).unwrap();
+        assert!(json.contains("sessionKeys"));
+        assert!(json.contains("\"confirm\":\"Space\""));
+
+        let parsed: UserSetting = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.session_keys.confirm, "Space");
+        assert_eq!(parsed.session_keys.dismiss, "Escape");
+    }
+
+    #[test]
+    fn sanitized_fills_blank_session_key_fields_with_defaults() {
+        let settings = UserSetting {
+            session_keys: super::SessionKeys {
+                confirm: "  ".to_string(),
+                dismiss: String::new(),
+                ..super::SessionKeys::default()
+            },
+            ..UserSetting::default()
+        }
+        .sanitized();
+
+        assert_eq!(settings.session_keys.confirm, "Enter");
+        assert_eq!(settings.session_keys.dismiss, "Escape");
+        assert_eq!(settings.session_keys.confirm_as_file, "Shift+Enter");
+    }
+
+    #[test]
+    fn session_keys_field_accessors_cover_all_actions() {
+        use super::SessionKeys;
+
+        let mut keys = SessionKeys::default();
+        for action in 0..8 {
+            assert!(!keys.field(action).is_empty());
+            keys.set_field(action, format!("K{action}"));
+        }
+        for action in 0..8 {
+            assert_eq!(keys.field(action), format!("K{action}"));
+        }
+        // 越界动作读写为空/忽略，不 panic
+        assert_eq!(keys.field(99), "");
+        keys.set_field(99, "ignored".to_string());
     }
 
     #[test]

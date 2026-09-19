@@ -16,9 +16,12 @@ use slint::{ComponentHandle, Model, VecModel};
 use tracing::{info, warn};
 
 use floatpaste_core::domain::clip_item::TagInfo;
-use floatpaste_core::domain::settings::{PasteTrigger, PickerPositionMode, ThemeMode, UserSetting};
+use floatpaste_core::domain::settings::{
+    PasteTrigger, PickerPositionMode, SessionKeys, ThemeMode, UserSetting,
+};
 use floatpaste_core::platform::windows::active_app::ActiveAppResolver;
 use floatpaste_core::platform::windows::picker_position::{current_cursor_point, work_area_from_point};
+use floatpaste_core::platform::windows::session_keyboard::parse_session_combo;
 use floatpaste_core::services::startup_service::StartupService;
 use floatpaste_core::services::tag_service::TagService;
 use floatpaste_core::theme::ResolvedTheme;
@@ -27,12 +30,24 @@ use floatpaste_core::theme;
 use crate::picker::App;
 use crate::theme_bridge::hex_color;
 use crate::{app_icon, theme_bridge, win32_ext};
-use crate::{AccentSwatch, PresetCard, SettingsWindow, TagRowData};
+use crate::{AccentSwatch, PresetCard, SessionKeyRow, SettingsWindow, TagRowData};
 
 const SAVE_DEBOUNCE: Duration = Duration::from_millis(800);
 const NOTICE_TIMEOUT: Duration = Duration::from_millis(1800);
 /// 分区滚动定位偏移（旧版 settingsScrollSpy SCROLL_OFFSET）
 const SCROLL_OFFSET: f32 = 80.0;
+
+/// 会话键行定义（序号 = SessionKeys 字段序号，顺序即界面行序）
+const SESSION_KEY_DEFS: [(&str, &str); 8] = [
+    ("上屏", "把选中条目粘贴到目标应用。"),
+    ("粘贴为文件路径", "把文件或图片的路径作为文本上屏。"),
+    ("编辑内容", "打开编辑窗口修改条目文本与标签。"),
+    ("收藏 / 取消收藏", "切换选中条目的收藏状态。"),
+    ("关闭 / 取消", "收起速贴面板或搜索窗口。"),
+    ("向上选择", "选中项上移一条，按住可连发。"),
+    ("向下选择", "选中项下移一条，按住可连发。"),
+    ("删除条目", "删除选中条目（仅搜索窗口，需二次确认）。"),
+];
 
 const STATUS_IDLE: i32 = 0;
 const STATUS_SAVING: i32 = 1;
@@ -157,6 +172,45 @@ pub fn wire(app: &App) {
             if let Some(win) = app_cb.settings.upgrade() {
                 win.set_picker_digit_enabled(enabled);
                 schedule_save(&app_cb);
+            }
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_session_key_captured(move |action, value| {
+            let Some(win) = app_cb.settings.upgrade() else {
+                return;
+            };
+            let action = action.max(0) as usize;
+            if action >= SESSION_KEY_DEFS.len() {
+                return;
+            }
+            match normalize_session_captured(&value) {
+                Some(combo) => {
+                    // 数字 1-9 直达保留：数字开关开启时拒绝裸数字键位
+                    if win.get_picker_digit_enabled() && is_bare_digit(&combo) {
+                        update_session_row(
+                            &win,
+                            action,
+                            None,
+                            Some("数字 1-9 保留给直达上屏：可先关闭「数字键 1-9 直达」，或改用带修饰键的组合。"),
+                        );
+                        return;
+                    }
+                    update_session_row(&win, action, Some(&combo), Some(""));
+                    schedule_save(&app_cb);
+                }
+                None => {
+                    update_session_row(&win, action, None, Some("无法识别的键位，请重新录制。"));
+                }
+            }
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_session_key_cancelled(move |action| {
+            if let Some(win) = app_cb.settings.upgrade() {
+                update_session_row(&win, action.max(0) as usize, None, Some(""));
             }
         });
     }
@@ -463,6 +517,10 @@ fn hydrate(app: &App, win: &SettingsWindow) {
     win.set_shortcut_notice_text("".into());
     win.set_search_shortcut_hint("".into());
     win.set_picker_digit_enabled(settings.picker_digit_shortcuts_enabled);
+    win.set_session_key_rows(slint::ModelRc::new(VecModel::from(session_key_rows(
+        &settings,
+    ))));
+    win.set_session_recorder_id(0);
     win.set_history_limit_text(settings.history_limit.to_string().into());
     win.set_picker_limit_text(settings.picker_record_limit.to_string().into());
     win.set_position_mode(match settings.picker_position_mode {
@@ -550,6 +608,7 @@ fn current_draft(win: &SettingsWindow) -> UserSetting {
         search_shortcut: win.get_search_shortcut().to_string(),
         search_shortcut_enabled: win.get_search_shortcut_enabled(),
         picker_digit_shortcuts_enabled: win.get_picker_digit_enabled(),
+        session_keys: session_keys_from_rows(win),
         theme_preset: theme::THEME_PRESET_IDS
             .get(win.get_theme_preset().max(0) as usize)
             .map(|id| id.to_string())
@@ -579,6 +638,87 @@ fn shortcut_conflict(win: &SettingsWindow) -> bool {
             == normalize_shortcut_value(&win.get_search_shortcut())
 }
 
+/// 会话键冲突：行间键位重复，或与全局快捷键相同。返回首个冲突的提示
+/// 文案（无冲突为 None）。归一口径与全局冲突一致（忽略大小写与修饰键
+/// 顺序）
+fn session_conflict_reason(win: &SettingsWindow) -> Option<String> {
+    let keys = session_keys_from_rows(win);
+    let entries: Vec<(&str, String)> = SESSION_KEY_DEFS
+        .iter()
+        .enumerate()
+        .map(|(action, (title, _))| (*title, normalize_shortcut_value(keys.field(action))))
+        .collect();
+
+    for i in 0..entries.len() {
+        for j in (i + 1)..entries.len() {
+            if !entries[i].1.is_empty() && entries[i].1 == entries[j].1 {
+                return Some(format!("「{}」与「{}」键位相同。", entries[i].0, entries[j].0));
+            }
+        }
+    }
+    let main = normalize_shortcut_value(&win.get_shortcut());
+    let search_enabled = win.get_search_shortcut_enabled();
+    let search = normalize_shortcut_value(&win.get_search_shortcut());
+    for (title, normalized) in &entries {
+        if !main.is_empty() && *normalized == main {
+            return Some(format!("「{title}」与速贴唤起快捷键相同。"));
+        }
+        if search_enabled && !search.is_empty() && *normalized == search {
+            return Some(format!("「{title}」与搜索窗口快捷键相同。"));
+        }
+    }
+    None
+}
+
+/// 会话键行模型（按当前设置构建，打开设置窗口时整体水合）
+fn session_key_rows(settings: &UserSetting) -> Vec<SessionKeyRow> {
+    SESSION_KEY_DEFS
+        .iter()
+        .enumerate()
+        .map(|(action, (title, description))| {
+            let value = settings.session_keys.field(action);
+            SessionKeyRow {
+                action: action as i32,
+                title: (*title).into(),
+                description: (*description).into(),
+                value: value.into(),
+                parts: slint::ModelRc::new(VecModel::from(parts_vec(value))),
+                notice: "".into(),
+            }
+        })
+        .collect()
+}
+
+/// 界面行 → SessionKeys（保存草稿回读）
+fn session_keys_from_rows(win: &SettingsWindow) -> SessionKeys {
+    let mut keys = SessionKeys::default();
+    let model = win.get_session_key_rows();
+    for index in 0..model.row_count() {
+        if let Some(row) = model.row_data(index) {
+            keys.set_field(row.action.max(0) as usize, row.value.to_string());
+        }
+    }
+    keys
+}
+
+/// 更新会话键行：value 传 None 表示只改提示（录制取消/拒绝时保留原值）
+fn update_session_row(win: &SettingsWindow, action: usize, value: Option<&str>, notice: Option<&str>) {
+    let model = win.get_session_key_rows();
+    if action >= model.row_count() {
+        return;
+    }
+    if let Some(mut row) = model.row_data(action) {
+        if let Some(value) = value {
+            row.value = value.into();
+            row.parts = slint::ModelRc::new(VecModel::from(parts_vec(value)));
+        }
+        if let Some(notice) = notice {
+            row.notice = notice.into();
+        }
+        model.set_row_data(action, row);
+    }
+}
+
 /// 编辑后重置防抖定时器；冲突时拦截保存并置头部提示
 fn schedule_save(app: &App) {
     let Some(win) = app.settings.upgrade() else {
@@ -589,6 +729,11 @@ fn schedule_save(app: &App) {
         win.set_status_kind(STATUS_BLOCKED);
         win.set_status_reasons("快捷键冲突".into());
         win.set_search_shortcut_hint("与主快捷键相同，请换一组组合；冲突时不会保存。".into());
+        return;
+    }
+    if let Some(reason) = session_conflict_reason(&win) {
+        win.set_status_kind(STATUS_BLOCKED);
+        win.set_status_reasons(reason.into());
         return;
     }
     win.set_search_shortcut_hint("".into());
@@ -612,7 +757,7 @@ fn perform_save(app: &App) {
         return;
     };
     stop_save_timer();
-    if shortcut_conflict(&win) {
+    if shortcut_conflict(&win) || session_conflict_reason(&win).is_some() {
         return;
     }
     let payload = current_draft(&win);
@@ -641,7 +786,7 @@ fn flush_pending_save(app: &App) {
     let Some(win) = app.settings.upgrade() else {
         return;
     };
-    if shortcut_conflict(&win) {
+    if shortcut_conflict(&win) || session_conflict_reason(&win).is_some() {
         return;
     }
     let payload = current_draft(&win);
@@ -944,12 +1089,42 @@ fn clamp_number_text(text: &str, min: u32, max: u32, fallback: u32) -> String {
     value.to_string()
 }
 
-fn set_parts(win: &SettingsWindow, search: bool, value: &str) {
-    let parts: Vec<slint::SharedString> = if value.is_empty() {
+/// 会话键录制结果归一化：单字母主键转大写（与全局快捷键录制一致）；
+/// 组合本身不可解析时返回 None（录制端正常不会产生）
+fn normalize_session_captured(value: &str) -> Option<String> {
+    parse_session_combo(value)?;
+    let mut parts: Vec<String> = value.split('+').map(str::to_string).collect();
+    if let Some(last) = parts.last_mut() {
+        let chars: Vec<char> = last.chars().collect();
+        if chars.len() == 1 && chars[0].is_ascii_alphabetic() {
+            *last = chars[0].to_ascii_uppercase().to_string();
+        }
+    }
+    Some(parts.join("+"))
+}
+
+/// 裸数字键位（无修饰键的 0-9）：数字直达开关开启时保留给 1-9 直达
+fn is_bare_digit(combo: &str) -> bool {
+    parse_session_combo(combo).is_some_and(|parsed| {
+        !parsed.ctrl
+            && !parsed.alt
+            && !parsed.shift
+            && !parsed.win
+            && parsed.key.chars().all(|char| char.is_ascii_digit())
+    })
+}
+
+/// 键位串 → 键帽展示拆分（"Ctrl+Enter" → ["Ctrl","Enter"]）
+fn parts_vec(value: &str) -> Vec<slint::SharedString> {
+    if value.is_empty() {
         Vec::new()
     } else {
         value.split('+').map(slint::SharedString::from).collect()
-    };
+    }
+}
+
+fn set_parts(win: &SettingsWindow, search: bool, value: &str) {
+    let parts = parts_vec(value);
     if search {
         win.set_search_shortcut_parts(slint::ModelRc::new(VecModel::from(parts)));
     } else {

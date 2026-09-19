@@ -15,7 +15,7 @@ use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use tracing::{info, warn};
 
 use floatpaste_core::domain::clip_item::{ClipItemSummary, PasteOption};
-use floatpaste_core::domain::settings::PasteTrigger;
+use floatpaste_core::domain::settings::{PasteTrigger, UserSetting};
 use floatpaste_core::platform::windows::active_app::ActiveAppResolver;
 use floatpaste_core::platform::windows::window_control::{self, GestureMode, ResizeDirection};
 use floatpaste_core::platform::windows::{mouse_monitor, session_keyboard};
@@ -228,7 +228,7 @@ pub fn activate(app: &App) {
     // 键鼠会话必须最后装配：LL 鼠标钩子回调由安装线程（事件循环）
     // 泵出，列表查询与逐行裁排若在安装之后运行，会阻塞回调泵送、
     // 造成全系统光标短暂冻结
-    begin_input_session(app, hwnd, settings.picker_digit_shortcuts_enabled);
+    begin_input_session(app, hwnd, &settings);
 }
 
 /// 隐藏（对齐 WindowCoordinator::hide_picker + hide_picker_and_restore_target）
@@ -404,11 +404,11 @@ pub fn restore_after_editor(app: &App, target: TargetSession) {
         &tokens,
     );
     // 键鼠会话最后装配（理由同 activate：LL 钩子回调泵送不能被阻塞）
-    begin_input_session(app, hwnd, settings.picker_digit_shortcuts_enabled);
+    begin_input_session(app, hwnd, &settings);
     info!("从 Editor 返回 Picker");
 }
 
-fn begin_input_session(app: &App, hwnd: isize, digit_shortcuts_enabled: bool) {
+fn begin_input_session(app: &App, hwnd: isize, settings: &UserSetting) {
     let app_for_mouse = app.clone();
     // 外击关闭不还原前台：用户点击的位置已取得焦点，此时再把原目标
     // 拉回前台会被前台所有权检查拒绝，Windows 拒绝时闪烁目标窗口的
@@ -425,7 +425,7 @@ fn begin_input_session(app: &App, hwnd: isize, digit_shortcuts_enabled: bool) {
 
     let app_for_keys = app.clone();
     session_keyboard::begin_session(
-        digit_shortcuts_enabled,
+        session_keyboard::SessionKeyConfig::from_settings(settings),
         Box::new(move |action| {
             let app = app_for_keys.clone();
             let _ = slint::invoke_from_event_loop(move || {

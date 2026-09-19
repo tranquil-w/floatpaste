@@ -24,12 +24,13 @@ use tracing::{info, warn};
 use floatpaste_core::domain::clip_item::{
     ClipItemSummary, ClipType, PasteOption, SearchFilters, SearchQuery, SearchResult, SearchSort,
 };
-use floatpaste_core::domain::settings::PasteTrigger;
+use floatpaste_core::domain::settings::{PasteTrigger, UserSetting};
 use floatpaste_core::domain::error::AppError;
 use floatpaste_core::platform::windows::active_app::ActiveAppResolver;
 use floatpaste_core::platform::windows::picker_position::{
     current_cursor_point, work_area_from_point,
 };
+use floatpaste_core::platform::windows::session_keyboard::parse_session_combo;
 use floatpaste_core::platform::windows::window_control;
 use floatpaste_core::services::clip_display::build_meta;
 use floatpaste_core::services::clip_service::ClipService;
@@ -1251,6 +1252,85 @@ pub fn edit_requested(app: &App) {
 /* ───────────────── 回调装配 ───────────────── */
 
 /// 搜索窗口回调绑定（main 装配期调用一次）
+/// Slint 事件文本 → 规范键名（与设置页录制端同名）。特殊键取 Slint 的
+/// 控制字符/私有区码位（i-slint-common key_codes 表）；非单字符文本
+/// （IME 组合串等）不参与会话匹配
+fn event_key_name(text: &str) -> Option<String> {
+    let mut chars = text.chars();
+    let ch = chars.next()?;
+    if chars.next().is_some() {
+        return None;
+    }
+    Some(match ch {
+        '\u{0008}' => "Backspace".to_string(),
+        '\u{0009}' => "Tab".to_string(),
+        '\u{000a}' => "Enter".to_string(),
+        '\u{001b}' => "Escape".to_string(),
+        '\u{007f}' => "Delete".to_string(),
+        '\u{0020}' => "Space".to_string(),
+        '\u{F700}' => "Up".to_string(),
+        '\u{F701}' => "Down".to_string(),
+        '\u{F702}' => "Left".to_string(),
+        '\u{F703}' => "Right".to_string(),
+        '\u{F727}' => "Insert".to_string(),
+        '\u{F729}' => "Home".to_string(),
+        '\u{F72B}' => "End".to_string(),
+        '\u{F72C}' => "PageUp".to_string(),
+        '\u{F72D}' => "PageDown".to_string(),
+        ',' => "Comma".to_string(),
+        '.' => "Period".to_string(),
+        '/' => "Slash".to_string(),
+        '`' => "`".to_string(),
+        c if c.is_ascii_alphanumeric() => c.to_ascii_uppercase().to_string(),
+        _ => return None,
+    })
+}
+
+/// 会话键解析（窗口 capture 阶段调用）：按当前设置的键位精确匹配
+/// （键名忽略大小写、修饰键集合一致），返回动作码：
+/// 0=无 1=向上 2=向下 3=上屏 4=粘贴为文件路径 5=编辑 6=收藏 7=关闭 8=删除
+fn resolve_session_action(
+    settings: &UserSetting,
+    text: &str,
+    ctrl: bool,
+    alt: bool,
+    shift: bool,
+    win: bool,
+) -> i32 {
+    let Some(name) = event_key_name(text) else {
+        return 0;
+    };
+    let keys = &settings.session_keys;
+    let matches = |combo_text: &str| {
+        parse_session_combo(combo_text).is_some_and(|combo| {
+            combo.key.eq_ignore_ascii_case(&name)
+                && combo.ctrl == ctrl
+                && combo.alt == alt
+                && combo.shift == shift
+                && combo.win == win
+        })
+    };
+    if matches(&keys.navigate_up) {
+        1
+    } else if matches(&keys.navigate_down) {
+        2
+    } else if matches(&keys.confirm) {
+        3
+    } else if matches(&keys.confirm_as_file) {
+        4
+    } else if matches(&keys.open_editor) {
+        5
+    } else if matches(&keys.toggle_favorite) {
+        6
+    } else if matches(&keys.dismiss) {
+        7
+    } else if matches(&keys.delete_entry) {
+        8
+    } else {
+        0
+    }
+}
+
 pub fn wire(app: &App) {
     let Some(win) = app.search.upgrade() else {
         return;
@@ -1382,7 +1462,15 @@ pub fn wire(app: &App) {
         });
     }
 
-    // 键盘会话（capture 阶段拦截）
+    // 键盘会话（capture 阶段拦截）：键位判定统一在 Rust 侧按当前设置
+    // 解析（自定义会话键），窗口只按返回的动作码分发
+    {
+        let app_cb = app.clone();
+        win.on_resolve_session_action(move |text, ctrl, alt, shift, meta| {
+            let settings = app_cb.state.current_settings();
+            resolve_session_action(&settings, &text, ctrl, alt, shift, meta)
+        });
+    }
     {
         let app_cb = app.clone();
         win.on_key_navigate_up(move || {
@@ -1554,5 +1642,45 @@ mod tests {
     fn preview_newlines_flatten_to_spaces() {
         assert_eq!(flatten_preview_newlines("a\r\nb\nc"), "a b c");
         assert_eq!(flatten_preview_newlines("无换行"), "无换行");
+    }
+
+    #[test]
+    fn session_action_resolves_default_combinations() {
+        let settings = UserSetting::default();
+        // Slint 事件文本：Return=\u{a}、Escape=\u{1b}、UpArrow=\u{F700}
+        assert_eq!(resolve_session_action(&settings, "\u{a}", false, false, false, false), 3);
+        assert_eq!(resolve_session_action(&settings, "\u{a}", false, false, true, false), 4);
+        assert_eq!(resolve_session_action(&settings, "\u{a}", true, false, false, false), 5);
+        assert_eq!(resolve_session_action(&settings, "\u{1b}", false, false, false, false), 7);
+        assert_eq!(resolve_session_action(&settings, "\u{F700}", false, false, false, false), 1);
+        assert_eq!(resolve_session_action(&settings, "\u{F701}", false, false, false, false), 2);
+        assert_eq!(resolve_session_action(&settings, "\u{20}", true, false, false, false), 6);
+        assert_eq!(resolve_session_action(&settings, "\u{7f}", false, false, false, false), 8);
+        // 未配置组合放行（0），修饰键集合不一致不命中
+        assert_eq!(resolve_session_action(&settings, "\u{20}", false, false, false, false), 0);
+        assert_eq!(resolve_session_action(&settings, "x", false, false, false, false), 0);
+    }
+
+    #[test]
+    fn session_action_follows_customized_keys_case_insensitively() {
+        let settings = UserSetting {
+            session_keys: floatpaste_core::domain::settings::SessionKeys {
+                confirm: "Ctrl+K".to_string(),
+                dismiss: "Q".to_string(),
+                ..floatpaste_core::domain::settings::SessionKeys::default()
+            },
+            ..UserSetting::default()
+        };
+        assert_eq!(resolve_session_action(&settings, "k", true, false, false, false), 3);
+        assert_eq!(resolve_session_action(&settings, "q", false, false, false, false), 7);
+        // 旧默认键位不再命中
+        assert_eq!(resolve_session_action(&settings, "\u{1b}", false, false, false, false), 0);
+    }
+
+    #[test]
+    fn event_key_name_rejects_multi_char_text() {
+        assert_eq!(event_key_name("ab"), None);
+        assert_eq!(event_key_name("剪"), None);
+        assert_eq!(event_key_name("\u{a}"), Some("Enter".to_string()));
     }
 }
