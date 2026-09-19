@@ -53,6 +53,8 @@ pub struct SharedState {
     /// 最近一次全局快捷键注册失败的 (id, Win32 错误码) 列表
     /// （id：1=主快捷键 2=搜索 3=Win+V 接管），供设置页展示用户可见反馈
     hotkey_failures: Mutex<Vec<(u32, u32)>>,
+    /// 是否已发过「管理员目标」托盘通知（每进程只发一次，不重复打扰）
+    admin_target_notified: AtomicBool,
 }
 
 impl SharedState {
@@ -72,6 +74,7 @@ impl SharedState {
             selected_id: Mutex::new(None),
             favorite_pending: AtomicBool::new(false),
             hotkey_failures: Mutex::new(Vec::new()),
+            admin_target_notified: AtomicBool::new(false),
         }
     }
 
@@ -216,5 +219,10 @@ impl SharedState {
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .clone()
+    }
+
+    /// 首次调用返回 true 并置为已通知（托盘气泡的每进程一次节流）
+    pub fn mark_admin_target_notified(&self) -> bool {
+        !self.admin_target_notified.swap(true, Ordering::SeqCst)
     }
 }

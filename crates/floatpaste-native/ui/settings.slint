@@ -862,6 +862,12 @@ export component SettingsWindow inherits Window {
     in property <string> theme-accent-id: "default";
     in-out property <bool> launch-on-startup;
     in-out property <bool> silent-on-startup;
+    // 以管理员身份运行：process-elevated = 当前进程实际提权状态（运行时
+    // 注入，不入设置）；always-run-elevated 决定自启任务是否带提权
+    in-out property <bool> process-elevated: false;
+    in-out property <bool> always-run-elevated: false;
+    // 任务计划操作结果提示（空=正常）
+    in-out property <string> elevated-status-text;
     in-out property <bool> restore-clipboard: true;
     in-out property <bool> pause-monitoring;
     in-out property <string> excluded-apps-text;
@@ -926,6 +932,9 @@ export component SettingsWindow inherits Window {
     callback accent-selected(string);
     callback launch-on-startup-toggled(bool);
     callback silent-on-startup-toggled(bool);
+    callback always-run-elevated-toggled(bool);
+    // 以管理员身份重启（UAC 确认后立即重启，成功即退出当前进程）
+    callback restart-as-admin();
     callback restore-clipboard-toggled(bool);
     callback pause-monitoring-toggled(bool);
     callback excluded-apps-edited(string);
@@ -1741,6 +1750,63 @@ export component SettingsWindow inherits Window {
                                         description: "登录系统后自动启动 FloatPaste。";
                                         checked: root.launch-on-startup;
                                         toggled(checked) => { root.launch-on-startup-toggled(checked); }
+                                    }
+                                    RowDivider { }
+                                    // 以管理员身份运行（对齐 PowerToys：提权是
+                                    // 一次性动作，「始终」决定自启是否带权限）
+                                    SettingRow {
+                                        title: "以管理员身份运行";
+                                        description: root.process-elevated
+                                            ? "当前已以管理员身份运行，向管理员窗口的自动粘贴可正常生效。"
+                                            : "向管理员窗口的自动粘贴需要管理员权限；确认 UAC 后将立即以管理员身份重启。";
+                                        Rectangle {
+                                            width: elev-restart-btn.width;
+                                            elev-restart-btn := Rectangle {
+                                                x: 0;
+                                                y: (parent.height - self.height) / 2;
+                                                width: elev-restart-btn-text.preferred-width + 24px;
+                                                height: 30px;
+                                                border-radius: 8px;
+                                                border-width: 1px;
+                                                border-color: Theme.border-default;
+                                                background: Theme.canvas-default;
+                                                opacity: root.process-elevated ? 0.55 : 1.0;
+                                                TouchArea {
+                                                    enabled: !root.process-elevated;
+                                                    mouse-cursor: root.process-elevated
+                                                        ? MouseCursor.default : MouseCursor.pointer;
+                                                    clicked() => { root.restart-as-admin(); }
+                                                }
+                                                elev-restart-btn-text := Text {
+                                                    text: root.process-elevated
+                                                        ? "当前已以管理员运行"
+                                                        : "以管理员身份重启";
+                                                    color: root.process-elevated
+                                                        ? Theme.fg-subtle : Theme.fg-default;
+                                                    font-size: Metrics.text-xs;
+                                                    vertical-alignment: center;
+                                                    horizontal-alignment: center;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    RowDivider { }
+                                    ToggleRow {
+                                        title: "始终以管理员身份运行";
+                                        description: "开机自启时也将以管理员权限运行。仅当以管理员身份运行时才能更改此设置。";
+                                        checked: root.always-run-elevated;
+                                        disabled: !root.process-elevated;
+                                        nested: true;
+                                        toggled(checked) => { root.always-run-elevated-toggled(checked); }
+                                    }
+                                    if (root.elevated-status-text != ""): VerticalLayout {
+                                        RowDivider { }
+                                        Text {
+                                            text: root.elevated-status-text;
+                                            color: Theme.danger-fg;
+                                            font-size: Metrics.text-xs;
+                                            wrap: word-wrap;
+                                        }
                                     }
                                     RowDivider { }
                                     ToggleRow {

@@ -8,6 +8,7 @@
 //! - 图标按 DPI 取档（app_icon::tray_icon_hicon，同旧壳 tray_icon_image）；
 //! - 监听 TaskbarCreated 广播，explorer 重启后自动重挂图标。
 
+use std::sync::atomic::{AtomicIsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use tracing::warn;
@@ -15,7 +16,8 @@ use windows::core::PCWSTR;
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Shell::{
-    Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW,
+    Shell_NotifyIconW, NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY,
+    NIIF_WARNING, NOTIFYICONDATAW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DispatchMessageW, DestroyMenu,
@@ -38,6 +40,8 @@ const MENU_QUIT: usize = 5;
 
 static TRAY_APP: OnceLock<Mutex<Option<App>>> = OnceLock::new();
 static TASKBAR_CREATED: OnceLock<u32> = OnceLock::new();
+/// 托盘图标所在隐藏窗口句柄（气泡通知经它 NIM_MODIFY）
+static TRAY_HWND: AtomicIsize = AtomicIsize::new(0);
 
 /// 启动托盘线程（幂等：重复调用忽略）。线程持有 App 副本，菜单动作经
 /// `slint::invoke_from_event_loop` 回事件循环执行。
@@ -120,6 +124,7 @@ unsafe fn add_icon(hwnd: HWND) {
     if !Shell_NotifyIconW(NIM_ADD, &mut nid).as_bool() {
         warn!("添加托盘图标失败");
     }
+    TRAY_HWND.store(hwnd.0 as isize, Ordering::SeqCst);
 }
 
 unsafe fn remove_icon(hwnd: HWND) {
@@ -130,6 +135,48 @@ unsafe fn remove_icon(hwnd: HWND) {
         ..Default::default()
     };
     let _ = Shell_NotifyIconW(NIM_DELETE, &mut nid);
+    TRAY_HWND.store(0, Ordering::SeqCst);
+}
+
+/// 管理员目标提示气泡文案（szInfo 定长 128 UTF-16，控制在限量内）
+const ADMIN_TARGET_INFO: &str =
+    "目标窗口以管理员权限运行，FloatPaste 无法向其自动粘贴。内容已在剪贴板，可手动 Ctrl+V；或在设置中开启「以管理员身份运行」。";
+
+/// 托盘气泡一次性提示（管理员目标无法自动回贴时调用；不占用窗口 UI）。
+/// Win10+ 转系统通知，无弹窗打扰。
+pub fn notify_admin_target() {
+    let hwnd = TRAY_HWND.load(std::sync::atomic::Ordering::SeqCst);
+    if hwnd == 0 {
+        return;
+    }
+    let mut nid = NOTIFYICONDATAW {
+        cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
+        hWnd: HWND(hwnd as *mut _),
+        uID: 1,
+        uFlags: NIF_INFO,
+        szInfo: {
+            // szInfo 是定长 256 UTF-16 数组，须以 NUL 结尾
+            let mut info = [0u16; 256];
+            for (slot, unit) in info.iter_mut().zip(ADMIN_TARGET_INFO.encode_utf16()) {
+                *slot = unit;
+            }
+            info
+        },
+        szInfoTitle: {
+            let mut title = [0u16; 64];
+            for (slot, unit) in title.iter_mut().zip("FloatPaste".encode_utf16()) {
+                *slot = unit;
+            }
+            title
+        },
+        dwInfoFlags: NIIF_WARNING,
+        ..Default::default()
+    };
+    unsafe {
+        if !Shell_NotifyIconW(NIM_MODIFY, &mut nid).as_bool() {
+            warn!("托盘气泡通知失败");
+        }
+    }
 }
 
 unsafe fn show_menu(hwnd: HWND) {

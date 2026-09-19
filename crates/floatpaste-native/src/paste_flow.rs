@@ -19,6 +19,7 @@ use arboard::Clipboard;
 use floatpaste_core::domain::clip_item::PasteOption;
 use floatpaste_core::domain::error::AppError;
 use floatpaste_core::platform::windows::active_app::ActiveAppResolver;
+use floatpaste_core::platform::windows::elevation;
 use floatpaste_core::platform::windows::{mouse_monitor, session_keyboard};
 use floatpaste_core::services::paste_support;
 
@@ -28,19 +29,39 @@ use crate::search;
 const RESTORE_DELAY: Duration = Duration::from_millis(90);
 const INJECT_DELAY: Duration = Duration::from_millis(60);
 
+/// 回贴目标是否需要提权才能送达：目标窗口以管理员运行且当前进程未提权
+/// （UIPI 会把未提权进程注入的按键对提权窗口静默丢弃，自动回贴必然无效）
+pub fn paste_target_requires_elevation(target_window_hwnd: Option<isize>) -> bool {
+    let Some(target_hwnd) = target_window_hwnd else {
+        return false;
+    };
+    !elevation::is_current_process_elevated()
+        && elevation::is_window_process_elevated(target_hwnd)
+}
+
+/// 管理员目标提示节流：托盘气泡每进程只发一次，不重复打扰
+pub fn notify_admin_target_once(app: &App) {
+    if app.state.mark_admin_target_notified() {
+        crate::tray::notify_admin_target();
+    }
+}
+
 pub fn paste_item(app: &App, id: &str, option: PasteOption) -> Result<(), AppError> {
     let detail = app.core().repository.get_item_detail(id)?;
+
+    // 管理员目标：照常写入剪贴板并还原目标焦点（用户可手动 Ctrl+V），
+    // 仅跳过必然无效的按键注入，经托盘气泡一次性说明
+    let admin_target = option.paste_to_target
+        && paste_target_requires_elevation(app.state.picker_session().target_window_hwnd);
+    if admin_target {
+        notify_admin_target_once(app);
+    }
+
     let previous_clipboard = paste_support::capture_snapshot_if_needed(&option)?;
     let mut clipboard = Clipboard::new().map_err(|error| AppError::Clipboard(error.to_string()))?;
 
     // 剪贴板属主：优先速贴窗口（此刻仍存活/可见）
-    let owner_hwnd = {
-        let hwnd = app
-            .state
-            .picker_hwnd
-            .load(std::sync::atomic::Ordering::SeqCst);
-        (hwnd != 0).then_some(hwnd)
-    };
+    let owner_hwnd = picker_owner_hwnd(app);
 
     paste_support::write_item_to_clipboard(
         app.core(),
@@ -94,13 +115,19 @@ pub fn paste_item(app: &App, id: &str, option: PasteOption) -> Result<(), AppErr
                             search::resume_input(&app_for_resume);
                         });
                     }
-                    thread::sleep(INJECT_DELAY);
-                    if paste_support::trigger_ctrl_v() {
-                        (true, format!("已将{clip_type_label}写入系统剪贴板，并回贴到目标窗口。"))
-                    } else {
+                    if admin_target {
                         (false, format!(
-                            "已将{clip_type_label}写入系统剪贴板，但系统按键注入失败。你仍可手动执行 Ctrl+V。"
+                            "已将{clip_type_label}写入系统剪贴板；目标窗口以管理员权限运行，无法自动粘贴。"
                         ))
+                    } else {
+                        thread::sleep(INJECT_DELAY);
+                        if paste_support::trigger_ctrl_v() {
+                            (true, format!("已将{clip_type_label}写入系统剪贴板，并回贴到目标窗口。"))
+                        } else {
+                            (false, format!(
+                                "已将{clip_type_label}写入系统剪贴板，但系统按键注入失败。你仍可手动执行 Ctrl+V。"
+                            ))
+                        }
                     }
                 } else {
                     (false, format!(
@@ -126,4 +153,12 @@ pub fn paste_item(app: &App, id: &str, option: PasteOption) -> Result<(), AppErr
     });
 
     Ok(())
+}
+
+fn picker_owner_hwnd(app: &App) -> Option<isize> {
+    let hwnd = app
+        .state
+        .picker_hwnd
+        .load(std::sync::atomic::Ordering::SeqCst);
+    (hwnd != 0).then_some(hwnd)
 }

@@ -10,6 +10,6 @@ pub mod picker_position_service;
 pub mod privacy_service;
 pub mod retention_service;
 pub mod search_service;
-pub mod startup_service;
+
 pub mod tag_service;
 pub mod time_format;

@@ -28,11 +28,14 @@ use std::sync::Arc;
 
 use slint::ComponentHandle;
 
-use floatpaste_core::launch_mode::LaunchMode;
+use floatpaste_core::domain::error::AppError;
+use floatpaste_core::launch_mode::{self, LaunchMode};
 use floatpaste_core::platform::windows::clipboard_monitor::ClipboardMonitor;
+use floatpaste_core::platform::windows::elevated_task;
 use floatpaste_core::platform::windows::hotkey;
 use floatpaste_core::platform::windows::mouse_monitor;
 use floatpaste_core::platform::windows::session_keyboard;
+use floatpaste_core::platform::windows::single_instance;
 use floatpaste_core::platform::windows::winv_takeover;
 use floatpaste_core::theme;
 
@@ -50,13 +53,27 @@ fn main() {
     // （速贴/搜索/tooltip）显隐走停屏与 Win32 路径，不触发此行为
     std::env::set_var("SLINT_DESTROY_WINDOW_ON_HIDE", "1");
     let _log_guard = system::init_logging();
+
+    // 提权辅助路径（UAC 重入自身）：完成管理员自启任务的注册/卸载后以
+    // 退出码报告结果。必须先于单实例检查——旧实例正持锁等待本进程结果
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(exit_code) = run_elevated_sidecar(&args) {
+        std::process::exit(exit_code);
+    }
+
+    // 提权重启：新实例（经 UAC 启动）先等旧实例释放单实例互斥量再正常
+    // 接管；等待超时则照常继续，由单实例检查兜底（唤醒旧实例）
+    if args.iter().any(|arg| arg == launch_mode::ELEVATED_RELAUNCH_ARG) {
+        single_instance::wait_mutex_release(std::time::Duration::from_secs(5));
+    }
+
     let launch_mode = LaunchMode::from_env();
 
     // 单实例：已有实例时通过命名事件唤醒其速贴会话并退出当前进程
     let _single_instance =
-        match floatpaste_core::platform::windows::single_instance::acquire_or_focus_existing(
+        match single_instance::acquire_or_focus_existing(
             launch_mode,
-            || floatpaste_core::platform::windows::single_instance::signal_wake_event(),
+            || single_instance::signal_wake_event(),
         ) {
             Ok(Some(guard)) => Some(guard),
             Ok(None) => return,
@@ -239,6 +256,9 @@ fn main() {
     // ── 全局快捷键：主快捷键切换速贴，搜索快捷键切换搜索窗口；
     //    托盘常驻（设置窗口「打开设置」左键单击与右键菜单）──
     sync_global_hotkeys(&app);
+    // 启动时同步一次自启任务（Run 键存量迁移 + 任务缺失自愈；不弹 UAC，
+    // 缺提权任务时留待用户改动设置时确认）
+    settings::spawn_autostart_sync(&app, false);
     tray::start(app.clone());
 
     // 必须用 until_quit 变体：Slint 默认在最后一个窗口关闭/隐藏时退出事件循环，
@@ -253,6 +273,44 @@ fn main() {
     ClipboardMonitor::stop();
     hotkey::stop_hotkeys();
     state.core.begin_quit();
+}
+
+/// UAC 重入自身的辅助路径：按参数执行自启任务的注册/删除，退出码 0/1
+/// 报告结果（等待方 run_elevated_and_wait 读取）。返回 Some(码) 表示本次
+/// 进程就是辅助进程，不进 GUI。
+fn run_elevated_sidecar(args: &[String]) -> Option<i32> {
+    // 删除兜底：本地删除失败（任务 ACL 异常等）时经 UAC 重入删除
+    if args
+        .iter()
+        .any(|arg| arg == launch_mode::REMOVE_ELEVATED_AUTOSTART_ARG)
+    {
+        let result = elevated_task::uninstall();
+        if let Err(error) = &result {
+            tracing::error!("自启任务删除失败: {error}");
+        }
+        return Some(if result.is_ok() { 0 } else { 1 });
+    }
+    if !args
+        .iter()
+        .any(|arg| arg == launch_mode::SETUP_ELEVATED_AUTOSTART_ARG)
+    {
+        return None;
+    }
+    // 注册 HIGHEST 任务（需提权）；任务动作参数 = SETUP 标记之外的剩余
+    // 参数（当前只有 --silent，对应「开机时静默启动」设置）
+    let task_arguments = args
+        .iter()
+        .filter(|arg| arg.as_str() != launch_mode::SETUP_ELEVATED_AUTOSTART_ARG)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let result = std::env::current_exe()
+        .map_err(AppError::from)
+        .and_then(|exe| elevated_task::install(&exe.to_string_lossy(), &task_arguments, true));
+    if let Err(error) = &result {
+        tracing::error!("自启任务注册失败: {error}");
+    }
+    Some(if result.is_ok() { 0 } else { 1 })
 }
 
 /// 注册全局快捷键（主快捷键=速贴开关，搜索快捷键=搜索开关，Win+V 接管

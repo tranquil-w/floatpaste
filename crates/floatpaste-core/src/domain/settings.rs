@@ -235,6 +235,11 @@ pub struct UserSetting {
     pub shortcut: String,
     pub launch_on_startup: bool,
     pub silent_on_startup: bool,
+    /// 以管理员权限启动：经任务计划程序注册「登录时最高权限」自启任务
+    /// 接管开机自启（Run 键无法提权；manifest 会锁死所有启动路径）。
+    /// 注册/卸载需要 UAC 确认，由壳层经 runas 重入自身完成
+    #[serde(default)]
+    pub always_run_elevated: bool,
     pub history_limit: u32,
     pub picker_record_limit: u32,
     pub picker_position_mode: PickerPositionMode,
@@ -276,6 +281,7 @@ impl Default for UserSetting {
             shortcut: DEFAULT_MAIN_SHORTCUT.to_string(),
             launch_on_startup: false,
             silent_on_startup: false,
+            always_run_elevated: false,
             history_limit: 1_000,
             picker_record_limit: 50,
             picker_position_mode: PickerPositionMode::Mouse,
@@ -472,6 +478,24 @@ mod tests {
     fn shortcut_defaults_to_ctrl_q() {
         let settings = UserSetting::default();
         assert_eq!(settings.shortcut, "Ctrl+Q");
+    }
+
+    #[test]
+    fn always_run_elevated_defaults_to_false() {
+        assert!(!UserSetting::default().always_run_elevated);
+
+        // 两开关独立（对齐 PowerToys 行为逻辑）：管理员启动不牵动开机自启
+        let settings = UserSetting {
+            always_run_elevated: true,
+            launch_on_startup: true,
+            silent_on_startup: true,
+            ..UserSetting::default()
+        }
+        .sanitized();
+
+        assert!(settings.always_run_elevated);
+        assert!(settings.launch_on_startup);
+        assert!(settings.silent_on_startup);
     }
 
     #[test]

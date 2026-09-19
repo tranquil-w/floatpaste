@@ -13,6 +13,10 @@ use super::wide_string::to_wide;
 const RUN_KEY_PATH: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 const ERROR_FILE_NOT_FOUND_HRESULT: HRESULT = HRESULT(0x80070002u32 as i32);
 
+/// 本应用在 Run 键下的条目名。自启载体已统一为任务计划程序
+/// （`elevated_task`），此条目仅在迁移清理时移除
+pub const RUN_ENTRY_NAME: &str = "FloatPaste";
+
 pub fn sync_run_entry(entry_name: &str, value: Option<&str>) -> Result<(), AppError> {
     let mut key = HKEY::default();
     let path = to_wide(RUN_KEY_PATH);

@@ -66,6 +66,14 @@ floatpaste-native（唯一桌面壳，Slint 软件渲染）
 
 - 速贴负责"选择"，上屏细节统一在 `paste_flow.rs` / `services/paste_support.rs` 收口：写入剪贴板 → 恢复目标窗口 → `SendInput` 注入 Ctrl+V；可选恢复原剪贴板内容。
 - 图片条目 Enter 上屏图片数据，Shift+Enter 上屏文件路径；注入失败提示手动粘贴。
+- 管理员目标（UIPI）：目标窗口以管理员运行且本应用未提权时，按键注入会被静默丢弃。上屏前检测（`elevation.rs` TokenElevation），命中则照常写入剪贴板、还原目标焦点，仅跳过必然无效的注入，并经托盘气泡一次性说明（每进程一次，速贴/搜索窗口零 UI）。
+
+### 开机自启与提权启动
+
+- 提权是对一次性动作（对齐 PowerToys）：设置页「以管理员身份重启」（未提权时显示）→ UAC 确认 → 经 `runas` 重启（新实例等旧实例释放单实例互斥量后接管）；重启后即拥有管理员权限。
+- 任务计划程序是开机自启的唯一载体（`elevated_task.rs` COM ITaskService）：任务存在 = 「开机自启」开；任务 RunLevel（HIGHEST/LUA）= 「始终以管理员身份运行」开。该勾选仅提权运行时可更改；勾选后每次启动（含登录自启）均带管理员权限。
+- 任务 ACL 仅授予 SYSTEM/Administrators/任务所属用户：非提权进程可查询/删除/重建自己的任务，只有注册 HIGHEST 任务需要提权（进程已提权时直接注册；删除另有 `--remove-elevated-autostart` UAC 兜底）。Run 键自启已退役，启动时无条件清理存量条目。
+- 同步时机：启动时与设置保存后（后台线程串行执行，`query` 快照幂等跳过已达形态）；同步失败回滚对应开关并提示。触发器延迟 3s 等 Explorer 就绪；任务名带用户名避免多用户冲突。
 
 ## 数据模型
 
@@ -90,6 +98,7 @@ SQLite（`%APPDATA%\com.floatpaste\floatpaste.db`）+ FTS5，表：`clip_items`�
 - 会话键盘（LL 钩子）`session_keyboard.rs`；外击关闭（LL 鼠标钩子）`mouse_monitor.rs`
 - 窗口手势（拖拽/八方向拉伸）`window_control.rs`；前台与焦点 `active_app.rs`
 - 定位 `picker_position.rs` + `services/picker_position_service.rs`；热键 `hotkey.rs`；单实例 `single_instance.rs`；自启 `startup.rs`
+- 提权检测与 runas 启动 `elevation.rs`；管理员自启任务 `elevated_task.rs`（COM ITaskService）
 - 仓储 `repository/sqlite_repository.rs`；展示格式化 `services/clip_display.rs`；主题 `theme.rs`
 
 ## 已知实现取舍

@@ -1,6 +1,8 @@
 pub mod active_app;
 pub mod clipboard_error;
 pub mod clipboard_monitor;
+pub mod elevated_task;
+pub mod elevation;
 pub mod file_clipboard;
 pub mod hotkey;
 pub mod image_clipboard;

@@ -61,6 +61,27 @@ pub fn retry_focus_existing(try_once: impl Fn() -> bool) -> bool {
     false
 }
 
+/// 等待单实例互斥量被释放（提权重启场景：旧实例在 ShellExecuteW 成功
+/// 返回后立即退出，新实例须等它释放后再正常获取，避免被当作二次启动
+/// 唤醒旧实例而自杀）。超时返回 false（调用方照常继续，让正常单实例
+/// 逻辑兜底）。
+pub fn wait_mutex_release(timeout: Duration) -> bool {
+    let name = to_wide(SINGLE_INSTANCE_MUTEX_NAME);
+    let deadline = std::time::Instant::now() + timeout;
+    while std::time::Instant::now() < deadline {
+        let handle = unsafe { CreateMutexW(None, false, PCWSTR::from_raw(name.as_ptr())) };
+        if let Ok(handle) = handle {
+            let exists = unsafe { GetLastError() } == ERROR_ALREADY_EXISTS;
+            let _ = unsafe { CloseHandle(handle) };
+            if !exists {
+                return true;
+            }
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    false
+}
+
 /* ───────────────── 跨进程唤醒事件 ───────────────── */
 
 /// 二次启动时通过命名事件通知首个实例（首个实例据此打开速贴会话，

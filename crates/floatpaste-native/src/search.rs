@@ -39,6 +39,7 @@ use floatpaste_core::services::time_format::format_relative_time_or_unused;
 
 use crate::app_state::SearchSession;
 use crate::overlay;
+use crate::paste_flow;
 use crate::picker::{self, App};
 use crate::thumbnails;
 use crate::tooltip::{self, HoverHost};
@@ -937,6 +938,15 @@ fn paste_item(app: &App, item: &ClipItemSummary, as_file_requested: bool) {
 /// 调度快照恢复 → mark_used。窗口已隐藏，结果消息无处展示（对齐旧版）
 fn execute_paste(app: &App, id: &str, option: PasteOption) -> Result<(), AppError> {
     let detail = app.core().repository.get_item_detail(id)?;
+    let session = app.state.search_session();
+
+    // 管理员目标：照常写入剪贴板并还原目标焦点（用户可手动 Ctrl+V），
+    // 仅跳过必然无效的按键注入，经托盘气泡一次性说明
+    let admin_target = paste_flow::paste_target_requires_elevation(session.target_window_hwnd);
+    if admin_target {
+        paste_flow::notify_admin_target_once(app);
+    }
+
     let previous_clipboard = paste_support::capture_snapshot_if_needed(&option)?;
     let mut clipboard =
         arboard::Clipboard::new().map_err(|error| AppError::Clipboard(error.to_string()))?;
@@ -953,7 +963,6 @@ fn execute_paste(app: &App, id: &str, option: PasteOption) -> Result<(), AppErro
         owner_hwnd,
     )?;
 
-    let session = app.state.search_session();
     hide(app, true);
 
     let core = app.core().clone();
@@ -966,9 +975,11 @@ fn execute_paste(app: &App, id: &str, option: PasteOption) -> Result<(), AppErro
                     return;
                 }
                 if ActiveAppResolver::restore_foreground_window_with_focus(target_hwnd, None) {
-                    thread::sleep(INJECT_DELAY);
-                    if !paste_support::trigger_ctrl_v() {
-                        warn!("搜索回贴 Ctrl+V 注入失败");
+                    if !admin_target {
+                        thread::sleep(INJECT_DELAY);
+                        if !paste_support::trigger_ctrl_v() {
+                            warn!("搜索回贴 Ctrl+V 注入失败");
+                        }
                     }
                 } else {
                     warn!("搜索回贴恢复目标窗口失败");

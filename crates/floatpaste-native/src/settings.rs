@@ -10,19 +10,24 @@
 //! （防抖定时器仍在，随后台落盘，对齐旧壳 prevent_close+hide）。
 
 use std::cell::RefCell;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use slint::{ComponentHandle, Model, VecModel};
 use tracing::{info, warn};
 
 use floatpaste_core::domain::clip_item::TagInfo;
+use floatpaste_core::domain::error::AppError;
 use floatpaste_core::domain::settings::{
     PasteTrigger, PickerPositionMode, SessionKeys, ThemeMode, UserSetting,
 };
+use floatpaste_core::launch_mode;
 use floatpaste_core::platform::windows::active_app::ActiveAppResolver;
+use floatpaste_core::platform::windows::elevated_task;
+use floatpaste_core::platform::windows::elevation;
 use floatpaste_core::platform::windows::picker_position::{current_cursor_point, work_area_from_point};
 use floatpaste_core::platform::windows::session_keyboard::parse_session_combo;
-use floatpaste_core::services::startup_service::StartupService;
+use floatpaste_core::platform::windows::startup;
 use floatpaste_core::services::tag_service::TagService;
 use floatpaste_core::theme::ResolvedTheme;
 use floatpaste_core::theme;
@@ -339,6 +344,8 @@ pub fn wire(app: &App) {
     }
 
     // ── 行为 ──
+    // 自启相关开关只更新 UI 状态并入保存流；任务计划同步在保存后的
+    // spawn_autostart_sync 统一执行（失败异步回滚开关并提示）
     {
         let app_cb = app.clone();
         win.on_launch_on_startup_toggled(move |checked| {
@@ -350,6 +357,34 @@ pub fn wire(app: &App) {
                 }
                 schedule_save(&app_cb);
             }
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_always_run_elevated_toggled(move |checked| {
+            if let Some(win) = app_cb.settings.upgrade() {
+                win.set_always_run_elevated(checked);
+                win.set_elevated_status_text("".into());
+                schedule_save(&app_cb);
+            }
+        });
+    }
+    {
+        // 以管理员身份重启：经 UAC 重入自身（--elevated-relaunch，新实例
+        // 等旧实例释放单实例互斥量后接管）。确认成功即退出当前进程，
+        // main 收尾统一停钩子与监听；失败在状态行提示
+        let app_cb = app.clone();
+        win.on_restart_as_admin(move || {
+            if let Err(error) = elevation::relaunch_elevated(launch_mode::ELEVATED_RELAUNCH_ARG)
+            {
+                warn!("提权重启失败: {error}");
+                if let Some(win) = app_cb.settings.upgrade() {
+                    win.set_elevated_status_text(format!("提权重启失败：{error}").into());
+                }
+                return;
+            }
+            app_cb.state.core.begin_quit();
+            let _ = slint::quit_event_loop();
         });
     }
     {
@@ -604,6 +639,9 @@ fn hydrate(app: &App, win: &SettingsWindow) {
     win.set_theme_accent_id(settings.theme_accent.clone().into());
     win.set_launch_on_startup(settings.launch_on_startup);
     win.set_silent_on_startup(settings.silent_on_startup);
+    win.set_always_run_elevated(settings.always_run_elevated);
+    win.set_process_elevated(elevation::is_current_process_elevated());
+    win.set_elevated_status_text("".into());
     win.set_restore_clipboard(settings.restore_clipboard_after_paste);
     win.set_pause_monitoring(settings.pause_monitoring);
     win.set_excluded_apps_text(settings.excluded_apps.join("\n").into());
@@ -625,6 +663,7 @@ fn hydrate(app: &App, win: &SettingsWindow) {
 /// 从界面属性收集当前草稿（字段语义对齐旧版 toSettingsPayload）
 fn current_draft(win: &SettingsWindow) -> UserSetting {
     let launch_on_startup = win.get_launch_on_startup();
+    let always_run_elevated = win.get_always_run_elevated();
     let history = clamp_number_text(&win.get_history_limit_text(), 100, 10_000, 1_000)
         .parse::<u32>()
         .unwrap_or(1_000);
@@ -640,6 +679,7 @@ fn current_draft(win: &SettingsWindow) -> UserSetting {
         } else {
             false
         },
+        always_run_elevated,
         history_limit: history,
         picker_record_limit: picker_limit,
         picker_position_mode: match win.get_position_mode() {
@@ -871,9 +911,8 @@ fn flush_pending_save(app: &App) {
 pub fn apply_side_effects(app: &App) {
     let settings = app.state.current_settings();
     crate::sync_global_hotkeys(app);
-    if let Err(error) = StartupService::sync_from_settings(&settings) {
-        warn!("同步开机自启失败: {error}");
-    }
+    // 自启任务同步（后台线程，串行锁防并发重建；失败异步回滚开关）
+    spawn_autostart_sync(app, true);
     let resolved = theme::resolve_theme(settings.theme_mode.clone(), theme::system_prefers_dark());
     let tokens = theme::derive_tokens(&settings.theme_preset, &settings.theme_accent, resolved);
     theme_bridge::reapply_theme(app, &tokens);
@@ -1154,6 +1193,123 @@ enum Captured {
     Value(String),
     Invalid,
     Cancel,
+}
+
+/// 自启任务同步的串行锁：并发触发的同步在锁上排队，醒来后重读最新设置，
+/// 一次同步即收敛到最新期望
+static AUTOSTART_SYNC_LOCK: Mutex<()> = Mutex::new(());
+
+/// 自启任务同步失败时回滚哪个开关：Launch=开机自启，Elevated=管理员启动
+enum AutostartError {
+    Launch(String),
+    Elevated(String),
+}
+
+impl std::fmt::Display for AutostartError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Launch(message) | Self::Elevated(message) => formatter.write_str(message),
+        }
+    }
+}
+
+/// 在后台线程把自启任务同步到设置期望的状态（对齐 PowerToys 行为逻辑：
+/// 任务计划是开机自启的唯一载体，「开机自启」决定任务有无、「以管理员
+/// 权限启动」决定任务 RunLevel，两开关独立互不牵动）。失败时异步回滚
+/// 对应开关并提示。`allow_prompt`：缺 HIGHEST 任务时是否允许经 UAC 弹窗
+/// 补装（启动期传 false，只记录留待用户改动设置时同步）。
+pub fn spawn_autostart_sync(app: &App, allow_prompt: bool) {
+    let app_cb = app.clone();
+    std::thread::spawn(move || {
+        let _guard =
+            AUTOSTART_SYNC_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let settings = app_cb.state.current_settings();
+        if let Err(error) = sync_autostart_task(&settings, allow_prompt) {
+            warn!("自启任务同步失败: {error}");
+            let app = app_cb.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                let Some(win) = app.settings.upgrade() else {
+                    return;
+                };
+                match &error {
+                    AutostartError::Launch(message) => {
+                        win.set_launch_on_startup(false);
+                        win.set_elevated_status_text(
+                            format!("开机自启设置失败：{message}").into(),
+                        );
+                    }
+                    AutostartError::Elevated(message) => {
+                        win.set_always_run_elevated(false);
+                        win.set_elevated_status_text(format!("设置失败：{message}").into());
+                    }
+                }
+                // 回滚后的期望再落盘，保存后的联动会按回滚值收敛任务状态
+                schedule_save(&app);
+            });
+        }
+    });
+}
+
+/// 按设置同步自启任务（调用方须在后台线程；UAC 重入在此阻塞等待）
+fn sync_autostart_task(settings: &UserSetting, allow_prompt: bool) -> Result<(), AutostartError> {
+    // Run 键自启已退役（载体统一为任务计划）：无条件清理存量条目
+    let _ = startup::sync_run_entry(startup::RUN_ENTRY_NAME, None);
+
+    let expected_arguments = if settings.silent_on_startup {
+        "--silent".to_string()
+    } else {
+        String::new()
+    };
+    let snapshot =
+        elevated_task::query().map_err(|error| AutostartError::Launch(error.to_string()))?;
+
+    // 关自启 = 无任务（提权偏好保留，下次开启自启时按其生效）
+    if !settings.launch_on_startup {
+        if snapshot.present {
+            elevated_task::uninstall().map_err(|error| AutostartError::Launch(error.to_string()))?;
+        }
+        return Ok(());
+    }
+    // 普通自启 = LUA 任务；已是期望形态则不动（避免无谓重建）
+    if !settings.always_run_elevated {
+        if snapshot.present && !snapshot.highest && snapshot.arguments == expected_arguments {
+            return Ok(());
+        }
+        return install_autostart_task(&expected_arguments, false)
+            .map_err(|error| AutostartError::Launch(error.to_string()));
+    }
+    // 提权自启 = HIGHEST 任务
+    if snapshot.present && snapshot.highest && snapshot.arguments == expected_arguments {
+        return Ok(());
+    }
+    if elevation::is_current_process_elevated() {
+        return install_autostart_task(&expected_arguments, true)
+            .map_err(|error| AutostartError::Elevated(error.to_string()));
+    }
+    if !allow_prompt {
+        info!("管理员自启任务待确认（需 UAC），跳过启动期同步");
+        return Ok(());
+    }
+    let mut arguments = launch_mode::SETUP_ELEVATED_AUTOSTART_ARG.to_string();
+    if !expected_arguments.is_empty() {
+        arguments.push(' ');
+        arguments.push_str(&expected_arguments);
+    }
+    let exe = std::env::current_exe()
+        .map_err(|error| AutostartError::Elevated(error.to_string()))?;
+    let code = elevation::run_elevated_and_wait(&exe.to_string_lossy(), &arguments)
+        .map_err(|error| AutostartError::Elevated(error.to_string()))?;
+    if code != 0 {
+        return Err(AutostartError::Elevated(format!(
+            "任务计划操作未完成（退出码 {code}）"
+        )));
+    }
+    Ok(())
+}
+
+fn install_autostart_task(arguments: &str, highest: bool) -> Result<(), AppError> {
+    let exe = std::env::current_exe()?;
+    elevated_task::install(&exe.to_string_lossy(), arguments, highest)
 }
 
 fn normalize_captured(value: &str) -> Captured {
