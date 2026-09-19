@@ -57,6 +57,8 @@ impl SqliteRepository {
         let connection = Connection::open(path)?;
         // 残留进程或外部工具短暂持锁时等待重试，而不是立即 SQLITE_BUSY 失败
         connection.busy_timeout(Duration::from_secs(5))?;
+        // 单用户低频读写，默认 2MB 页缓存收紧到 1MB
+        connection.pragma_update(None, "cache_size", -1000)?;
         super::schema::initialize_database(&connection)?;
         Ok(Self {
             connection: Arc::new(Mutex::new(connection)),

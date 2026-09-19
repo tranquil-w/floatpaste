@@ -51,7 +51,7 @@ pub fn read_image_from_clipboard() -> Result<Option<ClipboardImageData>, AppErro
             if let Some(format) = preferred_image_clipboard_format(png_format)? {
                 let data = read_clipboard_bytes(format)?;
                 if format == png_format {
-                    return decode_png_bytes(&data).map(Some);
+                    return decode_png_bytes(data).map(Some);
                 }
                 return decode_dib_bytes(&data).map(Some);
             }
@@ -115,19 +115,34 @@ unsafe fn read_clipboard_bytes(format: u32) -> Result<Vec<u8>, AppError> {
     Ok(bytes)
 }
 
-fn decode_png_bytes(data: &[u8]) -> Result<ClipboardImageData, AppError> {
-    let decoder = image::codecs::png::PngDecoder::new(Cursor::new(data))
+/// 接收剪贴板字节所有权：PNG 透传时原始字节直接存入条目，不再拷贝一份
+/// （大截图 PNG 数 MB，录入峰值减半）
+fn decode_png_bytes(data: Vec<u8>) -> Result<ClipboardImageData, AppError> {
+    let decoder = image::codecs::png::PngDecoder::new(Cursor::new(&data))
         .map_err(|error| AppError::Message(format!("解码剪贴板 PNG 图片失败: {error}")))?;
-    decode_image(decoder, Some(data.to_vec()))
+    let (width, height, rgba) = decode_image_pixels(decoder)?;
+    Ok(ClipboardImageData {
+        rgba,
+        width,
+        height,
+        png_bytes: Some(data),
+    })
 }
 
 fn decode_dib_bytes(data: &[u8]) -> Result<ClipboardImageData, AppError> {
     let decoder = BmpDecoder::new_without_file_header(Cursor::new(data))
         .map_err(|error| AppError::Message(format!("解码剪贴板 DIB 图片失败: {error}")))?;
-    decode_image(decoder, None)
+    let (width, height, rgba) = decode_image_pixels(decoder)?;
+    Ok(ClipboardImageData {
+        rgba,
+        width,
+        height,
+        png_bytes: None,
+    })
 }
 
-fn decode_image<D>(mut decoder: D, png_bytes: Option<Vec<u8>>) -> Result<ClipboardImageData, AppError>
+/// 解码像素（消费 decoder，借用随之结束，调用方随后可回收原始字节）
+fn decode_image_pixels<D>(mut decoder: D) -> Result<(usize, usize, Vec<u8>), AppError>
 where
     D: ImageDecoder,
 {
@@ -139,14 +154,11 @@ where
     let image = DynamicImage::from_decoder(decoder)
         .map_err(|error| AppError::Message(format!("读取剪贴板图片像素失败: {error}")))?;
 
-    Ok(ClipboardImageData {
-        rgba: image.into_rgba8().into_raw(),
-        width: usize::try_from(width)
-            .map_err(|_| AppError::Message("剪贴板图片宽度超出支持范围".to_string()))?,
-        height: usize::try_from(height)
-            .map_err(|_| AppError::Message("剪贴板图片高度超出支持范围".to_string()))?,
-        png_bytes,
-    })
+    let width = usize::try_from(width)
+        .map_err(|_| AppError::Message("剪贴板图片宽度超出支持范围".to_string()))?;
+    let height = usize::try_from(height)
+        .map_err(|_| AppError::Message("剪贴板图片高度超出支持范围".to_string()))?;
+    Ok((width, height, image.into_rgba8().into_raw()))
 }
 
 pub fn write_image_to_clipboard(
@@ -289,7 +301,7 @@ mod tests {
         encoded[16..20].copy_from_slice(&oversized.to_be_bytes());
         encoded[20..24].copy_from_slice(&oversized.to_be_bytes());
 
-        assert!(decode_png_bytes(&encoded).is_err());
+        assert!(decode_png_bytes(encoded).is_err());
     }
 
     #[test]
@@ -300,7 +312,7 @@ mod tests {
             .write_image(&rgba, 2, 1, ExtendedColorType::Rgba8)
             .unwrap();
 
-        let decoded = decode_png_bytes(&encoded).unwrap();
+        let decoded = decode_png_bytes(encoded).unwrap();
 
         assert_eq!(decoded.width, 2);
         assert_eq!(decoded.height, 1);
