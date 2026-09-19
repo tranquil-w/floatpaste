@@ -359,6 +359,10 @@ export component EditorWindow inherits Window {
 
                                     for tag-name[i] in root.tags: Rectangle {
                                         height: 24px;
+                                        // 不参与布局的剩余宽度分配（默认 stretch=1
+                                        // 会把 chip 与输入框之间的空隙对半分，chip
+                                        // 背景拉成大片空白胶囊，内容仍靠左）
+                                        horizontal-stretch: 0;
                                         border-radius: Metrics.radius-pill;
                                         background: Theme.canvas-default;
                                         HorizontalLayout {

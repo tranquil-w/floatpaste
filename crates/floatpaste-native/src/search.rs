@@ -140,6 +140,9 @@ pub fn open(app: &App) {
         width_px.max(1) as u32,
         height_px.max(1) as u32,
     ));
+    // 高度基线对齐到本次实际应用值：加载态的中间高度（低于基线）在无
+    // 收缩许可时被跳过，内容落定只发生一次尺寸变化
+    LAST_HEIGHT.with(|value| value.set(height_px as f32));
     JUST_OPENED.with(|flag| flag.set(true));
     if !position_on_cursor_monitor(&win, width_px, height_px) {
         // 光标/工作区不可得：退回上次隐藏前的位置（等价旧行为的
@@ -309,7 +312,9 @@ fn reset_session_state(app: &App) {
     ARMED_DELETE.with(|slot| *slot.borrow_mut() = None);
     DELETE_TOKEN.with(|token| token.set(token.get() + 1));
     ERROR_TOKEN.with(|token| token.set(token.get() + 1));
-    LAST_HEIGHT.with(|value| value.set(0.0));
+    // LAST_HEIGHT 不清零：开窗直接用上次内容高度（open 会把基线对齐到
+    // 实际应用的高度）。清零会让加载态的中间高度被视为「增长」而应用，
+    // 窗口先缩后长、两次跳动（闪烁 + 最终偏下）
     ALLOW_SHRINK.with(|flag| flag.set(false));
 
     win.set_keyword("".into());
@@ -1181,9 +1186,10 @@ pub fn sync_height(app: &App, allow_shrink: bool) {
             target as u32,
         ));
         // 打开后首次高度落定：以新尺寸重新居中（左上角锚定的增长会让
-        // 窗口偏离打开时的居中位置；后续会话内的高度变化不再干预，
-        // 用户拖动后的位置也不受影响）
-        if JUST_OPENED.with(|flag| flag.get()) {
+        // 窗口偏离打开时的居中位置）。加载态的中间高度不得消费本次重居
+        // 中——否则内容到达后窗口向下长高、最终落在中心下方；后续会话
+        // 内的高度变化不再干预，用户拖动后的位置也不受影响
+        if JUST_OPENED.with(|flag| flag.get()) && !win.get_loading() {
             JUST_OPENED.with(|flag| flag.set(false));
             let _ = position_on_cursor_monitor(
                 &win,

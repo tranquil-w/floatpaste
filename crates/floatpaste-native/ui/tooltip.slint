@@ -8,6 +8,12 @@ export struct TooltipMetaBadge {
     text: string,
 }
 
+// 正文单行：高度由 Rust 逐行实测（同排版引擎标尺），Slint 侧纯绑定渲染
+export struct TooltipLine {
+    text: string,
+    height: length,
+}
+
 export component TooltipWindow inherits Window {
     no-frame: true;
     background: transparent;
@@ -21,6 +27,11 @@ export component TooltipWindow inherits Window {
     in-out property <length> image-width: 0px;
     in-out property <length> image-height: 0px;
     in-out property <string> content-text;
+    // 正文按源行拆行渲染（Slint Text 无 line-height，行距由
+    // content-line-spacing 提供）；静态提示模式仍走 content-text 单行
+    in-out property <[TooltipLine]> content-lines;
+    // 行间距：Rust 测高时读取，保持与渲染同源
+    out property <length> content-line-spacing: 4px;
     in-out property <[TooltipMetaBadge]> badges;
     in-out property <string> source-app;
     in-out property <string> time-text;
@@ -94,19 +105,31 @@ export component TooltipWindow inherits Window {
                     image-fit: contain;
                 }
             }
-            if (!root.has-image): Text {
+            // 静态提示：单行小字（与 simple-ruler 同字号同字重）
+            if (root.simple-mode): Text {
                 text: root.content-text;
                 color: Theme.fg-default;
-                font-size: root.simple-mode ? Metrics.text-xs : Metrics.text-body;
+                font-size: Metrics.text-xs;
+                font-weight: Metrics.weight-medium;
                 wrap: word-wrap;
-                // 布局引擎对换行文本的最小高度按“最窄词宽折行”估计，长文
-                // 会撑出数百像素的窗口最小高度，把 Rust set_size 的目标尺寸
-                // 顶开（卡片下方成片空白）——高度用同排版参数的标尺实测，
-                // 显式 height 同时锁定最小高度，min-width 归零解除宽度约束
                 min-width: 0px;
-                height: root.simple-mode ? root.simple-line-height : content-ruler.height;
+                height: root.simple-line-height;
                 vertical-alignment: top;
                 horizontal-stretch: 1;
+            }
+            // 条目正文：按源行拆行，行距由布局 spacing 提供，行高用
+            // Rust 实测值（与窗口定高的度量同源）
+            if (!root.has-image && !root.simple-mode): VerticalLayout {
+                spacing: root.content-line-spacing;
+                for line in root.content-lines: Text {
+                    text: line.text;
+                    color: Theme.fg-default;
+                    font-size: Metrics.text-body;
+                    wrap: word-wrap;
+                    min-width: 0px;
+                    height: line.height;
+                    vertical-alignment: top;
+                }
             }
 
             // 元信息行上方分隔线（对齐原版 border-top + margin/padding）
@@ -194,18 +217,6 @@ export component TooltipWindow inherits Window {
             font-weight: Metrics.weight-medium;
             wrap: no-wrap;
             text: "";
-        }
-
-        // 内容高度标尺：与内容 Text 同文本/字号/换行、同宽度（卡片内宽
-        // = 卡片宽 − card-inset-h），高度绑定到内容 Text
-        content-ruler := Text {
-            opacity: 0;
-            x: 0;
-            y: 0;
-            text: root.content-text;
-            font-size: Metrics.text-body;
-            wrap: word-wrap;
-            width: parent.width - root.card-inset-h;
         }
     }
 }

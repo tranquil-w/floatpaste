@@ -25,7 +25,7 @@ use crate::overlay::{self, ForegroundPolicy};
 use crate::picker::App;
 use crate::thumbnails;
 use crate::win32_ext;
-use crate::{TooltipMetaBadge, TooltipWindow};
+use crate::{TooltipLine, TooltipMetaBadge, TooltipWindow};
 
 const SHOW_DELAY_MS: u64 = 400;
 /// tooltip.slint 的 preferred 尺寸（隐藏复位用，与 ui 保持一致）
@@ -227,13 +227,37 @@ fn render(
     let chrome_v = win.get_card_chrome_v();
     let (content_width, content_height) = match &payload {
         Payload::Text(text) => {
-            // 自然宽度（最宽段落一行放下所需）与高度同走 Slint 排版度量：
-            // 与内容 Text 同引擎，卡片宽窄与高度都不会偏离实际渲染
-            let natural_width = win.invoke_measure_natural_width(text.as_str().into());
+            // 正文按源行拆行渲染（Slint Text 无 line-height）：行距取
+            // content-line-spacing，空行以单个空格占住一行的高度；
+            // 自然宽度 = 最宽源行不换行所需，行高逐行实测后随模型下发
+            let raw_lines: Vec<SharedString> = text
+                .split('\n')
+                .map(|line| {
+                    if line.trim().is_empty() {
+                        SharedString::from(" ")
+                    } else {
+                        SharedString::from(line)
+                    }
+                })
+                .collect();
+            let natural_width = raw_lines
+                .iter()
+                .map(|line| win.invoke_measure_natural_width(line.clone()))
+                .fold(0.0f32, f32::max);
             let card_width = (natural_width + inset_h).clamp(MIN_WIDTH, MAX_WIDTH);
             let text_width = card_width - inset_h;
-            let content_height = win.invoke_measure_text(text.as_str().into(), text_width);
-            win.set_content_text(text.as_str().into());
+            let spacing = win.get_content_line_spacing();
+            let lines: Vec<TooltipLine> = raw_lines
+                .iter()
+                .map(|line| TooltipLine {
+                    text: line.clone(),
+                    height: win.invoke_measure_text(line.clone(), text_width),
+                })
+                .collect();
+            let line_spacing_total = spacing * lines.len().saturating_sub(1) as f32;
+            let content_height: f32 =
+                lines.iter().map(|line| line.height).sum::<f32>() + line_spacing_total;
+            win.set_content_lines(ModelRc::new(Rc::new(VecModel::from(lines))));
             win.set_has_image(false);
             (text_width, content_height)
         }
