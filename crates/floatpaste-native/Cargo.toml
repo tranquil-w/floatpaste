@@ -1,6 +1,6 @@
 [package]
 name = "floatpaste-native"
-version = "0.9.0"
+version = "0.10.0-alpha.1"
 edition = "2021"
 
 # 产物沿用旧壳二进制名 floatpaste.exe，便携版覆盖与用户感知路径保持一致
