@@ -42,3 +42,4 @@ target/
 
 # 本地 Inno 安装包编译产物
 packaging/output/
+.zcodeignore
