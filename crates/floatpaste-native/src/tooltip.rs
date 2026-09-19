@@ -228,15 +228,18 @@ fn render(
     let (content_width, content_height) = match &payload {
         Payload::Text(text) => {
             // 正文按源行拆行渲染（Slint Text 无 line-height）：行距取
-            // content-line-spacing，空行以单个空格占住一行的高度；
-            // 自然宽度 = 最宽源行不换行所需，行高逐行实测后随模型下发
+            // content-line-spacing，空行以单个空格占住一行的高度。
+            // 行尾空白裁掉：不可见却计入自然宽，把右边距撑得比左边大；
+            // 自然宽度 = 最宽源行不换行所需，行高逐行实测（向上取整，
+            // 对齐渲染器整像素行盒）后随模型下发
             let raw_lines: Vec<SharedString> = text
                 .split('\n')
                 .map(|line| {
-                    if line.trim().is_empty() {
+                    let trimmed = line.trim_end();
+                    if trimmed.is_empty() {
                         SharedString::from(" ")
                     } else {
-                        SharedString::from(line)
+                        SharedString::from(trimmed)
                     }
                 })
                 .collect();
@@ -251,7 +254,7 @@ fn render(
                 .iter()
                 .map(|line| TooltipLine {
                     text: line.clone(),
-                    height: win.invoke_measure_text(line.clone(), text_width),
+                    height: win.invoke_measure_text(line.clone(), text_width).ceil(),
                 })
                 .collect();
             let line_spacing_total = spacing * lines.len().saturating_sub(1) as f32;

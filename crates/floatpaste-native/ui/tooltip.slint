@@ -140,6 +140,9 @@ export component TooltipWindow inherits Window {
 
             // ── 元信息行：类型与来源靠左成组，相对时间推到行尾 ──
             if (!root.simple-mode): HorizontalLayout {
+                // 显式定高（行上间距 + 徽章高）：度量安全余量由底部弹性
+                // 占位吸收，不在此处变成不明空隙
+                height: root.meta-gap + root.meta-badge-height;
                 padding-top: root.meta-gap;
                 spacing: Metrics.space-1_5;
                 alignment: start;
@@ -184,6 +187,14 @@ export component TooltipWindow inherits Window {
                     font-size: Metrics.text-hint;
                     vertical-alignment: center;
                 }
+            }
+
+            // 底部弹性占位：窗口定高含 8px 度量安全余量（Rust 侧
+            // HEIGHT_SAFETY），由这里确定性吸收，保证元信息行下方
+            // 始终留有下边距
+            if (!root.simple-mode): Rectangle {
+                vertical-stretch: 1;
+                min-height: 0px;
             }
         }
 
