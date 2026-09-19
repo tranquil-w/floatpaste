@@ -43,15 +43,71 @@ const PREVIEW_MAX_LINES: usize = 4;
 /// 入库预览的字符截断上限（normalize_service 同值）：达到即认为原文更长
 const PREVIEW_SOURCE_LIMIT: usize = 120;
 
+/// 动态窗口槽位：低频窗口（搜索/编辑/设置）延迟创建、关闭即销毁。
+/// `upgrade` 与 `slint::Weak::upgrade` 同名同签名，调用点无感切换；
+/// 销毁重建后写入新 Weak，回调捕获的 App 克隆经同一槽位总能拿到当前窗口。
+/// Mutex 保证 App 仍可跨 invoke_from_event_loop 传递（升级在锁外进行）
+pub struct WindowSlot<T: ComponentHandle> {
+    inner: std::sync::Mutex<Option<slint::Weak<T>>>,
+}
+
+impl<T: ComponentHandle> Clone for WindowSlot<T> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: std::sync::Mutex::new(
+                self.inner
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .clone(),
+            ),
+        }
+    }
+}
+
+impl<T: ComponentHandle> WindowSlot<T> {
+    pub fn empty() -> Self {
+        Self {
+            inner: std::sync::Mutex::new(None),
+        }
+    }
+
+    /// 注册（重建）窗口：覆盖槽位
+    pub fn set(&self, weak: slint::Weak<T>) {
+        *self.inner.lock().unwrap_or_else(|error| error.into_inner()) = Some(weak);
+    }
+
+    /// 取出并清空槽位（销毁窗口时调用）
+    pub fn take(&self) -> Option<slint::Weak<T>> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take()
+    }
+
+    /// 升级到当前窗口实例（未创建或已销毁返回 None）
+    pub fn upgrade(&self) -> Option<T> {
+        let weak = self
+            .inner
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .as_ref()
+            .cloned()?;
+        weak.upgrade()
+    }
+}
+
 /// 事件循环线程上的应用上下文（克隆廉价，闭包捕获后经 invoke 回到事件循环）
 #[derive(Clone)]
 pub struct App {
     pub state: Arc<SharedState>,
+    /// 速贴面板：主路径窗口，启动即建、全程常驻
     pub picker: slint::Weak<QuickPasteWindow>,
+    /// 悬停预览：轻量小窗，启动即建、全程常驻
     pub tooltip: slint::Weak<TooltipWindow>,
-    pub search: slint::Weak<SearchWindow>,
-    pub editor: slint::Weak<crate::EditorWindow>,
-    pub settings: slint::Weak<crate::SettingsWindow>,
+    /// 低频窗口动态槽位：启动不建、关闭即毁、用时重建
+    pub search: WindowSlot<SearchWindow>,
+    pub editor: WindowSlot<crate::EditorWindow>,
+    pub settings: WindowSlot<crate::SettingsWindow>,
 }
 
 impl App {

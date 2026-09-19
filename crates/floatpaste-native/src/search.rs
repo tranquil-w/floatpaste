@@ -58,6 +58,37 @@ const INJECT_DELAY: Duration = Duration::from_millis(60);
 
 /* ───────────────── 会话生命周期 ───────────────── */
 
+/// 惰性创建搜索窗口：首次打开或上次销毁后重建。装配与启动期完全一致
+/// （可聚焦浮层样式 + 停屏待命 + 回填句柄 + 主题），重建后的窗口与
+/// 启动装配产物无差异，open 流程照常「移回屏上」即可
+fn ensure_window(app: &App) -> Option<SearchWindow> {
+    if let Some(win) = app.search.upgrade() {
+        return Some(win);
+    }
+    let win = SearchWindow::new().ok()?;
+    app.search.set(win.as_weak());
+    wire(app);
+    // winit 惰性建窗：show 时才真正建窗，随后停屏保持 Slint「已显示」
+    match overlay::silent_assemble_focusable(&win) {
+        Some(hwnd) => {
+            app.state.search_hwnd.store(hwnd, Ordering::SeqCst);
+        }
+        None => tracing::error!("搜索窗口装配失败，搜索会话不可用"),
+    }
+    let settings = app.state.current_settings();
+    let resolved = floatpaste_core::theme::resolve_theme(
+        settings.theme_mode.clone(),
+        floatpaste_core::theme::system_prefers_dark(),
+    );
+    let tokens = floatpaste_core::theme::derive_tokens(
+        &settings.theme_preset,
+        &settings.theme_accent,
+        resolved,
+    );
+    crate::theme_bridge::apply_theme(None, None, Some(&win), None, None, &tokens);
+    Some(win)
+}
+
 /// 全局搜索快捷键命中：活跃则关闭并还原目标；速贴活跃则先收起速贴（不还
 /// 原目标，焦点交给搜索窗口），再打开搜索（对齐 open_search_global）
 pub fn toggle_from_shortcut(app: &App) {
@@ -92,6 +123,10 @@ pub fn open_global(app: &App) {
 
 /// 打开搜索会话（对齐 open_search_global）
 pub fn open(app: &App) {
+    let Some(win) = ensure_window(app) else {
+        warn!("搜索窗口创建失败，无法显示");
+        return;
+    };
     let hwnd = app.state.search_hwnd.load(Ordering::SeqCst);
     if hwnd == 0 {
         warn!("搜索窗口 HWND 尚未就绪，无法显示");
@@ -105,11 +140,6 @@ pub fn open(app: &App) {
     });
     app.state.begin_search_activation();
     info!("打开 Search，target_window={target:?}");
-
-    let Some(win) = app.search.upgrade() else {
-        app.state.end_search_activation();
-        return;
-    };
 
     // 窗口自启动起保持 Slint 可见（停屏态），重现 = 移回屏上，不走
     // Slint show：hide→show 周期中 winit 清空表面且脏区跟踪失效，是

@@ -75,6 +75,10 @@ fn main() {
     }
 
     // ── 窗口创建 ──
+    // 速贴面板、tooltip 与搜索窗口是 overlay 装配窗口，启动即建、全程
+    // 常驻（搜索窗口缺席会扰动 winit 对速贴的样式重排，见装配处注释）；
+    // 编辑/设置为普通带框窗、低频使用，启动不建（App 中为动态槽位），
+    // 首次呼出时创建、关闭即销毁以释放帧缓冲与组件树
     let picker_win = match QuickPasteWindow::new() {
         Ok(win) => win,
         Err(error) => {
@@ -89,26 +93,16 @@ fn main() {
             return;
         }
     };
+    // 搜索窗口保持启动常驻（与速贴同为 overlay 装配窗口）：实测缺席时
+    // winit 对速贴的异步样式重排会周期性剥掉 WS_EX_TOPMOST 且重抬不
+    // 生效（置顶守护刷屏）。可聚焦浮层的建窗时序与速贴置顶强耦合，
+    // 不做惰性化；编辑/设置为普通带框窗，生命周期独立可动态销毁重建。
+    // 组件必须在事件循环启动前创建：winit 惰性建窗在循环启动后完成，
+    // invoke 内新建的组件装配期读不到句柄（winit 建窗异步未落）
     let search_win = match SearchWindow::new() {
         Ok(win) => win,
         Err(error) => {
             tracing::error!("创建搜索窗口失败: {error}");
-            return;
-        }
-    };
-    // 编辑窗口：普通带框窗（任务栏可见、可缩放），启动即建、按需显示
-    let editor_win = match EditorWindow::new() {
-        Ok(win) => win,
-        Err(error) => {
-            tracing::error!("创建编辑窗口失败: {error}");
-            return;
-        }
-    };
-    // 设置窗口：普通带框窗（同旧版 label=manager），启动即建、按需显示
-    let settings_win = match SettingsWindow::new() {
-        Ok(win) => win,
-        Err(error) => {
-            tracing::error!("创建设置窗口失败: {error}");
             return;
         }
     };
@@ -119,10 +113,11 @@ fn main() {
         state: state.clone(),
         picker: picker_win.as_weak(),
         tooltip: tooltip_win.as_weak(),
-        search: search_win.as_weak(),
-        editor: editor_win.as_weak(),
-        settings: settings_win.as_weak(),
+        search: picker::WindowSlot::empty(),
+        editor: picker::WindowSlot::empty(),
+        settings: picker::WindowSlot::empty(),
     };
+    app.search.set(search_win.as_weak());
 
     // ── 二次启动唤醒：打开速贴会话（等价于按下主快捷键）──
     {
@@ -140,9 +135,6 @@ fn main() {
     }
 
     picker::wire(&app);
-    search::wire(&app);
-    editor::wire(&app);
-    settings::wire(&app);
 
     // ── 窗口句柄与浮层样式：事件循环首轮装配（winit 惰性建窗，
     // show/停屏舞蹈统一在 overlay::silent_assemble）──
@@ -156,9 +148,6 @@ fn main() {
             return;
         };
         let Some(tooltip_win) = app_for_init.tooltip.upgrade() else {
-            return;
-        };
-        let Some(search_win) = app_for_init.search.upgrade() else {
             return;
         };
 
@@ -175,32 +164,30 @@ fn main() {
                 .store(hwnd, Ordering::SeqCst);
         }
         // 搜索窗口可聚焦（需要真实键盘焦点），装配变体不带 NOACTIVATE
-        match overlay::silent_assemble_focusable(&search_win) {
-            Some(hwnd) => {
-                app_for_init.state.search_hwnd.store(hwnd, Ordering::SeqCst);
+        if let Some(search_win) = app_for_init.search.upgrade() {
+            match overlay::silent_assemble_focusable(&search_win) {
+                Some(hwnd) => {
+                    app_for_init.state.search_hwnd.store(hwnd, Ordering::SeqCst);
+                }
+                None => tracing::error!("获取搜索窗口句柄失败，搜索会话不可用"),
             }
-            None => tracing::error!("获取搜索窗口句柄失败，搜索会话不可用"),
+            let settings = app_for_init.state.current_settings();
+            let resolved =
+                theme::resolve_theme(settings.theme_mode.clone(), theme::system_prefers_dark());
+            let tokens =
+                theme::derive_tokens(&settings.theme_preset, &settings.theme_accent, resolved);
+            theme_bridge::apply_theme(None, None, Some(&search_win), None, None, &tokens);
         }
 
         let settings = app_for_init.state.current_settings();
         let resolved =
             theme::resolve_theme(settings.theme_mode.clone(), theme::system_prefers_dark());
         let tokens = theme::derive_tokens(&settings.theme_preset, &settings.theme_accent, resolved);
-        let editor_for_theme = app_for_init.editor.upgrade();
-        let settings_for_theme = app_for_init.settings.upgrade();
-        theme_bridge::apply_theme(
-            Some(&picker_win),
-            Some(&tooltip_win),
-            Some(&search_win),
-            editor_for_theme.as_ref(),
-            settings_for_theme.as_ref(),
-            &tokens,
-        );
+        theme_bridge::apply_theme(Some(&picker_win), Some(&tooltip_win), None, None, None, &tokens);
 
         // 主题写入后同步暖一次表面：停屏窗口收不到自发 WM_PAINT，
         // 不主动泵一次呈现，上屏首帧会是透明的
         win32_ext::warm_surface(app_for_init.state.picker_hwnd.load(Ordering::SeqCst));
-        win32_ext::warm_surface(app_for_init.state.search_hwnd.load(Ordering::SeqCst));
 
         if !silent_startup {
             // 延一轮事件循环再打开：先让停屏窗口在屏外完成首帧渲染，
