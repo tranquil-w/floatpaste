@@ -99,12 +99,13 @@ fn schedule_style_reassert(hwnd: isize, no_activate: bool) {
     }
 }
 
-/// tooltip 启动装配：同 silent_assemble，但收起走 Win32 SW_HIDE 而非
-/// Slint hide。winit 对二次 show 固定 SW_SHOW（无视 WS_EX_NOACTIVATE，
-/// 激活窗口会打断宿主输入焦点与 IME 组合）；保持其可见标志恒为真、
-/// 显隐全部走 Win32（show_window_no_activate / hide_window），才能彻底
-/// 绕开 apply_diff 的 ShowWindow
-pub fn silent_assemble_win32_hidden<W: ComponentHandle>(win: &W, decorated: bool) -> Option<isize> {
+/// tooltip 启动装配：样式同 silent_assemble，收起走**停屏**（-32000 平移）
+/// 而非 SW_HIDE——SW_HIDE 隐藏期间 winit 抑制重绘（速贴/搜索停屏方案的
+/// 同源问题），气泡每次显示尺寸不同，隐藏态 resize 的首帧会残缺闪烁；
+/// 停屏保持 Win32 可见、隐藏期正常重绘，移上屏即完整内容。winit 对二次
+/// show 固定 SW_SHOW（无视 WS_EX_NOACTIVATE，激活窗口会打断宿主输入焦点
+/// 与 IME 组合），不用 Slint/Win32 的 show 显隐，收起只平移
+pub fn silent_assemble_parked<W: ComponentHandle>(win: &W, decorated: bool) -> Option<isize> {
     let _ = win.window().show();
     let hwnd = win32_ext::window_hwnd(win)?;
     win32_ext::apply_overlay_style(hwnd, true);
@@ -113,7 +114,8 @@ pub fn silent_assemble_win32_hidden<W: ComponentHandle>(win: &W, decorated: bool
         win32_ext::apply_dwm_rounded_corners(hwnd);
     }
     let _ = window_control::remove_window_system_menu(hwnd);
-    let _ = window_control::hide_window(hwnd);
+    win.window()
+        .set_position(slint::PhysicalPosition::new(-32000, -32000));
     Some(hwnd)
 }
 

@@ -133,6 +133,7 @@ pub fn schedule_with(
                         mouse_x,
                         mouse_y,
                         Payload::Image(image),
+                        token,
                     );
                 });
             });
@@ -154,6 +155,7 @@ pub fn schedule_with(
                 mouse_x,
                 mouse_y,
                 Payload::Text(full_text.trim_end().to_owned()),
+                token,
             );
         }
     });
@@ -175,7 +177,7 @@ pub fn schedule_static(app: &App, host: HoverHost, text: String, anchor_x: f32, 
         if PENDING_TOKEN.with(|value| value.get()) != token || !host_active(&app) {
             return;
         }
-        render_static(&app, host_hwnd, &text, anchor_x, anchor_y);
+        render_static(&app, host_hwnd, &text, anchor_x, anchor_y, token);
     });
 }
 
@@ -183,18 +185,11 @@ pub fn schedule_static(app: &App, host: HoverHost, text: String, anchor_x: f32, 
 pub fn cancel(app: &App) {
     PENDING_TOKEN.with(|value| value.set(value.get() + 1));
     if let Some(win) = app.tooltip.upgrade() {
-        let hwnd = app.state.tooltip_hwnd.load(Ordering::SeqCst);
-        if hwnd != 0 {
-            // 只用 Win32 SW_HIDE：Slint hide 会翻转 winit 可见标志，
-            // 下次显示将退回 SW_SHOW 路径并激活窗口。
-            // 不复位窗口尺寸（曾按内容回落 preferred 省帧缓冲）：尺寸
-            // 往返会让下次显示时软件渲染器脏区跟踪失准，表面残留上次
-            // 的透明竖带；buffer 按最大内容尺寸常驻（约 1-3MB）
-            let _ = window_control::hide_window(hwnd);
-        } else if win.window().is_visible() {
-            // 装配失败降级路径：tooltip 由 Slint show 显示，需 Slint hide
-            let _ = win.window().hide();
-        }
+        // 收起 = 停屏（对齐速贴/搜索）：SW_HIDE 隐藏期 winit 抑制重绘，
+        // 会让下一次显示（尺寸往往不同）首帧残缺闪烁；停屏保持表面
+        // 可正常 resize/重绘，移上屏即完整内容
+        win.window()
+            .set_position(slint::PhysicalPosition::new(-32000, -32000));
     }
 }
 
@@ -205,6 +200,7 @@ fn render(
     mouse_x: f32,
     mouse_y: f32,
     payload: Payload,
+    token: u64,
 ) {
     let Some(win) = app.tooltip.upgrade() else {
         return;
@@ -341,11 +337,19 @@ fn render(
         width,
         height,
         (mouse_x + OFFSET_X, mouse_y + OFFSET_Y),
+        token,
     );
 }
 
 /// 静态提示渲染：单行短文案（text-xs/medium），无元信息行，锚点取按钮下方
-fn render_static(app: &App, host_hwnd: isize, text: &str, anchor_x: f32, anchor_y: f32) {
+fn render_static(
+    app: &App,
+    host_hwnd: isize,
+    text: &str,
+    anchor_x: f32,
+    anchor_y: f32,
+    token: u64,
+) {
     let Some(win) = app.tooltip.upgrade() else {
         return;
     };
@@ -365,10 +369,20 @@ fn render_static(app: &App, host_hwnd: isize, text: &str, anchor_x: f32, anchor_
     win.set_has_image(false);
     win.set_content_text(text.into());
     win.set_badges(ModelRc::new(Rc::new(VecModel::from(Vec::new()))));
-    present(app, &win, host_hwnd, dpi, width, height, (anchor_x, anchor_y));
+    present(
+        app,
+        &win,
+        host_hwnd,
+        dpi,
+        width,
+        height,
+        (anchor_x, anchor_y),
+        token,
+    );
 }
 
 /// 定尺寸、定位并显示：条目预览与静态提示共用的收尾（anchor 已含偏移）
+#[allow(clippy::too_many_arguments)]
 fn present(
     app: &App,
     win: &TooltipWindow,
@@ -377,46 +391,65 @@ fn present(
     width: f32,
     height: f32,
     anchor: (f32, f32),
+    token: u64,
 ) {
     let physical_w = (width * dpi).round().max(1.0) as u32;
     let physical_h = (height * dpi).round().max(1.0) as u32;
+    let tooltip_hwnd = app.state.tooltip_hwnd.load(Ordering::SeqCst);
+    let prev_foreground = ActiveAppResolver::current_foreground_hwnd();
+    if tooltip_hwnd == 0 {
+        // 装配失败降级：裸 Slint show，可接受激活副作用
+        let _ = win.window().show();
+        return;
+    }
+    // 过期渲染（新请求/取消已递增令牌）直接放弃，不触碰窗口
+    if PENDING_TOKEN.with(|value| value.get()) != token {
+        return;
+    }
+    // 尺寸在停屏态落定：停屏窗口对 winit 保持「已显示」，resize 的重绘
+    // 正常发生且在屏外完成，无观感（SW_HIDE 隐藏期重绘被抑制，是先前
+    // 显示闪烁的根源）
     win.window()
         .set_size(slint::PhysicalSize::new(physical_w, physical_h));
 
-    // ── 定位：宿主窗口原点 + 锚点×scale，越界按光标翻转 ──
-    let position = resolve_position(host_hwnd, anchor.0, anchor.1, dpi, physical_w, physical_h);
-    win.window()
-        .set_position(slint::PhysicalPosition::new(position.0, position.1));
+    win32_ext::apply_overlay_style(tooltip_hwnd, true);
+    let _ = window_control::remove_window_system_menu(tooltip_hwnd);
 
-    // ── 显示（点击穿透 + 置顶不激活 + 前台若被抢则归还）──
-    // 不走 Slint show：winit 对二次 show 固定 SW_SHOW，无视 NOACTIVATE
-    // 激活窗口，打断宿主输入框焦点与 IME 组合。启动装配后 winit 可见
-    // 标志恒为真，这里直接复用速贴的无激活显示（SW_SHOWNOACTIVATE）；
-    // 样式重挂与置顶由 after_show 兜底。
-    // RestoreIfStolen 双保险：实测部分激活仍会穿透到达（时序在 show 与
-    // 兜底之间），归还后须把 tooltip 重新抬到置顶带顶部——宿主同为置顶，
-    // SetForegroundWindow 会把它提到 tooltip 之上盖住内容，两步均不激活
-    let tooltip_hwnd = app.state.tooltip_hwnd.load(Ordering::SeqCst);
-    let prev_foreground = ActiveAppResolver::current_foreground_hwnd();
-    if tooltip_hwnd != 0 {
-        win32_ext::apply_overlay_style(tooltip_hwnd, true);
-        let _ = window_control::remove_window_system_menu(tooltip_hwnd);
-        let _ = window_control::show_window_no_activate(tooltip_hwnd);
+    // 移上屏前等重绘落盘（debug 构建整帧渲染可达百余 ms；release 快，
+    // 一拍即成）。到点先暖表面（把最终帧同步泵进表面）再平移上屏——
+    // 移动不触发重绘，首帧即完整内容；上屏后 16ms 补泵兜底
+    let reveal_delay_ms = if cfg!(debug_assertions) { 200 } else { 16 };
+    let win_cb = win.as_weak();
+    slint::Timer::single_shot(std::time::Duration::from_millis(reveal_delay_ms), move || {
+        let Some(win) = win_cb.upgrade() else {
+            return;
+        };
+        // 期间有新的悬停请求或取消（令牌递增）则放弃本次显示
+        if PENDING_TOKEN.with(|value| value.get()) != token {
+            return;
+        }
+        win32_ext::warm_surface(tooltip_hwnd);
+        // ── 定位：宿主窗口原点 + 锚点×scale，越界按光标翻转 ──
+        let position =
+            resolve_position(host_hwnd, anchor.0, anchor.1, dpi, physical_w, physical_h);
+        win.window()
+            .set_position(slint::PhysicalPosition::new(position.0, position.1));
+        // 置顶不激活、前台若被抢则归还（RestoreIfStolen 双保险：归还后
+        // 须把 tooltip 抬回置顶带顶部，宿主同为置顶会盖住它）
         let restore =
             prev_foreground.map_or(ForegroundPolicy::Keep, ForegroundPolicy::RestoreIfStolen);
         overlay::after_show(tooltip_hwnd, true, restore, ForegroundPolicy::Keep);
-        let host = host_hwnd;
+        slint::Timer::single_shot(std::time::Duration::from_millis(16), move || {
+            win32_ext::warm_surface(tooltip_hwnd);
+        });
         slint::Timer::single_shot(std::time::Duration::from_millis(60), move || {
             if ActiveAppResolver::current_foreground_hwnd() == Some(tooltip_hwnd)
-                && ActiveAppResolver::restore_foreground_window(host)
+                && ActiveAppResolver::restore_foreground_window(host_hwnd)
             {
                 window_control::set_window_topmost_no_activate(tooltip_hwnd);
             }
         });
-    } else {
-        // 装配失败降级：裸 Slint show，可接受激活副作用
-        let _ = win.window().show();
-    }
+    });
 }
 
 /// 定位与翻转（对齐 TooltipWindow::resolve_clamped_position：
