@@ -51,6 +51,8 @@ const
   UninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall';
   RunKey = 'Software\Microsoft\Windows\CurrentVersion\Run';
   RunValueName = 'FloatPaste';
+  ExplorerAdvancedKey = 'Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced';
+  DisabledHotkeysValue = 'DisabledHotkeys';
 
 var
   g_RunMigrate: Boolean;   // 检测到指向旧安装位置的自启动条目
@@ -183,4 +185,29 @@ function InitializeUninstall(): Boolean;
 begin
   CloseApp;
   Result := True;
+end;
+
+// 卸载时清除 Win+V 接管在 DisabledHotkeys 里写的 V 字母（其他字母
+// 原样保留，删空则整值删除），否则系统 Win+V 在卸载后永久失效。
+// 清理后需重启资源管理器系统才重新持有该组合，向用户说明
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Value, Kept: String;
+  I: Integer;
+begin
+  if CurUninstallStep <> usPostUninstall then
+    Exit;
+  if not RegQueryStringValue(HKEY_CURRENT_USER, ExplorerAdvancedKey, DisabledHotkeysValue, Value) then
+    Exit;
+  Kept := '';
+  for I := 1 to Length(Value) do
+    if (Value[I] <> 'V') and (Value[I] <> 'v') then
+      Kept := Kept + Value[I];
+  if Kept = '' then
+    RegDeleteValue(HKEY_CURRENT_USER, ExplorerAdvancedKey, DisabledHotkeysValue)
+  else
+    RegWriteStringValue(HKEY_CURRENT_USER, ExplorerAdvancedKey, DisabledHotkeysValue, Kept);
+  if not WizardSilent() then
+    MsgBox('已恢复系统 Win+V 剪贴板历史热键。' + #13#10 +
+      '若未自动生效，请重启资源管理器或注销后重新登录。', mbInformation, MB_OK);
 end;

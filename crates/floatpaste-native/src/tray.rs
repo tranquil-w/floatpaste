@@ -264,8 +264,10 @@ unsafe extern "system" fn tray_wndproc(
         RegisterWindowMessageW(PCWSTR(to_wide("TaskbarCreated").as_ptr()))
     });
     if msg == taskbar_created {
-        // explorer 重启后托盘图标丢失：重新挂载
+        // explorer 重启后托盘图标丢失：重新挂载；同时系统对 Win+V 的
+        // 持有状态已翻转，交设置模块补注册或解除恢复过渡提示
         add_icon(hwnd);
+        dispatch(crate::settings::on_explorer_restarted);
         return LRESULT(0);
     }
     match msg {

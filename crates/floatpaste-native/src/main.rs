@@ -45,7 +45,14 @@ use picker::App;
 slint::include_modules!();
 
 /// ERROR_HOTKEY_ALREADY_REGISTERED：组合键已被其他程序（或系统）注册
-const ERROR_HOTKEY_OCCUPIED: u32 = 1409;
+pub(crate) const ERROR_HOTKEY_OCCUPIED: u32 = 1409;
+/// 哨兵码：Win+V 与本应用主/搜索快捷键组合相同而跳过注册（非系统占用，
+/// 与 1409 区分开供设置页给出不同指引）
+pub(crate) const HOTKEY_ERROR_WINV_SELF_CONFLICT: u32 = u32::MAX;
+/// 全局快捷键 id：速贴唤起 / 搜索窗口 / Win+V 接管（均唤起速贴面板）
+pub(crate) const HOTKEY_ID_MAIN: u32 = 1;
+pub(crate) const HOTKEY_ID_SEARCH: u32 = 2;
+pub(crate) const HOTKEY_ID_WINV: u32 = 3;
 
 fn main() {
     // Slint 内置开关：Windows 上隐藏窗口即销毁 winit 窗口与软渲染帧缓冲，
@@ -338,19 +345,21 @@ pub(crate) fn sync_global_hotkeys(app: &App) {
         tracing::error!("主快捷键无法解析（配置值与默认值均失败），跳过注册");
         return;
     };
-    let mut specs: Vec<(u32, hotkey::HotkeySpec)> = vec![(1, main_spec)];
+    let mut specs: Vec<(u32, hotkey::HotkeySpec)> = vec![(HOTKEY_ID_MAIN, main_spec)];
     // 搜索快捷键与主快捷键相同时跳过（同组合键 RegisterHotKey 必失败）
     if search_shortcut_enabled {
         match hotkey::parse_hotkey(&search_shortcut_text) {
             Some(search_spec) if search_spec != main_spec => {
-                specs.push((2, search_spec));
+                specs.push((HOTKEY_ID_SEARCH, search_spec));
             }
             Some(_) => tracing::warn!("搜索快捷键与主快捷键相同，跳过注册"),
             None => tracing::warn!("搜索快捷键无法解析，跳过注册"),
         }
     }
     // Win+V 接管（ADR-0001）：先自愈注册表（设置开启但值被外部清除时
-    // 补写）；与主/搜索快捷键相同则不注册（失败记录会让设置页给出提示）
+    // 补写）；与主/搜索快捷键相同则不注册（失败记录让设置页给出
+    // 「与自身快捷键冲突」指引，区别于系统占用）
+    let mut winv_self_conflict = false;
     if settings.takeover_winv {
         let winv_spec = hotkey::parse_hotkey("Win+V");
         match winv_takeover::is_enabled_in_registry() {
@@ -366,11 +375,10 @@ pub(crate) fn sync_global_hotkeys(app: &App) {
             specs.iter().any(|(_, existing)| existing == spec)
         };
         match winv_spec {
-            Some(spec) if !occupied(&spec) => specs.push((3, spec)),
+            Some(spec) if !occupied(&spec) => specs.push((HOTKEY_ID_WINV, spec)),
             Some(_) => {
                 tracing::warn!("Win+V 与已有全局快捷键相同，跳过接管注册");
-                app.state
-                    .set_hotkey_failures(vec![(3, ERROR_HOTKEY_OCCUPIED)]);
+                winv_self_conflict = true;
             }
             None => tracing::warn!("Win+V 组合无法解析，跳过接管注册"),
         }
@@ -385,7 +393,7 @@ pub(crate) fn sync_global_hotkeys(app: &App) {
             tracing::info!("命中全局快捷键 id={id}");
             let app = app_for_hotkey.clone();
             let _ = slint::invoke_from_event_loop(move || {
-                if id == 2 {
+                if id == HOTKEY_ID_SEARCH {
                     search::toggle_from_shortcut(&app);
                 } else {
                     // 主快捷键与 Win+V 接管均打开速贴面板
@@ -395,12 +403,18 @@ pub(crate) fn sync_global_hotkeys(app: &App) {
         };
         match hotkey::register_hotkeys(specs.clone(), on_trigger) {
             Ok(outcome) if outcome.failed.is_empty() => {
-                app.state.set_hotkey_failures(Vec::new());
-                return;
+                last_failures.clear();
+                last_hard_error = false;
+                break;
             }
             Ok(outcome) => {
                 // 部分失败：可用热键照常工作；重试等旧线程退出释放
-                // 组合键（新一轮 stop 已在循环头执行），末次结果记录
+                // 组合键（新一轮 stop 已在循环头执行），末次结果记录。
+                // 连续两轮失败集相同 = 非瞬态（如系统未释放 Win+V），
+                // 不再空转第三轮
+                if outcome.failed == last_failures {
+                    break;
+                }
                 last_failures = outcome.failed;
                 last_hard_error = false;
             }
@@ -422,6 +436,10 @@ pub(crate) fn sync_global_hotkeys(app: &App) {
     }
     if last_hard_error {
         last_failures = specs.iter().map(|(id, _)| (*id, 0)).collect();
+    }
+    // 自身冲突的跳过项不进 specs，注册循环覆盖不到，统一在出口并入
+    if winv_self_conflict {
+        last_failures.push((HOTKEY_ID_WINV, HOTKEY_ERROR_WINV_SELF_CONFLICT));
     }
     app.state.set_hotkey_failures(last_failures);
 }

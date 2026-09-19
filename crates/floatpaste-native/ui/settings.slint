@@ -852,6 +852,8 @@ export component SettingsWindow inherits Window {
     in-out property <bool> winv-enabled: false;
     in-out property <string> winv-status-text;
     in-out property <bool> winv-restart-armed: false;
+    // 关闭接管后尚未重启过资源管理器（系统 Win+V 恢复的过渡态）
+    in-out property <bool> winv-pending-restore: false;
     in-out property <bool> picker-digit-enabled: true;
     in-out property <string> history-limit-text;
     in-out property <string> picker-limit-text;
@@ -1306,6 +1308,55 @@ export component SettingsWindow inherits Window {
                                         }
                                     }
                                     RowDivider { }
+                                    // Win+V 唤起速贴（ADR-0001）：紧随
+                                    // 「速贴唤起」——它是同一动作的第二个
+                                    // 入口；接管系统组合需写注册表并重启
+                                    // 资源管理器，关闭即回退
+                                    ToggleRow {
+                                        title: "Win+V 唤起速贴";
+                                        description: "接管系统 Win+V：开启后 Win+V 与上方快捷键一样唤起速贴面板，系统剪贴板历史同时失效。需重启资源管理器生效；关闭开关并重启资源管理器即恢复系统原状。";
+                                        checked: root.winv-enabled;
+                                        toggled(checked) => { root.winv-toggled(checked); }
+                                    }
+                                    if (root.winv-enabled || root.winv-pending-restore): VerticalLayout {
+                                        spacing: 6px;
+                                        RowDivider { }
+                                        SettingRow {
+                                            title: "生效状态";
+                                            description: root.winv-status-text;
+                                            Rectangle {
+                                                width: restart-btn.width;
+                                                restart-btn := Rectangle {
+                                                    x: 0;
+                                                    y: (parent.height - self.height) / 2;
+                                                    width: restart-btn-text.preferred-width + 24px;
+                                                    height: 30px;
+                                                    border-radius: 8px;
+                                                    border-width: 1px;
+                                                    border-color: root.winv-restart-armed
+                                                        ? Theme.accent-fg : Theme.border-default;
+                                                    background: root.winv-restart-armed
+                                                        ? Theme.accent-subtle : Theme.canvas-default;
+                                                    TouchArea {
+                                                        clicked() => { root.winv-restart-explorer(); }
+                                                    }
+                                                    restart-btn-text := Text {
+                                                        text: root.winv-restart-armed
+                                                            ? "确认重启？任务栏会短暂消失"
+                                                            : (root.winv-enabled
+                                                                ? "重启资源管理器生效"
+                                                                : "重启资源管理器恢复系统");
+                                                        color: root.winv-restart-armed
+                                                            ? Theme.accent-fg : Theme.fg-default;
+                                                        font-size: Metrics.text-xs;
+                                                        vertical-alignment: center;
+                                                        horizontal-alignment: center;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    RowDivider { }
                                     // 搜索窗口：启用复选 + 录制框同行并排（旧版
                                     // flex items-center gap-4），「启用」与录制框垂直
                                     // 对齐；冲突提示在框下
@@ -1387,52 +1438,6 @@ export component SettingsWindow inherits Window {
                                                     color: Theme.fg-subtle;
                                                     font-size: Metrics.text-xs;
                                                     vertical-alignment: center;
-                                                }
-                                            }
-                                        }
-                                    }
-                                    RowDivider { }
-                                    // 接管系统 Win+V（ADR-0001）：写注册表
-                                    // 释放系统组合，本应用注册为速贴唤起；
-                                    // 关闭开关清注册表回退
-                                    ToggleRow {
-                                        title: "接管系统 Win+V";
-                                        description: "用 FloatPaste 速贴面板接替系统剪贴板历史：Win+V 改为打开速贴面板。开启需重启资源管理器生效；关闭开关并重启资源管理器即恢复系统原状。";
-                                        checked: root.winv-enabled;
-                                        toggled(checked) => { root.winv-toggled(checked); }
-                                    }
-                                    if (root.winv-enabled): VerticalLayout {
-                                        spacing: 6px;
-                                        RowDivider { }
-                                        SettingRow {
-                                            title: "生效状态";
-                                            description: root.winv-status-text;
-                                            Rectangle {
-                                                width: restart-btn.width;
-                                                restart-btn := Rectangle {
-                                                    x: 0;
-                                                    y: (parent.height - self.height) / 2;
-                                                    width: restart-btn-text.preferred-width + 24px;
-                                                    height: 30px;
-                                                    border-radius: 8px;
-                                                    border-width: 1px;
-                                                    border-color: root.winv-restart-armed
-                                                        ? Theme.accent-fg : Theme.border-default;
-                                                    background: root.winv-restart-armed
-                                                        ? Theme.accent-subtle : Theme.canvas-default;
-                                                    TouchArea {
-                                                        clicked() => { root.winv-restart-explorer(); }
-                                                    }
-                                                    restart-btn-text := Text {
-                                                        text: root.winv-restart-armed
-                                                            ? "确认重启？任务栏会短暂消失"
-                                                            : "重启资源管理器生效";
-                                                        color: root.winv-restart-armed
-                                                            ? Theme.accent-fg : Theme.fg-default;
-                                                        font-size: Metrics.text-xs;
-                                                        vertical-alignment: center;
-                                                        horizontal-alignment: center;
-                                                    }
                                                 }
                                             }
                                         }

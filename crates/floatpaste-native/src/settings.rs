@@ -75,12 +75,35 @@ thread_local! {
     static SAVED: RefCell<Option<UserSetting>> = const { RefCell::new(None) };
     /// Win+V「重启资源管理器」两段式确认的自动复位定时器
     static RESTART_ARM_TIMER: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
+    /// explorer 重启后延迟补注册 Win+V 的单发定时器（广播早于系统
+    /// 释放热键完成，等一站再注册）
+    static EXPLORER_RESYNC_TIMER: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
 }
 
 struct ScrollAnim {
     from: f32,
     to: f32,
     started_at: std::time::Instant,
+}
+
+/// 重启资源管理器按钮进入两段式确认态（3 秒内再点执行，超时自动复位）；
+/// 关闭接管开关时也直接置确认态，把「还需重启一次」变成可见引导
+fn arm_restart_button(app: &App) {
+    if let Some(win) = app.settings.upgrade() {
+        win.set_winv_restart_armed(true);
+    }
+    let app_arm = app.clone();
+    let timer = slint::Timer::default();
+    timer.start(
+        slint::TimerMode::SingleShot,
+        Duration::from_millis(3000),
+        move || {
+            if let Some(win) = app_arm.settings.upgrade() {
+                win.set_winv_restart_armed(false);
+            }
+        },
+    );
+    RESTART_ARM_TIMER.with(|slot| *slot.borrow_mut() = Some(timer));
 }
 
 impl Clone for ScrollAnim {
@@ -189,10 +212,16 @@ pub fn wire(app: &App) {
                 return;
             };
             win.set_winv_enabled(checked);
-            // 注册表立即写/清（ADR-0001：重启 Explorer 生效，可逆）
+            // 注册表立即写/清（ADR-0001：重启 Explorer 生效，可逆）。
+            // 关闭后系统需等 explorer 再重启一次才重新持有 Win+V（开启
+            // 期间那次重启已让系统放弃该组合），记过渡态并把恢复按钮
+            // 直接置确认态高亮，避免用户漏掉这关键一步
+            app_cb.state.set_winv_pending_restore(false);
             let result = if checked {
                 winv_takeover::enable_in_registry()
             } else {
+                app_cb.state.set_winv_pending_restore(true);
+                arm_restart_button(&app_cb);
                 winv_takeover::disable_in_registry()
             };
             if let Err(error) = result {
@@ -203,7 +232,7 @@ pub fn wire(app: &App) {
             perform_save(&app_cb);
             let failures = app_cb.state.hotkey_failures();
             refresh_hotkey_status_hints(&win, &failures);
-            refresh_winv_status(&win, &failures);
+            refresh_winv_status(&app_cb, &win);
         });
     }
     {
@@ -217,20 +246,7 @@ pub fn wire(app: &App) {
                 info!("用户确认重启资源管理器（Win+V 接管生效）");
                 winv_takeover::restart_explorer();
             } else {
-                // 两段式确认：3 秒内再点执行，超时自动复位
-                win.set_winv_restart_armed(true);
-                let app_cb_arm = app_cb.clone();
-                let timer = slint::Timer::default();
-                timer.start(
-                    slint::TimerMode::SingleShot,
-                    Duration::from_millis(3000),
-                    move || {
-                        if let Some(win) = app_cb_arm.settings.upgrade() {
-                            win.set_winv_restart_armed(false);
-                        }
-                    },
-                );
-                RESTART_ARM_TIMER.with(|slot| *slot.borrow_mut() = Some(timer));
+                arm_restart_button(&app_cb);
             }
         });
     }
@@ -612,10 +628,12 @@ fn hydrate(app: &App, win: &SettingsWindow) {
     win.set_session_recorder_id(0);
     win.set_winv_enabled(settings.takeover_winv);
     win.set_winv_restart_armed(false);
+    let pending_restore = app.state.winv_pending_restore();
+    win.set_winv_pending_restore(pending_restore);
     // 全局快捷键注册状态（启动或保存路径的失败记录在此呈现给用户）
     let failures = app.state.hotkey_failures();
     refresh_hotkey_status_hints(win, &failures);
-    refresh_winv_status(win, &failures);
+    refresh_winv_status(app, win);
     win.set_history_limit_text(settings.history_limit.to_string().into());
     win.set_picker_limit_text(settings.picker_record_limit.to_string().into());
     win.set_position_mode(match settings.picker_position_mode {
@@ -920,41 +938,102 @@ pub fn apply_side_effects(app: &App) {
         rebuild_preview_models(&win, &settings, resolved);
         // 保存路径可能改变快捷键（含 Win+V 接管），注册结果即时呈现
         let failures = app.state.hotkey_failures();
+        win.set_winv_pending_restore(app.state.winv_pending_restore());
         refresh_hotkey_status_hints(&win, &failures);
-        refresh_winv_status(&win, &failures);
+        refresh_winv_status(app, &win);
     }
+}
+
+/// explorer 已重启（托盘 TaskbarCreated 广播）：系统对 Win+V 的持有
+/// 状态随之翻转——接管开启则延迟补注册并更新状态；接管关闭则解除
+/// 「待重启恢复系统 Win+V」过渡提示
+pub fn on_explorer_restarted(app: &App) {
+    app.state.set_winv_pending_restore(false);
+    if let Some(win) = app.settings.upgrade() {
+        win.set_winv_restart_armed(false);
+        win.set_winv_pending_restore(false);
+        refresh_winv_status(app, &win);
+    }
+    if !app.state.current_settings().takeover_winv {
+        return;
+    }
+    // 广播早于系统释放热键完成，延迟一站再注册；定时器挂线程局部
+    // 保活，重复广播只保留最后一枚
+    let app_resync = app.clone();
+    EXPLORER_RESYNC_TIMER.with(|slot| {
+        let timer = slint::Timer::default();
+        timer.start(
+            slint::TimerMode::SingleShot,
+            Duration::from_millis(1500),
+            move || apply_side_effects(&app_resync),
+        );
+        *slot.borrow_mut() = Some(timer);
+    });
 }
 
 /// 全局快捷键注册失败的用户可见反馈（1409=组合被其他程序占用）。
-/// 空串 = 该键位注册正常
+/// 空串 = 该键位注册正常。含 Win 修饰的组合为系统保留，按接管开关
+/// 状态给出针对性指引而非笼统的「请换一组」
 fn refresh_hotkey_status_hints(win: &SettingsWindow, failures: &[(u32, u32)]) {
-    let text_for = |id: u32| {
+    let uses_win = |text: &str| {
+        floatpaste_core::platform::windows::hotkey::parse_hotkey(text)
+            .is_some_and(|spec| spec.win)
+    };
+    let text_for = |id: u32, text: &str| {
         failures
             .iter()
             .find(|(failed_id, _)| *failed_id == id)
-            .map(|(_, code)| match *code {
-                crate::ERROR_HOTKEY_OCCUPIED => "注册失败：组合键已被其他程序占用，请换一组组合。".to_string(),
-                code => format!("注册失败（错误码 {code}）。"),
+            .map(|(_, code)| {
+                if *code == crate::ERROR_HOTKEY_OCCUPIED && uses_win(text) {
+                    if win.get_winv_enabled() {
+                        "Win+V 为系统保留组合，接管尚未生效：重启资源管理器后即可使用（见下方「Win+V 唤起速贴」）。".to_string()
+                    } else {
+                        "Win+V 为系统保留组合：需先开启下方「Win+V 唤起速贴」接管后方可使用。".to_string()
+                    }
+                } else if *code == crate::ERROR_HOTKEY_OCCUPIED {
+                    "注册失败：组合键已被其他程序占用，请换一组组合。".to_string()
+                } else {
+                    format!("注册失败（错误码 {code}）。")
+                }
             })
             .unwrap_or_default()
     };
-    win.set_main_hotkey_status(text_for(1).into());
-    win.set_search_hotkey_status(text_for(2).into());
+    win.set_main_hotkey_status(text_for(crate::HOTKEY_ID_MAIN, &win.get_shortcut()).into());
+    win.set_search_hotkey_status(
+        text_for(crate::HOTKEY_ID_SEARCH, &win.get_search_shortcut()).into(),
+    );
 }
 
-/// Win+V 接管生效状态：开关关闭不显示；开启时区分「已注册」与
-/// 「未注册」（未重启 Explorer 前注册失败是预期态，给出指引而非报错）
-fn refresh_winv_status(win: &SettingsWindow, failures: &[(u32, u32)]) {
+/// Win+V 接管生效状态：关闭时区分「已停止、待重启恢复系统」过渡态；
+/// 开启时区分「已接管」「未生效（需重启 explorer）」「与自身快捷键
+/// 冲突」与「其他注册错误」
+fn refresh_winv_status(app: &App, win: &SettingsWindow) {
     if !win.get_winv_enabled() {
-        win.set_winv_status_text("".into());
+        win.set_winv_status_text(if app.state.winv_pending_restore() {
+            "已停止接管，还需一步：点击右侧「重启资源管理器恢复系统」，系统 Win+V 才会恢复；其间 Win+V 暂无响应属正常。"
+                .into()
+        } else {
+            "".into()
+        });
         return;
     }
-    let registered = !failures.iter().any(|(id, _)| *id == 3);
-    win.set_winv_status_text(if registered {
-        "已接管：Win+V 现在打开速贴面板；重启资源管理器前的提示可忽略。".into()
-    } else {
-        "尚未生效：重启资源管理器后 Win+V 即由 FloatPaste 接管；若重启后仍显示被占用，说明组合被其他程序持有。".into()
-    });
+    let failures = app.state.hotkey_failures();
+    let text = match failures
+        .iter()
+        .find(|(id, _)| *id == crate::HOTKEY_ID_WINV)
+    {
+        Some((_, crate::HOTKEY_ERROR_WINV_SELF_CONFLICT)) => {
+            "未接管：Win+V 与上方速贴唤起或搜索窗口的快捷键相同，请更换组合后重试。"
+        }
+        Some((_, crate::ERROR_HOTKEY_OCCUPIED)) => {
+            "尚未生效：点击右侧「重启资源管理器生效」，重启后 Win+V 即唤起速贴面板；若重启后仍如此，说明组合被其他程序占用。"
+        }
+        Some((_, code)) => {
+            return win.set_winv_status_text(format!("接管注册失败（错误码 {code}）。").into());
+        }
+        None => "已接管：Win+V 现在与速贴唤起快捷键一样打开速贴面板。",
+    };
+    win.set_winv_status_text(text.into());
 }
 
 /* ───────────────── 预览模型（主题预设卡 / 强调色） ───────────────── */
