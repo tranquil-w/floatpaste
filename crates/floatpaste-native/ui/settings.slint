@@ -1429,86 +1429,92 @@ export component SettingsWindow inherits Window {
                                         }
                                     }
                                 }
-                            }
 
-                            // ── 会话动作键位（速贴面板与搜索窗口共用，
-                            //    数字 1-9 直达保留，见下方开关）──
-                            RowGroup {
-                                for row[idx] in root.session-key-rows: VerticalLayout {
-                                    if (idx > 0): RowDivider { }
-                                    SettingRow {
-                                        title: row.title;
-                                        description: row.description;
-                                        Rectangle {
-                                            width: 224px;
-                                            sk-ctrl := VerticalLayout {
-                                                x: 0;
-                                                y: (parent.height - self.preferred-height) / 2;
+                                // ── 会话动作键位（速贴面板与搜索窗口共用，
+                                //    数字 1-9 直达保留，见下方开关）──
+                                // for 实例显式高度（= 行间分隔线 + 行首选高）：
+                                // 布局聚合依赖子元素的可确定尺寸
+                                RowGroup {
+                                    for row[idx] in root.session-key-rows: VerticalLayout {
+                                        height: (idx > 0 ? 1px : 0px) + sk-row.preferred-height;
+                                        RowDivider { visible: idx > 0; }
+                                        sk-row := SettingRow {
+                                            title: row.title;
+                                            description: row.description;
+                                            Rectangle {
                                                 width: 224px;
-                                                height: self.preferred-height;
-                                                spacing: 6px;
-                                                SessionKeyInput {
-                                                    width: 100%;
-                                                    instance-id: idx;
-                                                    recorder-id <=> root.session-recorder-id;
-                                                    value-parts: row.parts;
-                                                    notice: row.notice;
-                                                    captured(value) => {
-                                                        root.session-key-captured(row.action, value);
+                                                sk-ctrl := VerticalLayout {
+                                                    x: 0;
+                                                    y: (parent.height - self.preferred-height) / 2;
+                                                    width: 224px;
+                                                    height: self.preferred-height;
+                                                    spacing: 6px;
+                                                    SessionKeyInput {
+                                                        width: 100%;
+                                                        instance-id: idx;
+                                                        recorder-id <=> root.session-recorder-id;
+                                                        value-parts: row.parts;
+                                                        notice: row.notice;
+                                                        captured(value) => {
+                                                            root.session-key-captured(row.action, value);
+                                                        }
+                                                        cancelled() => {
+                                                            root.session-key-cancelled(row.action);
+                                                        }
                                                     }
-                                                    cancelled() => {
-                                                        root.session-key-cancelled(row.action);
+                                                    if (row.notice != ""): Text {
+                                                        text: row.notice;
+                                                        color: Theme.danger-fg;
+                                                        font-size: Metrics.text-xs;
+                                                        wrap: word-wrap;
                                                     }
-                                                }
-                                                if (row.notice != ""): Text {
-                                                    text: row.notice;
-                                                    color: Theme.danger-fg;
-                                                    font-size: Metrics.text-xs;
-                                                    wrap: word-wrap;
                                                 }
                                             }
                                         }
                                     }
                                 }
-                                RowDivider { }
-                                ToggleRow {
-                                    title: "数字键 1-9 直达";
-                                    description: "速贴面板打开时按 1-9 直接粘贴对应条目。数字键是无修饰全局热键，若与其他软件冲突可关闭。";
-                                    checked: root.picker-digit-enabled;
-                                    toggled(checked) => { root.picker-digit-toggled(checked); }
-                                }
-                                RowDivider { }
-                                // 编辑窗口固定键位（只读展示，重设计在
-                                // 编辑窗口迭代中一并处理）
-                                SettingRow {
-                                    title: "编辑窗口保存";
-                                    description: "保存正在编辑的内容（关闭时未保存会先询问）。";
-                                    Rectangle {
-                                        width: 120px;
-                                        HorizontalLayout {
-                                            x: 0;
-                                            y: (parent.height - self.preferred-height) / 2;
-                                            height: self.preferred-height;
-                                            spacing: Metrics.space-1_5;
-                                            alignment: start;
-                                            KbdBadge { key: "Ctrl"; }
-                                            KbdBadge { key: "S"; }
+
+                                // ── 直达开关与编辑窗固定键位 ──
+                                RowGroup {
+                                    ToggleRow {
+                                        title: "数字键 1-9 直达";
+                                        description: "速贴面板打开时按 1-9 直接粘贴对应条目。数字键是无修饰全局热键，若与其他软件冲突可关闭。";
+                                        checked: root.picker-digit-enabled;
+                                        toggled(checked) => { root.picker-digit-toggled(checked); }
+                                    }
+                                    RowDivider { }
+                                    // 编辑窗口固定键位（只读展示，重设计在
+                                    // 编辑窗口迭代中一并处理）
+                                    SettingRow {
+                                        title: "编辑窗口保存";
+                                        description: "保存正在编辑的内容（关闭时未保存会先询问）。";
+                                        Rectangle {
+                                            width: 120px;
+                                            HorizontalLayout {
+                                                x: 0;
+                                                y: (parent.height - self.preferred-height) / 2;
+                                                height: self.preferred-height;
+                                                spacing: Metrics.space-1_5;
+                                                alignment: start;
+                                                KbdBadge { key: "Ctrl"; }
+                                                KbdBadge { key: "S"; }
+                                            }
                                         }
                                     }
-                                }
-                                RowDivider { }
-                                SettingRow {
-                                    title: "编辑窗口关闭";
-                                    description: "关闭编辑窗口返回原面板。";
-                                    Rectangle {
-                                        width: 120px;
-                                        HorizontalLayout {
-                                            x: 0;
-                                            y: (parent.height - self.preferred-height) / 2;
-                                            height: self.preferred-height;
-                                            spacing: Metrics.space-1_5;
-                                            alignment: start;
-                                            KbdBadge { key: "Esc"; }
+                                    RowDivider { }
+                                    SettingRow {
+                                        title: "编辑窗口关闭";
+                                        description: "关闭编辑窗口返回原面板。";
+                                        Rectangle {
+                                            width: 120px;
+                                            HorizontalLayout {
+                                                x: 0;
+                                                y: (parent.height - self.preferred-height) / 2;
+                                                height: self.preferred-height;
+                                                spacing: Metrics.space-1_5;
+                                                alignment: start;
+                                                KbdBadge { key: "Esc"; }
+                                            }
                                         }
                                     }
                                 }
