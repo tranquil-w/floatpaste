@@ -98,13 +98,22 @@ pub fn schedule_with(
         }
 
         if item.r#type == "image" && item.image_path.is_some() {
-            // 图片解码可能上百毫秒：放后台线程（只传原始像素），回填走 token 失效校验
+            // 图片解码可能上百毫秒：放后台线程（只传原始像素），回填走 token 失效校验。
+            // 预览缩到显示上限（逻辑 560×420 × 宿主 DPI）：超出的原像素不可见，
+            // 全量解码只会制造内存尖峰（4K 截图 RGBA ≈ 33MB，缩放后 ≈ 3MB）
+            let dpi = if host_hwnd > 0 {
+                win32_ext::window_dpi(host_hwnd) as f32 / 96.0
+            } else {
+                1.0
+            };
+            let max_w = (IMAGE_MAX_WIDTH * dpi).ceil().max(1.0) as u32;
+            let max_h = (IMAGE_MAX_HEIGHT * dpi).ceil().max(1.0) as u32;
             let core = app.core().clone();
             let app_for_cb = app.clone();
             let item_for_cb = item.clone();
             let path = item.image_path.clone().unwrap_or_default();
             std::thread::spawn(move || {
-                let raw = thumbnails::load_full_image_raw(&core, &path);
+                let raw = thumbnails::load_preview_image_raw(&core, &path, max_w, max_h);
                 let _ = slint::invoke_from_event_loop(move || {
                     if PENDING_TOKEN.with(|value| value.get()) != token || !host_active(&app_for_cb)
                     {

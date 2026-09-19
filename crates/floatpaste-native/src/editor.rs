@@ -371,6 +371,7 @@ pub fn delete_requested(app: &App) {
     }
     match ClipService::delete(&app.core(), &session.item_id) {
         Ok(()) => {
+            thumbnails::evict(&session.item_id);
             refresh_lists(app);
             close_editor(app);
         }

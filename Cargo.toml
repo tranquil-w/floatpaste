@@ -1,3 +1,10 @@
 [workspace]
 resolver = "2"
 members = ["crates/floatpaste-core", "crates/floatpaste-native"]
+
+# 常驻后台应用：瘦 LTO + 单编译单元收缩代码体积，strip 去符号，
+# 降低发布版的代码页与元数据内存占用
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

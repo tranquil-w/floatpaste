@@ -4,26 +4,43 @@
 //!
 //! 列表缩略图缓存（id → 图像）按窗口共享：速贴与搜索展示同一批条目，
 //! 共用一份解码结果与失败哨兵，避免双份内存与重复解码。
+//! 缓存带容量上限（LRU 淘汰）与删除清理，防止重度图片使用下无界增长。
 
 use floatpaste_core::domain::clip_item::ClipItemSummary;
+use floatpaste_core::services::image_decode::decode_limits;
 use floatpaste_core::state::CoreState;
 use slint::{Rgba8Pixel, SharedPixelBuffer};
 
 use crate::picker::App;
 
+/// 缓存容量上限（条）。单张 144×144 RGBA 约 81KB，512 条 ≈ 42MB 封顶
+const MAX_CACHE_ENTRIES: usize = 512;
+
 thread_local! {
-    /// 缩略图缓存：id -> Some(图像) | None(解码失败哨兵，避免反复重试)
-    static CACHE: std::cell::RefCell<std::collections::HashMap<String, Option<slint::Image>>> =
+    /// 缩略图缓存：id -> (Some(图像) | None(解码失败哨兵，避免反复重试), 最近使用序号)
+    static CACHE: std::cell::RefCell<std::collections::HashMap<String, (Option<slint::Image>, u64)>> =
         std::cell::RefCell::new(std::collections::HashMap::new());
+    /// 最近使用序号：命中/写入时递增，容量超限时淘汰序号最小项
+    static USE_TICK: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     /// 列表版本号：异步缩略图回来时校验列表是否已变
     static LIST_VERSION: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
-/// 读取缓存的缩略图（未解码/失败返回 None）
+fn next_tick() -> u64 {
+    USE_TICK.with(|tick| {
+        tick.set(tick.get() + 1);
+        tick.get()
+    })
+}
+
+/// 读取缓存的缩略图（未解码/失败返回 None），命中时刷新最近使用序号
 pub fn cached(id: &str) -> Option<slint::Image> {
-    CACHE
-        .with(|cache| cache.borrow().get(id).cloned())
-        .flatten()
+    CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let entry = cache.get_mut(id)?;
+        entry.1 = next_tick();
+        entry.0.clone()
+    })
 }
 
 /// 是否已在缓存中（含失败哨兵）
@@ -31,10 +48,27 @@ pub fn contains(id: &str) -> bool {
     CACHE.with(|cache| cache.borrow().contains_key(id))
 }
 
-/// 写入缓存（事件循环线程）
+/// 写入缓存（事件循环线程）；超容量时淘汰最久未用项
 pub fn insert(id: String, image: Option<slint::Image>) {
     CACHE.with(|cache| {
-        cache.borrow_mut().insert(id, image);
+        let mut cache = cache.borrow_mut();
+        cache.insert(id, (image, next_tick()));
+        if cache.len() > MAX_CACHE_ENTRIES {
+            if let Some(oldest) = cache
+                .iter()
+                .min_by_key(|(_, (_, tick))| *tick)
+                .map(|(key, _)| key.clone())
+            {
+                cache.remove(&oldest);
+            }
+        }
+    });
+}
+
+/// 条目删除后同步清缓存，避免已删条目的缩略图滞留内存
+pub fn evict(id: &str) {
+    CACHE.with(|cache| {
+        cache.borrow_mut().remove(id);
     });
 }
 
@@ -63,7 +97,8 @@ const THUMB_SIZE: u32 = 144;
 /// 超过该字节数的源图跳过解码（防御异常大文件拖慢工作线程）
 const MAX_SOURCE_BYTES: u64 = 32 * 1024 * 1024;
 
-fn decode(core: &CoreState, image_path: &str, thumb: bool) -> Option<RawImage> {
+/// 带解码上限读取：超限（异常声明尺寸/巨量像素分配）按解码失败处理
+fn decode(core: &CoreState, image_path: &str, max_size: Option<(u32, u32)>) -> Option<RawImage> {
     let path = core
         .image_storage
         .resolve_existing_image_path(image_path)
@@ -73,9 +108,16 @@ fn decode(core: &CoreState, image_path: &str, thumb: bool) -> Option<RawImage> {
         return None;
     }
 
-    let mut image = image::open(&path).ok()?;
-    if thumb {
-        image = image.thumbnail(THUMB_SIZE, THUMB_SIZE);
+    let file = std::fs::File::open(&path).ok()?;
+    let mut reader = image::ImageReader::new(std::io::BufReader::new(file));
+    reader.limits(decode_limits());
+    let mut image = reader
+        .with_guessed_format()
+        .ok()?
+        .decode()
+        .ok()?;
+    if let Some((max_width, max_height)) = max_size {
+        image = image.thumbnail(max_width, max_height);
     }
     let (width, height) = (image.width(), image.height());
     if width == 0 || height == 0 {
@@ -92,12 +134,23 @@ fn decode(core: &CoreState, image_path: &str, thumb: bool) -> Option<RawImage> {
 
 /// 列表缩略图（144×144 内缩放）
 pub fn load_thumbnail_raw(core: &CoreState, image_path: &str) -> Option<RawImage> {
-    decode(core, image_path, true)
+    decode(core, image_path, Some((THUMB_SIZE, THUMB_SIZE)))
 }
 
-/// tooltip 预览用原图（不缩放；显示尺寸由元数据计算）
+/// tooltip 预览：缩放到显示上限内（物理像素）。显示按逻辑尺寸缩放渲染，
+/// 超出显示上限的原像素不可见，无需解码到全尺寸
+pub fn load_preview_image_raw(
+    core: &CoreState,
+    image_path: &str,
+    max_width: u32,
+    max_height: u32,
+) -> Option<RawImage> {
+    decode(core, image_path, Some((max_width, max_height)))
+}
+
+/// 编辑器查看用原图（不缩放；仍受解码上限保护）
 pub fn load_full_image_raw(core: &CoreState, image_path: &str) -> Option<RawImage> {
-    decode(core, image_path, false)
+    decode(core, image_path, None)
 }
 
 /// 事件循环线程：原始像素 → Slint 图像
@@ -145,4 +198,34 @@ pub(crate) fn ensure(app: &App, items: &[ClipItemSummary], rebuild: impl FnOnce(
             rebuild(&app_for_cb);
         });
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn insert_evicts_least_recently_used_beyond_capacity() {
+        for index in 0..MAX_CACHE_ENTRIES {
+            insert(format!("cap-{index}"), None);
+        }
+        // 触达最早写入项使其保活，再插入一项：被淘汰的应是最久未用的第二项
+        assert!(cached("cap-0").is_none());
+        insert("cap-new".to_string(), None);
+
+        assert!(contains("cap-0"));
+        assert!(!contains("cap-1"));
+        assert!(contains("cap-new"));
+        evict("cap-0");
+        assert!(!contains("cap-0"));
+    }
+
+    #[test]
+    fn insert_without_touch_evicts_oldest() {
+        for index in 0..=MAX_CACHE_ENTRIES {
+            insert(format!("old-{index}"), None);
+        }
+        assert!(!contains("old-0"));
+        assert!(contains(&format!("old-{MAX_CACHE_ENTRIES}")));
+    }
 }

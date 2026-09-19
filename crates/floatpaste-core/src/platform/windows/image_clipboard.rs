@@ -127,10 +127,14 @@ fn decode_dib_bytes(data: &[u8]) -> Result<ClipboardImageData, AppError> {
     decode_image(decoder, None)
 }
 
-fn decode_image<D>(decoder: D, png_bytes: Option<Vec<u8>>) -> Result<ClipboardImageData, AppError>
+fn decode_image<D>(mut decoder: D, png_bytes: Option<Vec<u8>>) -> Result<ClipboardImageData, AppError>
 where
     D: ImageDecoder,
 {
+    // 收紧解码内存：异常超大图按解码失败拒绝，防止瞬时分配上 GB
+    decoder
+        .set_limits(crate::services::image_decode::decode_limits())
+        .map_err(|error| AppError::Message(format!("剪贴板图片尺寸超出支持范围: {error}")))?;
     let (width, height) = decoder.dimensions();
     let image = DynamicImage::from_decoder(decoder)
         .map_err(|error| AppError::Message(format!("读取剪贴板图片像素失败: {error}")))?;
@@ -271,6 +275,22 @@ mod tests {
     };
 
     use super::{build_clipboard_image_payload, decode_dib_bytes, decode_png_bytes};
+    use crate::services::image_decode::MAX_IMAGE_EDGE;
+
+    #[test]
+    fn decode_png_bytes_rejects_oversized_dimensions() {
+        // 篡改 IHDR 尺寸为超大值：必须因解码上限被拒，而不是解码瞬间分配巨量像素
+        let rgba = vec![255, 0, 0, 255, 0, 255, 0, 128];
+        let mut encoded = Vec::new();
+        PngEncoder::new(&mut encoded)
+            .write_image(&rgba, 2, 1, ExtendedColorType::Rgba8)
+            .unwrap();
+        let oversized = MAX_IMAGE_EDGE + 1;
+        encoded[16..20].copy_from_slice(&oversized.to_be_bytes());
+        encoded[20..24].copy_from_slice(&oversized.to_be_bytes());
+
+        assert!(decode_png_bytes(&encoded).is_err());
+    }
 
     #[test]
     fn decode_png_bytes_round_trips_rgba_pixels() {

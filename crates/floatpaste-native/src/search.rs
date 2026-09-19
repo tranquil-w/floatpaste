@@ -1074,6 +1074,7 @@ fn perform_delete(app: &App, id: &str) {
         show_error(app, "删除条目失败，请稍后重试");
         return;
     }
+    thumbnails::evict(id);
     // 即时从列表缓存移除（对齐 applyClipsChanged deleted）
     let mut items = app.state.search_items();
     let removed_was_selected = SELECTED_ID.with(|slot| {
