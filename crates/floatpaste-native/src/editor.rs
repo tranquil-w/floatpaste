@@ -44,44 +44,6 @@ thread_local! {
 
 // ── 打开入口 ──────────────────────────────────────────────
 
-/// 惰性创建编辑窗口：重挂回调与主题，等价启动期装配。已有实例直接返回。
-/// 仅创建组件，winit 窗口在下一拍事件循环完成建窗——显示流程须延后
-/// 一轮执行，否则装配期读不到句柄
-fn ensure_window(app: &App) {
-    if app.editor.upgrade().is_some() {
-        return;
-    }
-    if let Ok(win) = EditorWindow::new() {
-        app.editor.set(win.as_weak());
-        wire(app);
-        let settings = app.state.current_settings();
-        let resolved = floatpaste_core::theme::resolve_theme(
-            settings.theme_mode.clone(),
-            floatpaste_core::theme::system_prefers_dark(),
-        );
-        let tokens = floatpaste_core::theme::derive_tokens(
-            &settings.theme_preset,
-            &settings.theme_accent,
-            resolved,
-        );
-        crate::theme_bridge::apply_theme(None, None, None, Some(&win), None, &tokens);
-    }
-}
-
-/// 销毁编辑窗口（关闭后的延迟调用）：下一轮事件循环 drop 组件，
-/// 释放帧缓冲与组件树；下次打开时重建。
-/// 延迟一轮执行，避免在组件回调栈内 drop 正在执行的组件
-pub fn schedule_destroy(app: &App) {
-    let app = app.clone();
-    let _ = slint::invoke_from_event_loop(move || {
-        if let Some(win) = app.editor.upgrade() {
-            let _ = win.window().hide();
-        }
-        app.editor.take();
-        info!("销毁编辑窗口");
-    });
-}
-
 /// 速贴面板 Ctrl+Enter：收起面板（不还原前台，编辑器接管），打开编辑器
 pub fn open_from_picker(app: &App, item_id: String) {
     let target = app.state.picker_session();
@@ -114,30 +76,13 @@ pub fn open_from_search(app: &App, item_id: String) {
 
 fn show_editor(app: &App, session: EditorSession) {
     app.state.set_editor_session(Some(session.clone()));
-    if let Some(win) = app.editor.upgrade() {
-        display_editor(app, &win, &session);
+    let Some(win) = app.editor.upgrade() else {
+        app.state.set_editor_session(None);
+        warn!("编辑窗口尚未就绪，无法打开编辑器");
         return;
-    }
-    // 首次打开（或上次销毁后重建）：先创建组件，建窗在下一拍事件循环
-    // 落地，再延一轮走显示流程
-    let app_cb = app.clone();
-    let _ = slint::invoke_from_event_loop(move || {
-        ensure_window(&app_cb);
-        let session_cb = session.clone();
-        let app_cb = app_cb.clone();
-        let _ = slint::invoke_from_event_loop(move || {
-            if let Some(win) = app_cb.editor.upgrade() {
-                display_editor(&app_cb, &win, &session_cb);
-            } else {
-                app_cb.state.set_editor_session(None);
-                warn!("编辑窗口创建失败，无法打开编辑器");
-            }
-        });
-    });
-}
+    };
 
-fn display_editor(app: &App, win: &EditorWindow, session: &EditorSession) {
-    reset_delete_arm(win);
+    reset_delete_arm(&win);
     // 显式定尺寸：窗口根布局的首选高被 stretch 子元素拉成极小，会被钳到
     // min（400×300），不能依赖 preferred（对齐旧版 inner_size(800,600)）
     // 整帧重绘：hide→show 后 Slint 只重绘「与上次渲染不同的区域」，静态
@@ -149,7 +94,7 @@ fn display_editor(app: &App, win: &EditorWindow, session: &EditorSession) {
     win.set_force_repaint(!win.get_force_repaint());
     win.window().set_size(slint::LogicalSize::new(800.0, 600.0));
     let _ = win.window().show();
-    let editor_hwnd = win32_ext::window_hwnd(win);
+    let editor_hwnd = win32_ext::window_hwnd(&win);
     if let Some(editor_hwnd) = editor_hwnd {
         win32_ext::remove_dwm_border(editor_hwnd);
         win32_ext::warm_surface(editor_hwnd);
@@ -165,7 +110,7 @@ fn display_editor(app: &App, win: &EditorWindow, session: &EditorSession) {
             warn!("编辑窗口获取前台失败");
         }
     }
-    load_session(app, win, &session.item_id);
+    load_session(app, &win, &session.item_id);
     info!("打开 Editor，item={}", session.item_id);
 }
 
@@ -376,8 +321,6 @@ pub fn close_editor(app: &App) {
     win.set_error_text("".into());
     let _ = win.window().hide();
     hide_and_restore_source(app);
-    // 低频窗口用完即毁：恢复来源后延迟销毁，释放帧缓冲与组件树
-    schedule_destroy(app);
 }
 
 /// 标题栏 X 关闭：脏 → 弹确认框拦截；干净 → 放行隐藏（返回流程同上）

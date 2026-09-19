@@ -285,7 +285,7 @@ pub fn wire(app: &App) {
         });
     }
 
-    // ── 关闭：Esc flush 后隐藏并销毁；X flush 后隐藏并销毁 ──
+    // ── 关闭：Esc flush 后隐藏；X 仅隐藏 ──
     {
         let app_cb = app.clone();
         win.on_request_close(move || {
@@ -293,17 +293,14 @@ pub fn wire(app: &App) {
             if let Some(win) = app_cb.settings.upgrade() {
                 let _ = win.window().hide();
             }
-            schedule_destroy(&app_cb);
         });
     }
     {
         let app_cb = app.clone();
         win.window().on_close_requested(move || {
-            // X 关闭：与 Esc 同为销毁语义（低频窗口用完即毁）。差异点：
-            // 旧壳防抖中的修改由后台定时器随后落盘，销毁前必须 flush——
-            // 用户无感知（结果一致：修改被保存），仅落盘时点提前
-            flush_pending_save(&app_cb);
-            schedule_destroy(&app_cb);
+            // 对齐旧壳 configure_settings_window：拦截关闭仅隐藏；
+            // 防抖中的修改由仍存活的定时器随后落盘
+            let _ = app_cb;
             slint::CloseRequestResponse::HideWindow
         });
     }
@@ -383,39 +380,6 @@ pub fn wire(app: &App) {
     }
 }
 
-/* ───────────────── 窗口生命周期 ───────────────── */
-
-/// 惰性创建设置窗口：重挂回调与主题，等价启动期装配。已有实例直接返回。
-/// 仅创建组件，winit 窗口在下一拍事件循环完成建窗——显示流程须延后一轮
-/// 执行，否则装配期读不到句柄
-fn ensure_window(app: &App) {
-    if app.settings.upgrade().is_some() {
-        return;
-    }
-    if let Ok(win) = SettingsWindow::new() {
-        app.settings.set(win.as_weak());
-        wire(app);
-        let settings = app.state.current_settings();
-        let resolved = theme::resolve_theme(settings.theme_mode.clone(), theme::system_prefers_dark());
-        let tokens = theme::derive_tokens(&settings.theme_preset, &settings.theme_accent, resolved);
-        theme_bridge::apply_theme(None, None, None, None, Some(&win), &tokens);
-    }
-}
-
-/// 销毁设置窗口（关闭后的延迟调用）：下一轮事件循环 drop 组件，
-/// 释放帧缓冲与组件树；下次 open 时重建。
-/// 延迟一轮执行，避免在组件回调栈内 drop 正在执行的组件
-pub fn schedule_destroy(app: &App) {
-    let app = app.clone();
-    let _ = slint::invoke_from_event_loop(move || {
-        if let Some(win) = app.settings.upgrade() {
-            let _ = win.window().hide();
-        }
-        app.settings.take();
-        info!("销毁设置窗口");
-    });
-}
-
 /* ───────────────── 打开 / 关闭 / 水合 ───────────────── */
 
 /// 打开设置窗口（托盘「打开设置」与窗口 X 的唯一入口语义）。
@@ -425,28 +389,12 @@ pub fn open(app: &App) {
     if app.state.is_picker_active() {
         crate::picker::hide(app, true);
     }
-    if let Some(win) = app.settings.upgrade() {
-        show(app, &win);
+    let Some(win) = app.settings.upgrade() else {
+        warn!("设置窗口尚未就绪，无法打开");
         return;
-    }
-    // 首次打开（或上次销毁后重建）：先创建组件，建窗在下一拍事件循环
-    // 落地，再延一轮走显示流程
-    let app_cb = app.clone();
-    let _ = slint::invoke_from_event_loop(move || {
-        ensure_window(&app_cb);
-        let app_cb = app_cb.clone();
-        let _ = slint::invoke_from_event_loop(move || {
-            if let Some(win) = app_cb.settings.upgrade() {
-                show(&app_cb, &win);
-            } else {
-                warn!("设置窗口创建失败，无法打开");
-            }
-        });
-    });
-}
+    };
 
-fn show(app: &App, win: &SettingsWindow) {
-    hydrate(app, win);
+    hydrate(app, &win);
 
     // 整帧重绘：hide→show 周期后 Slint 只重绘变化区域（与编辑窗口同理）
     win.set_force_repaint(!win.get_force_repaint());
@@ -457,7 +405,7 @@ fn show(app: &App, win: &SettingsWindow) {
     // 用户逐次调整的尺寸记忆属旧版 window 级持久化，本壳暂不保留）
     win.window()
         .set_size(slint::LogicalSize::new(920.0 as f32, 760.0 as f32));
-    if let Some(hwnd) = win32_ext::window_hwnd(win) {
+    if let Some(hwnd) = win32_ext::window_hwnd(&win) {
         app_icon::apply_window_icon(hwnd);
         win32_ext::warm_surface(hwnd);
         // 设置窗口需要真实前台（输入框键盘输入），绕前台锁获取
