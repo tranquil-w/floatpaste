@@ -591,8 +591,8 @@ pub struct ThemeTokens {
     pub selection_fg: String,
     pub selection_bg: String,
 
-    /// 编辑框聚焦边框（旧版 --pg-border-accent：不随用户强调色的固定蓝）
-    pub border_accent: &'static str,
+    /// 编辑框聚焦边框（旧版 --pg-border-accent = accentFg，跟随用户强调色）
+    pub border_accent: String,
     /// 警告点/徽标的原色（旧版 --pg-warning-emphasis，未做对比度调整）
     pub warning_emphasis: &'static str,
 }
@@ -721,7 +721,7 @@ pub fn derive_tokens(preset_id: &str, theme_accent: &str, resolved: ResolvedThem
             scale.canvas.to_string()
         },
         selection_bg: if is_light { emphasis } else { accent_hover },
-        border_accent: if is_light { "#0074d0" } else { "#3b9eff" },
+        border_accent: accent_fg.clone(),
         warning_emphasis: scale.warning,
     }
 }
@@ -768,6 +768,8 @@ mod tests {
         let tokens = derive_tokens("default", "purple", ResolvedTheme::Light);
         assert_eq!(tokens.accent_fg, "#8E4EC6");
         assert_eq!(tokens.accent_subtle_rgb, [142, 78, 198]);
+        // 旧版 --pg-border-accent = accentFg：聚焦边框跟随用户强调色
+        assert_eq!(tokens.border_accent, "#8E4EC6");
     }
 
     #[test]

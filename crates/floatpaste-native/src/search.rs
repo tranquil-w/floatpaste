@@ -53,13 +53,6 @@ const DELETE_ARM_TIMEOUT_MS: u64 = 3000;
 const ERROR_TIMEOUT_MS: u64 = 3000;
 /// 焦点监视轮询间隔（对齐 SEARCH_FOCUS_WATCH_INTERVAL_MS）
 const FOCUS_WATCH_INTERVAL_MS: u64 = 120;
-/// 选中预览最多行数（对齐 line-clamp-3）
-const PREVIEW_MAX_LINES: usize = 3;
-/// 入库预览的字符截断上限（normalize_service 同值）：达到即认为原文更长
-const PREVIEW_SOURCE_LIMIT: usize = 120;
-/// 大图预览最高（对齐 max-h-[120px]）
-const LARGE_PREVIEW_MAX_H: f32 = 120.0;
-
 const RESTORE_DELAY: Duration = Duration::from_millis(90);
 const INJECT_DELAY: Duration = Duration::from_millis(60);
 
@@ -312,8 +305,6 @@ fn reset_session_state(app: &App) {
     QUERY.with(|state| *state.borrow_mut() = QueryState::default());
     CANCEL_DEBOUNCE.with(|slot| *slot.borrow_mut() = None);
     SELECTED_ID.with(|slot| *slot.borrow_mut() = None);
-    SELECTED_DETAIL.with(|slot| *slot.borrow_mut() = None);
-    SELECTED_FULL_IMAGE.with(|slot| *slot.borrow_mut() = None);
     ARMED_DELETE.with(|slot| *slot.borrow_mut() = None);
     DELETE_TOKEN.with(|token| token.set(token.get() + 1));
     ERROR_TOKEN.with(|token| token.set(token.get() + 1));
@@ -401,11 +392,6 @@ thread_local! {
     /// 关键词防抖定时器（restartable：覆盖即停旧计时）
     static CANCEL_DEBOUNCE: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
     static SELECTED_ID: RefCell<Option<String>> = const { RefCell::new(None) };
-    /// 选中条目详情全文（id, full_text）；仅文本条目预览需要
-    static SELECTED_DETAIL: RefCell<Option<(String, String)>> = const { RefCell::new(None) };
-    /// 选中图片条目的全图解码结果（id, image）；None 表示解码中/未就绪
-    static SELECTED_FULL_IMAGE: RefCell<Option<(String, Option<slint::Image>)>> =
-        const { RefCell::new(None) };
     static ARMED_DELETE: RefCell<Option<String>> = const { RefCell::new(None) };
     static DELETE_TOKEN: Cell<u64> = const { Cell::new(0) };
     static ERROR_TOKEN: Cell<u64> = const { Cell::new(0) };
@@ -530,7 +516,6 @@ fn apply_page(app: &App, result: SearchResult, seq: u64, append: bool) {
         _ => items.first().map(|item| item.id.clone()),
     };
     SELECTED_ID.with(|slot| *slot.borrow_mut() = next_selected);
-    refresh_selected_detail(app);
 
     let has_more = QUERY.with(|state| state.borrow().has_more);
     app.with_search(|win| {
@@ -729,44 +714,11 @@ pub fn set_selected(app: &App, index: usize) {
     let Some(item) = app.state.search_item_at(index) else {
         return;
     };
-    let previous = SELECTED_ID.with(|slot| slot.borrow().clone());
-    let previous_index = app
-        .with_search(|win| win.get_selected().max(0) as usize)
-        .unwrap_or(0);
     SELECTED_ID.with(|slot| *slot.borrow_mut() = Some(item.id.clone()));
     reset_delete_arm(app);
-    refresh_selected_detail(app);
-
-    // 只更新受影响的两行（旧选中行恢复非选中形态、新行展开选中形态），
-    // 模型整体重建只留给查询落地/删除/收藏等结构性变化
-    let updated = app.with_search(|win| -> bool {
-        let model = ROW_MODEL.with(|slot| slot.borrow().clone());
-        let Some(model) = model else {
-            return false;
-        };
-        if model.row_count() != app.state.search_items().len() {
-            return false;
-        }
-        let ctx = row_ctx(win);
-        let previous_still_listed = previous.as_ref().is_some_and(|id| {
-            app.state
-                .search_item_at(previous_index)
-                .is_some_and(|row| row.id == *id)
-        });
-        if previous_still_listed && previous.as_deref() != Some(item.id.as_str()) {
-            if let Some(previous_item) = app.state.search_item_at(previous_index) {
-                model.set_row_data(previous_index, make_row(win, &ctx, &previous_item, false));
-            }
-        }
-        model.set_row_data(index, make_row(win, &ctx, &item, true));
-        win.set_selected(index as i32);
-        true
-    });
-    if !updated.unwrap_or(false) {
-        build_rows(app);
-    }
-    // 选中展开只允许增高（对齐 allowWindowShrinkRef 不置位的棘轮语义）
-    sync_height(app, false);
+    // 行高恒定后选中切换不改行数据：行元素以 selected: i == root.selected
+    // 绑定驱动高亮/左条/操作条，模型更新只留给结构性变化
+    app.with_search(|win| win.set_selected(index as i32));
 }
 
 /// ↑↓ 循环导航（对齐 (i ± 1 + n) % n）
@@ -791,189 +743,16 @@ pub(crate) fn next_navigation_index(count: usize, current: usize, up: bool) -> u
     }
 }
 
-/// 选中条目详情与全图：文本取全文（同步单行读），图片调度全图解码
-fn refresh_selected_detail(app: &App) {
-    let selected_id = SELECTED_ID.with(|slot| slot.borrow().clone());
-    let Some(id) = selected_id else {
-        SELECTED_DETAIL.with(|slot| *slot.borrow_mut() = None);
-        SELECTED_FULL_IMAGE.with(|slot| *slot.borrow_mut() = None);
-        return;
-    };
-    let Some(item) = app
-        .state
-        .search_items()
-        .into_iter()
-        .find(|item| item.id == id)
-    else {
-        return;
-    };
-
-    if item.r#type == "text" {
-        // 旧版选中预览对文本条目替换为详情全文（detailQuery.data.fullText）
-        let full = app
-            .core()
-            .repository
-            .get_item_detail(&id)
-            .ok()
-            .map(|detail| (detail.id, detail.full_text));
-        SELECTED_DETAIL.with(|slot| *slot.borrow_mut() = full);
-    } else {
-        SELECTED_DETAIL.with(|slot| *slot.borrow_mut() = None);
-    }
-    ensure_selected_full_image(app, &item);
-}
-
-/// 全图异步解码回填（缩略图 36px 拉伸会糊化，选中后换全图）。
-/// 高度在行模型里按元数据先占位，解码完成只补选中行的像素
-fn ensure_selected_full_image(app: &App, item: &ClipItemSummary) {
-    if item.r#type != "image" {
-        SELECTED_FULL_IMAGE.with(|slot| *slot.borrow_mut() = None);
-        return;
-    }
-    let already = SELECTED_FULL_IMAGE
-        .with(|slot| matches!(&*slot.borrow(), Some((id, Some(_))) if id == &item.id));
-    if already {
-        return;
-    }
-    let Some(path) = item.image_path.clone() else {
-        SELECTED_FULL_IMAGE.with(|slot| *slot.borrow_mut() = None);
-        return;
-    };
-
-    let id = item.id.clone();
-    SELECTED_FULL_IMAGE.with(|slot| *slot.borrow_mut() = Some((id.clone(), None)));
-    let core = app.core().clone();
-    let app_cb = app.clone();
-    thread::spawn(move || {
-        let raw = thumbnails::load_full_image_raw(&core, &path);
-        let _ = slint::invoke_from_event_loop(move || {
-            let still_selected =
-                SELECTED_ID.with(|slot| slot.borrow().as_deref() == Some(id.as_str()));
-            if !still_selected {
-                return;
-            }
-            SELECTED_FULL_IMAGE
-                .with(|slot| *slot.borrow_mut() = Some((id, raw.map(thumbnails::image_from_rgba))));
-            update_selected_row(&app_cb);
-        });
-    });
-}
-
-/// 只重算并写回当前选中行（全图解码回填等单行更新）
-fn update_selected_row(app: &App) {
-    app.with_search(|win| {
-        let model = ROW_MODEL.with(|slot| slot.borrow().clone());
-        let Some(model) = model else {
-            return;
-        };
-        let index = win.get_selected().max(0) as usize;
-        let Some(item) = app.state.search_item_at(index) else {
-            return;
-        };
-        let selected_id = SELECTED_ID.with(|slot| slot.borrow().clone());
-        if selected_id.as_deref() != Some(item.id.as_str()) {
-            return;
-        }
-        let ctx = row_ctx(win);
-        model.set_row_data(index, make_row(win, &ctx, &item, true));
-    });
-}
-
-/// 行构建上下文：一次测量，多行复用
-struct RowCtx {
-    base: f32,
-    reserve: f32,
-}
-
-fn row_ctx(win: &SearchWindow) -> RowCtx {
-    let base = preview_base_widths(win);
-    let reserve = win
-        .global::<SearchGeometry>()
-        .get_selected_preview_reserve();
-    RowCtx { base, reserve }
-}
-
-/// 行基础预览宽（逻辑像素，图标列恒占位已扣除）：按窗口几何常量推导。
-/// 不读 slint 上报值——首帧行构建可能早于窗口到位，读到陈旧小值会把
-/// 选中预览硬折成窄条（与 slint 侧 report-preview-widths 同式）
-fn preview_base_widths(win: &SearchWindow) -> f32 {
-    let geo = win.global::<SearchGeometry>();
-    let scale = win.window().scale_factor();
-    let panel_logical = win.window().size().width as f32 / scale;
-    let base = panel_logical
-        - geo.get_scroll_slot()
-        - 2.0 * geo.get_content_pad_h()
-        - geo.get_row_border_l()
-        - 2.0 * geo.get_row_pad_h()
-        - geo.get_thumb_size()
-        - geo.get_thumb_gap();
-    base.max(40.0)
-}
-
-/// 单行数据构建。selected=true 时携带选中形态：文本条目取详情全文按
-/// break-words 语义折到 3 行预算内，图片条目携带大图几何
-fn make_row(win: &SearchWindow, ctx: &RowCtx, item: &ClipItemSummary, selected: bool) -> SearchRow {
-    let selected_id = SELECTED_ID.with(|slot| slot.borrow().clone());
-    let is_selected_row = selected && selected_id.as_deref() == Some(item.id.as_str());
+/// 单行数据构建（行高恒定：选中态由 slint 侧 selected 绑定驱动，
+/// 行数据不区分选中形态）
+fn make_row(item: &ClipItemSummary) -> SearchRow {
     let thumb = thumbnails::cached(&item.id);
     let has_thumb = thumb.is_some();
-    let base_width = ctx.base;
     let normal_preview = flatten_preview_newlines(&item.content_preview);
-
-    // 选中形态预览：文本条目换详情全文（对齐 detailQuery.data.fullText），
-    // 其余类型沿用入库预览（旧版 selectedPreviewText 分支同构）
-    let selected_preview = if is_selected_row {
-        let source_truncated = item.content_preview.chars().count() >= PREVIEW_SOURCE_LIMIT;
-        let full = SELECTED_DETAIL
-            .with(|slot| {
-                slot.borrow()
-                    .as_ref()
-                    .filter(|(id, _)| id == &item.id)
-                    .map(|(_, text)| text.clone())
-            })
-            .filter(|text| !text.is_empty())
-            .unwrap_or_else(|| item.content_preview.clone());
-        if item.r#type == "text" {
-            let width = (base_width - ctx.reserve).max(40.0);
-            hard_wrap_preview(
-                &mut |candidate| win.invoke_measure_natural_width(candidate.into()),
-                &full,
-                width,
-                source_truncated,
-                PREVIEW_MAX_LINES,
-            )
-        } else {
-            normal_preview.clone()
-        }
-    } else {
-        normal_preview.clone()
-    };
-
-    // 大图预览仅选中行携带（内存考量）：高度按列宽等比、上限 120
-    let (has_large, large_height) = if is_selected_row && item.r#type == "image" {
-        large_preview_geometry(item, base_width)
-            .map(|height| (true, height))
-            .unwrap_or((false, 0.0))
-    } else {
-        (false, 0.0)
-    };
-    let large_image = if has_large {
-        SELECTED_FULL_IMAGE
-            .with(|slot| {
-                slot.borrow()
-                    .as_ref()
-                    .filter(|(id, _)| id == &item.id)
-                    .and_then(|(_, image)| image.clone())
-            })
-            .unwrap_or_default()
-    } else {
-        slint::Image::default()
-    };
 
     SearchRow {
         id: item.id.clone().into(),
-        preview: normal_preview.clone().into(),
-        selected_preview: selected_preview.into(),
+        preview: normal_preview.into(),
         kind: match item.r#type.as_str() {
             "image" => 1,
             "file" => 2,
@@ -1004,9 +783,6 @@ fn make_row(win: &SearchWindow, ctx: &RowCtx, item: &ClipItemSummary, selected: 
             ModelRc::new(Rc::new(VecModel::from(shown)))
         },
         tag_more: item.tags.len().saturating_sub(3) as i32,
-        has_large_preview: has_large,
-        large_preview: large_image,
-        large_preview_height: large_height,
     }
 }
 
@@ -1021,14 +797,7 @@ fn build_rows(app: &App) {
         .iter()
         .position(|item| Some(&item.id) == selected_id.as_ref());
 
-    let ctx = row_ctx(&win);
-    let rows: Vec<SearchRow> = items
-        .iter()
-        .map(|item| {
-            let selected = selected_id.as_deref() == Some(item.id.as_str());
-            make_row(&win, &ctx, item, selected)
-        })
-        .collect();
+    let rows: Vec<SearchRow> = items.iter().map(make_row).collect();
 
     let model = Rc::new(VecModel::from(rows));
     ROW_MODEL.with(|slot| *slot.borrow_mut() = Some(model.clone()));
@@ -1039,117 +808,6 @@ fn build_rows(app: &App) {
 /// 异步补齐缩略图（与速贴共用缓存；解码回填后重建搜索行模型）
 fn ensure_thumbnails(app: &App, items: &[ClipItemSummary]) {
     thumbnails::ensure(app, items, |app| build_rows(&app));
-}
-
-/// 按宽度把文本硬折到 max_lines 行内（旧版 whitespace-pre-wrap +
-/// break-words + line-clamp 的合成语义）：
-/// - 显式换行保留为行界（pre-wrap）
-/// - 行内放不下时优先在词间空格断行（词整体移到下一行），长词无空格
-///   可依才按字符边界硬折（break-words 的兜底）
-/// - 超出预算行或源本身截断 → 末行以省略号收尾（line-clamp 观感）
-fn hard_wrap_preview(
-    measure_width: &mut dyn FnMut(&str) -> f32,
-    text: &str,
-    avail: f32,
-    source_truncated: bool,
-    max_lines: usize,
-) -> String {
-    if text.is_empty() || avail <= 0.0 {
-        return text.to_string();
-    }
-    let mut lines: Vec<String> = Vec::new();
-    let mut overflow = false;
-    for segment in text.split('\n') {
-        let mut rest = segment;
-        while !rest.is_empty() {
-            if lines.len() == max_lines {
-                overflow = true;
-                break;
-            }
-            if measure_width(rest) <= avail {
-                lines.push(rest.to_string());
-                break;
-            }
-            // 二分行内最大可容前缀（自然宽随前缀单调不减）
-            let chars: Vec<char> = rest.chars().collect();
-            let mut low = 0usize;
-            let mut high = chars.len();
-            while high - low > 1 {
-                let mid = (low + high) / 2;
-                let candidate: String = chars[..mid].iter().collect();
-                if measure_width(&candidate) <= avail {
-                    low = mid;
-                } else {
-                    high = mid;
-                }
-            }
-            if low == 0 {
-                low = 1; // 单字符超宽也必须推进，避免死循环
-            }
-            // 对齐 break-words：可容纳前缀内存在空格时优先在最后一个空格
-            // 断行（词整体下移，断点空格随换行消耗）；仅长词无空格可依时
-            // 才按字符硬折，硬折后紧随的空格属词间间隔，一并消耗
-            let mut cut = low;
-            let mut consumed = low;
-            if let Some(space) = chars[..low].iter().rposition(|&c| c == ' ') {
-                if space > 0 {
-                    cut = space;
-                    consumed = space + 1;
-                }
-            } else {
-                while consumed < chars.len() && chars[consumed] == ' ' {
-                    consumed += 1;
-                }
-            }
-            let byte_len: usize = chars[..consumed].iter().map(|c| c.len_utf8()).sum();
-            lines.push(chars[..cut].iter().collect());
-            rest = &rest[byte_len..];
-        }
-        if overflow {
-            break;
-        }
-    }
-    if (overflow || source_truncated) && !lines.is_empty() {
-        let last = lines.last_mut().unwrap();
-        loop {
-            let mut candidate = last.clone();
-            candidate.push('…');
-            if measure_width(&candidate) <= avail {
-                *last = candidate;
-                break;
-            }
-            if last.is_empty() {
-                *last = "…".to_string();
-                break;
-            }
-            last.pop();
-        }
-    }
-    lines.join("\n")
-}
-
-/// 大图预览高度：实图解码完成后用实图尺寸，否则退回元数据；等比缩放宽
-/// 到列宽，上限 120。无尺寸信息时不渲染
-fn large_preview_geometry(item: &ClipItemSummary, base_width: f32) -> Option<f32> {
-    let decoded_size = SELECTED_FULL_IMAGE.with(|slot| {
-        slot.borrow()
-            .as_ref()
-            .filter(|(id, _)| id == &item.id)
-            .and_then(|(_, image)| image.as_ref())
-            .map(|image| image.size())
-    });
-    let (width, height) = match decoded_size {
-        Some(size) => (size.width as f32, size.height as f32),
-        None => (item.image_width? as f32, item.image_height? as f32),
-    };
-    if width <= 0.0 || height <= 0.0 {
-        return None;
-    }
-    Some(
-        (base_width * height / width)
-            .min(LARGE_PREVIEW_MAX_H)
-            .max(1.0),
-    )
 }
 
 /// 非选中预览的换行折行（对齐旧版 preview.replace(/\r?\n/g, " ")）
@@ -1364,7 +1022,6 @@ pub fn toggle_favorite(app: &App) {
                     win.set_result_count(items.len() as i32);
                     win.set_result_total(total as i32);
                 });
-                refresh_selected_detail(app);
                 update_empty_state(app);
                 build_rows(app);
                 sync_height(app, true);
@@ -1438,7 +1095,6 @@ fn perform_delete(app: &App, id: &str) {
         SELECTED_ID.with(|slot| {
             *slot.borrow_mut() = items.first().map(|item| item.id.clone());
         });
-        refresh_selected_detail(app);
     }
     app.with_search(|win| {
         win.set_result_count(items.len() as i32);
@@ -1449,7 +1105,7 @@ fn perform_delete(app: &App, id: &str) {
     sync_height(app, true);
 }
 
-/* ───────────────── 悬停预览（仅图片条目）───────────────── */
+/* ───────────────── 悬停预览（全类型条目）───────────────── */
 
 pub fn search_is_active(app: &App) -> bool {
     app.state.is_search_active()
@@ -1459,13 +1115,10 @@ pub fn row_hover(app: &App, index: usize, mouse_x: f32, mouse_y: f32) {
     if !app.state.is_search_active() {
         return;
     }
-    // 旧版搜索窗口 shouldShow 仅对图片条目启用悬浮预览
+    // 所有类型都出悬浮预览：文本/文件给全文，图片给大图（tooltip.rs 按类型分流）
     let Some(item) = app.state.search_item_at(index) else {
         return;
     };
-    if item.r#type != "image" {
-        return;
-    }
     let hwnd = app.state.search_hwnd.load(Ordering::SeqCst);
     if hwnd == 0 {
         return;
@@ -1862,83 +1515,5 @@ mod tests {
     fn preview_newlines_flatten_to_spaces() {
         assert_eq!(flatten_preview_newlines("a\r\nb\nc"), "a b c");
         assert_eq!(flatten_preview_newlines("无换行"), "无换行");
-    }
-
-    /// 确定性度量：每字符 10 逻辑像素，换行符不计
-    fn fake_measure() -> impl FnMut(&str) -> f32 {
-        |text: &str| text.chars().filter(|c| *c != '\n').count() as f32 * 10.0
-    }
-
-    #[test]
-    fn hard_wrap_keeps_short_text_on_one_line() {
-        let out = hard_wrap_preview(&mut fake_measure(), "短文本", 100.0, false, 3);
-        assert_eq!(out, "短文本");
-    }
-
-    #[test]
-    fn hard_wrap_breaks_long_text_at_char_boundary() {
-        // 每行容量 4 字符（40px），10 字符文本折成 3 行
-        let out = hard_wrap_preview(&mut fake_measure(), "0123456789", 40.0, false, 3);
-        assert_eq!(out, "0123\n4567\n89");
-    }
-
-    #[test]
-    fn hard_wrap_prefers_space_boundary_over_mid_word_cut() {
-        // 每行容量 6 字符（60px）："hello " 恰好可容 → 在空格断行，
-        // 词整体移到下一行（对齐 break-words），而不是切成 "hello w"
-        let out = hard_wrap_preview(&mut fake_measure(), "hello world", 60.0, false, 3);
-        assert_eq!(out, "hello\nworld");
-    }
-
-    #[test]
-    fn hard_wrap_consumes_break_space_after_hard_word_split() {
-        // 每行容量 5 字符（50px）：'hello' 无空格可依被硬折，紧随的词间
-        // 空格随断行消耗，下一行从 'world' 整词开始
-        let out = hard_wrap_preview(&mut fake_measure(), "hello world", 50.0, false, 3);
-        assert_eq!(out, "hello\nworld");
-    }
-
-    #[test]
-    fn hard_wrap_fills_lines_exactly_without_ellipsis() {
-        // 12 字符恰好占满 3 行 × 4 字符：不溢出不补省略号
-        let out = hard_wrap_preview(&mut fake_measure(), "0123456789AB", 40.0, false, 3);
-        assert_eq!(out, "0123\n4567\n89AB");
-    }
-
-    #[test]
-    fn hard_wrap_appends_ellipsis_when_line_budget_exceeded() {
-        // 13 字符超出 3 行预算：截断后末行收缩以容纳省略号
-        let out = hard_wrap_preview(&mut fake_measure(), "0123456789ABC", 40.0, false, 3);
-        assert_eq!(out, "0123\n4567\n89A…");
-    }
-
-    #[test]
-    fn hard_wrap_appends_ellipsis_for_truncated_source() {
-        // 源本身被入库预览截断：未超行预算也要补省略号
-        let out = hard_wrap_preview(&mut fake_measure(), "0123456789", 40.0, true, 3);
-        assert_eq!(out, "0123\n4567\n89…");
-    }
-
-    #[test]
-    fn hard_wrap_preserves_explicit_newlines() {
-        let out = hard_wrap_preview(&mut fake_measure(), "ab\ncd", 100.0, false, 3);
-        assert_eq!(out, "ab\ncd");
-    }
-
-    #[test]
-    fn hard_wrap_never_stalls_on_oversized_char() {
-        // 单字符宽度超过可用宽：每行仍推进一个字符，预算耗尽后以裸省略号收尾
-        let out = hard_wrap_preview(&mut fake_measure(), "宽宽宽", 5.0, false, 2);
-        assert_eq!(out, "宽\n…");
-    }
-
-    #[test]
-    fn hard_wrap_handles_empty_and_zero_width() {
-        let mut measure = fake_measure();
-        assert_eq!(hard_wrap_preview(&mut measure, "", 100.0, false, 3), "");
-        assert_eq!(
-            hard_wrap_preview(&mut measure, "文本", 0.0, false, 3),
-            "文本"
-        );
     }
 }

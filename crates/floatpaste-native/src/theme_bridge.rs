@@ -52,7 +52,7 @@ fn write_full_tokens(theme: &Theme, tokens: &ThemeTokens) {
     theme.set_border_window(hex_color(&tokens.border_window));
     theme.set_border_muted(hex_color(tokens.border_muted));
     theme.set_border_subtle(hex_color(&tokens.border_subtle));
-    theme.set_border_accent(hex_color(tokens.border_accent));
+    theme.set_border_accent(hex_color(&tokens.border_accent));
     theme.set_success_fg(hex_color(&tokens.success_fg));
     theme.set_success_subtle(rgba_color(
         tokens.success_subtle_rgb,

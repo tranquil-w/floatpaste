@@ -126,8 +126,9 @@ component ShortcutInput inherits Rectangle {
 
     height: 34px;
     border-radius: 12px;
+    // 录制态 2px 强调框；非录制悬停边框转强调色（旧版 hover:border-pg-accent-fg）
     border-width: rec.has-focus ? 2px : 1px;
-    border-color: rec.has-focus ? Theme.accent-fg : Theme.border-default;
+    border-color: rec.has-focus || ta.has-hover ? Theme.accent-fg : Theme.border-default;
     background: Theme.canvas-default;
     opacity: root.disabled ? 0.6 : 1.0;
 
@@ -317,9 +318,8 @@ component ToggleRow inherits Rectangle {
     callback toggled(bool);
     height: max(44px, text-col.preferred-height + 16px);
     opacity: root.disabled ? 0.6 : 1.0;
-    // 悬停提亮一档（border-subtle）。不用 canvas-default：深色主题下它与
-    // 窗口背景同色，行会视觉上"融进"页面像没变化
-    background: ta.has-hover && !root.disabled ? Theme.border-subtle : transparent;
+    // 悬停底色对齐旧版 ToggleRow 的 hover:bg-pg-canvas-default
+    background: ta.has-hover && !root.disabled ? Theme.canvas-default : transparent;
     ta := TouchArea {
         enabled: !root.disabled;
         clicked() => { root.toggled(!root.checked); }
@@ -382,8 +382,15 @@ component RowGroup inherits Rectangle {
     border-color: Theme.border-muted;
     background: Theme.canvas-subtle;
     clip: true;
-    height: group-col.preferred-height;
+    height: group-col.preferred-height + 2px;
+    // 内容整体内缩 1px：Slint 子元素画在父边框之上，行悬停底色若延伸
+    // 进边框带会把组左右边框盖掉；浏览器盒模型内容区天然不含边框，
+    // 这里显式对齐该语义
     group-col := VerticalLayout {
+        x: 1px;
+        y: 1px;
+        width: parent.width - 2px;
+        height: parent.height - 2px;
         @children
     }
 }

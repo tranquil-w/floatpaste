@@ -566,13 +566,24 @@ export component EditorWindow inherits Window {
                             background: Theme.canvas-subtle;
                             clip: true;
 
-                        if (root.has-image): Image {
-                            source: root.image-preview;
+                        if (root.has-image): Rectangle {
+                            // 旧版 img：rounded-md + 1px border-subtle 描边
                             x: 16px;
                             y: 16px;
                             width: parent.width - 32px;
                             height: parent.height - 32px;
-                            image-fit: contain;
+                            border-radius: Metrics.radius-md;
+                            border-width: 1px;
+                            border-color: Theme.border-subtle;
+                            clip: true;
+                            Image {
+                                x: 1px;
+                                y: 1px;
+                                width: parent.width - 2px;
+                                height: parent.height - 2px;
+                                source: root.image-preview;
+                                image-fit: contain;
+                            }
                         }
                         if (root.image-loading): Text {
                             y: (parent.height - self.height) / 2;
@@ -654,7 +665,7 @@ export component EditorWindow inherits Window {
                                     width: 6px;
                                     height: 6px;
                                     border-radius: 3px;
-                                    background: Theme.warning-fg;
+                                    background: Theme.warning-emphasis;
                                 }
                             }
                             Text {
@@ -733,8 +744,9 @@ export component EditorWindow inherits Window {
                             width: 68px;
                             height: 36px;
                             border-radius: Metrics.radius-md;
-                            background: root.is-text && root.is-dirty
-                                ? Theme.accent-emphasis : Theme.accent-emphasis.with-alpha(0.5);
+                            // 旧版 disabled:opacity-50：整键（底+字）半透明
+                            opacity: root.is-text && root.is-dirty ? 1.0 : 0.5;
+                            background: Theme.accent-emphasis;
                             save-ta := TouchArea {
                                 enabled: root.is-text && root.is-dirty;
                                 mouse-cursor: root.is-text && root.is-dirty ? default : not-allowed;

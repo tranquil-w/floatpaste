@@ -3,22 +3,19 @@
 //   宽度固定 780，高度由 Rust 按内容棘轮同步（min(620, chrome+列表)）
 // - 头部：放大镜 + 输入框（17px/24px 行高）+ 清除按钮 + 条目计数，背景可拖拽移动
 // - 筛选行：类型 chips（全部/收藏/文本/图片/文件）+ 标签 chips（多选 AND）
-// - 列表：非选中单行省略；选中内联展开（3 行预览 + 元信息 + 大图预览 + 操作条）
+// - 列表：单行省略恒定行高，选中仅高亮/左条/操作条浮层（不展开全文与大图）
 // - 键盘：根 FocusScope capture-key-pressed 先于输入框拦截会话键
 //   （↑↓/Enter/Shift+Enter/Ctrl+Enter/Ctrl+Space/Del/Esc），其余按键放行输入框
 // - 挂起态（键盘交给速贴面板）：输入框失焦、底栏切换为速贴键位提示
+// - 行高恒定：选中只换高亮/左条/操作条浮层，不展开（切换零跳动，用户要求）
 import { Theme, Metrics } from "theme.slint";
 import { Kbd } from "common.slint";
 import { ListScrollBar } from "picker.slint";
 
 export struct SearchRow {
     id: string,
-    // 非选中形态：入库预览（单行省略，换行已由 Rust 折为空格）
+    // 单行省略形态（换行已由 Rust 折为空格）。行高恒定不随选中变化
     preview: string,
-    // 选中形态：详情全文（Rust 已按 break-words 语义折到 3 行预算内）。
-    // 两形态都随行模型携带，导航只更新受影响的行（滚动跟随依赖行
-    // 元素持续存活，重建模型会让 changed is-selected 失效）
-    selected-preview: string,
     kind: int, // 0=text 1=image 2=file
     source-app: string,
     time-text: string,
@@ -28,11 +25,6 @@ export struct SearchRow {
     thumb: image,
     tags: [string],
     tag-more: int,
-    // 选中态大图预览：高度由 Rust 按元数据/实图与列宽算好；
-    // has-large-preview 置位后才渲染（全图异步解码回填，避免缩略图拉伸糊化）
-    has-large-preview: bool,
-    large-preview: image,
-    large-preview-height: length,
 }
 
 export struct SearchTagChip {
@@ -56,8 +48,6 @@ export global SearchGeometry {
     out property <length> row-pad-h: 12px;
     out property <length> thumb-size: 36px;
     out property <length> thumb-gap: 12px;
-    // 选中态预览为悬浮操作条预留的右侧宽（旧版 pr-[148px]）
-    out property <length> selected-preview-reserve: 148px;
     // 触底预载距离（旧版 SEARCH_LOAD_MORE_ROOT_MARGIN_PX）
     out property <length> load-more-margin: 240px;
 }
@@ -94,6 +84,13 @@ component IconButton inherits Rectangle {
             : (btn-ta.has-hover
                 ? (root.danger-hover ? Theme.danger-subtle : Theme.canvas-subtle)
                 : transparent));
+    // 危险悬停时图标同步转危险色（旧版 hover:text-pg-danger-fg）；
+    // 实底强调键悬停降不透明度（旧版 hover:opacity-90）
+    out property <color> glyph-color: btn-ta.has-hover && root.danger-hover
+        ? Theme.danger-fg : root.icon-color;
+    opacity: root.emphasized && btn-ta.has-hover ? 0.9 : 1.0;
+    // 旧版 actionButton 的 transition-colors：底色渐变而非瞬变
+    animate background { duration: 120ms; easing: ease-out; }
 
     // 图标直接作为 Rectangle 子元素走“默认 y = 居中”规则；若套布局，
     // 固定高图标会被交叉轴顶对齐而整体偏高
@@ -232,16 +229,15 @@ component SearchRowCard inherits Rectangle {
     // 各自的 has-hover 变化都从当前实际命中重算，与回调触发顺序无关
     property <bool> hovered: false;
     property <bool> is-selected: selected;
-    // 右列纵向排布链（旧版 mt-0.5 / mt-1 / mt-1.5）
-    property <length> preview-h: root.selected ? min(72px, sel-ruler.height) : 24px;
+    // 右列纵向排布链。行高恒定（不随选中展开）：切换选中时下方行
+    // 才不会被推挤跳动（用户要求；选中只换高亮/左条/操作条浮层）
+    property <length> preview-h: 24px;
     property <length> meta-y: root.preview-h + 2px;
     property <length> meta-h: meta-ruler.height;
     property <bool> tags-shown: data.tags.length > 0;
     property <length> tags-y: root.meta-y + root.meta-h + 4px;
     property <length> tags-h: 18px;
-    property <length> large-y: root.tags-y + (root.tags-shown ? root.tags-h : 0px) + 6px;
-    property <length> col-height:
-        root.large-y + (root.selected && data.has-large-preview ? data.large-preview-height : 0px);
+    property <length> col-height: root.tags-y + (root.tags-shown ? root.tags-h : 0px);
 
     height: 20px + root.col-height;
 
@@ -255,13 +251,37 @@ component SearchRowCard inherits Rectangle {
     background: root.selected ? Theme.accent-subtle
         : (root.hovered ? Theme.canvas-subtle : transparent);
 
-    // 选中态左侧 2px 强调边（旧版 border-l-pg-accent-fg）
-    if (root.selected): Rectangle {
+    // 选中态左侧 2px 强调边（旧版 border-l-pg-accent-fg）。浏览器里
+    // border-left 沿圆角转折，Slint 的 clip 只按矩形裁：底层铺整卡
+    // 强调色作"边"，其上右移 2px 垫不透明底色再上半透明高亮，露出的
+    // 左缘即贴合圆角的 2px 边。accent-subtle 是半透明色，直接叠在
+    // 强调色上会透成亮蓝，必须先垫不透明的 canvas 底
+    Rectangle {
+        visible: root.selected;
         x: 0;
         y: 0;
-        width: 2px;
-        height: parent.height;
+        width: root.width;
+        height: root.height;
+        border-radius: Metrics.radius-lg;
         background: Theme.accent-fg;
+    }
+    Rectangle {
+        visible: root.selected;
+        x: 2px;
+        y: 0;
+        width: root.width - 2px;
+        height: root.height;
+        border-radius: Metrics.radius-lg;
+        background: Theme.canvas-default;
+    }
+    Rectangle {
+        visible: root.selected;
+        x: 2px;
+        y: 0;
+        width: root.width - 2px;
+        height: root.height;
+        border-radius: Metrics.radius-lg;
+        background: Theme.accent-subtle;
     }
 
     // 整行命中（声明在前处于最上层内容之下）
@@ -317,22 +337,23 @@ component SearchRowCard inherits Rectangle {
         background: Theme.canvas-inset;
         TypeGlyph {
             kind: data.kind;
-            glyph-color: root.selected ? Theme.fg-default : Theme.fg-muted;
+            // 非选中行悬停时图标变亮（旧版 group-hover:text-pg-fg-default）
+            glyph-color: (root.selected || root.hovered)
+                ? Theme.fg-default : Theme.fg-muted;
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
         }
     }
 
-    // ── 右列：预览 + 元信息 + 标签 + 大图（绝对定位纵排链）──
+    // ── 右列：预览 + 元信息 + 标签（绝对定位纵排链）──
     Rectangle {
         x: root.col-x + SearchGeometry.thumb-size + SearchGeometry.thumb-gap;
         y: 10px;
         width: root.col-w;
         height: root.col-height;
 
-            // 非选中：单行省略（旧版 truncate pr-1，常规字重）
+            // 单行省略（旧版 truncate pr-1，常规字重）
             Text {
-                visible: !root.selected;
                 x: 0;
                 y: 0;
                 height: 24px;
@@ -345,29 +366,13 @@ component SearchRowCard inherits Rectangle {
                 vertical-alignment: center;
             }
 
-            // 非选中收藏星标（旧版 ★ 12px，悬挂在内容列右上）
+            // 收藏星标（旧版 ★ 12px，悬挂在内容列右上）
             if (data.favorited && !root.selected): Text {
                 x: root.col-w - 14px;
                 y: 3px;
                 text: "★";
                 color: Theme.favorite;
                 font-size: 12px;
-            }
-
-            // 选中：pre-wrap 3 行预算（Rust 硬折行 + 标尺实测高）
-            // 显式 x:0：Slint 默认 x 是“父内居中”，宽度小于父宽时会被静默居中
-            Text {
-                visible: root.selected;
-                x: 0;
-                y: 0;
-                height: root.preview-h;
-                width: root.col-w - SearchGeometry.selected-preview-reserve;
-                text: data.selected-preview;
-                color: Theme.fg-default;
-                font-size: 15px;
-                font-weight: Metrics.weight-medium;
-                wrap: word-wrap;
-                vertical-alignment: top;
             }
 
             // 元信息行（mt-0.5 text-xs fg-subtle）
@@ -416,37 +421,6 @@ component SearchRowCard inherits Rectangle {
                         vertical-alignment: center;
                     }
                 }
-            }
-
-            // 选中态大图预览（mt-1.5，max-h 120，contain）
-            Rectangle {
-                visible: root.selected && data.has-large-preview;
-                x: 0;
-                y: root.large-y;
-                height: data.large-preview-height;
-                width: root.col-w;
-                border-radius: Metrics.radius-md;
-                border-width: 1px;
-                border-color: Theme.border-subtle;
-                clip: true;
-                Image {
-                    width: parent.width;
-                    height: parent.height;
-                    source: data.large-preview;
-                    image-fit: contain;
-                }
-            }
-
-            // 选中态预览标尺：同文本/宽度/字号/字重实测排版高
-            sel-ruler := Text {
-                opacity: 0;
-                x: 0;
-                y: 0;
-                text: data.selected-preview;
-                font-size: 15px;
-                font-weight: Metrics.weight-medium;
-                wrap: word-wrap;
-                width: root.col-w - SearchGeometry.selected-preview-reserve;
             }
 
             // 元信息标尺：元信息可能折行，高度实测
@@ -517,6 +491,8 @@ component SearchRowCard inherits Rectangle {
                     if (data.kind == 1): IconButton {
                         icon-color: Theme.fg-default;
                         clicked => { root.paste-as-file(); }
+                        // 折角文档（与类型图标 file 同源）：直白表达"粘贴为
+                        // 文件路径"；旧版 T 形路径表意模糊已弃用
                         Path {
                             width: 16px;
                             height: 16px;
@@ -524,7 +500,7 @@ component SearchRowCard inherits Rectangle {
                             viewbox-height: 24;
                             stroke: Theme.fg-default;
                             stroke-width: 1.2px;
-                            commands: "M 4 7 L 4 4 L 20 4 L 20 7 M 9 20 L 15 20 M 12 4 L 12 20";
+                            commands: "M 6 3.75 L 13 3.75 L 18.25 9 L 18.25 20.25 L 6 20.25 Z M 13 3.75 L 13 9 L 18.25 9";
                         }
                     }
                     if (data.kind == 0): IconButton {
@@ -575,7 +551,7 @@ component SearchRowCard inherits Rectangle {
                             height: 16px;
                             viewbox-width: 24;
                             viewbox-height: 24;
-                            stroke: del-btn.icon-color;
+                            stroke: del-btn.glyph-color;
                             stroke-width: 1.2px;
                             commands: "M 4 7 L 20 7 M 9.5 4.75 L 14.5 4.75 L 14.5 7 L 9.5 7 Z M 6.5 7 L 7.3 19.25 L 16.7 19.25 L 17.5 7 M 10 10.5 L 10 16.5 M 14 10.5 L 14 16.5";
                         }
@@ -588,6 +564,9 @@ component SearchRowCard inherits Rectangle {
     // ── 非选中悬停快捷粘贴（absolute right-2.5 top-1.5）──
     Rectangle {
         visible: !root.selected && root.hovered;
+        // 旧版 hoverPasteButton 的 transition-opacity：出现时淡入
+        opacity: root.hovered ? 1.0 : 0.0;
+        animate opacity { duration: 150ms; easing: ease-out; }
         clip: false;
         x: 0;
         y: 0;
@@ -607,7 +586,9 @@ component SearchRowCard inherits Rectangle {
                 border-radius: Metrics.radius-md;
                 border-width: 1px;
                 border-color: Theme.border-default;
-                background: Theme.canvas-default;
+                // 悬停自身也给出反馈：底色沉一档并渐变（旧版 transition-colors 语言）
+                background: hover-paste-ta.has-hover ? Theme.canvas-subtle : Theme.canvas-default;
+                animate background { duration: 120ms; easing: ease-out; }
                 drop-shadow-blur: 8px;
                 drop-shadow-offset-y: 2px;
                 drop-shadow-color: Theme.shadow-color.with-alpha(0.12);
@@ -714,13 +695,6 @@ export component SearchWindow inherits Window {
     callback drag-moved();
     callback drag-finished();
     callback heights-changed();
-    // 自然宽度标尺（不换行排开所需宽）：Rust 硬折行（break-words 语义）
-    // 逐字符找行内最大前缀时使用
-    callback measure-natural-width(string) -> length;
-    measure-natural-width(text) => {
-        natural-ruler.text = text;
-        natural-ruler.preferred-width
-    }
 
     // ── 预览可用宽（列表布局实测上报，Rust 只消费）──
     out property <length> preview-width-no-thumb;
@@ -910,7 +884,8 @@ export component SearchWindow inherits Window {
                                             y: (parent.height - self.height) / 2;
                                             viewbox-width: 24;
                                             viewbox-height: 24;
-                                            stroke: Theme.fg-subtle;
+                                            stroke: clear-ta.has-hover
+                                                ? Theme.fg-default : Theme.fg-subtle;
                                             stroke-width: 1.2px;
                                             commands: "M 6 6 L 18 18 M 18 6 L 6 18";
                                         }
@@ -1267,16 +1242,5 @@ export component SearchWindow inherits Window {
                 }
             }
         }
-    }
-
-    // 自然宽度标尺：不换行，preferred-width 即整串排开所需宽度
-    natural-ruler := Text {
-        opacity: 0;
-        x: 0;
-        y: 0;
-        text: "";
-        font-size: 15px;
-        font-weight: Metrics.weight-medium;
-        wrap: no-wrap;
     }
 }

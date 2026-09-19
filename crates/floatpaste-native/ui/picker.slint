@@ -3,7 +3,7 @@
 //   由 Rust 侧处理，见 win32_ext::apply_dwm_*）
 // - 头部：状态点 + FloatPaste 标题 + 成功/错误消息徽章（可拖拽移动窗口）
 // - 列表：多行预览（最多 4 行）、72px 缩略图、数字徽章、类型徽章、来源、
-//   相对时间、收藏星标与左侧强调边条、选中项标签行
+//   相对时间、收藏星标与左侧强调边条、标签行（常显，行高不随选中变化）
 // - 交互：单击选中 / 双击上屏 / 悬停 400ms 预览（Rust 调度）
 // - 键盘全程不经窗口焦点（LL 键盘钩子会话），窗口本身不抢焦点
 import { Theme, Metrics } from "theme.slint";
@@ -39,25 +39,30 @@ export global PanelGeometry {
 }
 
 // ── 拉伸手柄：八方向共用，direction 编码对齐 resize-started 回调 ──
-component ResizeHandle inherits TouchArea {
+// 东西向手柄悬停显 accent-subtle 底（旧版 west/east 的 hover:bg-pg-accent-subtle）
+component ResizeHandle inherits Rectangle {
     in property <int> direction; // 0=N 1=S 2=W 3=E 4=NW 5=NE 6=SW 7=SE
+    background: handle-ta.has-hover && (direction == 2 || direction == 3)
+        ? Theme.accent-subtle : transparent;
     callback started();
     callback drag-moved();
     callback finished();
 
-    pointer-event(e) => {
-        if (e.kind == PointerEventKind.down) {
-            root.started();
+    handle-ta := TouchArea {
+        mouse-cursor: direction == 0 || direction == 4 || direction == 5 ? n-resize
+            : direction == 1 || direction == 6 || direction == 7 ? s-resize
+            : direction == 2 ? w-resize
+            : e-resize;
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down) {
+                root.started();
+            }
+            if (e.kind == PointerEventKind.up) {
+                root.finished();
+            }
         }
-        if (e.kind == PointerEventKind.up) {
-            root.finished();
-        }
+        moved => { root.drag-moved(); }
     }
-    moved => { root.drag-moved(); }
-    mouse-cursor: direction == 0 || direction == 4 || direction == 5 ? n-resize
-        : direction == 1 || direction == 6 || direction == 7 ? s-resize
-        : direction == 2 ? w-resize
-        : e-resize;
 }
 
 // ── 列表滚动条：10px 稳定槽 + 4px 视觉拇指（对齐原版 webkit 拇指全槽可抓）──
@@ -220,6 +225,8 @@ component ClipRowCard inherits Rectangle {
                         border-radius: Metrics.radius-md;
                         border-width: 1px;
                         border-color: selected ? Theme.border-default : Theme.border-subtle;
+                        // 透明 PNG 周边的衬底（旧版 bg-canvas-default/subtle）
+                        background: selected ? Theme.canvas-default : Theme.canvas-subtle;
                         clip: true;
                         Image {
                             width: parent.width;
@@ -327,8 +334,10 @@ component ClipRowCard inherits Rectangle {
                     }
                 }
 
-                // ── 选中态标签行（最多 2 个 + 计数）──
-                if (selected && data.tags.length > 0): HorizontalLayout {
+                // ── 标签行（最多 2 个 + 计数）──
+                // 常显、不随选中切换：选中才渲染会让行高突增 26px、把下方
+                // 行整体推动跳动；行高必须只由内容决定，与选中态无关
+                if (data.tags.length > 0): HorizontalLayout {
                     spacing: Metrics.space-1;
                     alignment: start;
                     for tag-name in data.tags: Rectangle {
@@ -455,7 +464,13 @@ export component QuickPasteWindow inherits Window {
             Rectangle {
                 height: 30px;
                 background: Theme.canvas-default;
-                border-color: Theme.border-window;
+
+                // 底部分隔线（旧版 header 的 border-b border-pg-border-subtle）
+                Rectangle {
+                    y: parent.height - 1px;
+                    height: 1px;
+                    background: Theme.border-subtle;
+                }
 
                 header-ta := TouchArea {
                     mouse-cursor: default;
@@ -573,7 +588,7 @@ export component QuickPasteWindow inherits Window {
                             alignment: center;
                             Text {
                                 text: "重试";
-                                color: Theme.fg-muted;
+                                color: retry-ta.has-hover ? Theme.fg-default : Theme.fg-muted;
                                 font-size: Metrics.text-xs;
                                 font-weight: Metrics.weight-medium;
                                 vertical-alignment: center;
