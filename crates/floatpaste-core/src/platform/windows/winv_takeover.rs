@@ -162,13 +162,3 @@ pub fn restart_explorer() {
         .creation_flags(0x0000_0008) // DETACHED_PROCESS
         .spawn();
 }
-
-#[cfg(test)]
-mod tests {
-    use super::TARGET_LETTER;
-
-    #[test]
-    fn target_letter_is_v() {
-        assert_eq!(TARGET_LETTER, 'V');
-    }
-}

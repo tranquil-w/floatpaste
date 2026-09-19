@@ -1165,14 +1165,7 @@ fn normalize_captured(value: &str) -> Captured {
     if value.is_empty() {
         return Captured::Cancel;
     }
-    let mut parts: Vec<String> = value.split('+').map(str::to_string).collect();
-    if let Some(last) = parts.last_mut() {
-        let chars: Vec<char> = last.chars().collect();
-        if chars.len() == 1 && chars[0].is_ascii_alphabetic() {
-            *last = chars[0].to_ascii_uppercase().to_string();
-        }
-    }
-    Captured::Value(parts.join("+"))
+    Captured::Value(uppercase_main_key(value))
 }
 
 /// 数字输入钳制：越界或非法值收敛到边界/回退值（对齐 toBoundedNumber）
@@ -1186,10 +1179,8 @@ fn clamp_number_text(text: &str, min: u32, max: u32, fallback: u32) -> String {
     value.to_string()
 }
 
-/// 会话键录制结果归一化：单字母主键转大写（与全局快捷键录制一致）；
-/// 组合本身不可解析时返回 None（录制端正常不会产生）
-fn normalize_session_captured(value: &str) -> Option<String> {
-    parse_session_combo(value)?;
+/// 录制结果归一化公共步：单字母主键转大写（Slint 侧按下档字母原样上报）
+fn uppercase_main_key(value: &str) -> String {
     let mut parts: Vec<String> = value.split('+').map(str::to_string).collect();
     if let Some(last) = parts.last_mut() {
         let chars: Vec<char> = last.chars().collect();
@@ -1197,7 +1188,14 @@ fn normalize_session_captured(value: &str) -> Option<String> {
             *last = chars[0].to_ascii_uppercase().to_string();
         }
     }
-    Some(parts.join("+"))
+    parts.join("+")
+}
+
+/// 会话键录制结果归一化：组合本身不可解析时返回 None（录制端正常不会
+/// 产生），单字母主键转大写（与全局快捷键录制一致）
+fn normalize_session_captured(value: &str) -> Option<String> {
+    parse_session_combo(value)?;
+    Some(uppercase_main_key(value))
 }
 
 /// 裸数字键位（无修饰键的 0-9）：数字直达开关开启时保留给 1-9 直达

@@ -298,6 +298,8 @@ extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM)
 /// 判定虚拟键是否命中会话键：数字 1-9 直达（可关）外，其余按用户配置
 /// 的动作键绑定精确匹配（键相同且修饰键集合一致）
 fn classify(vk: u32) -> Option<SessionAction> {
+    // 简化: 每键事件深拷贝配置（≤8 组合键）并在匹配时小写化键名，开销
+    // 相对系统每击键自身处理可忽略；升级: 解析时预存虚拟键码 + Arc 共享
     let config = SESSION_CONFIG.lock().ok().and_then(|guard| guard.clone());
 
     if (0x31..=0x39).contains(&vk) {

@@ -293,8 +293,8 @@ pub(crate) fn sync_global_hotkeys(app: &App) {
     }
     // Win+V 接管（ADR-0001）：先自愈注册表（设置开启但值被外部清除时
     // 补写）；与主/搜索快捷键相同则不注册（失败记录会让设置页给出提示）
-    let winv_spec = hotkey::parse_hotkey("Win+V");
     if settings.takeover_winv {
+        let winv_spec = hotkey::parse_hotkey("Win+V");
         match winv_takeover::is_enabled_in_registry() {
             Ok(true) => {}
             Ok(false) => {
