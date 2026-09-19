@@ -13,6 +13,7 @@ status: accepted
 
 ## Consequences
 
-- 需注销/重启才生效，开关状态与实际注册状态可能短暂不一致（启动时校验并提示）。
-- CopyQ 的实证场景是「系统剪贴板历史已关闭」；实施前需真机 spike 验证「历史开启 + DisabledHotkeys」组合，若不释放则向导需加关闭系统历史的引导步骤。
-- 调研依据：RegisterHotKey 官方文档（Win 组合保留声明）、CopyQ #1668/#2422、Ditto #143。
+- 生效与回退都只需重启 Explorer（真机 Windows 11 26100 实测）：写入 `DisabledHotkeys=V` 后重启 Explorer，`RegisterHotKey(Win+V)` 立即成功；删除该值并重启 Explorer 后系统恢复持有（1409）。无需注销或重启系统，实施时可提供「重启 Explorer」的引导按钮（任务栏会短暂消失，需用户确认）。
+- 系统剪贴板历史**保持开启**亦可成功释放并注册 Win+V（同机同轮实测，`EnableClipboardHistory=1`），接管向导无需引导用户关闭系统历史。
+- 未重启 Explorer 前，开关状态与实际注册状态不一致（用户已开启接管但 Win+V 仍归系统）：启动注册失败时在设置页给出「需重启 Explorer 生效」提示，而非视为错误。
+- 调研依据：RegisterHotKey 官方文档（Win 组合保留声明）、CopyQ #1668/#2422、Ditto #143、本仓库 2026-09-19 真机 spike（`.artifacts/winv-spike/`）。
