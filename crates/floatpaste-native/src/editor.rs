@@ -94,24 +94,39 @@ fn show_editor(app: &App, session: EditorSession) {
     win.set_force_repaint(!win.get_force_repaint());
     win.window().set_size(slint::LogicalSize::new(800.0, 600.0));
     let _ = win.window().show();
-    let editor_hwnd = win32_ext::window_hwnd(&win);
-    if let Some(editor_hwnd) = editor_hwnd {
-        win32_ext::remove_dwm_border(editor_hwnd);
-        win32_ext::warm_surface(editor_hwnd);
-    }
-    // 前台获取放在全部尺寸/显隐操作之后：从速贴打开时本进程不是前台
-    // （前台在目标应用上），裸 SetForegroundWindow 会被前台锁拒绝、
-    // 编辑器被目标窗口遮挡——force_foreground_window 经 AttachThreadInput
-    // + BringWindowToTop 绕过（对齐旧版 window.set_focus() 语义），仍
-    // 失败时以 TOPMOST 提升→回落保底可见，且不常驻置顶（不能复用带
-    // TOPMOST 的 restore_window_and_focus）
-    if let Some(editor_hwnd) = editor_hwnd {
-        if !ActiveAppResolver::force_foreground_window(editor_hwnd) {
-            warn!("编辑窗口获取前台失败");
-        }
-    }
     load_session(app, &win, &session.item_id);
     info!("打开 Editor，item={}", session.item_id);
+    // SLINT_DESTROY_WINDOW_ON_HIDE 下每次隐藏都销毁 winit 窗口，再次
+    // 打开是重建：建窗在下一拍事件循环落地，句柄相关收尾（边框/暖屏/
+    // 前置/焦点）延后执行，否则编辑器不在前台
+    let app_cb = app.clone();
+    let item_id_cb = session.item_id.clone();
+    slint::Timer::single_shot(std::time::Duration::from_millis(50), move || {
+        if let Some(win) = app_cb.editor.upgrade() {
+            if !app_cb
+                .state
+                .editor_session()
+                .is_some_and(|session| session.item_id == item_id_cb)
+            {
+                return;
+            }
+            if let Some(editor_hwnd) = win32_ext::window_hwnd(&win) {
+                win32_ext::remove_dwm_border(editor_hwnd);
+                win32_ext::warm_surface(editor_hwnd);
+                // 前台获取放在全部尺寸/显隐操作之后：从速贴打开时本进程
+                // 不是前台（前台在目标应用上），裸 SetForegroundWindow 会
+                // 被前台锁拒绝、编辑器被目标窗口遮挡——force_foreground_window
+                // 经 AttachThreadInput + BringWindowToTop 绕过（对齐旧版
+                // window.set_focus() 语义），仍失败时以 TOPMOST 提升→回落
+                // 保底可见，且不常驻置顶（不能复用带 TOPMOST 的
+                // restore_window_and_focus）
+                if !ActiveAppResolver::force_foreground_window(editor_hwnd) {
+                    warn!("编辑窗口获取前台失败");
+                }
+                win.invoke_focus_root_scope();
+            }
+        }
+    });
 }
 
 /// 载入条目详情并填充界面（同步读库：单条查询延迟可忽略，省去加载态）

@@ -405,17 +405,28 @@ pub fn open(app: &App) {
     // 用户逐次调整的尺寸记忆属旧版 window 级持久化，本壳暂不保留）
     win.window()
         .set_size(slint::LogicalSize::new(920.0 as f32, 760.0 as f32));
-    if let Some(hwnd) = win32_ext::window_hwnd(&win) {
-        app_icon::apply_window_icon(hwnd);
-        win32_ext::warm_surface(hwnd);
-        // 设置窗口需要真实前台（输入框键盘输入），绕前台锁获取
-        if !ActiveAppResolver::force_foreground_window(hwnd) {
-            warn!("设置窗口获取前台失败");
-        }
-    }
     // 窗口级键盘（Esc 关窗）挂在 root-scope capture 上，开窗先聚焦
     win.invoke_focus_root_scope();
     info!("打开设置窗口");
+    // SLINT_DESTROY_WINDOW_ON_HIDE 下每次隐藏都销毁 winit 窗口，再次
+    // 打开是重建：建窗在下一拍事件循环落地，句柄相关收尾（尺寸补齐/
+    // 图标/暖屏/前置）延后执行，否则窗口不在前台
+    let app_cb = app.clone();
+    slint::Timer::single_shot(std::time::Duration::from_millis(50), move || {
+        if let Some(win) = app_cb.settings.upgrade() {
+            win.window()
+                .set_size(slint::LogicalSize::new(920.0 as f32, 760.0 as f32));
+            win.invoke_focus_root_scope();
+            if let Some(hwnd) = win32_ext::window_hwnd(&win) {
+                app_icon::apply_window_icon(hwnd);
+                win32_ext::warm_surface(hwnd);
+                // 设置窗口需要真实前台（输入框键盘输入），绕前台锁获取
+                if !ActiveAppResolver::force_foreground_window(hwnd) {
+                    warn!("设置窗口获取前台失败");
+                }
+            }
+        }
+    });
 }
 
 /// 把当前持久化设置水合进界面（对齐旧版 applyServerSettings：

@@ -41,6 +41,10 @@ use picker::App;
 slint::include_modules!();
 
 fn main() {
+    // Slint 内置开关：Windows 上隐藏窗口即销毁 winit 窗口与软渲染帧缓冲，
+    // 下次显示自动重建。编辑/设置窗口关闭即回收内存；overlay 装配窗口
+    // （速贴/搜索/tooltip）显隐走停屏与 Win32 路径，不触发此行为
+    std::env::set_var("SLINT_DESTROY_WINDOW_ON_HIDE", "1");
     let _log_guard = system::init_logging();
     let launch_mode = LaunchMode::from_env();
 
