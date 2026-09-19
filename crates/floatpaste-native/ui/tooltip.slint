@@ -32,6 +32,8 @@ export component TooltipWindow inherits Window {
     in-out property <[TooltipLine]> content-lines;
     // 行间距：Rust 测高时读取，保持与渲染同源
     out property <length> content-line-spacing: 4px;
+    // 正文与分隔线之间的间距：Rust 测高时读取（计入窗口高）
+    out property <length> content-bottom-gap: 6px;
     in-out property <[TooltipMetaBadge]> badges;
     in-out property <string> source-app;
     in-out property <string> time-text;
@@ -139,22 +141,30 @@ export component TooltipWindow inherits Window {
                 }
             }
 
-            // 元信息行上方分隔线（对齐原版 border-top + margin/padding）
+            // 正文与分隔线之间的固定间距
+            if (!root.has-image && !root.simple-mode): Rectangle {
+                height: root.content-bottom-gap;
+            }
+
+            // 元信息行上方分隔线（对齐原版 border-top + margin/padding）；
+            // 与正文之间由 content-bottom-gap 撑开
             if (!root.simple-mode): Rectangle {
                 height: 1px;
                 background: Theme.border-muted;
             }
 
             // ── 元信息行：类型与来源靠左成组，相对时间推到行尾 ──
+            // 不设 alignment（禁 stretch，规则：start 会让占位失效）；
+            // 除占位外全部 stretch=0，剩余宽度由占位独占、时间贴右
             if (!root.simple-mode): HorizontalLayout {
                 // 显式定高（行上间距 + 徽章高）：度量安全余量由底部弹性
                 // 占位吸收，不在此处变成不明空隙
                 height: root.meta-gap + root.meta-badge-height;
                 padding-top: root.meta-gap;
                 spacing: Metrics.space-1_5;
-                alignment: start;
 
                 HorizontalLayout {
+                    horizontal-stretch: 0;
                     spacing: Metrics.space-1_5;
                     alignment: start;
 
@@ -177,6 +187,7 @@ export component TooltipWindow inherits Window {
                 }
 
                 Text {
+                    horizontal-stretch: 0;
                     text: root.source-app;
                     color: Theme.fg-muted;
                     font-size: Metrics.text-hint;
@@ -189,6 +200,7 @@ export component TooltipWindow inherits Window {
                 }
 
                 Text {
+                    horizontal-stretch: 0;
                     text: root.time-text;
                     color: Theme.fg-subtle;
                     font-size: Metrics.text-hint;
@@ -196,7 +208,7 @@ export component TooltipWindow inherits Window {
                 }
             }
 
-            // 底部弹性占位：窗口定高含 8px 度量安全余量（Rust 侧
+            // 底部弹性占位：窗口定高含 2px 度量安全余量（Rust 侧
             // HEIGHT_SAFETY），由这里确定性吸收，保证元信息行下方
             // 始终留有下边距
             if (!root.simple-mode): Rectangle {

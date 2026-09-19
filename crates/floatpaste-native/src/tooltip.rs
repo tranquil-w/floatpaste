@@ -36,9 +36,9 @@ const MAX_WIDTH: f32 = 600.0;
 const MIN_WIDTH: f32 = 120.0;
 const IMAGE_MAX_WIDTH: f32 = 560.0;
 const IMAGE_MAX_HEIGHT: f32 = 420.0;
-/// 高度安全余量：字体度量与窗口装配存在边缘差异时防止裁掉尾行。
-/// 仅 2px——逐行 ceil 后度量误差已很小，余量由 slint 底部弹性占位吸收
-const HEIGHT_SAFETY: f32 = 2.0;
+/// 高度安全余量：逐行 ceil 后度量误差极小，1px 保险即可（由 slint 底部
+/// 弹性占位吸收，下边距与四周一致）
+const HEIGHT_SAFETY: f32 = 1.0;
 /// 静态提示为单行短文案，余量收小避免卡片下方留白
 const HEIGHT_SAFETY_STATIC: f32 = 4.0;
 /// 静态提示的宽度下限：单行短文案不需要长文预览的阅读下限
@@ -279,8 +279,9 @@ fn render(
                 })
                 .collect();
             let line_spacing_total = spacing * lines.len().saturating_sub(1) as f32;
-            let content_height: f32 =
-                lines.iter().map(|line| line.height).sum::<f32>() + line_spacing_total;
+            let content_height: f32 = lines.iter().map(|line| line.height).sum::<f32>()
+                + line_spacing_total
+                + win.get_content_bottom_gap();
             win.set_content_lines(ModelRc::new(Rc::new(VecModel::from(lines))));
             win.set_has_image(false);
             (text_width, content_height)
@@ -308,7 +309,7 @@ fn render(
             win.set_has_image(true);
             win.set_image_width(display_w);
             win.set_image_height(display_h);
-            (display_w, display_h)
+            (display_w, display_h + win.get_content_bottom_gap())
         }
     };
 
