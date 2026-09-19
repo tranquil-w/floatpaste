@@ -18,9 +18,21 @@ native 壳内约定：
 - 不依赖 Slint 类型的纯逻辑（格式化、计算）下沉 core（如 `core::clip_display`），保证无 GUI 依赖即可测试
 
 ### 其他目录
-- `docs/` - 架构与发布文档
+- `docs/` - 文档，平铺（仅 `release/` 保留子目录）；地图见 [docs/README.md](docs/README.md)
+- `CONTEXT.md` - 领域术语表，术语以这里为准
 - `packaging/` - Inno 安装包脚本
 - `scripts/` - 版本号、发版说明、图标生成等辅助脚本
+- `.artifacts/` - 迭代计划、发版草稿等临时产物（不入 Git）
+
+---
+
+## 文档规则
+
+- docs/ 只保留当前有价值且可预见长期有参考价值的文档，失去价值即移除（历史在 git 提交记录中）；计划、路线图、调研草稿等临时物放 `.artifacts/`，不进 Git
+- 提交行为或结构变更时，同一改动内更新对应活文档（architecture.md / no-focus-picker.md / theme-system.md），文档与实现不一致视同 bug
+- 设计与决策文档平铺编号为 `docs/adr-NNNN-<slug>.md`，状态写文件头部 frontmatter：`proposed`（调研/提案中）/ `accepted` / `rejected` / `superseded by adr-NNNN`；状态变更只改头不改正文，被拒方案原位保留
+- 立项写 adr 需同时满足：难以逆转、无上下文会费解、存在真实取舍；三条缺一就不值得单独立项
+- 文档与界面文案统一使用 `CONTEXT.md` 术语表的命名
 
 ---
 

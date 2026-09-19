@@ -20,18 +20,20 @@
 .DS_Store
 Thumbs.db
 tmp/
-.superpowers/
 .claude/settings.local.json
 .zcode/
 
 # AI/工具临时产物
 .playwright-mcp/
-docs/superpowers/*-comparison.html
 .brv/
+
+# 临时产物（迭代计划、发版说明草稿等，不进 Git）
+.artifacts/
 
 # 图标生成脚本的本地产物
 scripts/__pycache__/
 crates/floatpaste-native/assets/_preview_pngs/
+crates/floatpaste-native/assets/icon-tray.png
 # 原生化冒烟测试工程（临时）
 smoke/
 

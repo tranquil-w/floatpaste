@@ -128,7 +128,7 @@ jobs:
           ZIP_NAME="FloatPaste-v${VERSION}-windows-x64-portable.zip"
           mkdir -p "${STAGE}"
           cp "target/release/floatpaste.exe" "${STAGE}/floatpaste.exe"
-          node scripts/render-release-notes.mjs "${VERSION}" "$(date +%F)" - "${STAGE}/README-使用说明.md" --template docs/release/使用说明模板.md
+          node scripts/render-release-notes.mjs "${VERSION}" "$(date +%F)" - "${STAGE}/README-使用说明.md" --template docs/release/usage-template.md
           powershell -Command "Compress-Archive -Path 'tmp/portable/FloatPaste-v${VERSION}-windows-x64-portable/*' -DestinationPath 'tmp/${ZIP_NAME}' -Force"
           mkdir -p tmp/assets
           cp "tmp/${ZIP_NAME}" tmp/assets/
