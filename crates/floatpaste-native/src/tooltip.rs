@@ -27,6 +27,9 @@ use crate::win32_ext;
 use crate::TooltipMetaBadge;
 
 const SHOW_DELAY_MS: u64 = 400;
+/// tooltip.slint 的 preferred 尺寸（隐藏复位用，与 ui 保持一致）
+const PREFERRED_WIDTH: f32 = 200.0;
+const PREFERRED_HEIGHT: f32 = 80.0;
 /// 鼠标右下偏移（逻辑像素）
 const OFFSET_X: f32 = 12.0;
 const OFFSET_Y: f32 = 16.0;
@@ -157,6 +160,11 @@ pub fn schedule_with(
 pub fn cancel(app: &App) {
     PENDING_TOKEN.with(|value| value.set(value.get() + 1));
     if let Some(win) = app.tooltip.upgrade() {
+        // 软件渲染按窗口尺寸分配帧缓冲：大图预览会把窗口顶到最大显示
+        // 尺寸，隐藏时复位到 preferred，避免小内容期 buffer 顶格常驻
+        let _ = win
+            .window()
+            .set_size(slint::LogicalSize::new(PREFERRED_WIDTH, PREFERRED_HEIGHT));
         let hwnd = app.state.tooltip_hwnd.load(Ordering::SeqCst);
         if hwnd != 0 {
             // 只用 Win32 SW_HIDE：Slint hide 会翻转 winit 可见标志，
