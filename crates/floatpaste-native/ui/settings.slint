@@ -1008,10 +1008,12 @@ export component SettingsWindow inherits Window {
                             vertical-alignment: center;
                         }
                     }
-                    // SaveStatusText：状态点 + 文案
+                    // SaveStatusText：状态点 + 文案。
+                    // stretch 必须压到 0：与标题位等分拉伸会把状态挤到中部
                     HorizontalLayout {
                         spacing: Metrics.space-1_5;
                         alignment: center;
+                        horizontal-stretch: 0;
                         // 状态点为固定高子元素，交叉轴顶对齐——包一层居中
                         if (root.status-kind == 4): Rectangle {
                             width: 6px;
@@ -1164,18 +1166,8 @@ export component SettingsWindow inherits Window {
                     height: nav-col.preferred-height;
                     nav-col := VerticalLayout {
                         spacing: 2px;
-                        VerticalLayout {
-                            padding-left: 12px;
-                            padding-bottom: 8px;
-                            Text {
-                                text: "偏好设置";
-                                color: Theme.fg-subtle;
-                                font-size: Metrics.text-xs;
-                                font-weight: Metrics.weight-medium;
-                            }
-                        }
                         for section[idx] in [
-                            "通用", "快捷键", "外观", "行为", "排除应用", "标签",
+                            "通用", "行为", "外观", "快捷键", "排除应用", "标签",
                         ]: Rectangle {
                             height: 30px;
                             border-radius: Metrics.radius-md;
@@ -1264,10 +1256,333 @@ export component SettingsWindow inherits Window {
                             }
                         }
 
-                        /* ═══ 快捷键 ═══ */
+                        /* ═══ 行为 ═══ */
                         sec1 := Rectangle {
                             height: sec1-col.preferred-height;
                             sec1-col := VerticalLayout {
+                                spacing: 6px;
+                                SectionHeader {
+                                    title: "行为";
+                                    description: "控制开机启动、监听状态、贴回与速贴窗口显示位置，明确主次关系。";
+                                }
+                                RowGroup {
+                                    ToggleRow {
+                                        title: "开机自启";
+                                        description: "登录系统后自动启动 FloatPaste。";
+                                        checked: root.launch-on-startup;
+                                        toggled(checked) => { root.launch-on-startup-toggled(checked); }
+                                    }
+                                    RowDivider { }
+                                    // 以管理员身份运行（对齐 PowerToys：提权是
+                                    // 一次性动作，「始终」决定自启是否带权限）
+                                    SettingRow {
+                                        title: "以管理员身份运行";
+                                        description: root.process-elevated
+                                            ? "当前已以管理员身份运行，向管理员窗口的自动粘贴可正常生效。"
+                                            : "向管理员窗口的自动粘贴需要管理员权限；确认 UAC 后将立即以管理员身份重启。";
+                                        Rectangle {
+                                            width: elev-restart-btn.width;
+                                            elev-restart-btn := Rectangle {
+                                                x: 0;
+                                                y: (parent.height - self.height) / 2;
+                                                width: elev-restart-btn-text.preferred-width + 24px;
+                                                height: 30px;
+                                                border-radius: 8px;
+                                                border-width: 1px;
+                                                border-color: Theme.border-default;
+                                                background: Theme.canvas-default;
+                                                opacity: root.process-elevated ? 0.55 : 1.0;
+                                                TouchArea {
+                                                    enabled: !root.process-elevated;
+                                                    mouse-cursor: root.process-elevated
+                                                        ? MouseCursor.default : MouseCursor.pointer;
+                                                    clicked() => { root.restart-as-admin(); }
+                                                }
+                                                elev-restart-btn-text := Text {
+                                                    text: root.process-elevated
+                                                        ? "当前已以管理员运行"
+                                                        : "以管理员身份重启";
+                                                    color: root.process-elevated
+                                                        ? Theme.fg-subtle : Theme.fg-default;
+                                                    font-size: Metrics.text-xs;
+                                                    vertical-alignment: center;
+                                                    horizontal-alignment: center;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    RowDivider { }
+                                    ToggleRow {
+                                        title: "始终以管理员身份运行";
+                                        description: "开机自启时也将以管理员权限运行。仅当以管理员身份运行时才能更改此设置。";
+                                        checked: root.always-run-elevated;
+                                        disabled: !root.process-elevated;
+                                        nested: true;
+                                        toggled(checked) => { root.always-run-elevated-toggled(checked); }
+                                    }
+                                    if (root.elevated-status-text != ""): VerticalLayout {
+                                        RowDivider { }
+                                        Text {
+                                            text: root.elevated-status-text;
+                                            color: Theme.danger-fg;
+                                            font-size: Metrics.text-xs;
+                                            wrap: word-wrap;
+                                        }
+                                    }
+                                    RowDivider { }
+                                    ToggleRow {
+                                        title: "开机时静默启动";
+                                        description: "启动后不主动打断当前工作流。";
+                                        checked: root.silent-on-startup;
+                                        disabled: !root.launch-on-startup;
+                                        nested: true;
+                                        toggled(checked) => { root.silent-on-startup-toggled(checked); }
+                                    }
+                                    RowDivider { }
+                                    ToggleRow {
+                                        title: "回贴后恢复剪贴板";
+                                        description: "贴回完成后恢复原有剪贴板内容，减少对当前工作流的干扰。";
+                                        checked: root.restore-clipboard;
+                                        toggled(checked) => { root.restore-clipboard-toggled(checked); }
+                                    }
+                                    RowDivider { }
+                                    ToggleRow {
+                                        title: "暂停监听";
+                                        description: "暂停后不会继续采集新的剪贴板记录。";
+                                        checked: root.pause-monitoring;
+                                        toggled(checked) => { root.pause-monitoring-toggled(checked); }
+                                    }
+                                    RowDivider { }
+                                    // 鼠标上屏触发方式
+                                    SettingRow {
+                                        title: "粘贴触发方式";
+                                        description: ["单击条目立即上屏。",
+                                            "单击选中条目，双击上屏。"][root.paste-trigger];
+                                        Rectangle {
+                                            width: seg-paste-trigger.width;
+                                            seg-paste-trigger := Segmented {
+                                                x: 0;
+                                                y: (parent.height - self.height) / 2;
+                                                options: ["单击上屏", "双击上屏"];
+                                                value <=> root.paste-trigger;
+                                                selected(idx) => { root.paste-trigger-selected(idx); }
+                                            }
+                                        }
+                                    }
+                                    RowDivider { }
+                                    // 速贴窗口显示位置
+                                    SettingRow {
+                                        title: "速贴窗口显示位置";
+                                        description: ["默认推荐，速贴窗口会贴近当前鼠标所在位置弹出。",
+                                            "保留上次拖动或关闭时的位置；首次使用会落在屏幕中心。",
+                                            "优先跟随当前输入光标；如果系统拿不到光标位置，会退回鼠标位置。"][root.position-mode];
+                                        Rectangle {
+                                            width: seg-position.width;
+                                            seg-position := Segmented {
+                                                x: 0;
+                                                y: (parent.height - self.height) / 2;
+                                                options: ["鼠标位置", "上次关闭时的位置", "光标所在位置"];
+                                                value <=> root.position-mode;
+                                                selected(idx) => { root.position-mode-selected(idx); }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        /* ═══ 外观 ═══ */
+                        sec2 := Rectangle {
+                            height: sec2-col.preferred-height;
+                            sec2-col := VerticalLayout {
+                                spacing: 6px;
+                                SectionHeader {
+                                    title: "外观";
+                                    description: "管理界面主题，保证日常使用观感一致。";
+                                }
+                                RowGroup {
+                                    // 界面模式
+                                    SettingRow {
+                                        title: "界面模式";
+                                        description: ["自动匹配 Windows 当前的浅色或深色外观。",
+                                            "固定使用浅色界面，不受系统外观影响。",
+                                            "固定使用深色界面，适合夜间与暗光环境。"][root.theme-mode];
+                                        Rectangle {
+                                            width: seg-theme.width;
+                                            seg-theme := Segmented {
+                                                x: 0;
+                                                y: (parent.height - self.height) / 2;
+                                                options: ["跟随系统", "浅色", "深色"];
+                                                value <=> root.theme-mode;
+                                                selected(idx) => { root.theme-mode-selected(idx); }
+                                            }
+                                        }
+                                    }
+                                    RowDivider { }
+                                    // 主题预设（wide 行：标题描述在上，网格在下）
+                                    Rectangle {
+                                        height: ap2-col.preferred-height + 24px;
+                                        ap2-col := VerticalLayout {
+                                            padding-left: 16px;
+                                            padding-right: 16px;
+                                            padding-top: 12px;
+                                            padding-bottom: 12px;
+                                            spacing: 2px;
+                                            Text {
+                                                text: "主题预设";
+                                                color: Theme.fg-default;
+                                                font-size: Metrics.text-sm;
+                                                font-weight: Metrics.weight-medium;
+                                            }
+                                            Text {
+                                                text: "配色方案基于经过验证的公开色板，全部通过对比度门禁，跨设备观感一致。";
+                                                color: Theme.fg-muted;
+                                                font-size: Metrics.text-xs;
+                                                wrap: word-wrap;
+                                            }
+                                            VerticalLayout {
+                                                padding-top: 10px;
+                                                HorizontalLayout {
+                                                    spacing: 10px;
+                                                    for card[idx] in root.preset-cards: Rectangle {
+                                                        // 旧版 grid sm:grid-cols-3：三列严格
+                                                        // 等宽。直接绑 parent.width 会成绑定环，
+                                                        // 改为首选宽归零 + 等拉伸（stretch 只
+                                                        // 均分剩余空间，基础宽仍随内容长不等）
+                                                        min-width: 0px;
+                                                        preferred-width: 0px;
+                                                        horizontal-stretch: 1;
+                                                        height: card-col.preferred-height;
+                                                        border-radius: 12px;
+                                                        border-width: 1px;
+                                                        border-color: card.selected ? Theme.accent-fg
+                                                            : (preset-ta.has-hover
+                                                                ? Theme.border-default : Theme.border-muted);
+                                                        background: card.selected
+                                                            ? Theme.canvas-default : transparent;
+                                                        preset-ta := TouchArea {
+                                                            clicked() => { root.preset-selected(idx); }
+                                                        }
+                                                        card-col := VerticalLayout {
+                                                            x: 0;
+                                                            y: 0;
+                                                            width: 100%;
+                                                            padding: 8px;
+                                                            spacing: 6px;
+                                                            Rectangle {
+                                                                height: preview-inner.preferred-height + 16px;
+                                                                border-radius: Metrics.radius-lg;
+                                                                background: card.canvas-default;
+                                                                preview-inner := VerticalLayout {
+                                                                    x: 8px;
+                                                                    y: 8px;
+                                                                    width: parent.width - 16px;
+                                                                    padding: 6px;
+                                                                    spacing: 4px;
+                                                                    Rectangle {
+                                                                        height: 6px;
+                                                                        border-radius: Metrics.radius-pill;
+                                                                        background: card.fg-default;
+                                                                    }
+                                                                    Rectangle {
+                                                                        height: 6px;
+                                                                        width: parent.width * 0.75;
+                                                                        border-radius: Metrics.radius-pill;
+                                                                        background: card.fg-muted;
+                                                                    }
+                                                                    Rectangle {
+                                                                        height: 14px;
+                                                                        width: 40px;
+                                                                        border-radius: Metrics.radius-sm;
+                                                                        background: card.accent-emphasis;
+                                                                        Rectangle {
+                                                                            x: 6px;
+                                                                            y: 6px;
+                                                                            width: parent.width - 12px;
+                                                                            height: 2px;
+                                                                            border-radius: Metrics.radius-pill;
+                                                                            background: card.fg-on-emphasis;
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                            Text {
+                                                                text: card.name;
+                                                                color: card.selected
+                                                                    ? Theme.fg-default : Theme.fg-muted;
+                                                                font-size: Metrics.text-sm;
+                                                                font-weight: Metrics.weight-medium;
+                                                            }
+                                                            Text {
+                                                                text: card.description;
+                                                                color: Theme.fg-subtle;
+                                                                font-size: Metrics.text-xs;
+                                                                wrap: word-wrap;
+                                                                // 固定两行高：三张卡描述区等高，
+                                                                // 卡片高度随之完全一致（grid 行为）
+                                                                height: 33px;
+                                                                vertical-alignment: top;
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    RowDivider { }
+                                    // 强调色（旧版 h-7 色点 gap-1.5；内圆在 28px
+                                    // 圆内居中 = 4px 偏移，对齐旧版 items-center）
+                                    SettingRow {
+                                        title: "强调色";
+                                        description: "选中态、按钮与高亮使用的颜色。";
+                                        Rectangle {
+                                            width: dots-row.preferred-width;
+                                            dots-row := HorizontalLayout {
+                                                x: 0;
+                                                y: (parent.height - self.preferred-height) / 2;
+                                                height: self.preferred-height;
+                                                spacing: Metrics.space-1_5;
+                                                alignment: start;
+                                                for swatch in root.accent-swatches: Rectangle {
+                                                    // 旧版 hover:scale-105 的等效反馈用
+                                                    // 描边环表达：尺寸动画会改变行首选宽，
+                                                    // 悬停点间移动时所有圆点跟着重排闪动
+                                                    width: 28px;
+                                                    height: 28px;
+                                                    border-radius: Metrics.radius-pill;
+                                                    border-width: 2px;
+                                                    border-color: swatch.selected
+                                                        ? Theme.accent-fg
+                                                        : (sw-ta.has-hover
+                                                            ? Theme.border-default : transparent);
+                                                    sw-ta := TouchArea {
+                                                        clicked() => { root.accent-selected(swatch.id); }
+                                                    }
+                                                    Rectangle {
+                                                        // 按下内圆回缩（按压反馈）；在固定
+                                                        // 外圈内变化，不影响布局尺寸
+                                                        x: (parent.width - self.width) / 2;
+                                                        y: (parent.height - self.height) / 2;
+                                                        width: sw-ta.pressed ? 17px : 20px;
+                                                        height: self.width;
+                                                        border-radius: Metrics.radius-pill;
+                                                        border-width: 1px;
+                                                        border-color: rgba(0, 0, 0, 0.08);
+                                                        background: swatch.hex;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                }
+                            }
+                        }
+
+                        /* ═══ 快捷键 ═══ */
+                        sec3 := Rectangle {
+                            height: sec3-col.preferred-height;
+                            sec3-col := VerticalLayout {
                                 spacing: 6px;
                                 SectionHeader {
                                     title: "快捷键";
@@ -1530,328 +1845,6 @@ export component SettingsWindow inherits Window {
                                                 spacing: Metrics.space-1_5;
                                                 alignment: start;
                                                 KbdBadge { key: "Esc"; }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        /* ═══ 外观 ═══ */
-                        sec2 := Rectangle {
-                            height: sec2-col.preferred-height;
-                            sec2-col := VerticalLayout {
-                                spacing: 6px;
-                                SectionHeader {
-                                    title: "外观";
-                                    description: "管理界面主题与速贴窗口出现方式，保证日常使用手感一致。";
-                                }
-                                RowGroup {
-                                    // 界面模式
-                                    SettingRow {
-                                        title: "界面模式";
-                                        description: ["自动匹配 Windows 当前的浅色或深色外观。",
-                                            "固定使用浅色界面，不受系统外观影响。",
-                                            "固定使用深色界面，适合夜间与暗光环境。"][root.theme-mode];
-                                        Rectangle {
-                                            width: seg-theme.width;
-                                            seg-theme := Segmented {
-                                                x: 0;
-                                                y: (parent.height - self.height) / 2;
-                                                options: ["跟随系统", "浅色", "深色"];
-                                                value <=> root.theme-mode;
-                                                selected(idx) => { root.theme-mode-selected(idx); }
-                                            }
-                                        }
-                                    }
-                                    RowDivider { }
-                                    // 主题预设（wide 行：标题描述在上，网格在下）
-                                    Rectangle {
-                                        height: ap2-col.preferred-height + 24px;
-                                        ap2-col := VerticalLayout {
-                                            padding-left: 16px;
-                                            padding-right: 16px;
-                                            padding-top: 12px;
-                                            padding-bottom: 12px;
-                                            spacing: 2px;
-                                            Text {
-                                                text: "主题预设";
-                                                color: Theme.fg-default;
-                                                font-size: Metrics.text-sm;
-                                                font-weight: Metrics.weight-medium;
-                                            }
-                                            Text {
-                                                text: "配色方案基于经过验证的公开色板，全部通过对比度门禁，跨设备观感一致。";
-                                                color: Theme.fg-muted;
-                                                font-size: Metrics.text-xs;
-                                                wrap: word-wrap;
-                                            }
-                                            VerticalLayout {
-                                                padding-top: 10px;
-                                                HorizontalLayout {
-                                                    spacing: 10px;
-                                                    for card[idx] in root.preset-cards: Rectangle {
-                                                        // 旧版 grid sm:grid-cols-3：三列严格
-                                                        // 等宽。直接绑 parent.width 会成绑定环，
-                                                        // 改为首选宽归零 + 等拉伸（stretch 只
-                                                        // 均分剩余空间，基础宽仍随内容长不等）
-                                                        min-width: 0px;
-                                                        preferred-width: 0px;
-                                                        horizontal-stretch: 1;
-                                                        height: card-col.preferred-height;
-                                                        border-radius: 12px;
-                                                        border-width: 1px;
-                                                        border-color: card.selected ? Theme.accent-fg
-                                                            : (preset-ta.has-hover
-                                                                ? Theme.border-default : Theme.border-muted);
-                                                        background: card.selected
-                                                            ? Theme.canvas-default : transparent;
-                                                        preset-ta := TouchArea {
-                                                            clicked() => { root.preset-selected(idx); }
-                                                        }
-                                                        card-col := VerticalLayout {
-                                                            x: 0;
-                                                            y: 0;
-                                                            width: 100%;
-                                                            padding: 8px;
-                                                            spacing: 6px;
-                                                            Rectangle {
-                                                                height: preview-inner.preferred-height + 16px;
-                                                                border-radius: Metrics.radius-lg;
-                                                                background: card.canvas-default;
-                                                                preview-inner := VerticalLayout {
-                                                                    x: 8px;
-                                                                    y: 8px;
-                                                                    width: parent.width - 16px;
-                                                                    padding: 6px;
-                                                                    spacing: 4px;
-                                                                    Rectangle {
-                                                                        height: 6px;
-                                                                        border-radius: Metrics.radius-pill;
-                                                                        background: card.fg-default;
-                                                                    }
-                                                                    Rectangle {
-                                                                        height: 6px;
-                                                                        width: parent.width * 0.75;
-                                                                        border-radius: Metrics.radius-pill;
-                                                                        background: card.fg-muted;
-                                                                    }
-                                                                    Rectangle {
-                                                                        height: 14px;
-                                                                        width: 40px;
-                                                                        border-radius: Metrics.radius-sm;
-                                                                        background: card.accent-emphasis;
-                                                                        Rectangle {
-                                                                            x: 6px;
-                                                                            y: 6px;
-                                                                            width: parent.width - 12px;
-                                                                            height: 2px;
-                                                                            border-radius: Metrics.radius-pill;
-                                                                            background: card.fg-on-emphasis;
-                                                                        }
-                                                                    }
-                                                                }
-                                                            }
-                                                            Text {
-                                                                text: card.name;
-                                                                color: card.selected
-                                                                    ? Theme.fg-default : Theme.fg-muted;
-                                                                font-size: Metrics.text-sm;
-                                                                font-weight: Metrics.weight-medium;
-                                                            }
-                                                            Text {
-                                                                text: card.description;
-                                                                color: Theme.fg-subtle;
-                                                                font-size: Metrics.text-xs;
-                                                                wrap: word-wrap;
-                                                                // 固定两行高：三张卡描述区等高，
-                                                                // 卡片高度随之完全一致（grid 行为）
-                                                                height: 33px;
-                                                                vertical-alignment: top;
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    RowDivider { }
-                                    // 强调色（旧版 h-7 色点 gap-1.5；内圆在 28px
-                                    // 圆内居中 = 4px 偏移，对齐旧版 items-center）
-                                    SettingRow {
-                                        title: "强调色";
-                                        description: "选中态、按钮与高亮使用的颜色。";
-                                        Rectangle {
-                                            width: dots-row.preferred-width;
-                                            dots-row := HorizontalLayout {
-                                                x: 0;
-                                                y: (parent.height - self.preferred-height) / 2;
-                                                height: self.preferred-height;
-                                                spacing: Metrics.space-1_5;
-                                                alignment: start;
-                                                for swatch in root.accent-swatches: Rectangle {
-                                                    // 旧版 hover:scale-105 的等效反馈用
-                                                    // 描边环表达：尺寸动画会改变行首选宽，
-                                                    // 悬停点间移动时所有圆点跟着重排闪动
-                                                    width: 28px;
-                                                    height: 28px;
-                                                    border-radius: Metrics.radius-pill;
-                                                    border-width: 2px;
-                                                    border-color: swatch.selected
-                                                        ? Theme.accent-fg
-                                                        : (sw-ta.has-hover
-                                                            ? Theme.border-default : transparent);
-                                                    sw-ta := TouchArea {
-                                                        clicked() => { root.accent-selected(swatch.id); }
-                                                    }
-                                                    Rectangle {
-                                                        // 按下内圆回缩（按压反馈）；在固定
-                                                        // 外圈内变化，不影响布局尺寸
-                                                        x: (parent.width - self.width) / 2;
-                                                        y: (parent.height - self.height) / 2;
-                                                        width: sw-ta.pressed ? 17px : 20px;
-                                                        height: self.width;
-                                                        border-radius: Metrics.radius-pill;
-                                                        border-width: 1px;
-                                                        border-color: rgba(0, 0, 0, 0.08);
-                                                        background: swatch.hex;
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    RowDivider { }
-                                    // 速贴窗口显示位置
-                                    SettingRow {
-                                        title: "速贴窗口显示位置";
-                                        description: ["默认推荐，速贴窗口会贴近当前鼠标所在位置弹出。",
-                                            "保留上次拖动或关闭时的位置；首次使用会落在屏幕中心。",
-                                            "优先跟随当前输入光标；如果系统拿不到光标位置，会退回鼠标位置。"][root.position-mode];
-                                        Rectangle {
-                                            width: seg-position.width;
-                                            seg-position := Segmented {
-                                                x: 0;
-                                                y: (parent.height - self.height) / 2;
-                                                options: ["鼠标位置", "上次关闭时的位置", "光标所在位置"];
-                                                value <=> root.position-mode;
-                                                selected(idx) => { root.position-mode-selected(idx); }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        /* ═══ 行为 ═══ */
-                        sec3 := Rectangle {
-                            height: sec3-col.preferred-height;
-                            sec3-col := VerticalLayout {
-                                spacing: 6px;
-                                SectionHeader {
-                                    title: "行为";
-                                    description: "控制开机启动、监听状态与贴回行为，明确主次关系。";
-                                }
-                                RowGroup {
-                                    ToggleRow {
-                                        title: "开机自启";
-                                        description: "登录系统后自动启动 FloatPaste。";
-                                        checked: root.launch-on-startup;
-                                        toggled(checked) => { root.launch-on-startup-toggled(checked); }
-                                    }
-                                    RowDivider { }
-                                    // 以管理员身份运行（对齐 PowerToys：提权是
-                                    // 一次性动作，「始终」决定自启是否带权限）
-                                    SettingRow {
-                                        title: "以管理员身份运行";
-                                        description: root.process-elevated
-                                            ? "当前已以管理员身份运行，向管理员窗口的自动粘贴可正常生效。"
-                                            : "向管理员窗口的自动粘贴需要管理员权限；确认 UAC 后将立即以管理员身份重启。";
-                                        Rectangle {
-                                            width: elev-restart-btn.width;
-                                            elev-restart-btn := Rectangle {
-                                                x: 0;
-                                                y: (parent.height - self.height) / 2;
-                                                width: elev-restart-btn-text.preferred-width + 24px;
-                                                height: 30px;
-                                                border-radius: 8px;
-                                                border-width: 1px;
-                                                border-color: Theme.border-default;
-                                                background: Theme.canvas-default;
-                                                opacity: root.process-elevated ? 0.55 : 1.0;
-                                                TouchArea {
-                                                    enabled: !root.process-elevated;
-                                                    mouse-cursor: root.process-elevated
-                                                        ? MouseCursor.default : MouseCursor.pointer;
-                                                    clicked() => { root.restart-as-admin(); }
-                                                }
-                                                elev-restart-btn-text := Text {
-                                                    text: root.process-elevated
-                                                        ? "当前已以管理员运行"
-                                                        : "以管理员身份重启";
-                                                    color: root.process-elevated
-                                                        ? Theme.fg-subtle : Theme.fg-default;
-                                                    font-size: Metrics.text-xs;
-                                                    vertical-alignment: center;
-                                                    horizontal-alignment: center;
-                                                }
-                                            }
-                                        }
-                                    }
-                                    RowDivider { }
-                                    ToggleRow {
-                                        title: "始终以管理员身份运行";
-                                        description: "开机自启时也将以管理员权限运行。仅当以管理员身份运行时才能更改此设置。";
-                                        checked: root.always-run-elevated;
-                                        disabled: !root.process-elevated;
-                                        nested: true;
-                                        toggled(checked) => { root.always-run-elevated-toggled(checked); }
-                                    }
-                                    if (root.elevated-status-text != ""): VerticalLayout {
-                                        RowDivider { }
-                                        Text {
-                                            text: root.elevated-status-text;
-                                            color: Theme.danger-fg;
-                                            font-size: Metrics.text-xs;
-                                            wrap: word-wrap;
-                                        }
-                                    }
-                                    RowDivider { }
-                                    ToggleRow {
-                                        title: "开机时静默启动";
-                                        description: "启动后不主动打断当前工作流。";
-                                        checked: root.silent-on-startup;
-                                        disabled: !root.launch-on-startup;
-                                        nested: true;
-                                        toggled(checked) => { root.silent-on-startup-toggled(checked); }
-                                    }
-                                    RowDivider { }
-                                    ToggleRow {
-                                        title: "回贴后恢复剪贴板";
-                                        description: "贴回完成后恢复原有剪贴板内容，减少对当前工作流的干扰。";
-                                        checked: root.restore-clipboard;
-                                        toggled(checked) => { root.restore-clipboard-toggled(checked); }
-                                    }
-                                    RowDivider { }
-                                    ToggleRow {
-                                        title: "暂停监听";
-                                        description: "暂停后不会继续采集新的剪贴板记录。";
-                                        checked: root.pause-monitoring;
-                                        toggled(checked) => { root.pause-monitoring-toggled(checked); }
-                                    }
-                                    RowDivider { }
-                                    // 鼠标上屏触发方式
-                                    SettingRow {
-                                        title: "粘贴触发方式";
-                                        description: ["单击条目立即上屏。",
-                                            "单击选中条目，双击上屏。"][root.paste-trigger];
-                                        Rectangle {
-                                            width: seg-paste-trigger.width;
-                                            seg-paste-trigger := Segmented {
-                                                x: 0;
-                                                y: (parent.height - self.height) / 2;
-                                                options: ["单击上屏", "双击上屏"];
-                                                value <=> root.paste-trigger;
-                                                selected(idx) => { root.paste-trigger-selected(idx); }
                                             }
                                         }
                                     }
