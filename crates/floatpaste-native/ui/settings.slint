@@ -138,8 +138,10 @@ component ShortcutInput inherits Rectangle {
     height: 34px;
     border-radius: 12px;
     // 录制态 2px 强调框；非录制悬停边框转强调色（旧版 hover:border-pg-accent-fg）
-    border-width: rec.has-focus ? 2px : 1px;
-    border-color: rec.has-focus || ta.has-hover ? Theme.accent-fg : Theme.border-default;
+    // 边框以 recording 为真值来源而非 rec.has-focus：退出录制时 FocusScope
+    // 被禁用，has-focus 不回落会卡住高亮
+    border-width: root.recording ? 2px : 1px;
+    border-color: root.recording || ta.has-hover ? Theme.accent-fg : Theme.border-default;
     background: Theme.canvas-default;
     opacity: root.disabled ? 0.6 : 1.0;
 
@@ -306,8 +308,8 @@ component SessionKeyInput inherits Rectangle {
 
     height: 34px;
     border-radius: 12px;
-    border-width: rec.has-focus ? 2px : 1px;
-    border-color: rec.has-focus || ta.has-hover ? Theme.accent-fg : Theme.border-default;
+    border-width: root.recording ? 2px : 1px;
+    border-color: root.recording || ta.has-hover ? Theme.accent-fg : Theme.border-default;
     background: Theme.canvas-default;
     opacity: root.notice != "" ? 0.6 : 1.0;
 
