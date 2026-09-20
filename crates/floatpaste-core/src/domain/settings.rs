@@ -235,9 +235,11 @@ pub struct UserSetting {
     pub shortcut: String,
     pub launch_on_startup: bool,
     pub silent_on_startup: bool,
-    /// 以管理员权限启动：经任务计划程序注册「登录时最高权限」自启任务
-    /// 接管开机自启（Run 键无法提权；manifest 会锁死所有启动路径）。
-    /// 注册/卸载需要 UAC 确认，由壳层经 runas 重入自身完成
+    /// 以管理员权限启动：登录自启经任务计划程序「最高权限」任务接管
+    /// （Run 键无法提权；asInvoker manifest 不触发 UAC）；其余启动路径
+    /// （手动双击图标等）由壳层启动期自检经 UAC 重入自身提权，UAC 取消
+    /// 则本次普通权限运行并托盘气泡说明。任务注册/卸载需要 UAC 确认，
+    /// 由壳层经 runas 重入自身完成
     #[serde(default)]
     pub always_run_elevated: bool,
     pub history_limit: u32,

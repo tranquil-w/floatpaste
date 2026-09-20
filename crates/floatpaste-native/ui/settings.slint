@@ -1274,7 +1274,8 @@ export component SettingsWindow inherits Window {
                                     }
                                     RowDivider { }
                                     // 以管理员身份运行（对齐 PowerToys：提权是
-                                    // 一次性动作，「始终」决定自启是否带权限）
+                                    // 一次性动作，「始终」约束所有启动路径——
+                                    // 自启走最高权限任务，手动启动靠启动期自检）
                                     SettingRow {
                                         title: "以管理员身份运行";
                                         description: root.process-elevated
@@ -1314,7 +1315,7 @@ export component SettingsWindow inherits Window {
                                     RowDivider { }
                                     ToggleRow {
                                         title: "始终以管理员身份运行";
-                                        description: "开机自启时也将以管理员权限运行。仅当以管理员身份运行时才能更改此设置。";
+                                        description: "每次启动（含手动打开）均以管理员权限运行，手动启动时会弹出 UAC 确认，取消则本次以普通权限运行。仅当以管理员身份运行时才能更改此设置。";
                                         checked: root.always-run-elevated;
                                         disabled: !root.process-elevated;
                                         nested: true;

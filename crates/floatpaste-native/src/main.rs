@@ -32,6 +32,7 @@ use floatpaste_core::domain::error::AppError;
 use floatpaste_core::launch_mode::{self, LaunchMode};
 use floatpaste_core::platform::windows::clipboard_monitor::ClipboardMonitor;
 use floatpaste_core::platform::windows::elevated_task;
+use floatpaste_core::platform::windows::elevation;
 use floatpaste_core::platform::windows::hotkey;
 use floatpaste_core::platform::windows::mouse_monitor;
 use floatpaste_core::platform::windows::session_keyboard;
@@ -267,6 +268,36 @@ fn main() {
     // 缺提权任务时留待用户改动设置时确认）
     settings::spawn_autostart_sync(&app, false);
     tray::start(app.clone());
+
+    // 「始终以管理员身份运行」启动期自检：任务计划只覆盖登录自启，手动
+    // 启动（图标/命令行）经 asInvoker manifest 拿不到提权。预期提权而
+    // 实际未提权时经 UAC 重入自身（复用 --elevated-relaunch 闭环：本
+    // 进程退出释放单实例互斥量，提权新实例接管）；UAC 取消则照常以
+    // 普通权限运行，托盘气泡说明一次
+    if launch_mode::needs_elevated_relaunch(
+        app.state.current_settings().always_run_elevated,
+        elevation::is_current_process_elevated(),
+        &args,
+    ) {
+        // 透传原启动参数（--silent 等），提权接管后保持同一启动模式
+        let mut relaunch_args: Vec<String> = args.iter().skip(1).cloned().collect();
+        relaunch_args.push(launch_mode::ELEVATED_RELAUNCH_ARG.to_string());
+        match elevation::relaunch_elevated(&relaunch_args.join(" ")) {
+            Ok(()) => {
+                tracing::info!("提权重启已获确认，退出当前实例交由提权实例接管");
+                session_keyboard::end_session();
+                mouse_monitor::end_session();
+                ClipboardMonitor::stop();
+                hotkey::stop_hotkeys();
+                app.state.core.begin_quit();
+                return;
+            }
+            Err(error) => {
+                tracing::warn!("提权重启未获确认，继续以普通权限运行: {error}");
+                tray::notify_elevation_declined();
+            }
+        }
+    }
 
     // 必须用 until_quit 变体：Slint 默认在最后一个窗口关闭/隐藏时退出事件循环，
     // 而"隐藏窗口"是速贴应用的常态操作（Esc/粘贴/热键），会让整个进程静默退出

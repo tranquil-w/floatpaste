@@ -142,9 +142,12 @@ unsafe fn remove_icon(hwnd: HWND) {
 const ADMIN_TARGET_INFO: &str =
     "目标窗口以管理员权限运行，FloatPaste 无法向其自动粘贴。内容已在剪贴板，可手动 Ctrl+V；或在设置中开启「以管理员身份运行」。";
 
-/// 托盘气泡一次性提示（管理员目标无法自动回贴时调用；不占用窗口 UI）。
-/// Win10+ 转系统通知，无弹窗打扰。
-pub fn notify_admin_target() {
+/// 启动期提权自检未获确认（UAC 取消）的气泡文案
+const ELEVATION_DECLINED_INFO: &str =
+    "已开启「始终以管理员身份运行」，但本次启动未获得管理员权限（UAC 未确认）。向管理员窗口的自动粘贴将无法生效；重新打开 FloatPaste 并确认即可。";
+
+/// 托盘警告气泡（不占用窗口 UI）。Win10+ 转系统通知，无弹窗打扰
+fn notify_warning(info: &str) {
     let hwnd = TRAY_HWND.load(std::sync::atomic::Ordering::SeqCst);
     if hwnd == 0 {
         return;
@@ -156,11 +159,11 @@ pub fn notify_admin_target() {
         uFlags: NIF_INFO,
         szInfo: {
             // szInfo 是定长 256 UTF-16 数组，须以 NUL 结尾
-            let mut info = [0u16; 256];
-            for (slot, unit) in info.iter_mut().zip(ADMIN_TARGET_INFO.encode_utf16()) {
+            let mut buffer = [0u16; 256];
+            for (slot, unit) in buffer.iter_mut().zip(info.encode_utf16()) {
                 *slot = unit;
             }
-            info
+            buffer
         },
         szInfoTitle: {
             let mut title = [0u16; 64];
@@ -177,6 +180,16 @@ pub fn notify_admin_target() {
             warn!("托盘气泡通知失败");
         }
     }
+}
+
+/// 管理员目标无法自动回贴时的一次性说明
+pub fn notify_admin_target() {
+    notify_warning(ADMIN_TARGET_INFO);
+}
+
+/// 启动期提权自检未获确认（用户在 UAC 中取消）时的一次性说明
+pub fn notify_elevation_declined() {
+    notify_warning(ELEVATION_DECLINED_INFO);
 }
 
 unsafe fn show_menu(hwnd: HWND) {

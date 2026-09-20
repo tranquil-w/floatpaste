@@ -71,7 +71,8 @@ floatpaste-native（唯一桌面壳，Slint 软件渲染）
 ### 开机自启与提权启动
 
 - 提权是对一次性动作（对齐 PowerToys）：设置页「以管理员身份重启」（未提权时显示）→ UAC 确认 → 经 `runas` 重启（新实例等旧实例释放单实例互斥量后接管）；重启后即拥有管理员权限。
-- 任务计划程序是开机自启的唯一载体（`elevated_task.rs` COM ITaskService）：任务存在 = 「开机自启」开；任务 RunLevel（HIGHEST/LUA）= 「始终以管理员身份运行」开。该勾选仅提权运行时可更改；勾选后每次启动（含登录自启）均带管理员权限。
+- 任务计划程序是开机自启的唯一载体（`elevated_task.rs` COM ITaskService）：任务存在 = 「开机自启」开；任务 RunLevel（HIGHEST/LUA）= 「始终以管理员身份运行」开。该勾选仅提权运行时可更改；勾选后每次启动均带管理员权限——登录自启走 HIGHEST 任务免 UAC；手动启动（asInvoker manifest 不触发 UAC）由启动期自检兜底（`launch_mode::needs_elevated_relaunch`，托盘就绪后执行，透传 `--silent` 等原参数）。
+- 启动期提权自检：预期提权而实际未提权时，经 UAC 重入自身（复用 `--elevated-relaunch` 闭环，本进程走退出收尾后让位，提权新实例接管）；UAC 被取消则本次以普通权限运行，托盘气泡说明一次。带 `--elevated-relaunch` 参数的启动不再自检，防 UAC 异常时无限弹窗。
 - 任务 ACL 仅授予 SYSTEM/Administrators/任务所属用户：非提权进程可查询/删除/重建自己的任务，只有注册 HIGHEST 任务需要提权（进程已提权时直接注册；删除另有 `--remove-elevated-autostart` UAC 兜底）。Run 键自启已退役，启动时无条件清理存量条目。
 - 同步时机：启动时与设置保存后（后台线程串行执行，`query` 快照幂等跳过已达形态）；同步失败回滚对应开关并提示。触发器延迟 3s 等 Explorer 就绪；任务名带用户名避免多用户冲突。
 
