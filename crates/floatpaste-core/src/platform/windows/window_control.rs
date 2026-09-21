@@ -218,6 +218,26 @@ pub fn is_cursor_inside_window(hwnd: isize) -> Result<bool, AppError> {
         && cursor.y <= rect.bottom)
 }
 
+/// 一次调用完成窗口移动与缩放。winit 的 set_size 与 set_position 分开
+/// 调用时是两次 SetWindowPos，DWM 可能各自呈现一帧——先 resize（左上角
+/// 锚定）后 move 的顺序会露出「已长高但未移位」的偏下中间帧；同屏可见
+/// 窗口的几何变化必须原子完成。尺寸经 WM_WINDOWPOSCHANGED 同步回 winit，
+/// Slint 布局随新逻辑尺寸重排，与自身 set_size 等效
+pub fn set_window_bounds(hwnd: isize, x: i32, y: i32, width: i32, height: i32) {
+    let hwnd = hwnd_of(hwnd);
+    unsafe {
+        let _ = SetWindowPos(
+            hwnd,
+            None,
+            x,
+            y,
+            width,
+            height,
+            SWP_NOZORDER | SWP_NOACTIVATE,
+        );
+    }
+}
+
 /// 显示并前置聚焦（搜索窗口路径）：置顶 → BringWindowToTop → 恢复/显示 → 激活
 pub fn restore_window_and_focus(hwnd: isize) -> Result<(), AppError> {
     let hwnd = hwnd_of(hwnd);

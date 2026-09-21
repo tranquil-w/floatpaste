@@ -139,7 +139,10 @@ fn place_window_near_point(
     )
 }
 
-fn center_in_work_area(
+/// 工作区内居中放置 width×height 窗口的左上角（物理像素）；窗口大于
+/// 工作区时钳回工作区左上（不居中到负偏移）。窗口自身尺寸同步定尺寸的
+/// 路径（搜索窗口上屏几何）复用同一算式，避免居中逻辑两处各写一遍
+pub fn center_in_work_area(
     work_area: ScreenRect,
     window_width: i32,
     window_height: i32,

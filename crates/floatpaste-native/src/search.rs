@@ -7,7 +7,8 @@
 //! - 查询：200ms 关键词防抖 + 类型/标签筛选 + 50 条分页 + 触底预载
 //!   （240px），keyword 非空按相关度排序，否则按最近使用。
 //! - 高度：target = min(620, 5 + chrome + 列表内容)，棘轮同步——结构变化
-//!   （关键词/筛选/错误条/条目数）允许收缩，选中展开只允许增高。
+//!   （关键词/筛选/条目数）允许收缩，选中展开只允许增高。读数与应用统一
+//!   由布局的 heights-changed 驱动，命令式调用点只置收缩许可不自读数。
 //! - 挂起态（速贴会话把回贴目标定为搜索窗口）：输入框失焦、底栏切换为速
 //!   贴键位；恢复路径覆盖速贴隐藏还原与粘贴还原两条链路。
 
@@ -28,13 +29,14 @@ use floatpaste_core::domain::settings::{PasteTrigger, UserSetting};
 use floatpaste_core::domain::error::AppError;
 use floatpaste_core::platform::windows::active_app::ActiveAppResolver;
 use floatpaste_core::platform::windows::picker_position::{
-    current_cursor_point, work_area_from_point,
+    current_cursor_point, work_area_from_point, ScreenRect,
 };
 use floatpaste_core::platform::windows::session_keyboard::parse_session_combo;
 use floatpaste_core::platform::windows::window_control;
 use floatpaste_core::services::clip_display::build_meta;
 use floatpaste_core::services::clip_service::ClipService;
 use floatpaste_core::services::paste_support;
+use floatpaste_core::services::picker_position_service::center_in_work_area;
 use floatpaste_core::services::time_format::format_relative_time_or_unused;
 
 use crate::app_state::SearchSession;
@@ -120,10 +122,12 @@ pub fn open(app: &App) {
     if let Ok(mut slot) = PARKED_POSITION.lock() {
         *slot = None;
     }
-    // 会话状态先重置（仍停屏），同步泵帧让空关键词加载态落盘，再移回
-    // 屏上：首帧即加载态，不闪旧内容
+    // 会话状态先重置（仍停屏），再改尺寸并同步泵帧：尺寸变更与泵帧同处
+    // 一个消息回合，泵出的已是新尺寸的加载态表面，移回屏上首帧即完整
+    // 内容。若泵帧先于尺寸变更，落盘/上屏的还是旧尺寸表面，与窗口不
+    // 匹配即闪一下（对齐 picker::activate 的「尺寸/数据就绪 → 暖表面 →
+    // 上屏」顺序）
     reset_session_state(app);
-    win32_ext::warm_surface(hwnd);
     // 尺寸先于定位：首开会话时窗口还是装配期自然尺寸（根布局钳制，不是
     // 设计尺寸），直接拿 window().size() 居中必偏（winit set_size 亦非
     // 同步可读回）。定位用同一组计算值，不经窗口回读
@@ -138,17 +142,19 @@ pub fn open(app: &App) {
     } else {
         (geo.get_window_max_height() * scale).round() as i32
     };
-    win.window().set_size(PhysicalSize::new(
-        width_px.max(1) as u32,
-        height_px.max(1) as u32,
-    ));
     // 高度基线对齐到本次实际应用值：加载态的中间高度（低于基线）在无
     // 收缩许可时被跳过，内容落定只发生一次尺寸变化
     LAST_HEIGHT.with(|value| value.set(height_px as f32));
     JUST_OPENED.with(|flag| flag.set(true));
-    if !position_on_cursor_monitor(&win, width_px, height_px) {
-        // 光标/工作区不可得：退回上次隐藏前的位置（等价旧行为的
-        // 「原位显示」）；无记录时保持停屏并告警
+    // 停屏窗口在屏外，几何变化在移回屏上前完成，无可见中间帧；一次
+    // SetWindowPos 同步定尺寸与位置（窗口仍在屏外，不受「先长高后移位」
+    // 影响）。定位失败（光标/工作区不可得）才需要单独定尺寸，再退回
+    // 上次隐藏前的原位（等价旧行为的「原位显示」）
+    if !position_centered_on_cursor(hwnd, width_px, height_px) {
+        win.window().set_size(PhysicalSize::new(
+            width_px.max(1) as u32,
+            height_px.max(1) as u32,
+        ));
         let fallback = LAST_HIDDEN_POSITION.lock().ok().and_then(|slot| *slot);
         if let Some((x, y)) = fallback {
             win.window().set_position(PhysicalPosition::new(x, y));
@@ -156,6 +162,7 @@ pub fn open(app: &App) {
             warn!("搜索窗口定位失败且无历史位置，保持停屏");
         }
     }
+    win32_ext::warm_surface(hwnd);
 
     if let Err(error) = window_control::restore_window_and_focus(hwnd) {
         warn!("搜索窗口获取焦点失败: {error}");
@@ -285,20 +292,21 @@ pub fn resume_input(app: &App) {
     });
 }
 
-/// 打开时定位：光标所在显示器工作区居中（不持久化位置，对齐
-/// center_window_on_cursor_monitor）。尺寸由调用方算好后传入——
-/// winit set_size 不同步反映到 window().size()，回读会拿到旧值。
-/// 定位失败返回 false，由调用方兜底
-fn position_on_cursor_monitor(win: &SearchWindow, width_px: i32, height_px: i32) -> bool {
-    let Ok(cursor) = current_cursor_point() else {
+/// 光标所在显示器工作区（物理坐标）；光标/工作区不可得返回 None
+fn cursor_monitor_work_area() -> Option<ScreenRect> {
+    let cursor = current_cursor_point().ok()?;
+    work_area_from_point(cursor).ok()
+}
+
+/// 以新尺寸一次 SetWindowPos 完成缩放+移动并按光标所在工作区居中；
+/// 工作区不可得返回 false，调用方退回自身兜底路径
+fn position_centered_on_cursor(hwnd: isize, width_px: i32, height_px: i32) -> bool {
+    let Some(work) = cursor_monitor_work_area() else {
         return false;
     };
-    let Ok(work) = work_area_from_point(cursor) else {
-        return false;
-    };
-    let x = work.left + (work.width() - width_px).max(0) / 2;
-    let y = work.top + (work.height() - height_px).max(0) / 2;
-    win.window().set_position(PhysicalPosition::new(x, y));
+    let (width, height) = (width_px.max(1), height_px.max(1));
+    let point = center_in_work_area(work, width, height);
+    window_control::set_window_bounds(hwnd, point.x, point.y, width, height);
     true
 }
 
@@ -405,7 +413,6 @@ thread_local! {
     static ERROR_TOKEN: Cell<u64> = const { Cell::new(0) };
     static LAST_HEIGHT: Cell<f32> = const { Cell::new(0.0) };
     static ALLOW_SHRINK: Cell<bool> = const { Cell::new(false) };
-    static HEIGHT_TOKEN: Cell<u64> = const { Cell::new(0) };
 }
 
 fn build_query(keyword: &str, filter: u32, tags: &[String], offset: u32) -> SearchQuery {
@@ -538,7 +545,7 @@ fn apply_page(app: &App, result: SearchResult, seq: u64, append: bool) {
     update_empty_state(app);
     build_rows(app);
     ensure_thumbnails(app, &items);
-    sync_height(app, true);
+    sync_height();
 }
 
 /// 触底预载（对齐 fetchNextPage：offset + items.length < total）
@@ -1042,7 +1049,7 @@ pub fn toggle_favorite(app: &App) {
                 });
                 update_empty_state(app);
                 build_rows(app);
-                sync_height(app, true);
+                sync_height();
             } else {
                 app.state.set_search_items(items);
                 build_rows(app);
@@ -1121,7 +1128,7 @@ fn perform_delete(app: &App, id: &str) {
     });
     update_empty_state(app);
     build_rows(app);
-    sync_height(app, true);
+    sync_height();
 }
 
 /* ───────────────── 悬停预览（全类型条目）───────────────── */
@@ -1155,67 +1162,65 @@ pub fn hover_left(app: &App) {
 
 /* ───────────────── 高度棘轮同步 ───────────────── */
 
-/// 目标高度 = min(620, 5 + chrome + 列表内容高)（对齐
-/// syncWindowHeightWithContent）。0ms 延迟合并同帧多次触发并等布局把新
-/// 模型高度算出；ALLOW_SHRINK 由结构性变化置位、应用后消费（棘轮）：
-/// 选中展开的 sync(false) 不会取消结构性收缩许可
-pub fn sync_height(app: &App, allow_shrink: bool) {
-    if allow_shrink {
-        ALLOW_SHRINK.with(|flag| flag.set(true));
-    }
-    let token = HEIGHT_TOKEN.with(|value| {
-        value.set(value.get() + 1);
-        value.get()
-    });
-    let app_cb = app.clone();
-    slint::Timer::single_shot(Duration::from_millis(0), move || {
-        if HEIGHT_TOKEN.with(|value| value.get()) != token {
-            return;
-        }
-        let Some(win) = app_cb.search.upgrade() else {
-            return;
-        };
-        let geo = win.global::<SearchGeometry>();
-        let target_logical =
-            (geo.get_height_slack() + win.get_chrome_height() + win.get_list_content_height())
-                .min(geo.get_window_max_height());
-        let scale = win.window().scale_factor();
-        let target = (target_logical * scale).round() as i32;
-        let last = LAST_HEIGHT.with(|value| value.get()) as i32;
-        if target == last {
-            // 布局尚未把新模型的高度算出（0ms 定时器可能先于渲染帧）：
-            // 提前返回并保留收缩许可，等随后的 heights-changed 带新值重入
-            return;
-        }
-        let allow = ALLOW_SHRINK.with(|flag| flag.get());
-        ALLOW_SHRINK.with(|flag| flag.set(false));
-        if !allow && target < last {
-            return;
-        }
-        LAST_HEIGHT.with(|value| value.set(target as f32));
-        win.window().set_size(PhysicalSize::new(
-            (geo.get_window_width() * scale).round() as u32,
-            target as u32,
-        ));
-        // 打开后首次高度落定：以新尺寸重新居中（左上角锚定的增长会让
-        // 窗口偏离打开时的居中位置）。加载态的中间高度不得消费本次重居
-        // 中——否则内容到达后窗口向下长高、最终落在中心下方；后续会话
-        // 内的高度变化不再干预，用户拖动后的位置也不受影响
-        if JUST_OPENED.with(|flag| flag.get()) && !win.get_loading() {
-            JUST_OPENED.with(|flag| flag.set(false));
-            let _ = position_on_cursor_monitor(
-                &win,
-                (geo.get_window_width() * scale).round() as i32,
-                target,
-            );
-        }
-    });
+/// 请求高度同步（结构变化语义：查询落地/删除/取消收藏）：仅置一次
+/// 收缩许可，读数与应用由 heights-changed 驱动（见 apply_height）。
+/// 命令式调用点不得自行读数——list-content-height 依赖布局 pass 写入的
+/// viewport-height，0ms 定时器读数可能先于渲染帧，拿到的是布局未跟上的
+/// 陈旧值（曾致开窗会话按陈旧的空态高度重居中、消费 JUST_OPENED，真值
+/// 落地后窗口永久偏下）
+pub fn sync_height() {
+    ALLOW_SHRINK.with(|flag| flag.set(true));
 }
 
-/// 列表内容实测高变化（viewport-height）：视作安全网重同步（允许增长；
-/// 收缩许可仍由结构性变化的 sync(true) 供给）
+/// 列表内容实测高变化（list-stack 自然高由布局 pass 写入）：布局真值
+/// 信号，触发一次读数应用。日常滚动等无高度净变化的触发在 apply_height
+/// 内被 target==last 拦下
 pub fn heights_changed(app: &App) {
-    sync_height(app, false);
+    apply_height(app);
+}
+
+/// 读数并应用目标高度：target = min(620, 5 + chrome + 列表内容高)。
+/// ALLOW_SHRINK 由结构性变化的 sync_height() 置位、应用后消费（棘轮）；
+/// 开窗会话内容未落地（加载态）的中间高度不应用，等内容落地一次到位
+fn apply_height(app: &App) {
+    let Some(win) = app.search.upgrade() else {
+        return;
+    };
+    let geo = win.global::<SearchGeometry>();
+    let target_logical =
+        (geo.get_height_slack() + win.get_chrome_height() + win.get_list_content_height())
+            .min(geo.get_window_max_height());
+    let scale = win.window().scale_factor();
+    let target = (target_logical * scale).round() as i32;
+    let last = LAST_HEIGHT.with(|value| value.get()) as i32;
+    if target == last {
+        return;
+    }
+    // 加载态高度不应用：矮历史开窗会在旧位置分步长高、露出「已长高
+    // 未居中」的偏下中间帧，等内容落地一次到位
+    if JUST_OPENED.with(|flag| flag.get()) && win.get_loading() {
+        return;
+    }
+    let allow = ALLOW_SHRINK.with(|flag| flag.get());
+    ALLOW_SHRINK.with(|flag| flag.set(false));
+    if !allow && target < last {
+        return;
+    }
+    LAST_HEIGHT.with(|value| value.set(target as f32));
+    let width_px = (geo.get_window_width() * scale).round() as i32;
+    // 打开后首次高度落定：以新尺寸重新居中（左上角锚定的增长会让
+    // 窗口偏离打开时的居中位置）。一次 SetWindowPos 原子完成缩放+
+    // 移动，避免「先长高后移位」的两帧呈现；工作区不可得则退回仅缩放
+    if JUST_OPENED.with(|flag| flag.replace(false)) {
+        let hwnd = app.state.search_hwnd.load(Ordering::SeqCst);
+        if position_centered_on_cursor(hwnd, width_px, target) {
+            return;
+        }
+    }
+    win.window().set_size(PhysicalSize::new(
+        width_px.max(1) as u32,
+        target.max(1) as u32,
+    ));
 }
 
 /* ───────────────── 窗口拖拽 ───────────────── */
