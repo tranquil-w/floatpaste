@@ -26,6 +26,7 @@ tmp/
 # AI/工具临时产物
 .playwright-mcp/
 .brv/
+.workbuddy/
 
 # 临时产物（迭代计划、发版说明草稿等，不进 Git）
 .artifacts/
