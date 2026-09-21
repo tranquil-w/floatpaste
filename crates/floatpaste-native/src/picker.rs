@@ -22,7 +22,7 @@ use floatpaste_core::platform::windows::{mouse_monitor, session_keyboard};
 use floatpaste_core::services::clip_display::clip_type_label;
 use floatpaste_core::services::clip_service::ClipService;
 use floatpaste_core::services::picker_position_service::{
-    PickerPositionService, WindowGeometry, PICKER_DEFAULT_HEIGHT, PICKER_DEFAULT_WIDTH,
+    default_window_size, resolve_near_cursor, PickerPositionService, WindowGeometry,
     PICKER_MIN_HEIGHT, PICKER_MIN_WIDTH,
 };
 use floatpaste_core::services::time_format::format_relative_time_or_unused;
@@ -139,7 +139,9 @@ pub fn activate(app: &App) {
         // 兜底：标志位与真实可见性脱节时（Win+D/多屏切换/被全屏应用抢占）
         // 重置状态后走完整显示流程，避免后续打开沦为空操作
         if window_control::is_window_visible(hwnd) {
-            apply_window_position(app, &settings, None);
+            // 尺寸不动：用窗口当前实测尺寸（Slint 的 size() 即物理像素，
+            // 不要再乘缩放因子，乘了约束用的尺寸会虚大）
+            apply_window_position(app, &settings, win.window().size(), hwnd, None);
             // 该路径绕过 after_show：置顶与守护需自行保证
             window_control::set_window_topmost_no_activate(hwnd);
             start_topmost_guard(app);
@@ -151,13 +153,11 @@ pub fn activate(app: &App) {
         mouse_monitor::end_session();
     }
 
-    // 恢复记忆尺寸（无记忆则用默认）
-    let (width, height) = PickerPositionService::resolve_window_size(&app.core().repository)
-        .ok()
-        .flatten()
-        .unwrap_or((PICKER_DEFAULT_WIDTH, PICKER_DEFAULT_HEIGHT));
-    win.window()
-        .set_size(slint::PhysicalSize::new(width, height));
+    // 恢复记忆尺寸（无记忆则按设计尺寸与当前缩放折算为物理像素）。
+    // 这一组尺寸必须原样带到定位环节——首开时窗口刚请求过 resize，
+    // 此时回读窗口尺寸拿到的是装配期旧值，用它算约束必然错位
+    let size = resolve_physical_size(app, win.window().scale_factor());
+    win.window().set_size(size);
     window_control::set_window_min_size(
         hwnd,
         (PICKER_MIN_WIDTH as f32 * win.window().scale_factor()) as i32,
@@ -207,7 +207,7 @@ pub fn activate(app: &App) {
     // 让数据就绪后的首帧在屏外落盘——移回屏上的第一帧即完整内容，
     // 既不透明也不闪旧列表
     win32_ext::warm_surface(hwnd);
-    apply_window_position(app, &settings, session.target_window_hwnd);
+    apply_window_position(app, &settings, size, hwnd, session.target_window_hwnd);
 
     let immediate = session
         .target_window_hwnd
@@ -367,13 +367,10 @@ pub fn restore_after_editor(app: &App, target: TargetSession) {
     }
     let settings = app.state.current_settings();
 
-    // 恢复记忆尺寸（无记忆则用默认）
-    let (width, height) = PickerPositionService::resolve_window_size(&app.core().repository)
-        .ok()
-        .flatten()
-        .unwrap_or((PICKER_DEFAULT_WIDTH, PICKER_DEFAULT_HEIGHT));
-    win.window()
-        .set_size(slint::PhysicalSize::new(width, height));
+    // 恢复记忆尺寸（无记忆则按设计尺寸与当前缩放折算），同 activate：
+    // 尺寸与定位取自同一组数，不回读窗口
+    let size = resolve_physical_size(app, win.window().scale_factor());
+    win.window().set_size(size);
     window_control::set_window_min_size(
         hwnd,
         (PICKER_MIN_WIDTH as f32 * win.window().scale_factor()) as i32,
@@ -383,7 +380,7 @@ pub fn restore_after_editor(app: &App, target: TargetSession) {
     app.state.set_picker_session(target);
     // 上屏前先暖表面（同步泵一次 WM_PAINT 呈现），移回即有内容
     win32_ext::warm_surface(hwnd);
-    apply_window_position(app, &settings, target.target_window_hwnd);
+    apply_window_position(app, &settings, size, hwnd, target.target_window_hwnd);
 
     app.state.begin_picker_activation();
 
@@ -874,36 +871,53 @@ fn set_message(app: &App, text: &str, tone: i32) {
 
 /* ───────────────── 定位 ───────────────── */
 
+/// 本次上屏的窗口物理尺寸：有记忆用记忆（落盘的已是物理像素），无记忆按
+/// 设计尺寸与显示器缩放折算。定位与定尺寸必须取自同一组数——首开（或刚从
+/// 编辑器返回）时窗口尺寸是这里算出来、刚请求下去的值，回读窗口拿到的
+/// 还可能是装配期旧值
+fn resolve_physical_size(app: &App, scale_factor: f32) -> slint::PhysicalSize {
+    let (width, height) =
+        PickerPositionService::resolve_window_size(&app.core().repository, scale_factor)
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| default_window_size(scale_factor));
+    slint::PhysicalSize::new(width, height)
+}
+
+/// 按设置模式定位并上屏。窗口尺寸是定位的输入而非输出：速贴的三种模式
+/// 都要拿它与工作区边界一起约束，保证无论光标贴在屏幕哪一侧，窗口都
+/// 整块落在光标所在显示器的工作区内，且优先贴近光标。`physical_size`
+/// 必须是窗口**真实**的物理尺寸（传小了约束即失效）
 fn apply_window_position(
     app: &App,
     settings: &floatpaste_core::domain::settings::UserSetting,
+    physical_size: slint::PhysicalSize,
+    hwnd: isize,
     target_window_hwnd: Option<isize>,
 ) {
-    let Some(win) = app.picker.upgrade() else {
-        return;
-    };
-    let size = win.window().size();
-    let scale = win.window().scale_factor();
-    let physical = slint::PhysicalSize::new(
-        (size.width as f32 * scale) as u32,
-        (size.height as f32 * scale) as u32,
-    );
-
+    let width = physical_size.width.max(1) as i32;
+    let height = physical_size.height.max(1) as i32;
     let mode = settings.picker_position_mode.clone();
-    let position = PickerPositionService::resolve_window_position(
+
+    // 解析失败（仓储报错 / 工作区不可得）回退到贴光标：直接放弃会把窗口
+    // 留在屏外停屏位，用户按快捷键却什么都看不到
+    let Some(point) = PickerPositionService::resolve_window_position(
         &app.core().repository,
         &mode,
-        physical.width as i32,
-        physical.height as i32,
+        width,
+        height,
         target_window_hwnd,
     )
     .ok()
-    .flatten();
+    .flatten()
+    .or_else(|| resolve_near_cursor(width, height)) else {
+        warn!("速贴定位失败：光标位置与工作区均不可得，窗口保持原位");
+        return;
+    };
 
-    if let Some(point) = position {
-        win.window()
-            .set_position(slint::PhysicalPosition::new(point.x, point.y));
-    }
+    // 尺寸与位置一次 SetWindowPos 落地：定位用的尺寸必须与真正生效的
+    // 尺寸一致，分开调用还会露出「先长高后移位」的中间帧
+    window_control::set_window_bounds(hwnd, point.x, point.y, width, height);
 }
 
 // 类型徽章文案（对齐旧版 getClipTypeLabel）见 core::clip_display::clip_type_label

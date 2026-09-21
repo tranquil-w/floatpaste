@@ -11,8 +11,12 @@ use crate::repository::sqlite_repository::SqliteRepository;
 
 const PICKER_ANCHOR_GAP_PX: i32 = 12;
 const PICKER_TOP_ANCHOR_X_DIVISOR: i32 = 5;
-pub const PICKER_DEFAULT_WIDTH: u32 = 360;
-pub const PICKER_DEFAULT_HEIGHT: u32 = 420;
+/// 设计尺寸（**逻辑像素**，与 `ui/picker.slint` 的 preferred-width/height 同值）。
+/// 不对外导出：直接当物理尺寸用就是这个模块踩过的坑，落窗口前必须过
+/// [`default_window_size`] 折算
+const PICKER_DEFAULT_WIDTH: u32 = 360;
+const PICKER_DEFAULT_HEIGHT: u32 = 420;
+/// 最小尺寸（逻辑像素），与窗口自设的最小尺寸同单位
 pub const PICKER_MIN_WIDTH: u32 = 256;
 pub const PICKER_MIN_HEIGHT: u32 = 280;
 
@@ -28,7 +32,10 @@ pub struct WindowGeometry {
 }
 
 impl PickerPositionService {
-    /// 解析下次显示位置；window_width/window_height 为物理像素
+    /// 解析下次显示位置；window_width/window_height 为**窗口真实物理尺寸**，
+    /// 三种模式都会把它与工作区边界一起纳入约束，返回的左上角保证
+    /// `width×height` 整块落在锚点所在显示器的工作区内（工作区比窗口还小
+    /// 的极端情况退化为工作区左上角）
     pub fn resolve_window_position(
         repository: &SqliteRepository,
         mode: &PickerPositionMode,
@@ -37,7 +44,7 @@ impl PickerPositionService {
         target_window_hwnd: Option<isize>,
     ) -> Result<Option<ScreenPoint>, AppError> {
         Ok(match mode {
-            PickerPositionMode::Mouse => resolve_from_mouse(window_width, window_height),
+            PickerPositionMode::Mouse => resolve_near_cursor(window_width, window_height),
             PickerPositionMode::Caret => {
                 resolve_from_caret(target_window_hwnd, window_width, window_height)
             }
@@ -58,16 +65,39 @@ impl PickerPositionService {
         })
     }
 
+    /// 记忆的窗口尺寸（**物理像素**）；无记忆返回 None，调用方按
+    /// [`default_window_size`] 补默认。`scale_factor` 只服务旧数据只存了
+    /// 单边时的补齐——设计尺寸是逻辑像素，补齐结果仍必须是物理像素
     pub fn resolve_window_size(
         repository: &SqliteRepository,
+        scale_factor: f32,
     ) -> Result<Option<(u32, u32)>, AppError> {
         Ok(repository
             .load_picker_window_state()?
-            .and_then(stored_window_size))
+            .and_then(|position| stored_window_size(position, scale_factor)))
     }
 }
 
-fn resolve_from_mouse(window_width: i32, window_height: i32) -> Option<ScreenPoint> {
+/// 无记忆尺寸时的首开尺寸（**物理像素**）：设计尺寸按显示器缩放折算。
+/// 直接把设计尺寸当物理像素用在缩放 >100% 的显示器上会小于自定义的
+/// 最小尺寸（`PICKER_MIN_* × scale`），被系统钳到最小后首开窗口偏小
+pub fn default_window_size(scale_factor: f32) -> (u32, u32) {
+    let scale = if scale_factor.is_finite() && scale_factor > 0.0 {
+        scale_factor
+    } else {
+        1.0
+    };
+
+    (
+        ((PICKER_DEFAULT_WIDTH as f32 * scale).round() as u32).max(PICKER_MIN_WIDTH),
+        ((PICKER_DEFAULT_HEIGHT as f32 * scale).round() as u32).max(PICKER_MIN_HEIGHT),
+    )
+}
+
+/// 鼠标锚点解析：贴近光标但不越界。既是 `mouse` 模式的实现，也是配置模式
+/// 解析失败（仓储报错）时的兜底——兜底不按模式走，只保证窗口不留在屏外
+/// 停屏位；光标或工作区读不到才返回 None，调用方保持原位
+pub fn resolve_near_cursor(window_width: i32, window_height: i32) -> Option<ScreenPoint> {
     let point = current_cursor_point().ok()?;
     let work_area = work_area_from_point(point).ok()?;
     Some(place_window_near_point(
@@ -117,6 +147,10 @@ fn resolve_from_last_position(
     Ok(work_area.map(|rect| center_in_work_area(rect, window_width, window_height)))
 }
 
+/// 贴近锚点放置 width×height 窗口的左上角：优先落在锚点下方，下方放不下
+/// 翻到上方，再整体钳进工作区。**尺寸参与约束**——返回的左上角 + 传入的
+/// 窗口尺寸必然整块落在工作区内（窗口比工作区还大时退化为工作区左上角），
+/// 因此调用方必须传入窗口**真实**的物理尺寸，传小了约束就会失效
 fn place_window_near_point(
     point: ScreenPoint,
     work_area: ScreenRect,
@@ -173,14 +207,15 @@ fn clamp_top_left(
     }
 }
 
-fn stored_window_size(position: StoredWindowPosition) -> Option<(u32, u32)> {
+fn stored_window_size(position: StoredWindowPosition, scale_factor: f32) -> Option<(u32, u32)> {
     if position.width.is_none() && position.height.is_none() {
         return None;
     }
 
+    let (default_width, default_height) = default_window_size(scale_factor);
     let (width, height) = clamp_window_size(
-        position.width.unwrap_or(PICKER_DEFAULT_WIDTH),
-        position.height.unwrap_or(PICKER_DEFAULT_HEIGHT),
+        position.width.unwrap_or(default_width),
+        position.height.unwrap_or(default_height),
     );
     Some((width, height))
 }
@@ -192,10 +227,30 @@ fn clamp_window_size(width: u32, height: u32) -> (u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::{
-        center_in_work_area, clamp_top_left, clamp_window_size, place_window_near_point,
-        stored_window_size, ScreenPoint, ScreenRect, StoredWindowPosition, PICKER_DEFAULT_HEIGHT,
-        PICKER_DEFAULT_WIDTH,
+        center_in_work_area, clamp_top_left, clamp_window_size, current_cursor_point,
+        default_window_size, place_window_near_point, stored_window_size, work_area_from_point,
+        ScreenPoint, ScreenRect, StoredWindowPosition, PICKER_DEFAULT_HEIGHT, PICKER_DEFAULT_WIDTH,
+        PICKER_MIN_HEIGHT, PICKER_MIN_WIDTH,
     };
+
+    const WORK: ScreenRect = ScreenRect {
+        left: 0,
+        top: 0,
+        right: 1600,
+        bottom: 900,
+    };
+
+    /// 断言窗口（左上角 + 尺寸）整块落在工作区内
+    fn assert_fits_inside(point: ScreenPoint, work: ScreenRect, width: i32, height: i32) {
+        assert!(
+            point.x >= work.left && point.y >= work.top,
+            "左上角越界: {point:?}"
+        );
+        assert!(
+            point.x + width <= work.right && point.y + height <= work.bottom,
+            "右下角越界: {point:?}"
+        );
+    }
 
     #[test]
     fn place_window_below_anchor_when_there_is_space() {
@@ -275,40 +330,149 @@ mod tests {
 
     #[test]
     fn stored_window_size_uses_defaults_for_missing_dimension() {
-        let size = stored_window_size(StoredWindowPosition {
-            x: 0,
-            y: 0,
-            width: Some(540),
-            height: None,
-        })
+        let size = stored_window_size(
+            StoredWindowPosition {
+                x: 0,
+                y: 0,
+                width: Some(540),
+                height: None,
+            },
+            1.0,
+        )
         .unwrap();
 
         assert_eq!(size, (540, PICKER_DEFAULT_HEIGHT));
     }
 
     #[test]
+    fn stored_window_size_scales_default_for_missing_dimension() {
+        // 旧数据只存了宽：补出来的高同样是物理像素
+        let size = stored_window_size(
+            StoredWindowPosition {
+                x: 0,
+                y: 0,
+                width: Some(540),
+                height: None,
+            },
+            1.5,
+        )
+        .unwrap();
+
+        assert_eq!(size, (540, 630));
+    }
+
+    #[test]
     fn stored_window_size_returns_none_when_legacy_payload_has_no_size() {
-        let size = stored_window_size(StoredWindowPosition {
-            x: 0,
-            y: 0,
-            width: None,
-            height: None,
-        });
+        let size = stored_window_size(
+            StoredWindowPosition {
+                x: 0,
+                y: 0,
+                width: None,
+                height: None,
+            },
+            1.0,
+        );
 
         assert!(size.is_none());
     }
 
     #[test]
     fn stored_window_size_clamps_saved_dimensions() {
-        let size = stored_window_size(StoredWindowPosition {
-            x: 0,
-            y: 0,
-            width: Some(200),
-            height: Some(120),
-        })
+        let size = stored_window_size(
+            StoredWindowPosition {
+                x: 0,
+                y: 0,
+                width: Some(200),
+                height: Some(120),
+            },
+            1.0,
+        )
         .unwrap();
 
         assert_eq!(size, (256, 280));
         assert_ne!(size.0, PICKER_DEFAULT_WIDTH);
+    }
+
+    #[test]
+    fn place_window_stays_inside_work_area_at_every_corner() {
+        // 光标贴四角时窗口也必须整块可见（越界即失败）
+        let probes = [
+            ScreenPoint { x: 0, y: 0 },
+            ScreenPoint { x: 1599, y: 0 },
+            ScreenPoint { x: 0, y: 899 },
+            ScreenPoint { x: 1599, y: 899 },
+        ];
+
+        for point in probes {
+            let placed = place_window_near_point(point, WORK, 360, 420);
+            assert_fits_inside(placed, WORK, 360, 420);
+        }
+    }
+
+    #[test]
+    fn place_window_keeps_window_inside_on_negative_origin_monitor() {
+        // 副屏在工作区左侧/上方时工作区原点是负数
+        let work = ScreenRect {
+            left: -1920,
+            top: -100,
+            right: 0,
+            bottom: 980,
+        };
+
+        let placed = place_window_near_point(ScreenPoint { x: -1, y: -100 }, work, 360, 420);
+
+        assert_fits_inside(placed, work, 360, 420);
+    }
+
+    #[test]
+    fn place_window_degrades_to_work_area_origin_when_window_is_larger() {
+        // 窗口比工作区还大：无处可放，退化为工作区左上角（不允许负偏移）
+        let work = ScreenRect {
+            left: 100,
+            top: 60,
+            right: 400,
+            bottom: 300,
+        };
+
+        let placed = place_window_near_point(ScreenPoint { x: 380, y: 290 }, work, 600, 500);
+
+        assert_eq!(placed, ScreenPoint { x: 100, y: 60 });
+    }
+
+    /// 真机不变量：拿当前光标位置与真实显示器工作区（含多屏/负原点/
+    /// 任务栏占用）验证「窗口整块可见」，不假设任何固定分辨率
+    #[test]
+    fn real_cursor_and_work_area_always_keep_window_inside() {
+        let Ok(cursor) = current_cursor_point() else {
+            return;
+        };
+        let Ok(work) = work_area_from_point(cursor) else {
+            return;
+        };
+
+        for size in [(360, 420), (720, 840)] {
+            let placed = place_window_near_point(cursor, work, size.0, size.1);
+            if size.0 <= work.width() && size.1 <= work.height() {
+                assert_fits_inside(placed, work, size.0, size.1);
+            }
+        }
+    }
+
+    #[test]
+    fn default_window_size_follows_display_scale() {
+        assert_eq!(default_window_size(1.0), (360, 420));
+        assert_eq!(default_window_size(1.5), (540, 630));
+        assert_eq!(default_window_size(2.0), (720, 840));
+    }
+
+    #[test]
+    fn default_window_size_never_drops_below_minimum() {
+        // 缩放异常（NaN）退回 1.0
+        assert_eq!(default_window_size(f32::NAN), (360, 420));
+        // 缩放小于 1（异常但可能）：折算后不缩到最小尺寸以下
+        assert_eq!(
+            default_window_size(0.5),
+            (PICKER_MIN_WIDTH, PICKER_MIN_HEIGHT)
+        );
     }
 }
