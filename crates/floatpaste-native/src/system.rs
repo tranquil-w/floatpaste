@@ -10,9 +10,11 @@ use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 /// 初始化日志：stdout + 按天滚动文件。返回的 guard 需在进程生命周期内保活。
+///
+/// 默认级别放到了 debug：插入符定位链路的诊断日志（锚点来源、失败现场）
+/// 全在 debug 级，定位问题要开箱可查，不能要求先设 RUST_LOG 再复现
 pub fn init_logging() -> Option<WorkerGuard> {
-    let env_filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("floatpaste=info"));
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| default_filter());
 
     let Some(log_dir) = resolve_log_dir() else {
         let _ = fmt()
@@ -33,7 +35,7 @@ pub fn init_logging() -> Option<WorkerGuard> {
 
     if result.is_err() {
         let _ = fmt()
-            .with_env_filter(EnvFilter::new("floatpaste=info"))
+            .with_env_filter(default_filter())
             .with_target(false)
             .try_init();
         return None;
@@ -41,6 +43,11 @@ pub fn init_logging() -> Option<WorkerGuard> {
 
     tracing::info!("日志将写入 {}", log_dir.display());
     Some(guard)
+}
+
+/// 两个 crate 的 target 前缀不同（floatpaste / floatpaste_core），都显式列出
+fn default_filter() -> EnvFilter {
+    EnvFilter::new("floatpaste=debug,floatpaste_core=debug")
 }
 
 fn resolve_log_dir() -> Option<PathBuf> {

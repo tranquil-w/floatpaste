@@ -98,7 +98,7 @@ SQLite（`%APPDATA%\com.floatpaste\floatpaste.db`）+ FTS5，表：`clip_items`�
 - 监听：`platform/windows/clipboard_monitor.rs`、`image_clipboard.rs`、`file_clipboard.rs`
 - 会话键盘（LL 钩子）`session_keyboard.rs`；外击关闭（LL 鼠标钩子）`mouse_monitor.rs`
 - 窗口手势（拖拽/八方向拉伸）`window_control.rs`；前台与焦点 `active_app.rs`
-- 定位 `picker_position.rs` + `services/picker_position_service.rs`；热键 `hotkey.rs`；单实例 `single_instance.rs`；自启 `startup.rs`
+- 定位 `picker_position.rs`（含插入符探测，UI Automation 兜底见 `uia_caret.rs`）+ `services/picker_position_service.rs`；热键 `hotkey.rs`；单实例 `single_instance.rs`；自启 `startup.rs`
 - 提权检测与 runas 启动 `elevation.rs`；管理员自启任务 `elevated_task.rs`（COM ITaskService）
 - 仓储 `repository/sqlite_repository.rs`；展示格式化 `services/clip_display.rs`；主题 `theme.rs`
 
@@ -107,7 +107,7 @@ SQLite（`%APPDATA%\com.floatpaste\floatpaste.db`）+ FTS5，表：`clip_items`�
 - 无焦点体验依赖 Win32 焦点恢复、低级键鼠钩子与热键注册时序；速贴/搜索/悬浮气泡显隐走「屏外停屏 + 上屏移动」，避免 `ShowWindow` 焦点副作用与首帧闪烁。
 - 头部拖拽与八方向拉伸用非模态手势（Slint 事件驱动 down/move/up），规避系统模态循环吞掉指针抬起。
 - Slint 软件渲染单进程多窗；`slint::Image` 非 `Send`，缩略图跨线程只传原始像素。
-- 光标定位依赖 `GetGUIThreadInfo`，无插入符时回退鼠标定位。
+- 插入符定位分两层：先 `GetGUIThreadInfo`（只对调用 `CreateCaret` 的原生控件有效），失败再走 UI Automation 的 TextPattern（Chromium/Electron、WinUI 等自绘插入符的应用），两层都不可得才回退鼠标定位。UIA 侧的关键约束：折叠判定用 `CompareEndpoints` 端点比较而非矩形空判、展开粒度按「字符→词→行→段」逐级放大、拒绝「整元素大小」的几何（`covers_element`）与跨元素边界的多块几何（`single_rect`）；边界插入符（行尾/文末/软换行）的展开会跳到「下一个单元」，改取上一条视觉行的末端（`previous_line_rect`）；范围几何全空的字段级焦点（空输入框、Obsidian 内联标题）由 `field_rect_anchor` 用焦点元素框底边中心兜底（限客户区真子矩形）；焦点元素没有任何 TextPattern 时下钻后代搜文本框（两级条件从紧到松、事务超时 300ms 护栏、候选不再二次下钻），UIA 定位最终失败时补采一次诊断现场输出 debug 日志——细节与实测样例见[无焦点速贴防坑指南](no-focus-picker.md)「坑六」。
 - 窗口生命周期与置顶的坑位结论（500ms 置顶守护、销毁重开两段式收尾等）统一见[无焦点速贴防坑指南](no-focus-picker.md)。
 
 ## 运行与调试

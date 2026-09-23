@@ -5,7 +5,8 @@
 use crate::domain::error::AppError;
 use crate::domain::settings::{PickerPositionMode, StoredWindowPosition};
 use crate::platform::windows::picker_position::{
-    caret_point_for_window, current_cursor_point, work_area_from_point, ScreenPoint, ScreenRect,
+    caret_point_for_window, current_cursor_point, work_area_from_point, Anchor, ScreenPoint,
+    ScreenRect,
 };
 use crate::repository::sqlite_repository::SqliteRepository;
 
@@ -101,7 +102,7 @@ pub fn resolve_near_cursor(window_width: i32, window_height: i32) -> Option<Scre
     let point = current_cursor_point().ok()?;
     let work_area = work_area_from_point(point).ok()?;
     Some(place_window_near_point(
-        point,
+        Anchor::at_point(point),
         work_area,
         window_width,
         window_height,
@@ -113,16 +114,23 @@ fn resolve_from_caret(
     window_width: i32,
     window_height: i32,
 ) -> Option<ScreenPoint> {
-    let point = target_window_hwnd
+    let anchor = target_window_hwnd
         .and_then(|hwnd| caret_point_for_window(hwnd).ok())
-        .or_else(|| current_cursor_point().ok())?;
-    let work_area = work_area_from_point(point).ok()?;
-    Some(place_window_near_point(
-        point,
-        work_area,
-        window_width,
-        window_height,
-    ))
+        .or_else(|| {
+            tracing::debug!("caret 定位失败，回退鼠标位置");
+            current_cursor_point().ok().map(Anchor::at_point)
+        })?;
+    let work_area = work_area_from_point(anchor.point).ok()?;
+    let placed = place_window_near_point(anchor, work_area, window_width, window_height);
+    tracing::debug!(
+        "速贴落位 锚点=({},{}) 行高={} 左上角=({},{})",
+        anchor.point.x,
+        anchor.point.y,
+        anchor.line_height,
+        placed.x,
+        placed.y
+    );
+    Some(placed)
 }
 
 fn resolve_from_last_position(
@@ -150,21 +158,33 @@ fn resolve_from_last_position(
 /// 贴近锚点放置 width×height 窗口的左上角：优先落在锚点下方，下方放不下
 /// 翻到上方，再整体钳进工作区。**尺寸参与约束**——返回的左上角 + 传入的
 /// 窗口尺寸必然整块落在工作区内（窗口比工作区还大时退化为工作区左上角），
-/// 因此调用方必须传入窗口**真实**的物理尺寸，传小了约束就会失效
+/// 因此调用方必须传入窗口**真实**的物理尺寸，传小了约束就会失效。
+///
+/// 翻到上方时让开的是**锚点整行**（`anchor.line_height`）而不只是锚点本身：
+/// 只让开空隙会把窗口压在插入符自己那一行上（输入框首行的上半截被切掉）
 fn place_window_near_point(
-    point: ScreenPoint,
+    anchor: Anchor,
     work_area: ScreenRect,
     window_width: i32,
     window_height: i32,
 ) -> ScreenPoint {
+    let point = anchor.point;
     let mut y = point.y + PICKER_ANCHOR_GAP_PX;
     if y + window_height > work_area.bottom {
-        y = point.y - PICKER_ANCHOR_GAP_PX - window_height;
+        y = point.y - anchor.line_height.max(0) - PICKER_ANCHOR_GAP_PX - window_height;
     }
 
+    // 无列信息的锚点（字段框兜底）在锚点上**水平居中**打开：行带中间才是
+    // 「贴着这一行」的预期位置；有列信息的锚点保持左收 1/5 窗口宽的候选框
+    // 风格，窗口主体落在插入符右侧
+    let x_offset = if anchor.centered {
+        window_width / 2
+    } else {
+        window_width / PICKER_TOP_ANCHOR_X_DIVISOR
+    };
     clamp_top_left(
         ScreenPoint {
-            x: point.x - window_width / PICKER_TOP_ANCHOR_X_DIVISOR,
+            x: point.x - x_offset,
             y,
         },
         work_area,
@@ -229,8 +249,8 @@ mod tests {
     use super::{
         center_in_work_area, clamp_top_left, clamp_window_size, current_cursor_point,
         default_window_size, place_window_near_point, stored_window_size, work_area_from_point,
-        ScreenPoint, ScreenRect, StoredWindowPosition, PICKER_DEFAULT_HEIGHT, PICKER_DEFAULT_WIDTH,
-        PICKER_MIN_HEIGHT, PICKER_MIN_WIDTH,
+        Anchor, ScreenPoint, ScreenRect, StoredWindowPosition, PICKER_DEFAULT_HEIGHT,
+        PICKER_DEFAULT_WIDTH, PICKER_MIN_HEIGHT, PICKER_MIN_WIDTH,
     };
 
     const WORK: ScreenRect = ScreenRect {
@@ -239,6 +259,11 @@ mod tests {
         right: 1600,
         bottom: 900,
     };
+
+    /// 鼠标式锚点（无行高）
+    fn mouse_anchor(x: i32, y: i32) -> Anchor {
+        Anchor::at_point(ScreenPoint { x, y })
+    }
 
     /// 断言窗口（左上角 + 尺寸）整块落在工作区内
     fn assert_fits_inside(point: ScreenPoint, work: ScreenRect, width: i32, height: i32) {
@@ -255,7 +280,7 @@ mod tests {
     #[test]
     fn place_window_below_anchor_when_there_is_space() {
         let point = place_window_near_point(
-            ScreenPoint { x: 700, y: 200 },
+            mouse_anchor(700, 200),
             ScreenRect {
                 left: 0,
                 top: 0,
@@ -273,7 +298,7 @@ mod tests {
     #[test]
     fn place_window_flips_above_when_bottom_space_is_not_enough() {
         let point = place_window_near_point(
-            ScreenPoint { x: 700, y: 860 },
+            mouse_anchor(700, 860),
             ScreenRect {
                 left: 0,
                 top: 0,
@@ -286,6 +311,68 @@ mod tests {
 
         assert_eq!(point.x, 628);
         assert_eq!(point.y, 428);
+    }
+
+    /// 翻到上方时窗口底边必须让开锚点**整行**：只有空隙（12px）会让窗口压在
+    /// 插入符自己那一行上（WorkBuddy 输入框首行被切掉半行就是这个）
+    #[test]
+    fn place_window_clears_anchor_line_when_flipping_above() {
+        // 与真机同款：插入符行 1170..1190（行高 20），窗口 460 高，工作区下沿 1392
+        let work = ScreenRect {
+            left: 0,
+            top: 0,
+            right: 2560,
+            bottom: 1392,
+        };
+        let caret = Anchor {
+            point: ScreenPoint { x: 1140, y: 1190 },
+            line_height: 20,
+            centered: false,
+        };
+
+        let placed = place_window_near_point(caret, work, 360, 460);
+
+        // 底边 = 1190-20-12 = 1158，让开插入符行上沿 1170
+        assert_eq!(placed.y, 1158 - 460);
+        assert!(placed.y + 460 < 1170, "窗口压在插入符行上: {placed:?}");
+    }
+
+    /// 无列信息的锚点（字段框兜底）窗口**水平居中**于锚点打开；有列信息的
+    /// 锚点保持左收 1/5 窗口宽（窗口主体在插入符右侧）
+    #[test]
+    fn centered_anchor_opens_window_centered_on_point() {
+        let work = ScreenRect {
+            left: 0,
+            top: 0,
+            right: 2560,
+            bottom: 1392,
+        };
+        let caret = Anchor {
+            point: ScreenPoint { x: 1140, y: 200 },
+            line_height: 20,
+            centered: true,
+        };
+
+        let placed = place_window_near_point(caret, work, 360, 420);
+        assert_eq!(placed.x, 1140 - 180);
+
+        let lead = Anchor { centered: false, ..caret };
+        let placed = place_window_near_point(lead, work, 360, 420);
+        assert_eq!(placed.x, 1140 - 72);
+    }
+
+    /// 下方放得下时行高不参与（免得平白把窗口往下推）
+    #[test]
+    fn place_window_below_anchor_ignores_line_height() {
+        let caret = Anchor {
+            point: ScreenPoint { x: 700, y: 200 },
+            line_height: 20,
+            centered: false,
+        };
+
+        let placed = place_window_near_point(caret, WORK, 360, 420);
+
+        assert_eq!(placed.y, 212);
     }
 
     #[test]
@@ -395,16 +482,21 @@ mod tests {
 
     #[test]
     fn place_window_stays_inside_work_area_at_every_corner() {
-        // 光标贴四角时窗口也必须整块可见（越界即失败）
+        // 光标贴四角时窗口也必须整块可见（越界即失败）；带行高的锚点一并覆盖
         let probes = [
-            ScreenPoint { x: 0, y: 0 },
-            ScreenPoint { x: 1599, y: 0 },
-            ScreenPoint { x: 0, y: 899 },
-            ScreenPoint { x: 1599, y: 899 },
+            mouse_anchor(0, 0),
+            mouse_anchor(1599, 0),
+            mouse_anchor(0, 899),
+            mouse_anchor(1599, 899),
+            Anchor {
+                point: ScreenPoint { x: 1599, y: 899 },
+                line_height: 24,
+                centered: false,
+            },
         ];
 
-        for point in probes {
-            let placed = place_window_near_point(point, WORK, 360, 420);
+        for anchor in probes {
+            let placed = place_window_near_point(anchor, WORK, 360, 420);
             assert_fits_inside(placed, WORK, 360, 420);
         }
     }
@@ -419,7 +511,7 @@ mod tests {
             bottom: 980,
         };
 
-        let placed = place_window_near_point(ScreenPoint { x: -1, y: -100 }, work, 360, 420);
+        let placed = place_window_near_point(mouse_anchor(-1, -100), work, 360, 420);
 
         assert_fits_inside(placed, work, 360, 420);
     }
@@ -434,7 +526,7 @@ mod tests {
             bottom: 300,
         };
 
-        let placed = place_window_near_point(ScreenPoint { x: 380, y: 290 }, work, 600, 500);
+        let placed = place_window_near_point(mouse_anchor(380, 290), work, 600, 500);
 
         assert_eq!(placed, ScreenPoint { x: 100, y: 60 });
     }
@@ -451,7 +543,7 @@ mod tests {
         };
 
         for size in [(360, 420), (720, 840)] {
-            let placed = place_window_near_point(cursor, work, size.0, size.1);
+            let placed = place_window_near_point(Anchor::at_point(cursor), work, size.0, size.1);
             if size.0 <= work.width() && size.1 <= work.height() {
                 assert_fits_inside(placed, work, size.0, size.1);
             }
