@@ -451,7 +451,7 @@ fn handle_session_action(app: &App, action: session_keyboard::SessionAction) {
         SessionAction::NavigateUp => navigate(app, true),
         SessionAction::NavigateDown => navigate(app, false),
         SessionAction::Confirm => confirm(app, current_index(app), false),
-        SessionAction::ConfirmAsFile => confirm(app, current_index(app), true),
+        SessionAction::ConfirmAsPath => confirm(app, current_index(app), true),
         SessionAction::Dismiss => hide(app, true),
         SessionAction::ToggleFavorite => toggle_favorite(app),
         SessionAction::OpenEditor => {
@@ -787,8 +787,9 @@ fn ensure_thumbnails(app: &App, items: &[ClipItemSummary]) {
 
 /* ───────────────── 会话动作 ───────────────── */
 
-/// 确认上屏（对齐 PickerShell.confirmSelection：Shift+Enter 仅对图片以文件形式）
-pub fn confirm(app: &App, index: usize, as_file: bool) {
+/// 确认上屏（对齐 PickerShell.confirmSelection）：as_path_text 走次级
+/// 形态——图片上屏为图片路径、文件上屏为逐行路径列表（Shift+Enter）
+pub fn confirm(app: &App, index: usize, as_path_text: bool) {
     let Some(item) = app.state.item_at(index) else {
         return;
     };
@@ -796,11 +797,10 @@ pub fn confirm(app: &App, index: usize, as_file: bool) {
     tooltip::cancel(app);
 
     let settings = app.state.current_settings();
-    let is_image = item.r#type == "image";
     let option = PasteOption {
         restore_clipboard_after_paste: settings.restore_clipboard_after_paste,
         paste_to_target: true,
-        as_file: as_file && is_image,
+        as_path_text,
     };
 
     if let Err(error) = paste_flow::paste_item(app, &item.id, option) {

@@ -105,7 +105,8 @@ impl<'de> Deserialize<'de> for PasteTrigger {
 pub struct SessionKeys {
     /// 上屏
     pub confirm: String,
-    /// 粘贴为文件路径
+    /// 次级上屏：粘贴为图片路径 / 文件路径（按条目类型）。字段名是
+    /// 持久化配置键，不可更名
     pub confirm_as_file: String,
     /// 打开编辑器
     pub open_editor: String,

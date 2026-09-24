@@ -235,7 +235,7 @@ component SearchRowCard inherits Rectangle {
     callback button-hint(string, length, length);
     callback button-hint-left();
     callback paste();
-    callback paste-as-file();
+    callback paste-as-path();
     callback edit();
     callback toggle-favorite();
     callback delete-armed-request();
@@ -507,14 +507,17 @@ component SearchRowCard inherits Rectangle {
                             commands: "M 9.75 3 L 14.25 3 A 1.75 1.75 0 0 1 16 4.75 L 16 6 L 8 6 L 8 4.75 A 1.75 1.75 0 0 1 9.75 3 Z M 7.75 6 L 16.25 6 A 2.75 2.75 0 0 1 19 8.75 L 19 18.25 A 2.75 2.75 0 0 1 16.25 21 L 7.75 21 A 2.75 2.75 0 0 1 5 18.25 L 5 8.75 A 2.75 2.75 0 0 1 7.75 6 Z M 9 11 L 15 11 M 9 15 L 15 15";
                         }
                     }
-                    if (data.kind == 1): IconButton {
+                    // 次级上屏（图片/文件行）：把所在路径作为文本上屏。
+                    // 图标随类型切换——图片=相框+双山（与类型图标 image
+                    // 同源）、文件=折角文档（与类型图标 file 同源）
+                    if (data.kind != 0): IconButton {
                         icon-color: Theme.fg-default;
-                        hint: "粘贴为文件路径（Shift+Enter）";
-                        clicked => { root.paste-as-file(); }
+                        hint: data.kind == 1
+                            ? "粘贴为图片路径（Shift+Enter）"
+                            : "粘贴为文件路径（Shift+Enter）";
+                        clicked => { root.paste-as-path(); }
                         hover(t, x, y) => { root.button-hint(t, x, y); }
                         hover-left => { root.button-hint-left(); }
-                        // 折角文档（与类型图标 file 同源）：直白表达"粘贴为
-                        // 文件路径"；旧版 T 形路径表意模糊已弃用
                         Path {
                             width: 16px;
                             height: 16px;
@@ -522,7 +525,9 @@ component SearchRowCard inherits Rectangle {
                             viewbox-height: 24;
                             stroke: Theme.fg-default;
                             stroke-width: 1.2px;
-                            commands: "M 6 3.75 L 13 3.75 L 18.25 9 L 18.25 20.25 L 6 20.25 Z M 13 3.75 L 13 9 L 18.25 9";
+                            commands: data.kind == 1
+                                ? "M 5.5 5 L 18.5 5 A 2.5 2.5 0 0 1 21 7.5 L 21 16.5 A 2.5 2.5 0 0 1 18.5 19 L 5.5 19 A 2.5 2.5 0 0 1 3 16.5 L 3 7.5 A 2.5 2.5 0 0 1 5.5 5 Z M 5 16 L 9.2 11.8 A 1.5 1.5 0 0 1 11.3 11.8 L 15 15.5 M 13 13 L 14.7 11.3 A 1.5 1.5 0 0 1 16.8 11.3 L 21 15.5"
+                                : "M 6 3.75 L 13 3.75 L 18.25 9 L 18.25 20.25 L 6 20.25 Z M 13 3.75 L 13 9 L 18.25 9";
                         }
                     }
                     if (data.kind == 0): IconButton {
@@ -713,13 +718,13 @@ export component SearchWindow inherits Window {
     callback button-hint(string, length, length);
     callback button-hint-left();
     callback action-paste(int);
-    callback action-paste-as-file();
+    callback action-paste-as-path();
     callback action-edit();
     callback action-toggle-favorite();
     callback action-delete();
     callback key-navigate-up();
     callback key-navigate-down();
-    callback key-paste(bool); // shift=图片按文件粘贴
+    callback key-paste(bool); // shift=次级上屏（粘贴为路径）
     callback key-edit();
     callback key-toggle-favorite();
     callback key-delete();
@@ -752,9 +757,9 @@ export component SearchWindow inherits Window {
     key-scope := FocusScope {
         // 键盘会话：capture 阶段先于输入框消费会话键（对齐旧版 window 级
         // keydown + preventDefault）。键位判定在 Rust 侧按当前设置解析
-        // （resolve-session-action 动作码：1=向上 2=向下 3=上屏 4=粘贴为
-        // 文件路径 5=编辑 6=收藏 7=关闭 8=删除，0=放行），其余按键 reject
-        // 放行给输入框
+        // （resolve-session-action 动作码：1=向上 2=向下 3=上屏 4=次级
+        // 上屏（粘贴为路径） 5=编辑 6=收藏 7=关闭 8=删除，0=放行），其余
+        // 按键 reject 放行给输入框
         capture-key-pressed(event) => {
             let action = root.resolve-session-action(
                 event.text,
@@ -1224,7 +1229,7 @@ export component SearchWindow inherits Window {
                                     button-hint(t, x, y) => { root.button-hint(t, x, y); }
                                     button-hint-left => { root.button-hint-left(); }
                                     paste => { root.action-paste(i); }
-                                    paste-as-file => { root.action-paste-as-file(); }
+                                    paste-as-path => { root.action-paste-as-path(); }
                                     edit => { root.action-edit(); }
                                     toggle-favorite => { root.action-toggle-favorite(); }
                                     delete-armed-request => { root.action-delete(); }

@@ -65,7 +65,7 @@ floatpaste-native（唯一桌面壳，Slint 软件渲染）
 ### 上屏执行
 
 - 速贴负责"选择"，上屏细节统一在 `paste_flow.rs` / `services/paste_support.rs` 收口：写入剪贴板 → 恢复目标窗口 → `SendInput` 注入 Ctrl+V；可选恢复原剪贴板内容。
-- 图片条目 Enter 上屏图片数据，Shift+Enter 上屏文件路径；注入失败提示手动粘贴。
+- 条目 Enter 上屏本体（文本/图片数据/文件列表），Shift+Enter 次级上屏为路径文本：图片上屏所在路径、文件上屏逐行路径列表（`PasteOption.as_path_text`）；注入失败提示手动粘贴。
 - 管理员目标（UIPI）：目标窗口以管理员运行且本应用未提权时，按键注入会被静默丢弃。上屏前检测（`elevation.rs` TokenElevation），命中则照常写入剪贴板、还原目标焦点，仅跳过必然无效的注入，并经托盘气泡一次性说明（每进程一次，速贴/搜索窗口零 UI）。
 
 ### 开机自启与提权启动

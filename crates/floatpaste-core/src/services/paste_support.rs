@@ -183,11 +183,13 @@ fn suppress_clipboard_snapshot(
 ///
 /// `owner_hwnd`：承载 OpenClipboard 的窗口句柄（传 None 时图片走 arboard 兜底）。
 /// 壳层应在调用前传自己还可见的窗口句柄，隐藏窗口后再回贴目标。
+/// `as_path_text`：次级上屏形态——图片写图片文件路径文本、文件写逐行
+/// 路径列表文本；文本类型无次级形态，标记被忽略
 pub fn write_item_to_clipboard(
     core: &CoreState,
     clipboard: &mut Clipboard,
     detail: &ClipItemDetail,
-    as_file: bool,
+    as_path_text: bool,
     owner_hwnd: Option<isize>,
 ) -> Result<(), AppError> {
     match detail.r#type.as_str() {
@@ -208,7 +210,7 @@ pub fn write_item_to_clipboard(
                 ));
             };
 
-            if as_file {
+            if as_path_text {
                 let absolute_path = core.image_storage.resolve_existing_image_path(image_path)?;
                 let path_str = absolute_path.to_string_lossy().to_string();
 
@@ -259,6 +261,19 @@ pub fn write_item_to_clipboard(
                 return Err(AppError::Message("文件记录缺少文件路径".to_string()));
             }
 
+            // 次级形态「粘贴为文件路径」：路径列表作为文本上屏，不动文件本体
+            if as_path_text {
+                let listing = file_paths_text(&detail.file_paths);
+                if let Some(normalized) = NormalizeService::normalize_text(&listing, None) {
+                    core.self_write_guard()
+                        .suppress_hash(normalized.normalized.hash, Duration::from_secs(3))?;
+                }
+
+                return clipboard
+                    .set_text(listing)
+                    .map_err(|error| AppError::Clipboard(error.to_string()));
+            }
+
             if let Some(normalized) = NormalizeService::normalize_files(
                 detail.file_paths.clone(),
                 detail.directory_count,
@@ -273,6 +288,12 @@ pub fn write_item_to_clipboard(
         }
         other => Err(AppError::Message(format!("暂不支持 {other} 类型的写回"))),
     }
+}
+
+/// 文件条目次级上屏的文本形态：逐行路径（CRLF 分隔对齐 Windows 文本
+/// 惯例，记事本等按行消费的目标应用才能正确换行）
+fn file_paths_text(paths: &[String]) -> String {
+    paths.join("\r\n")
 }
 
 /// 中文类型标签，用于拼装用户可见的粘贴结果消息。
@@ -315,7 +336,7 @@ pub fn trigger_ctrl_v() -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::clip_type_label;
+    use super::{clip_type_label, file_paths_text};
 
     #[test]
     fn clip_type_label_maps_known_and_unknown_types() {
@@ -323,5 +344,15 @@ mod tests {
         assert_eq!(clip_type_label("image"), "图片内容");
         assert_eq!(clip_type_label("file"), "文件列表");
         assert_eq!(clip_type_label("other"), "剪贴内容");
+    }
+
+    #[test]
+    fn file_paths_text_joins_with_crlf_per_line() {
+        assert_eq!(
+            file_paths_text(&["C:\\a.txt".to_string(), "D:\\dir\\b.txt".to_string()]),
+            "C:\\a.txt\r\nD:\\dir\\b.txt"
+        );
+        assert_eq!(file_paths_text(&["C:\\only.txt".to_string()]), "C:\\only.txt");
+        assert_eq!(file_paths_text(&[]), "");
     }
 }

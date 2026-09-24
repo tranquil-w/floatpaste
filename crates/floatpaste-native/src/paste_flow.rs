@@ -67,7 +67,7 @@ pub fn paste_item(app: &App, id: &str, option: PasteOption) -> Result<(), AppErr
         app.core(),
         &mut clipboard,
         &detail,
-        option.as_file,
+        option.as_path_text,
         owner_hwnd,
     )?;
 

@@ -10,4 +10,5 @@
 | [adr-0001-winv-takeover-via-registry](adr-0001-winv-takeover-via-registry.md) | 决策：Win+V 走注册表接管路线 |
 | [adr-0002-picker-docked-mode](adr-0002-picker-docked-mode.md) | 决策：速贴固定显示与停靠形态 |
 | [adr-0003-editor-window-redesign](adr-0003-editor-window-redesign.md) | 决策：编辑窗口标签面板、自管滚动与常驻浮层命中门控、整帧重绘调查结论 |
+| [adr-0004-text-secondary-paste](adr-0004-text-secondary-paste.md) | 决策：文本次级上屏候选处理功能与本地优先边界（proposed） |
 | [release/](release/) | 发布流程（process.md）与说明/用法模板（流水线按固定路径引用） |

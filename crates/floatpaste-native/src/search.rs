@@ -911,28 +911,29 @@ fn show_error(app: &App, message: &str) {
 
 /* ───────────────── 条目动作 ───────────────── */
 
-pub fn paste_index(app: &App, index: usize, as_file_requested: bool) {
+pub fn paste_index(app: &App, index: usize, as_path_text: bool) {
     let Some(item) = app.state.search_item_at(index) else {
         return;
     };
-    paste_item(app, &item, as_file_requested);
+    paste_item(app, &item, as_path_text);
 }
 
-/// 选中条目上屏（键盘路径）；Shift+Enter 仅对图片以文件形式
-pub fn paste_selected(app: &App, as_file_requested: bool) {
+/// 选中条目上屏（键盘路径）；次级形态按类型生效：图片上屏为图片路径、
+/// 文件上屏为逐行路径列表文本（文本暂无次级形态，等同主上屏）
+pub fn paste_selected(app: &App, as_path_text: bool) {
     let index = app
         .with_search(|win| win.get_selected().max(0) as usize)
         .unwrap_or(0);
-    paste_index(app, index, as_file_requested);
+    paste_index(app, index, as_path_text);
 }
 
-fn paste_item(app: &App, item: &ClipItemSummary, as_file_requested: bool) {
+fn paste_item(app: &App, item: &ClipItemSummary, as_path_text: bool) {
     tooltip::cancel(app);
     let settings = app.state.current_settings();
     let option = PasteOption {
         restore_clipboard_after_paste: settings.restore_clipboard_after_paste,
         paste_to_target: true,
-        as_file: as_file_requested && item.r#type == "image",
+        as_path_text,
     };
     if let Err(error) = execute_paste(app, &item.id, option) {
         warn!("搜索粘贴失败: {error}");
@@ -966,7 +967,7 @@ fn execute_paste(app: &App, id: &str, option: PasteOption) -> Result<(), AppErro
         app.core(),
         &mut clipboard,
         &detail,
-        option.as_file,
+        option.as_path_text,
         owner_hwnd,
     )?;
 
@@ -1304,7 +1305,7 @@ fn event_key_name(text: &str) -> Option<String> {
 
 /// 会话键解析（窗口 capture 阶段调用）：按当前设置的键位精确匹配
 /// （键名忽略大小写、修饰键集合一致），返回动作码：
-/// 0=无 1=向上 2=向下 3=上屏 4=粘贴为文件路径 5=编辑 6=收藏 7=关闭 8=删除
+/// 0=无 1=向上 2=向下 3=上屏 4=次级上屏（粘贴为路径） 5=编辑 6=收藏 7=关闭 8=删除
 fn resolve_session_action(
     settings: &UserSetting,
     text: &str,
@@ -1452,10 +1453,10 @@ pub fn wire(app: &App) {
             paste_index(&app_cb, index.max(0) as usize, false);
         });
     }
-    // 图片按文件粘贴的按钮只在选中行上出现，作用于当前选中
+    // 次级上屏按钮（图片/文件行）只在选中行上出现，作用于当前选中
     {
         let app_cb = app.clone();
-        win.on_action_paste_as_file(move || {
+        win.on_action_paste_as_path(move || {
             paste_selected(&app_cb, true);
         });
     }
@@ -1501,8 +1502,8 @@ pub fn wire(app: &App) {
     }
     {
         let app_cb = app.clone();
-        win.on_key_paste(move |as_file| {
-            paste_selected(&app_cb, as_file);
+        win.on_key_paste(move |as_path_text| {
+            paste_selected(&app_cb, as_path_text);
         });
     }
     {

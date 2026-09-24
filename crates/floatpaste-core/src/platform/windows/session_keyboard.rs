@@ -39,7 +39,9 @@ pub enum SessionAction {
     NavigateUp,
     NavigateDown,
     Confirm,
-    ConfirmAsFile,
+    /// 次级上屏（Shift+Enter）：按条目类型粘贴为路径（图片→图片路径、
+    /// 文件→路径列表文本）
+    ConfirmAsPath,
     Dismiss,
     ToggleFavorite,
     OpenEditor,
@@ -170,7 +172,7 @@ impl SessionKeyConfig {
             bind(&keys.navigate_up, SessionAction::NavigateUp),
             bind(&keys.navigate_down, SessionAction::NavigateDown),
             bind(&keys.confirm, SessionAction::Confirm),
-            bind(&keys.confirm_as_file, SessionAction::ConfirmAsFile),
+            bind(&keys.confirm_as_file, SessionAction::ConfirmAsPath),
             bind(&keys.open_editor, SessionAction::OpenEditor),
             bind(&keys.toggle_favorite, SessionAction::ToggleFavorite),
             bind(&keys.dismiss, SessionAction::Dismiss),

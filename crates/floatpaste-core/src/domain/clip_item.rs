@@ -187,8 +187,11 @@ pub struct PasteOption {
     pub restore_clipboard_after_paste: bool,
     #[serde(default = "default_true")]
     pub paste_to_target: bool,
+    /// 次级上屏形态（Shift+Enter）：把路径作为文本写入剪贴板——图片写
+    /// 图片文件路径、文件写逐行路径列表。文本类型暂无次级形态，标记被
+    /// 忽略（处理类次级形态设计中，见 docs/adr-0004）
     #[serde(default)]
-    pub as_file: bool,
+    pub as_path_text: bool,
 }
 
 fn default_true() -> bool {
