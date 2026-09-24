@@ -162,3 +162,10 @@ sequenceDiagram
 - **原因**：winit 对置顶/激活状态的管理与窗口存活及异步样式重排耦合；窗口销毁会连带撤销关联状态，销毁重建则丢失首建时建立的 Win32 修饰。
 - **教训**：「编辑/设置窗惰性首建」的改造曾整体回退，现行五窗启动即建：速贴/搜索/悬浮气泡 winit 窗口常驻（显隐不调 `hide()`），编辑/设置窗以「关闭即销毁」控制常驻成本。
 - **对停靠面板的约束**：任何新增常驻窗口形态（见 [ADR-0002](adr-0002-picker-docked-mode.md)）都先在本坑结论上做 spike，验证不回退内存优化成果。
+
+### 坑九：FRAMECHANGED 的 SetWindowPos 缺 NOACTIVATE 会激活 NOACTIVATE 窗口（近期最重要）
+
+- **现象**：tooltip/速贴每次上屏，宿主窗口边框微微闪烁一下；无其他窗口聚焦时速贴面板自身被莫名抬成前台。高频采样 `GetForegroundWindow` 可见前台翻转「宿主 → tooltip → 宿主」两组——`WS_EX_NOACTIVATE` 挂着也拦不住。每次「抢—还」都是宿主激活状态翻转，DWM 随之重画边框，即「边框微微闪烁」。
+- **原因**：`window_control::remove_window_system_menu` 的 `SetWindowPos` 带 `SWP_FRAMECHANGED` 但缺 `SWP_NOACTIVATE`，缺省激活语义对 NOACTIVATE 窗口依然生效——`WS_EX_NOACTIVATE` 只拦鼠标点击激活，拦不住程序化激活。又因 winit 会异步把 `WS_SYSMENU` 带回窗口样式，每次剥除都有净变化、每次都把浮层抬成前台；该调用在 tooltip 的 `present` 同步段与 `after_show` 的 50ms 兜底里各跑一次，恰对应观测到的两组「抢—还」。winit 样式重置的落地时序不定，`WS_SYSMENU` 是否被带回决定剥除有无净变化，故现象时隐时现。
+- **解决方案**：① 样式类 `SetWindowPos` 一律显式带 `SWP_NOACTIVATE`（`remove_window_system_menu` 即此类，一处约束全体浮层受益）；② 停屏浮层的几何变更走 `window_control` 的裸 `SetWindowPos`（`set_window_bounds` / `set_window_position_no_activate` / `set_window_size_no_activate`），不经 Slint/winit 的窗口几何 API——框架会附带 flags 重排、异步投递等额外语义，停屏浮层需要单一确定的「只动几何、绝不激活」。归还前台的前台策略（`overlay.rs` 的 `ForegroundPolicy`）保留作防御，正常路径不再触发。
+- **教训**：黑盒对照实验（「框架路径 vs 裸 API 路径」重放）会被并发因素混淆——本案曾把激活归因于 Slint 的 `set_position`/`set_size`（实测 winit 这些 API 底层全带 `SWP_NOACTIVATE`），真凶是同路径上的样式剥除。进程内插桩（逐调用打前台快照）才能把翻转钉到具体调用，定性结论以此为凭。

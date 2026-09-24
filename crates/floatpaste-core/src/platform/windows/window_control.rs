@@ -47,7 +47,11 @@ fn is_alt_menu_syscommand(wparam: usize) -> bool {
 }
 
 /// 移除系统菜单/最小化/最大化样式：无边框工具窗口按 Alt 或任务栏右键
-/// 仍会弹出系统菜单，原版对所有浮层窗口做了同样的剥除
+/// 仍会弹出系统菜单，原版对所有浮层窗口做了同样的剥除。
+/// FRAMECHANGED 的 SetWindowPos 必须带 NOACTIVATE：该调用对样式实际
+/// 变化的窗口走缺省激活语义，WS_EX_NOACTIVATE 只拦鼠标点击激活、
+/// 拦不住程序化激活——tooltip 的「边框闪烁」即源于此（winit 会异步
+/// 把 WS_SYSMENU 带回，每次剥除都有净变化、每次都把浮层抬成前台）
 pub fn remove_window_system_menu(hwnd: isize) -> Result<(), AppError> {
     let hwnd = hwnd_of(hwnd);
     unsafe {
@@ -60,7 +64,7 @@ pub fn remove_window_system_menu(hwnd: isize) -> Result<(), AppError> {
             0,
             0,
             0,
-            SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER,
+            SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
         );
     }
     Ok(())
@@ -234,6 +238,42 @@ pub fn set_window_bounds(hwnd: isize, x: i32, y: i32, width: i32, height: i32) {
             width,
             height,
             SWP_NOZORDER | SWP_NOACTIVATE,
+        );
+    }
+}
+
+/// 只移动窗口位置，不改尺寸与 Z 序（tooltip 停屏/上屏路径）。与
+/// [`set_window_bounds`] 同理走裸 SetWindowPos：浮层几何不经 Slint/
+/// winit 的窗口 API——框架会附带 flags 重排、异步投递等额外窗口管理
+/// 语义，停屏浮层需要的是单一确定的「只动几何、绝不激活」
+pub fn set_window_position_no_activate(hwnd: isize, x: i32, y: i32) {
+    let hwnd = hwnd_of(hwnd);
+    unsafe {
+        let _ = SetWindowPos(
+            hwnd,
+            None,
+            x,
+            y,
+            0,
+            0,
+            SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+        );
+    }
+}
+
+/// 只改窗口尺寸，不动位置与 Z 序（速贴停屏期定尺寸路径），激活语义
+/// 同 [`set_window_position_no_activate`]
+pub fn set_window_size_no_activate(hwnd: isize, width: i32, height: i32) {
+    let hwnd = hwnd_of(hwnd);
+    unsafe {
+        let _ = SetWindowPos(
+            hwnd,
+            None,
+            0,
+            0,
+            width,
+            height,
+            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
         );
     }
 }

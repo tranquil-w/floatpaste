@@ -157,7 +157,13 @@ pub fn activate(app: &App) {
     // 这一组尺寸必须原样带到定位环节——首开时窗口刚请求过 resize，
     // 此时回读窗口尺寸拿到的是装配期旧值，用它算约束必然错位
     let size = resolve_physical_size(app, win.window().scale_factor());
-    win.window().set_size(size);
+    // 停屏态定尺寸走裸 SetWindowPos（单一确定的「只动几何、绝不激活」，
+    // 不经 Slint/winit 的窗口 API 附带语义），见 window_control 注释
+    window_control::set_window_size_no_activate(
+        hwnd,
+        size.width as i32,
+        size.height as i32,
+    );
     window_control::set_window_min_size(
         hwnd,
         (PICKER_MIN_WIDTH as f32 * win.window().scale_factor()) as i32,
@@ -370,7 +376,11 @@ pub fn restore_after_editor(app: &App, target: TargetSession) {
     // 恢复记忆尺寸（无记忆则按设计尺寸与当前缩放折算），同 activate：
     // 尺寸与定位取自同一组数，不回读窗口
     let size = resolve_physical_size(app, win.window().scale_factor());
-    win.window().set_size(size);
+    window_control::set_window_size_no_activate(
+        hwnd,
+        size.width as i32,
+        size.height as i32,
+    );
     window_control::set_window_min_size(
         hwnd,
         (PICKER_MIN_WIDTH as f32 * win.window().scale_factor()) as i32,

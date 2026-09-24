@@ -66,6 +66,9 @@ pub struct HoverHost {
     pub is_active: fn(&App) -> bool,
 }
 
+/// 停屏坐标（Windows 坐标下限）：保持 Win32 可见，隐藏期重绘照常
+const PARKED_POS: (i32, i32) = (-32000, -32000);
+
 fn picker_is_active(app: &App) -> bool {
     app.state.is_picker_active()
 }
@@ -184,13 +187,14 @@ pub fn schedule_static(app: &App, host: HoverHost, text: String, anchor_x: f32, 
 /// 取消挂起的显示并隐藏当前 tooltip（离开条目/会话结束/粘贴前调用）
 pub fn cancel(app: &App) {
     PENDING_TOKEN.with(|value| value.set(value.get() + 1));
-    if let Some(win) = app.tooltip.upgrade() {
-        // 收起 = 停屏（对齐速贴/搜索）：SW_HIDE 隐藏期 winit 抑制重绘，
-        // 会让下一次显示（尺寸往往不同）首帧残缺闪烁；停屏保持表面
-        // 可正常 resize/重绘，移上屏即完整内容
-        win.window()
-            .set_position(slint::PhysicalPosition::new(-32000, -32000));
+    let hwnd = app.state.tooltip_hwnd.load(Ordering::SeqCst);
+    if hwnd == 0 {
+        return; // 装配失败：tooltip 从未正确显示过，无可收起
     }
+    // 收起 = 停屏（对齐速贴/搜索）：SW_HIDE 隐藏期 winit 抑制重绘，会让
+    // 下一次显示（尺寸往往不同）首帧残缺闪烁；停屏保持表面可正常
+    // resize/重绘，移上屏即完整内容。几何走裸 SetWindowPos（绝不激活）
+    window_control::set_window_position_no_activate(hwnd, PARKED_POS.0, PARKED_POS.1);
 }
 
 fn render(
@@ -407,10 +411,16 @@ fn present(
         return;
     }
     // 尺寸在停屏态落定：停屏窗口对 winit 保持「已显示」，resize 的重绘
-    // 正常发生且在屏外完成，无观感（SW_HIDE 隐藏期重绘被抑制，是先前
-    // 显示闪烁的根源）
-    win.window()
-        .set_size(slint::PhysicalSize::new(physical_w, physical_h));
+    // 在屏外完成、无观感（SW_HIDE 隐藏期重绘被抑制是先前显示闪烁的根源）。
+    // 几何一律走裸 SetWindowPos：只动几何、绝不激活（为何严格：
+    // 见 docs/no-focus-picker.md 坑九）
+    window_control::set_window_bounds(
+        tooltip_hwnd,
+        PARKED_POS.0,
+        PARKED_POS.1,
+        physical_w as i32,
+        physical_h as i32,
+    );
 
     win32_ext::apply_overlay_style(tooltip_hwnd, true);
     let _ = window_control::remove_window_system_menu(tooltip_hwnd);
@@ -421,9 +431,10 @@ fn present(
     let reveal_delay_ms = if cfg!(debug_assertions) { 200 } else { 16 };
     let win_cb = win.as_weak();
     slint::Timer::single_shot(std::time::Duration::from_millis(reveal_delay_ms), move || {
-        let Some(win) = win_cb.upgrade() else {
+        // 窗口已销毁则放弃（仅作生命周期检查，几何走裸 Win32）
+        if win_cb.upgrade().is_none() {
             return;
-        };
+        }
         // 期间有新的悬停请求或取消（令牌递增）则放弃本次显示
         if PENDING_TOKEN.with(|value| value.get()) != token {
             return;
@@ -432,8 +443,13 @@ fn present(
         // ── 定位：宿主窗口原点 + 锚点×scale，越界按光标翻转 ──
         let position =
             resolve_position(host_hwnd, anchor.0, anchor.1, dpi, physical_w, physical_h);
-        win.window()
-            .set_position(slint::PhysicalPosition::new(position.0, position.1));
+        window_control::set_window_bounds(
+            tooltip_hwnd,
+            position.0,
+            position.1,
+            physical_w as i32,
+            physical_h as i32,
+        );
         // 置顶不激活、前台若被抢则归还（RestoreIfStolen 双保险：归还后
         // 须把 tooltip 抬回置顶带顶部，宿主同为置顶会盖住它）
         let restore =
