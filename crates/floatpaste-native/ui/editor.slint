@@ -2,9 +2,10 @@
 // 普通带框窗口（旧版 decorations(true)，任务栏可见、可缩放、800×600 起
 // min 400×300）。会话与数据由 Rust 接管：
 // - 文本条目：多行编辑 + Ctrl+S 保存 + 未保存关闭确认 + 两段式删除
-// - 图片/文件条目：只读预览（大图 contain / 路径列表）
-// - 标签：芯片 + 内嵌输入 + 建议浮层（match/create/exists，回车采纳、
-//   Tab 补全、Backspace 删末位、Esc 本地清空让位窗口关闭）
+// - 图片/文件条目：只读预览（大图 contain / 路径列表，可系统程序打开）
+// - 标签：Notion 式多选面板——行内 chips（× 删除）+「添加标签」入口，
+//   面板内搜索/勾选已选/创建；回车采纳、Tab 补全、上下键导航（滚动
+//   跟随）、Backspace 空输入删末位、Esc 分层退出（清输入→关面板→关窗）
 // - 键盘：窗口级 capture 先于输入框（对齐旧版 window keydown capture）
 import { Theme, Metrics } from "theme.slint";
 import { Kbd } from "common.slint";
@@ -19,8 +20,9 @@ export struct EditorTagSuggestion {
 // 两段式删除按钮（旧版 actionButtonDanger 的编辑器变体）
 component DeleteButton inherits Rectangle {
     in property <bool> armed;
-    in property <bool> enabled;
     callback clicked();
+    callback hint(length, length);
+    callback hint-left();
 
     height: 28px;
     width: armed ? 68px : 28px;
@@ -30,9 +32,15 @@ component DeleteButton inherits Rectangle {
     animate background { duration: 120ms; }
 
     del-ta := TouchArea {
-        enabled: root.enabled;
-        mouse-cursor: root.enabled ? default : not-allowed;
+        mouse-cursor: default;
         clicked => { root.clicked(); }
+        changed has-hover => {
+            if (self.has-hover) {
+                root.hint(root.absolute-position.x, root.absolute-position.y + root.height + 4px);
+            } else {
+                root.hint-left();
+            }
+        }
     }
 
     if (root.armed): HorizontalLayout {
@@ -60,7 +68,8 @@ component DeleteButton inherits Rectangle {
 }
 
 export component EditorWindow inherits Window {
-    title: "FloatPaste · 编辑";
+    // 脏状态上标题栏（VS Code 惯例的 ●）
+    title: root.has-session && root.is-dirty ? "● FloatPaste · 编辑" : "FloatPaste · 编辑";
     icon: @image-url("app-icon.png");
     min-width: 400px;
     min-height: 300px;
@@ -70,13 +79,16 @@ export component EditorWindow inherits Window {
 
     // ── 会话与数据（Rust 接管）──
     in-out property <bool> has-session: false;
-    in-out property <bool> loading: false;
     in-out property <bool> item-missing: false;
     in-out property <bool> is-text: false;
     in-out property <string> meta-source;
     in-out property <string> meta-time;
     in-out property <string> meta-extra;
     in-out property <int> char-count: 0;
+    // draft 文本的 UTF-8 字节长度：Slint 侧无字节长度内建，而
+    // set-selection-offsets 按字节偏移取位（char-count 是字符数，中文
+    // 文本用它会落在字符中间），置尾光标由 Rust 维护此值
+    in-out property <int> draft-byte-len: 0;
     in-out property <string> draft-text;
     in-out property <string> saved-text;
     // 旧版 store：isDirty = draft !== saved
@@ -85,7 +97,12 @@ export component EditorWindow inherits Window {
     in-out property <bool> image-loading: false;
     in-out property <bool> image-failed: false;
     in property <image> image-preview;
+    // 图片原始路径：预览区「打开」按钮用（系统查看器）
+    in-out property <string> image-path;
     in-out property <[string]> file-paths;
+    // 光标行列（1 起，Rust 按 draft 文本计算写回）
+    in-out property <int> cursor-line: 1;
+    in-out property <int> cursor-col: 1;
     in-out property <[string]> tags;
     in-out property <[EditorTagSuggestion]> tag-suggestions;
     in-out property <string> tag-input-text;
@@ -105,15 +122,21 @@ export component EditorWindow inherits Window {
     // （0.4% 白在深底上亮度差 1/255，不可感知）；无 TouchArea 不拦截指针
     in-out property <bool> force-repaint;
 
-    // 建议浮层开关：输入框聚焦且有建议（对齐 open = focused && len > 0）
-    in-out property <bool> tag-open:
-        tag-input.has-focus && root.tag-suggestions.length > 0;
+    // 标签面板开关（Notion 式：添加/搜索/创建在面板内完成）。显式状态
+    // 而非绑定表达式：打开由「+ 添加」触发，关闭由 Esc（tag-escape）或
+    // 搜索框失焦驱动
+    in-out property <bool> tag-open: false;
     // 高亮收拢到合法范围（对齐 activeIndex = min(highlight, len-1)）
     in-out property <int> tag-active:
         Math.min(root.tag-highlight, root.tag-suggestions.length - 1);
 
     // ── 回调（Rust 接管）──
     callback text-edited(string);
+    callback editor-cursor-moved(int); // 光标移动（UTF-8 byte offset），Rust 算行列
+    callback open-externally(string);  // 系统默认程序打开路径
+    callback open-file-path-at(int);   // 按索引打开文件条目路径
+    callback button-hint(string, length, length); // 按钮 tooltip（悬浮气泡 simple 模式）
+    callback button-hint-left();
     callback save-requested();
     callback request-close();
     callback close-discard();
@@ -135,9 +158,11 @@ export component EditorWindow inherits Window {
         root-scope.focus();
     }
 
-    // 标签 Esc 本地让位后焦点留在标签输入框（对齐旧版 tagEditor）
-    public function focus-tag-input() {
-        tag-input.focus();
+    // 打开标签面板并聚焦搜索框（「+ 添加」chip / 标签行点击触发）。
+    // 面板常驻实例化，可立即寻址聚焦
+    public function open-tag-panel() {
+        root.tag-open = true;
+        panel-input.focus();
     }
 
     // 窗口级键盘（capture 先于输入框；对齐旧版 window keydown capture）。
@@ -159,9 +184,9 @@ export component EditorWindow inherits Window {
                 return reject; // Tab 走默认对话框焦点穿梭
             }
             if (event.text == Key.Escape) {
-                // 标签输入的本地让位（data-esc-scope="local"）：有输入或
-                // 浮层开着时，Esc 只清空输入，不触发窗口关闭
-                if (tag-input.has-focus
+                // 标签面板的分层退出（Esc 先关面板/清输入，再关窗口）：
+                // 面板开着时 Esc 交给 tag-escape（Rust 侧清输入或关面板）
+                if (panel-input.has-focus
                     && (root.tag-input-text != "" || root.tag-open))
                 {
                     root.tag-escape();
@@ -181,8 +206,15 @@ export component EditorWindow inherits Window {
 
         VerticalLayout {
             // ── 顶部通知条（成功 3 秒自动消失，由 Rust 计时）──
-            if (root.notice-text != ""): Rectangle {
-                height: 36px;
+            // 高度收放而非 if 条件实例化：条件实例化无法做进场动画；
+            // visible 又不参与布局计算（隐藏仍占位），0 高 + clip +
+            // opacity 联动即「展开浮现/收起消失」
+            Rectangle {
+                height: root.notice-text != "" ? 36px : 0px;
+                animate height { duration: 150ms; easing: ease-out; }
+                opacity: root.notice-text != "" ? 1.0 : 0.0;
+                animate opacity { duration: 150ms; easing: ease-out; }
+                clip: true;
                 background: Theme.success-subtle;
                 HorizontalLayout {
                     padding-left: 20px;
@@ -197,8 +229,12 @@ export component EditorWindow inherits Window {
                 }
             }
             // ── 错误条（持续到下一次动作）──
-            if (root.error-text != ""): Rectangle {
-                height: 36px;
+            Rectangle {
+                height: root.error-text != "" ? 36px : 0px;
+                animate height { duration: 150ms; easing: ease-out; }
+                opacity: root.error-text != "" ? 1.0 : 0.0;
+                animate opacity { duration: 150ms; easing: ease-out; }
+                clip: true;
                 background: Theme.danger-subtle;
                 HorizontalLayout {
                     padding-left: 20px;
@@ -270,21 +306,8 @@ export component EditorWindow inherits Window {
                     }
                 }
 
-                // 加载中
-                if (root.has-session && root.loading): VerticalLayout {
-                    width: parent.width;
-                    height: parent.height;
-                    alignment: center;
-                    Text {
-                        text: "正在加载条目内容...";
-                        color: Theme.fg-muted;
-                        font-size: Metrics.text-sm;
-                        horizontal-alignment: center;
-                    }
-                }
-
                 // 条目缺失
-                if (root.has-session && !root.loading && root.item-missing): Text {
+                if (root.has-session && root.item-missing): Text {
                     y: (parent.height - self.height) / 2;
                     width: parent.width;
                     text: "未找到对应条目";
@@ -294,19 +317,19 @@ export component EditorWindow inherits Window {
                 }
 
                 // 会话内容（visible 而非 if：tag-input/edit-input 需要被
-                // 窗口级键盘与焦点函数引用，条件实例化的元素不可寻址；
-                // Slint 布局会跳过不可见元素，占位行为与 if 一致）
+                // 窗口级键盘与焦点函数引用，条件实例化的元素不可寻址。
+                // visible:false 不参与布局计算但此处无碍——父容器是
+                // Rectangle，子元素 width/height 显式 100%，不占布局位）
                 // Rectangle 的子元素同样不自动铺满，显式全屏 + 旧版 mt-2.5 行距
                 VerticalLayout {
-                    visible: root.has-session && !root.loading && !root.item-missing;
+                    visible: root.has-session && !root.item-missing;
                     width: parent.width;
                     height: parent.height;
-                    spacing: 10px;
-                    // 旧版 px-5 pb-3 pt-4
+                    spacing: 8px;
                     padding-left: 20px;
                     padding-right: 20px;
-                    padding-top: 16px;
-                    padding-bottom: 12px;
+                    padding-top: 14px;
+                    padding-bottom: 10px;
 
                     // ── 头部：元信息 + 两段删除（无 alignment：文本
                     // stretch 占满、删除按钮靠右，对齐旧版 justify-between）──
@@ -329,39 +352,51 @@ export component EditorWindow inherits Window {
                         DeleteButton {
                             armed: root.delete-armed;
                             clicked => { root.delete-requested(); }
+                            hint(x, y) => {
+                                root.button-hint(
+                                    root.delete-armed ? "再次点击确认删除" : "删除条目",
+                                    x, y);
+                            }
+                            hint-left => { root.button-hint-left(); }
                         }
                     }
 
-                    // ── 标签区（旧版 mt-2.5）。建议浮层不在此处声明：
-                    // Slint 按声明顺序绘制且无 z-index，这里的浮层会被
-                    // 后声明的内容区盖住（旧版 HTML 靠 z-20 浮起），改为
-                    // root-scope 直挂实例（见 VerticalLayout 之后）──
+                    // ── 标签行：已选 chips（行内 × 删除）+「添加标签」入口。
+                    // 添加/搜索/创建收敛到下拉面板（Notion/GitHub 多选模
+                    // 式，见 root-scope 直挂的面板实例）。行本身不再画条
+                    // 形容器：chips 直接落在窗口底上（轻量标注，非表单框）
                     tag-field := Rectangle {
-                        height: 38px;
-                        border-radius: Metrics.radius-lg;
-                        border-width: 1px;
-                        border-color: tag-input.has-focus ? Theme.border-accent : transparent;
-                        background: tag-input.has-focus ? Theme.canvas-inset : Theme.canvas-subtle;
+                        height: 30px;
                         clip: false;
+
+                        // 点击行空白也打开面板（超宽滚动时由 Flickable 拦截）
+                        tag-field-ta := TouchArea {
+                            width: parent.width;
+                            height: parent.height;
+                            mouse-cursor: default;
+                            clicked => { root.open-tag-panel(); }
+                        }
 
                         tag-flick := Flickable {
                             x: 0;
                             y: 0;
                             width: parent.width;
                             height: parent.height;
-                            interactive: true;
+                            // interactive=false：非滚轮事件完全透传（源码
+                            // ForwardAndIgnore），可滚状态下拖拽拦截会吞掉
+                            // chips 的 × 点击；滚轮走独立分支仍可滚
+                            interactive: false;
                             VerticalLayout {
                                 alignment: center;
                                 HorizontalLayout {
-                                    padding-left: 8px;
-                                    padding-right: 8px;
+                                    padding-left: 6px;
+                                    padding-right: 6px;
                                     spacing: 6px;
+                                    // 全员 stretch=0 + start：chips 紧凑靠左
+                                    alignment: start;
 
                                     for tag-name[i] in root.tags: Rectangle {
                                         height: 24px;
-                                        // 不参与布局的剩余宽度分配（默认 stretch=1
-                                        // 会把 chip 与输入框之间的空隙对半分，chip
-                                        // 背景拉成大片空白胶囊，内容仍靠左）
                                         horizontal-stretch: 0;
                                         border-radius: Metrics.radius-pill;
                                         background: Theme.canvas-default;
@@ -384,6 +419,14 @@ export component EditorWindow inherits Window {
                                                     mouse-cursor: default;
                                                     clicked => { root.tag-remove(i); }
                                                 }
+                                                if (tag-x-ta.has-hover): Rectangle {
+                                                    x: 0;
+                                                    y: 5px;
+                                                    width: 14px;
+                                                    height: 14px;
+                                                    border-radius: 7px;
+                                                    background: Theme.danger-subtle;
+                                                }
                                                 Text {
                                                     y: 4px;
                                                     text: "×";
@@ -394,76 +437,43 @@ export component EditorWindow inherits Window {
                                         }
                                     }
 
-                                    // 占位符自绘（原生 TextInput 无 placeholder 属性）
+                                    // 添加入口 chip：打开面板（搜索既有/创建新标签）
                                     Rectangle {
-                                        min-width: 112px;
-                                        horizontal-stretch: 1;
                                         height: 24px;
-                                        if (tag-input.text == "" && !tag-input.has-focus): Text {
-                                            x: 0;
-                                            width: parent.width;
-                                            height: parent.height;
-                                            text: root.tags.length > 0
-                                                ? "添加标签…" : "输入标签，回车添加";
-                                            color: Theme.fg-subtle;
-                                            font-size: Metrics.text-body;
-                                            vertical-alignment: center;
-                                            overflow: elide;
+                                        horizontal-stretch: 0;
+                                        border-radius: Metrics.radius-pill;
+                                        border-width: 1px;
+                                        border-color: add-ta.has-hover ? Theme.border-default : Theme.border-subtle;
+                                        background: add-ta.has-hover ? Theme.canvas-default : transparent;
+                                        animate background { duration: 120ms; easing: ease-out; }
+                                        animate border-color { duration: 120ms; easing: ease-out; }
+                                        add-ta := TouchArea {
+                                            mouse-cursor: pointer;
+                                            clicked => { root.open-tag-panel(); }
                                         }
-                                        tag-input := TextInput {
-                                            width: parent.width;
-                                            // TextInput 无 vertical-alignment，且
-                                            // preferred-height(≈24px) 远大于墨迹高：
-                                            // 文本与光标从元素顶部画。按字号收高度
-                                            // 再在 24px 容器里垂直居中，光标才不偏上
-                                            y: (parent.height - self.font-size) / 2;
-                                            height: self.font-size;
-                                            font-size: Metrics.text-body;
-                                            color: Theme.fg-default;
-                                            selection-foreground-color: Theme.selection-fg;
-                                            selection-background-color: Theme.selection-bg;
-                                            text <=> root.tag-input-text;
-                                            edited() => { root.tag-input-changed(self.text); }
-                                        key-pressed(event) => {
-                                            if (root.tag-open
-                                                && (event.text == Key.DownArrow
-                                                    || event.text == Key.UpArrow))
-                                            {
-                                                root.tag-highlight = Math.mod(
-                                                    root.tag-active
-                                                        + (event.text == Key.DownArrow ? 1 : -1),
-                                                    root.tag-suggestions.length,
-                                                );
-                                                return accept;
+                                        HorizontalLayout {
+                                            padding-left: 10px;
+                                            padding-right: 10px;
+                                            spacing: 4px;
+                                            alignment: start;
+                                            Text {
+                                                text: "+";
+                                                color: Theme.fg-muted;
+                                                font-size: Metrics.text-body;
+                                                vertical-alignment: center;
                                             }
-                                            if (event.text == Key.Return) {
-                                                if (root.tag-open) {
-                                                    root.tag-adopt(root.tag-active);
-                                                } else {
-                                                    root.tag-commit-add();
-                                                }
-                                                return accept;
+                                            Text {
+                                                text: root.tags.length > 0 ? "添加" : "添加标签";
+                                                color: add-ta.has-hover ? Theme.fg-default : Theme.fg-muted;
+                                                font-size: Metrics.text-xs;
+                                                vertical-alignment: center;
                                             }
-                                            if (event.text == Key.Tab && root.tag-open) {
-                                                root.tag-complete();
-                                                return accept;
-                                            }
-                                            if (event.text == Key.Backspace
-                                                && root.tag-input-text == ""
-                                                && root.tags.length > 0)
-                                            {
-                                                root.tag-remove-last();
-                                                return accept;
-                                            }
-                                            return reject;
-                                        }
                                         }
                                     }
                                 }
                             }
                         }
-
-                        }
+                    }
 
                     // ── 内容弹性区（旧版 flex-1：吃掉头部与标签区以外的
                     // 全部剩余高度）──
@@ -480,87 +490,191 @@ export component EditorWindow inherits Window {
                             // changed 只监听本元素属性：用本地别名桥接根上的
                             // 会话序号，每次载入条目重新聚焦
                             property <int> focus-trigger: root.session-seq;
-                            border-radius: Metrics.radius-lg;
-                            border-width: 1px;
-                            border-color: edit-input.has-focus ? Theme.border-accent : transparent;
-                            background: edit-input.has-focus ? Theme.canvas-inset : Theme.canvas-subtle;
+                            // 平铺观感（无框无圆角），但**不透明背景必须有**：
+                            // 软件渲染器擦除光标闪烁时按「重画脏区内 items」
+                            // 进行，容器无背景则光标白色像素残留在文字上方
+                            // 空隙（「文字上方小白点」根因）；canvas-default
+                            // 与窗口同色，视觉仍是一张纸
+                            background: Theme.canvas-default;
                             clip: true;
                             init => {
                                 // 首次实例化即聚焦并置尾（对齐旧版
                                 // setSelectionRange(len, len)）：init 在本次
-                                // 会话属性写入落地后执行，char-count 已是本
-                                // 条目值。同窗口再次打开不重新实例化，由
+                                // 会话属性写入落地后执行，draft-byte-len 已是
+                                // 本条目值。同窗口再次打开不重新实例化，由
                                 // session-seq changed 承接
                                 edit-input.focus();
                                 edit-input.set-selection-offsets(
-                                    root.char-count, root.char-count);
+                                    root.draft-byte-len, root.draft-byte-len);
                             }
                             changed focus-trigger => {
-                                // 再次载入条目：聚焦并把光标定位到文本末尾。
+                                // 再次载入条目：滚动复位后聚焦并把光标定位
+                                // 到文本末尾（跟随逻辑会把视口推到光标处）。
                                 // session-seq 由 Rust 在数据全部就绪后自增，
-                                // 这里读到的 char-count 是本条目值
+                                // 这里读到的 draft-byte-len 是本条目值
+                                edit-scroll.scroll-y = 0px;
                                 edit-input.focus();
                                 edit-input.set-selection-offsets(
-                                    root.char-count, root.char-count);
+                                    root.draft-byte-len, root.draft-byte-len);
                             }
 
-                        edit-flick := Flickable {
+                        // 自管滚动（Flickable 三轮踩坑后弃用：可滚状态在
+                        // pressed 阶段吞子元素点击、滚轮链路不可控，见
+                        // docs/adr-0003）。滚动 = 内容层 y 偏移 + 滚轮事件
+                        // 驱动，全部显式
+                        edit-scroll := Rectangle {
                             x: 0;
                             y: 0;
                             width: parent.width;
                             height: parent.height;
-                            interactive: true;
+                            clip: true;
+                            property <length> scroll-y: 0px;
+                            // 内容高 = 全文排版高 + 上下 padding 32
+                            property <length> max-scroll-y:
+                                Math.max(0px, edit-input.preferred-height + 32px - self.height);
 
-                            // 内容包裹层：宽随视口（显式断开与内容 min-width
-                            // 的相互推导，多行 TextInput 的换行最小宽会撑破
-                            // 布局形成绑定环）；内边距对齐旧版 px-5 py-4。
-                            // 高度铺到视口底：TextInput 必须覆盖空白区，
-                            // 否则点击正文下方空白无法移动光标（旧版 textarea
-                            // 整块可点，点击空白光标到文本末尾）
-                            Rectangle {
-                                x: 20px;
-                                y: 16px;
-                                width: edit-flick.width - 40px;
-                                height: Math.max(
-                                    edit-input.preferred-height,
-                                    edit-flick.height - 16px,
-                                );
-                                // 占位符自绘（原生 TextInput 无 placeholder 属性）
-                                if (edit-input.text == "" && !edit-input.has-focus): Text {
-                                    x: 0;
-                                    y: 0;
-                                    width: parent.width;
-                                    height: 23px;
-                                    text: "在此输入或修改文本...";
-                                    color: Theme.fg-subtle;
-                                    font-size: Metrics.text-sm;
-                                    vertical-alignment: top;
-                                }
-                                edit-input := TextInput {
-                                    x: 0;
-                                    y: 0;
-                                    width: parent.width;
-                                    min-width: 0px;
-                                    height: parent.height;
-                                    single-line: false;
-                                    wrap: word-wrap;
-                                    font-size: Metrics.text-sm;
-                                    color: Theme.fg-default;
-                                    selection-foreground-color: Theme.selection-fg;
-                                    selection-background-color: Theme.selection-bg;
-                                    text <=> root.draft-text;
-                                    edited() => { root.text-edited(self.text); }
-                                    cursor-position-changed(cursor) => {
-                                        // 光标跟随滚动（垂直方向保持在视口内）
-                                        if (cursor.y < -edit-flick.viewport-y + 8px) {
-                                            edit-flick.viewport-y = -cursor.y + 8px;
-                                        } else if (cursor.y + 23px > -edit-flick.viewport-y + edit-flick.height - 8px) {
-                                            edit-flick.viewport-y = -(cursor.y + 23px - edit-flick.height + 8px);
+                            inner := Rectangle {
+                                x: 0;
+                                y: -edit-scroll.scroll-y;
+                                width: edit-scroll.width;
+                                height: Math.max(edit-input.preferred-height + 32px,
+                                    edit-scroll.height);
+
+                                // 输入宿主：必须是 TextInput 的祖先——滚轮在
+                                // TextInput 忽略后沿父链冒泡才到这里（兄弟收
+                                // 不到）；空白区点击聚焦并光标置尾（旧版
+                                // textarea 整块可点语义）
+                                edit-ta := TouchArea {
+                                    width: 100%;
+                                    height: 100%;
+                                    mouse-cursor: default;
+                                    scroll-event(event) => {
+                                        // Windows 滚轮向下 delta_y 为负：向下滚
+                                        // = 看下方内容 = scroll-y 增大，故取负
+                                        edit-scroll.scroll-y = Math.clamp(
+                                            edit-scroll.scroll-y - event.delta_y,
+                                            0px,
+                                            edit-scroll.max-scroll-y);
+                                        return accept;
+                                    }
+                                    clicked => {
+                                        edit-input.focus();
+                                        edit-input.set-selection-offsets(
+                                            root.draft-byte-len, root.draft-byte-len);
+                                    }
+
+                                    // 占位符自绘（原生 TextInput 无 placeholder 属性）
+                                    if (edit-input.text == "" && !edit-input.has-focus): Text {
+                                        x: 20px;
+                                        y: 16px;
+                                        width: parent.width - 40px;
+                                        height: 23px;
+                                        text: "在此输入或修改文本...";
+                                        color: Theme.fg-subtle;
+                                        font-size: Metrics.text-sm;
+                                        vertical-alignment: top;
+                                    }
+                                    edit-input := TextInput {
+                                        x: 20px;
+                                        y: 16px;
+                                        width: parent.width - 40px;
+                                        min-width: 0px;
+                                        height: parent.height - 32px;
+                                        single-line: false;
+                                        wrap: word-wrap;
+                                        font-size: Metrics.text-sm;
+                                        color: Theme.fg-default;
+                                        selection-foreground-color: Theme.selection-fg;
+                                        selection-background-color: Theme.selection-bg;
+                                        text <=> root.draft-text;
+                                        edited() => { root.text-edited(self.text); }
+                                        cursor-position-changed(cursor) => {
+                                            // 行列上报（byte offset 由 TextInput 内部
+                                            // 属性读出，Rust 按 draft 文本换算）
+                                            root.editor-cursor-moved(
+                                                edit-input.cursor-position_byte-offset);
+                                            // 光标跟随滚动：cursor.y 是 TextInput 内
+                                            // 坐标，视口内位置 = cursor.y + 16 - scroll
+                                            let view-y = cursor.y + 16px - edit-scroll.scroll-y;
+                                            if (view-y < 8px) {
+                                                edit-scroll.scroll-y = Math.clamp(
+                                                    cursor.y + 16px - 8px,
+                                                    0px, edit-scroll.max-scroll-y);
+                                            } else if (view-y + 23px
+                                                > edit-scroll.height - 8px)
+                                            {
+                                                edit-scroll.scroll-y = Math.clamp(
+                                                    cursor.y + 16px + 23px - edit-scroll.height + 8px,
+                                                    0px, edit-scroll.max-scroll-y);
+                                            }
                                         }
+                                    }
+
+                                    // 光标越界盲区遮罩（声明在 TextInput 后 = 画在其
+                                    // 上）：软件渲染器在非整数 DPI 缩放（125% 实测）
+                                    // 下会把光标条顶端画出元素几何 1-2px（parley 行
+                                    // 盒顶高于元素顶），而增量重绘的脏区只认元素几何
+                                    // ——越界段「画得上、擦不掉」，在首行文字上方残留
+                                    // 孤立白点（离屏复现实验证实，见 docs/adr-0003）。
+                                    // 此条盖住盲区让越界像素落在同色之下；与窗口同
+                                    // 底不可见、不遮首行墨迹；滚动后盲区随内容移出
+                                    // 视口被裁，无副作用
+                                    Rectangle {
+                                        x: 0;
+                                        y: 12px;
+                                        width: parent.width;
+                                        height: 4px;
+                                        background: Theme.canvas-default;
+                                    }
+                                }
+                                }
+
+                                // 滚动条：内容超出视口时显示。滑块高度按视口/
+                                // 内容比例（最小 24px），轨道点击跳转、拖拽跟随
+                                if (edit-scroll.max-scroll-y > 0px): scrollbar := Rectangle {
+                                    x: parent.width - self.width;
+                                    y: 0;
+                                    width: 8px;
+                                    height: parent.height;
+                                    // 滑块几何（thumb-h 用视口²/内容² 的经典比例）
+                                    property <length> thumb-h: Math.max(24px,
+                                        self.height * self.height / Math.max(content-h, 1px));
+                                    property <length> content-h: edit-input.preferred-height + 32px;
+                                    property <length> thumb-y: (edit-scroll.scroll-y
+                                        / Math.max(edit-scroll.max-scroll-y, 1px))
+                                        * Math.max(self.height - thumb-h, 1px);
+
+                                    track-ta := TouchArea {
+                                        property <length> grab-offset;
+                                        width: 100%;
+                                        height: 100%;
+                                        pointer-event(e) => {
+                                            if (e.kind == PointerEventKind.down) {
+                                                self.grab-offset =
+                                                    self.pressed-y - scrollbar.thumb-y;
+                                            }
+                                        }
+                                        moved => {
+                                            edit-scroll.scroll-y = Math.clamp(
+                                                (self.mouse-y - self.grab-offset)
+                                                    / Math.max(scrollbar.height - scrollbar.thumb-h, 1px)
+                                                    * edit-scroll.max-scroll-y,
+                                                0px, edit-scroll.max-scroll-y);
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        x: 2px;
+                                        y: scrollbar.thumb-y;
+                                        width: parent.width - 4px;
+                                        height: scrollbar.thumb-h;
+                                        border-radius: 2px;
+                                        background: track-ta.pressed || track-ta.has-hover
+                                            ? Theme.border-default : Theme.border-subtle;
+                                        animate background { duration: 120ms; easing: ease-out; }
                                     }
                                 }
                             }
-                        }
                     }
 
                         if (!root.is-text): Rectangle {
@@ -588,6 +702,40 @@ export component EditorWindow inherits Window {
                                 source: root.image-preview;
                                 image-fit: contain;
                             }
+                            // 右下角「打开」：预览是 contain 缩略，细看交系统查看器
+                            open-img-btn := Rectangle {
+                                x: parent.width - self.width - 12px;
+                                y: parent.height - self.height - 12px;
+                                width: open-img-row.preferred-width + 24px;
+                                height: 28px;
+                                border-radius: Metrics.radius-pill;
+                                border-width: 1px;
+                                border-color: Theme.border-default;
+                                background: open-img-ta.has-hover ? Theme.canvas-subtle : Theme.canvas-default;
+                                animate background { duration: 120ms; easing: ease-out; }
+                                open-img-ta := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.open-externally(root.image-path); }
+                                    changed has-hover => {
+                                        if (self.has-hover) {
+                                            root.button-hint("用系统查看器打开",
+                                                open-img-btn.absolute-position.x,
+                                                open-img-btn.absolute-position.y + open-img-btn.height + 4px);
+                                        } else {
+                                            root.button-hint-left();
+                                        }
+                                    }
+                                }
+                                open-img-row := HorizontalLayout {
+                                    alignment: center;
+                                    Text {
+                                        text: "打开";
+                                        color: Theme.fg-default;
+                                        font-size: Metrics.text-xs;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
                         }
                         if (root.image-loading): Text {
                             y: (parent.height - self.height) / 2;
@@ -610,20 +758,30 @@ export component EditorWindow inherits Window {
                             y: 16px;
                             width: parent.width - 32px;
                             height: parent.height - 32px;
-                            interactive: true;
+                            // false=点击透传（行可点打开），滚轮仍可滚
+                            interactive: false;
                             VerticalLayout {
                                 spacing: 4px;
                                 alignment: start;
-                                for path in root.file-paths: Rectangle {
+                                for path[i] in root.file-paths: Rectangle {
                                     height: 30px;
                                     border-radius: Metrics.radius-md;
+                                    border-width: 1px;
+                                    // hover 描边 + 文字提亮提示可点（行底色与
+                                    // 预览区同底，色块反馈无区分度）
+                                    border-color: path-ta.has-hover ? Theme.border-subtle : transparent;
+                                    animate border-color { duration: 120ms; easing: ease-out; }
                                     background: Theme.canvas-default;
+                                    path-ta := TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => { root.open-file-path-at(i); }
+                                    }
                                     HorizontalLayout {
                                         padding-left: 12px;
                                         padding-right: 12px;
                                         Text {
                                             text: path;
-                                            color: Theme.fg-muted;
+                                            color: path-ta.has-hover ? Theme.fg-default : Theme.fg-muted;
                                             font-size: Metrics.text-body;
                                             vertical-alignment: center;
                                             overflow: elide;
@@ -645,9 +803,9 @@ export component EditorWindow inherits Window {
                 }
             }
 
-            // ── 底栏（bg-canvas-subtle px-5 py-2 justify-between）──
+            // ── 底栏（原 52px 精简：键位提示已移至按钮 tooltip）──
             footer := Rectangle {
-                height: 52px;
+                height: 44px;
                 background: Theme.canvas-subtle;
                 HorizontalLayout {
                     padding-left: 20px;
@@ -656,10 +814,16 @@ export component EditorWindow inherits Window {
                     // 不设 alignment:start——它会禁用 stretch，弹性占位
                     // 失效后右侧按钮组不再贴右（旧版 justify-between）
 
-                    // 左：未保存标记 + 键位提示（start 排列收缩到左端）
+                    // 左：行列 + 未保存标记（start 排列收缩到左端）
                     HorizontalLayout {
                         alignment: start;
                         spacing: 12px;
+                        if (root.is-text && root.has-session): Text {
+                            text: "第 \{root.cursor-line} 行 · 第 \{root.cursor-col} 列";
+                            color: Theme.fg-subtle;
+                            font-size: Metrics.text-hint;
+                            vertical-alignment: center;
+                        }
                         if (root.is-dirty && root.has-session): HorizontalLayout {
                             spacing: 6px;
                             alignment: start;
@@ -680,43 +844,12 @@ export component EditorWindow inherits Window {
                                 vertical-alignment: center;
                             }
                         }
-                        HorizontalLayout {
-                            spacing: 6px;
-                            alignment: start;
-                            VerticalLayout {
-                                alignment: center;
-                                HorizontalLayout {
-                                    spacing: 4px;
-                                    alignment: start;
-                                    Kbd { key: "Ctrl+S"; }
-                                    Text {
-                                        text: "保存";
-                                        color: Theme.fg-muted;
-                                        font-size: Metrics.text-hint;
-                                        vertical-alignment: center;
-                                    }
-                                    Text {
-                                        text: "·";
-                                        color: Theme.fg-subtle;
-                                        font-size: Metrics.text-hint;
-                                        vertical-alignment: center;
-                                    }
-                                    Kbd { key: "Esc"; }
-                                    Text {
-                                    text: "关闭";
-                                    color: Theme.fg-muted;
-                                    font-size: Metrics.text-hint;
-                                    vertical-alignment: center;
-                                }
-                            }
-                        }
-                    }
                     }
 
                     Rectangle { horizontal-stretch: 1; }
 
-                    // 右：关闭 / 保存（固定高按钮在布局交叉轴顶对齐，
-                    // 包一层居中容器才能垂直居中，对齐旧版 items-center）
+                    // 右：关闭 / 保存（tooltip 承载键位提示；固定高按钮在
+                    // 布局交叉轴顶对齐，包一层居中容器才能垂直居中）
                     HorizontalLayout {
                         spacing: 8px;
                         alignment: end;
@@ -727,7 +860,7 @@ export component EditorWindow inherits Window {
                                 spacing: 8px;
                         close-btn := Rectangle {
                             width: 68px;
-                            height: 36px;
+                            height: 32px;
                             border-radius: Metrics.radius-md;
                             border-width: 1px;
                             border-color: Theme.border-default;
@@ -735,6 +868,15 @@ export component EditorWindow inherits Window {
                             close-ta := TouchArea {
                                 mouse-cursor: default;
                                 clicked => { root.request-close(); }
+                                changed has-hover => {
+                                    if (self.has-hover) {
+                                        root.button-hint("关闭（Esc）",
+                                            close-btn.absolute-position.x,
+                                            close-btn.absolute-position.y + close-btn.height + 4px);
+                                    } else {
+                                        root.button-hint-left();
+                                    }
+                                }
                             }
                             Text {
                                 text: "关闭";
@@ -746,7 +888,7 @@ export component EditorWindow inherits Window {
                         }
                         save-btn := Rectangle {
                             width: 68px;
-                            height: 36px;
+                            height: 32px;
                             border-radius: Metrics.radius-md;
                             // 旧版 disabled:opacity-50：整键（底+字）半透明
                             opacity: root.is-text && root.is-dirty ? 1.0 : 0.5;
@@ -755,6 +897,15 @@ export component EditorWindow inherits Window {
                                 enabled: root.is-text && root.is-dirty;
                                 mouse-cursor: root.is-text && root.is-dirty ? default : not-allowed;
                                 clicked => { root.save-requested(); }
+                                changed has-hover => {
+                                    if (self.has-hover) {
+                                        root.button-hint("保存（Ctrl+S）",
+                                            save-btn.absolute-position.x,
+                                            save-btn.absolute-position.y + save-btn.height + 4px);
+                                    } else {
+                                        root.button-hint-left();
+                                    }
+                                }
                             }
                             Text {
                                 text: "保存";
@@ -772,76 +923,246 @@ export component EditorWindow inherits Window {
             }
         }
 
-        // ── 标签建议浮层：root-scope 直挂 + 声明在 VerticalLayout 之后。
-        // Slint 按声明顺序绘制且无 z-index，放在标签区内会被后声明的
-        // 内容区盖住（旧版 HTML 靠 z-20 浮起）；定位读标签条的窗口绝对
-        // 坐标，自动跟随通知/错误条的高度变化
-        if (root.tag-open): Rectangle {
+        // ── 标签面板：root-scope 直挂 + 声明在 VerticalLayout 之后。
+        // Slint 按声明顺序绘制且无 z-index，这里的浮层会被后声明的
+        // 内容区盖住。Notion/GitHub 多选模式：搜索框 + 已选区（点击
+        // 移除）+ 建议区（点击/回车添加）。常驻实例而非 if 条件实例化：
+        // 条件实例化无法做退场动画；opacity 淡入淡出 + 4px 位移进场，
+        // TouchArea 由 tag-open 门控，隐藏与淡出中不拦截指针。
+        // 定位读标签条的窗口绝对坐标，自动跟随通知/错误条高度变化
+        Rectangle {
             x: tag-field.absolute-position.x;
             y: tag-field.absolute-position.y + tag-field.height + 4px;
-            width: 288px;
-            height: Math.min(224px, root.tag-suggestions.length * 32px + 8px);
-            border-radius: Metrics.radius-md;
-            border-width: 1px;
-            border-color: Theme.border-subtle;
-            background: Theme.canvas-default;
+            width: 320px;
+            // 高度随内容：搜索框 44 + 分隔线 1 + 行列表 32px/行 + 列表
+            // 内边距 8，封顶 288
+            height: Math.min(288px,
+                45px + (root.tags.length + root.tag-suggestions.length) * 32px + 8px);
+            opacity: root.tag-open ? 1.0 : 0.0;
+            animate opacity { duration: 150ms; easing: ease-out; }
             clip: true;
 
-            sug-flick := Flickable {
+            panel-body := Rectangle {
                 x: 0;
-                y: 0;
+                y: root.tag-open ? 0px : 4px;
+                animate y { duration: 150ms; easing: ease-out; }
                 width: parent.width;
                 height: parent.height;
-                interactive: true;
+                border-radius: Metrics.radius-md;
+                border-width: 1px;
+                border-color: Theme.border-subtle;
+                background: Theme.canvas-default;
+                drop-shadow-blur: 16px;
+                drop-shadow-color: Theme.shadow-color.with-alpha(0.15);
+
                 VerticalLayout {
-                    padding: 4px;
-                    spacing: 0px;
-                    for sug[i] in root.tag-suggestions: Rectangle {
-                        // 行高 32px = 旧版 py-1.5 + leading-5；
-                        // 与浮层高度公式（length * 32px + 8px）一致
-                        height: 32px;
-                        border-radius: Metrics.radius-md;
-                        background: i == root.tag-active
-                            ? Theme.canvas-subtle : transparent;
-                        sug-ta := TouchArea {
-                            mouse-cursor: default;
-                            clicked => { root.tag-adopt(i); }
-                        }
-                        HorizontalLayout {
-                            padding-left: 8px;
-                            padding-right: 8px;
-                            spacing: 8px;
-                            // kind：0=match 1=create 2=exists
-                            if (sug.kind == 0): HorizontalLayout {
-                                spacing: 8px;
-                                Text {
-                                    text: sug.name;
-                                    color: Theme.fg-default;
+                    // 搜索框（内部绝对定位：Rectangle 子元素不自动铺满，
+                    // 且显式几何断开 TextInput 首选宽的布局传导）
+                    Rectangle {
+                        height: 44px;
+                        panel-input-wrap := Rectangle {
+                            x: 10px;
+                            y: 8px;
+                            width: parent.width - 20px;
+                            height: 28px;
+                            border-radius: Metrics.radius-md;
+                            border-width: 1px;
+                            border-color: panel-input.has-focus ? Theme.border-accent : Theme.border-subtle;
+                            background: Theme.canvas-subtle;
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                if (panel-input.text == "" && !panel-input.has-focus): Text {
+                                    text: "搜索或创建标签";
+                                    color: Theme.fg-subtle;
                                     font-size: Metrics.text-body;
                                     vertical-alignment: center;
-                                    horizontal-stretch: 1;
-                                    overflow: elide;
                                 }
-                                Text {
-                                    text: sug.count-text;
-                                    color: Theme.fg-subtle;
-                                    font-size: Metrics.text-hint;
-                                    vertical-alignment: center;
+                                    panel-input := TextInput {
+                                        // 隐藏态必须禁用：opacity 0 的元素仍参
+                                        // 与鼠标命中，不门控会抢走编辑区上部的
+                                        // 点击（「鼠标失灵」根因之一）
+                                        enabled: root.tag-open;
+                                        width: parent.width;
+                                    // TextInput 墨迹从元素顶部画：按字号收
+                                    // 高度再垂直居中（见编辑区同款注释）
+                                    y: (parent.height - self.font-size) / 2;
+                                    height: self.font-size;
+                                    font-size: Metrics.text-body;
+                                    color: Theme.fg-default;
+                                    selection-foreground-color: Theme.selection-fg;
+                                    selection-background-color: Theme.selection-bg;
+                                    text <=> root.tag-input-text;
+                                    edited() => { root.tag-input-changed(self.text); }
+                                    // 点击面板外（焦点离开搜索框）即收起面板
+                                    changed has-focus => {
+                                        if (!self.has-focus && root.tag-open) {
+                                            root.tag-open = false;
+                                        }
+                                    }
+                                        key-pressed(event) => {
+                                            if ((event.text == Key.DownArrow
+                                                    || event.text == Key.UpArrow)
+                                                && root.tag-suggestions.length > 0)
+                                            {
+                                                root.tag-highlight = Math.mod(
+                                                    root.tag-active
+                                                        + (event.text == Key.DownArrow ? 1 : -1),
+                                                    root.tag-suggestions.length,
+                                                );
+                                                // 高亮行保持可见：建议行视口系顶 =
+                                                // 已选区高 + 行索引 × 行高
+                                                let row-top = root.tags.length * 32px
+                                                    + root.tag-active * 32px;
+                                                if (row-top < -panel-flick.viewport-y) {
+                                                    panel-flick.viewport-y = -row-top;
+                                                } else if (row-top + 32px
+                                                    > -panel-flick.viewport-y + panel-flick.height)
+                                                {
+                                                    panel-flick.viewport-y =
+                                                        -(row-top + 32px - panel-flick.height);
+                                                }
+                                                return accept;
+                                            }
+                                            if (event.text == Key.Return) {
+                                                root.tag-commit-add();
+                                                return accept;
+                                            }
+                                            if (event.text == Key.Tab) {
+                                                root.tag-complete();
+                                                return accept;
+                                            }
+                                            if (event.text == Key.Backspace
+                                                && root.tag-input-text == ""
+                                                && root.tags.length > 0)
+                                            {
+                                                root.tag-remove-last();
+                                                return accept;
+                                            }
+                                            return reject;
+                                        }
+                                    }
                                 }
                             }
-                            if (sug.kind == 1): Text {
-                                text: "创建标签「" + sug.name + "」";
-                                color: Theme.accent-fg;
-                                font-size: Metrics.text-body;
-                                vertical-alignment: center;
-                                overflow: elide;
+                    }
+                    // 分隔线
+                    Rectangle { height: 1px; background: Theme.border-subtle; }
+                    // 行列表（已选区 + 建议区）
+                    panel-flick := Flickable {
+                        width: parent.width;
+                        height: parent.height;
+                        // false=行点击透传（列表超出面板封顶高时不吞点击），
+                        // 滚轮仍可滚；键盘导航的滚动跟随是显式写 viewport-y
+                        interactive: false;
+                        VerticalLayout {
+                            padding: 4px;
+                            spacing: 0px;
+
+                            // 已选区：点击行 = 移除该标签（勾号标记归属）
+                            for tag-name[i] in root.tags: Rectangle {
+                                height: 32px;
+                                border-radius: Metrics.radius-md;
+                                background: sel-ta.has-hover ? Theme.canvas-subtle : transparent;
+                                sel-ta := TouchArea {
+                                    // 隐藏态必须禁用：与 panel-input/sug-ta 同理，
+                                    // opacity 0 的已选行仍参与鼠标命中，会吃掉
+                                    // 编辑区上部的点击
+                                    enabled: root.tag-open;
+                                    mouse-cursor: pointer;
+                                    // pointer-down 即移除（与建议行同语义）
+                                    pointer-event(e) => {
+                                        if (e.kind == PointerEventKind.down) {
+                                            root.tag-remove(i);
+                                        }
+                                    }
+                                }
+                                HorizontalLayout {
+                                    padding-left: 8px;
+                                    padding-right: 8px;
+                                    spacing: 8px;
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Path {
+                                            width: 14px;
+                                            height: 14px;
+                                            viewbox-width: 24;
+                                            viewbox-height: 24;
+                                            stroke: Theme.accent-fg;
+                                            // Slint 描边不随视框缩放：1.8 @24 → 14px 折算 1.05px
+                                            stroke-width: 1.05px;
+                                            commands: "M 4 12.5 L 9.5 18 L 20 6.5";
+                                        }
+                                    }
+                                    Text {
+                                        text: tag-name;
+                                        color: Theme.fg-default;
+                                        font-size: Metrics.text-body;
+                                        vertical-alignment: center;
+                                        horizontal-stretch: 1;
+                                        overflow: elide;
+                                    }
+                                    Text {
+                                        text: sel-ta.has-hover ? "移除" : "";
+                                        color: Theme.danger-fg;
+                                        font-size: Metrics.text-hint;
+                                        vertical-alignment: center;
+                                    }
+                                }
                             }
-                            if (sug.kind == 2): Text {
-                                text: "「" + sug.name + "」已添加";
-                                color: Theme.fg-subtle;
-                                font-size: Metrics.text-body;
-                                vertical-alignment: center;
-                                overflow: elide;
+
+                            // 建议区：kind 0=match 1=create 2=exists
+                            for sug[i] in root.tag-suggestions: Rectangle {
+                                height: 32px;
+                                border-radius: Metrics.radius-md;
+                                background: i == root.tag-active
+                                    ? Theme.canvas-subtle : transparent;
+                                sug-ta := TouchArea {
+                                    enabled: root.tag-open;
+                                    mouse-cursor: default;
+                                    // pointer-down 即采纳：采纳引发失焦收面板
+                                    // 抢在 pointer-up 前发生也不丢点击
+                                    pointer-event(e) => {
+                                        if (e.kind == PointerEventKind.down) {
+                                            root.tag-adopt(i);
+                                        }
+                                    }
+                                }
+                                HorizontalLayout {
+                                    padding-left: 8px;
+                                    padding-right: 8px;
+                                    spacing: 8px;
+                                    if (sug.kind == 0): HorizontalLayout {
+                                        spacing: 8px;
+                                        Text {
+                                            text: sug.name;
+                                            color: Theme.fg-default;
+                                            font-size: Metrics.text-body;
+                                            vertical-alignment: center;
+                                            horizontal-stretch: 1;
+                                            overflow: elide;
+                                        }
+                                        Text {
+                                            text: sug.count-text;
+                                            color: Theme.fg-subtle;
+                                            font-size: Metrics.text-hint;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                    if (sug.kind == 1): Text {
+                                        text: "创建标签「" + sug.name + "」";
+                                        color: Theme.accent-fg;
+                                        font-size: Metrics.text-body;
+                                        vertical-alignment: center;
+                                        overflow: elide;
+                                    }
+                                    if (sug.kind == 2): Text {
+                                        text: "「" + sug.name + "」已添加";
+                                        color: Theme.fg-subtle;
+                                        font-size: Metrics.text-body;
+                                        vertical-alignment: center;
+                                        overflow: elide;
+                                    }
+                                }
                             }
                         }
                     }
@@ -858,9 +1179,12 @@ export component EditorWindow inherits Window {
 
         // ── 未保存关闭确认（旧版 role=dialog，max-w-sm p-6）──
         // visible 而非 if：dlg-save 需在会话打开时被 focus（对齐旧版
-        // closeConfirmOpen effect 聚焦主按钮）
+        // closeConfirmOpen effect 聚焦主按钮）；opacity 进场淡入
+        // （root-scope 非布局容器，visible 不占位问题在此不存在）
         Rectangle {
             visible: root.close-confirm-open;
+            opacity: root.close-confirm-open ? 1.0 : 0.0;
+            animate opacity { duration: 120ms; easing: ease-out; }
             background: rgba(0, 0, 0, 0.45);
             HorizontalLayout {
                 alignment: center;

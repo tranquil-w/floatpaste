@@ -27,6 +27,7 @@ use crate::app_state::{EditorSession, TargetSession};
 use crate::picker::{self, App};
 use crate::search;
 use crate::thumbnails;
+use crate::tooltip::HoverHost;
 use crate::win32_ext;
 use crate::{app_icon, EditorTagSuggestion, EditorWindow};
 
@@ -201,7 +202,6 @@ fn load_session(app: &App, win: &EditorWindow, item_id: &str) {
         Err(error) => {
             warn!("读取条目详情失败: {error}");
             win.set_has_session(true);
-            win.set_loading(false);
             win.set_item_missing(true);
             focus_loaded(win);
             return;
@@ -209,7 +209,6 @@ fn load_session(app: &App, win: &EditorWindow, item_id: &str) {
     };
 
     win.set_has_session(true);
-    win.set_loading(false);
     win.set_item_missing(false);
     win.set_is_text(detail.r#type == "text");
     win.set_meta_source(
@@ -225,6 +224,9 @@ fn load_session(app: &App, win: &EditorWindow, item_id: &str) {
     if detail.r#type == "text" {
         let full = detail.full_text.clone();
         win.set_char_count(full.chars().count() as i32);
+        // set-selection-offsets 要 UTF-8 字节偏移（Slint 内置语义），
+        // Slint 侧拿不到字节长度（只有 character-count），由这里供给
+        win.set_draft_byte_len(full.len() as i32);
         win.set_draft_text(full.clone().into());
         win.set_saved_text(full.into());
     } else {
@@ -236,6 +238,7 @@ fn load_session(app: &App, win: &EditorWindow, item_id: &str) {
 
     // 图片大图：后台解码原始像素，事件循环侧构造 slint::Image
     if detail.r#type == "image" {
+        win.set_image_path(detail.image_path.clone().unwrap_or_default().into());
         load_image_preview(app, win, &detail);
     }
     let paths: Vec<slint::SharedString> =
@@ -322,7 +325,81 @@ fn build_meta_extra(detail: &ClipItemDetail) -> String {
 pub fn text_edited(app: &App, text: &str) {
     if let Some(win) = app.editor.upgrade() {
         win.set_char_count(text.chars().count() as i32);
+        win.set_draft_byte_len(text.len() as i32);
     }
+}
+
+/// 光标移动（含载入置尾触发）：按 UTF-8 byte offset 计算行列写回底栏。
+/// offset 由 Slint 侧从 TextInput 内部属性读出，异常值按边界钳制
+pub fn cursor_moved(app: &App, byte_offset: i32) {
+    let Some(win) = app.editor.upgrade() else {
+        return;
+    };
+    let text = win.get_draft_text().to_string();
+    let (line, col) = cursor_line_col(&text, byte_offset.max(0) as usize);
+    win.set_cursor_line(line as i32);
+    win.set_cursor_col(col as i32);
+}
+
+/// 行列计算（1 起）：列按字符数（中英文同权），offset 越界或落在
+/// char 中间时向前钳到合法边界
+fn cursor_line_col(text: &str, byte_offset: usize) -> (usize, usize) {
+    let mut offset = byte_offset.min(text.len());
+    while offset > 0 && !text.is_char_boundary(offset) {
+        offset -= 1;
+    }
+    let before = &text[..offset];
+    let line = before.matches('\n').count() + 1;
+    let line_start = before.rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let col = before[line_start..].chars().count() + 1;
+    (line, col)
+}
+
+/// 用系统默认程序打开路径（图片预览「打开」按钮 / 文件路径行点击）。
+/// 外部程序会抢走前台，属预期行为；失败以错误条提示
+pub fn open_externally(app: &App, path: &str) {
+    let Some(win) = app.editor.upgrade() else {
+        return;
+    };
+    if let Err(error) = floatpaste_core::platform::windows::shell_open::open_path(path) {
+        warn!("打开路径失败: {error}");
+        win.set_notice_text("".into());
+        win.set_error_text(format!("打开失败：{error}").into());
+    }
+}
+
+/// 文件条目：按行索引取路径打开
+pub fn open_file_path_at(app: &App, index: usize) {
+    let Some(win) = app.editor.upgrade() else {
+        return;
+    };
+    let Some(path) = win.get_file_paths().row_data(index).map(|s| s.to_string()) else {
+        return;
+    };
+    open_externally(app, &path);
+}
+
+// ── 按钮 tooltip（悬浮气泡 simple 模式，锚点=按钮下方）────
+
+pub fn editor_is_active(app: &App) -> bool {
+    // 编辑窗显示期间会话恒存在（close_editor 先清会话再还原来源）
+    app.state.editor_session().is_some()
+}
+
+fn button_hint(app: &App, text: &str, x: f32, y: f32) {
+    // 活跃校验由 schedule_static 的定时器回调统一兜（host_active），
+    // 此处不再重复守卫
+    let Some(win) = app.editor.upgrade() else {
+        return;
+    };
+    let Some(hwnd) = win32_ext::window_hwnd(&win) else {
+        return;
+    };
+    let host = HoverHost {
+        hwnd,
+        is_active: editor_is_active,
+    };
+    crate::tooltip::schedule_static(app, host, text.to_string(), x, y);
 }
 
 pub fn save(app: &App) {
@@ -596,10 +673,13 @@ pub fn tag_remove_last(app: &App) {
 }
 
 pub fn tag_escape(app: &App) {
-    // 本地消费：清空输入并保持焦点（对齐 tagEditor 的 Esc 分支）
+    // Esc 分层退出（面板模式）：清空输入、收起面板、焦点回窗口级。
+    // 输入非空时 Slint 侧 capture 已先按「仅清空」处理，不会到这里；
+    // 此处兜底清空并关闭
     if let Some(win) = app.editor.upgrade() {
         win.set_tag_input_text("".into());
-        win.invoke_focus_tag_input();
+        win.set_tag_open(false);
+        win.invoke_focus_root_scope();
     }
 }
 
@@ -776,6 +856,26 @@ pub fn wire(app: &App) {
         text_edited(&app_cb, text.as_str());
     });
     let app_cb = app.clone();
+    win.on_editor_cursor_moved(move |offset| {
+        cursor_moved(&app_cb, offset);
+    });
+    let app_cb = app.clone();
+    win.on_open_externally(move |path| {
+        open_externally(&app_cb, path.as_str());
+    });
+    let app_cb = app.clone();
+    win.on_open_file_path_at(move |index| {
+        open_file_path_at(&app_cb, index.max(0) as usize);
+    });
+    let app_cb = app.clone();
+    win.on_button_hint(move |text, x, y| {
+        button_hint(&app_cb, text.as_str(), x, y);
+    });
+    let app_cb = app.clone();
+    win.on_button_hint_left(move || {
+        crate::tooltip::cancel(&app_cb);
+    });
+    let app_cb = app.clone();
     win.on_save_requested(move || {
         save(&app_cb);
     });
@@ -836,4 +936,25 @@ pub fn wire(app: &App) {
             slint::CloseRequestResponse::KeepWindowShown
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cursor_line_col;
+
+    #[test]
+    fn cursor_line_col_counts_chars_and_clamps_offsets() {
+        assert_eq!(cursor_line_col("", 0), (1, 1));
+        assert_eq!(cursor_line_col("abc", 0), (1, 1));
+        assert_eq!(cursor_line_col("abc", 3), (1, 4));
+        assert_eq!(cursor_line_col("a\nb", 3), (2, 2));
+        // 换行符之后即新行行首
+        assert_eq!(cursor_line_col("a\nb", 2), (2, 1));
+        // 中文按字符计列（每字 3 字节）
+        assert_eq!(cursor_line_col("中文", 3), (1, 2));
+        // offset 落在 char 中间：钳到前一个边界
+        assert_eq!(cursor_line_col("中文", 4), (1, 2));
+        // offset 越界：钳到文本末尾
+        assert_eq!(cursor_line_col("ab", 99), (1, 3));
+    }
 }

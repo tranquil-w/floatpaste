@@ -9,6 +9,7 @@ pub mod image_clipboard;
 pub mod mouse_monitor;
 pub mod picker_position;
 pub mod session_keyboard;
+pub mod shell_open;
 pub mod single_instance;
 pub mod startup;
 pub mod uia_caret;

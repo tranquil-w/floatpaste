@@ -3,12 +3,12 @@
 
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use slint::ComponentHandle;
-use windows::Win32::Foundation::{HWND, RECT};
+use windows::Win32::Foundation::{HWND, POINT, RECT};
 use windows::Win32::Graphics::Dwm::{
     DwmExtendFrameIntoClientArea, DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE,
     DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DWM_WINDOW_CORNER_PREFERENCE,
 };
-use windows::Win32::Graphics::Gdi::{InvalidateRect, UpdateWindow};
+use windows::Win32::Graphics::Gdi::{ClientToScreen, InvalidateRect, UpdateWindow};
 use windows::Win32::UI::Controls::MARGINS;
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -44,8 +44,21 @@ pub fn window_dpi(hwnd: isize) -> u32 {
 
 pub fn physical_rect(hwnd: isize) -> Option<RECT> {
     let mut rect = RECT::default();
-    unsafe { GetWindowRect(HWND(hwnd as *mut _), &mut rect) }.ok()?;
+    unsafe { GetWindowRect(HWND(hwnd as *mut _), &mut rect).ok()? };
     Some(rect)
+}
+
+/// 客户区左上角的屏幕坐标（ClientToScreen 0,0）。带框窗口（编辑/设置）
+/// 的窗口 rect 含标题栏与边框，而 Slint 的 absolute-position 相对客户区——
+/// 以窗口 rect 为基准换算会偏移一个非客户区高度（tooltip 锚点错位的根因）
+pub fn client_origin(hwnd: isize) -> Option<(i32, i32)> {
+    let mut point = POINT::default();
+    // ClientToScreen 返回 BOOL（成功非零）
+    if unsafe { ClientToScreen(HWND(hwnd as *mut _), &mut point) }.as_bool() {
+        Some((point.x, point.y))
+    } else {
+        None
+    }
 }
 
 /// 无边框浮层样式：跳过任务栏（TOOLWINDOW）+ 可选不抢焦点（NOACTIVATE）。

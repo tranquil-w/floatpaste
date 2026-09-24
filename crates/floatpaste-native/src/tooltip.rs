@@ -373,6 +373,8 @@ fn render_static(
     win.set_has_image(false);
     win.set_content_text(text.into());
     win.set_badges(ModelRc::new(Rc::new(VecModel::from(Vec::new()))));
+    // 气泡水平居中于锚点（锚点=按钮中心，比「左缘对齐」观感正；
+    // 越界翻转仍在 resolve_position 兜底）
     present(
         app,
         &win,
@@ -380,7 +382,7 @@ fn render_static(
         dpi,
         width,
         height,
-        (anchor_x, anchor_y),
+        (anchor_x - width / 2.0, anchor_y),
         token,
     );
 }
@@ -469,8 +471,8 @@ fn present(
 }
 
 /// 定位与翻转（对齐 TooltipWindow::resolve_clamped_position：
-/// anchor 为相对宿主窗口原点的逻辑锚点（已含偏移），默认向右下展开，
-/// 超出工作区时按当前光标位置翻到对侧，留 4px 间隙）
+/// anchor 为相对宿主**客户区**原点的逻辑锚点（已含偏移），默认向右下
+/// 展开，超出工作区时按当前光标位置翻到对侧，留 4px 间隙）
 fn resolve_position(
     picker_hwnd: isize,
     anchor_x: f32,
@@ -479,13 +481,16 @@ fn resolve_position(
     width: u32,
     height: u32,
 ) -> (i32, i32) {
-    let picker_rect = (picker_hwnd > 0)
-        .then(|| win32_ext::physical_rect(picker_hwnd))
+    // 基准 = 客户区原点（ClientToScreen 0,0）：Slint 的 absolute-position
+    // 相对客户区，而带框窗口（编辑/设置）的 GetWindowRect 含标题栏与边框，
+    // 以窗口 rect 为基准会让 tooltip 偏移一个非客户区高度；无框窗口两者重合
+    let origin = (picker_hwnd > 0)
+        .then(|| win32_ext::client_origin(picker_hwnd))
         .flatten();
-    let (mut x, mut y) = match picker_rect {
-        Some(rect) => (
-            rect.left + (anchor_x * scale) as i32,
-            rect.top + (anchor_y * scale) as i32,
+    let (mut x, mut y) = match origin {
+        Some((ox, oy)) => (
+            ox + (anchor_x * scale) as i32,
+            oy + (anchor_y * scale) as i32,
         ),
         None => (0, 0),
     };
