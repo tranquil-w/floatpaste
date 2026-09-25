@@ -264,8 +264,10 @@ component SearchRowCard inherits Rectangle {
     }
 
     border-radius: Metrics.radius-lg;
+    // hover 底恒定半透明：材质时透 backdrop，无材质时叠窗底实色（观感
+    // 仅略淡，无害）——省去向行组件穿材质门控
     background: root.selected ? Theme.accent-subtle
-        : (root.hovered ? Theme.canvas-subtle : transparent);
+        : (root.hovered ? Theme.canvas-subtle.with-alpha(0.62) : transparent);
 
     // 选中态左侧 2px 强调边（旧版 border-l-pg-accent-fg）。浏览器里
     // border-left 沿圆角转折，Slint 的 clip 只按矩形裁：底层铺整卡
@@ -702,6 +704,8 @@ export component SearchWindow inherits Window {
     in-out property <int> empty-action: 0;
     // 每次会话打开滚回顶部
     in-out property <int> scroll-generation: 0;
+    // DWM 材质（Mica）挂载成功与否：false 时面板用不透明底回退
+    in property <bool> material-active: false;
 
     // ── 回调（Rust 接管）──
     callback keyword-edited(string);
@@ -809,7 +813,7 @@ export component SearchWindow inherits Window {
         }
 
         panel := Rectangle {
-            background: Theme.canvas-default;
+            background: root.material-active ? Theme.material-base : Theme.canvas-default;
             border-width: SearchGeometry.window-border;
             border-color: Theme.border-window;
             clip: true;
@@ -818,7 +822,8 @@ export component SearchWindow inherits Window {
                 // ── 头部（背景可拖拽；px-4 py-3 gap-3）──
                 header-bar := Rectangle {
                     height: 56px;
-                    background: Theme.canvas-default;
+                    // 透出 panel 的材质底（原 canvas-default 形成不透明色带）
+                    background: transparent;
 
                     header-ta := TouchArea {
                         mouse-cursor: default;
@@ -1010,7 +1015,8 @@ export component SearchWindow inherits Window {
                 // ── 筛选行（px-4 py-1.5 gap-1，全窗唯一分隔线）──
                 filter-bar := Rectangle {
                     height: 36px;
-                    background: Theme.canvas-default;
+                    // 透出 panel 的材质底
+                    background: transparent;
                     Rectangle {
                         y: parent.height - 1px;
                         height: 1px;
@@ -1292,7 +1298,8 @@ export component SearchWindow inherits Window {
                 // ── 底栏键位提示 ──
                 footer-bar := Rectangle {
                     height: 28px;
-                    background: Theme.canvas-subtle;
+                    // 恒定半透明：材质时透 backdrop，无材质时叠窗底实色
+                    background: Theme.canvas-subtle.with-alpha(0.6);
                     HorizontalLayout {
                         alignment: center;
                         spacing: Metrics.space-3;

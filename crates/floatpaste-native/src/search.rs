@@ -38,6 +38,7 @@ use floatpaste_core::services::clip_service::ClipService;
 use floatpaste_core::services::paste_support;
 use floatpaste_core::services::picker_position_service::center_in_work_area;
 use floatpaste_core::services::time_format::format_relative_time_or_unused;
+use floatpaste_core::theme;
 
 use crate::app_state::SearchSession;
 use crate::overlay;
@@ -169,6 +170,7 @@ pub fn open(app: &App) {
     }
     // 兜底重挂浮层样式（可聚焦变体，不带 WS_EX_NOACTIVATE）并复查置顶
     overlay::after_show_focusable(hwnd);
+    apply_material(app, &win, hwnd);
 
     begin_focus_watcher(app);
     refresh_tags(app);
@@ -276,6 +278,7 @@ pub fn restore_after_editor(app: &App) {
         warn!("搜索窗口恢复焦点失败: {error}");
     }
     overlay::after_show_focusable(hwnd);
+    apply_material(app, &win, hwnd);
     app.state.begin_search_activation();
     // 失焦自动关闭的监视随激活重启：旧壳是常驻 Focused(false) 监听按
     // is_search_active 门控，编辑器返回后依然生效；本实现的轮询线程
@@ -910,6 +913,17 @@ fn show_error(app: &App, message: &str) {
 }
 
 /* ───────────────── 条目动作 ───────────────── */
+
+/// 挂 Win11 材质并回写门控：全应用统一 Acrylic 浮层家族观感（速贴
+/// 同款；Mica 视觉过弱用户实测否决），明暗随主题联动。不支持/透明
+/// 关闭时 false，面板回不透明底（搜索窗停屏不销毁，重复挂载幂等）
+fn apply_material(app: &App, win: &SearchWindow, hwnd: isize) {
+    let settings = app.state.current_settings();
+    let resolved = theme::resolve_theme(settings.theme_mode.clone(), theme::system_prefers_dark());
+    let active =
+        win32_ext::apply_window_backdrop(hwnd, true, resolved == theme::ResolvedTheme::Dark);
+    win.set_material_active(active);
+}
 
 pub fn paste_index(app: &App, index: usize, as_path_text: bool) {
     let Some(item) = app.state.search_item_at(index) else {

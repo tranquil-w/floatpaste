@@ -75,7 +75,9 @@ export component EditorWindow inherits Window {
     min-height: 300px;
     preferred-width: 800px;
     preferred-height: 600px;
-    background: Theme.canvas-default;
+    // 材质（Mica）挂载成功时窗底半透明透出 backdrop，否则不透明回退
+    background: root.material-active ? Theme.material-base : Theme.canvas-default;
+    in property <bool> material-active: false;
 
     // ── 会话与数据（Rust 接管）──
     in-out property <bool> has-session: false;
@@ -252,7 +254,8 @@ export component EditorWindow inherits Window {
             // ── 主区（旧版 main flex-1：吃掉底栏以外的全部剩余高度）──
             Rectangle {
                 vertical-stretch: 1;
-                background: Theme.canvas-default;
+                // 透出窗底（Window.background 恒有底：材质底或回退实色）
+                background: transparent;
                 clip: true;
 
                 // 无会话：引导态
@@ -490,12 +493,13 @@ export component EditorWindow inherits Window {
                             // changed 只监听本元素属性：用本地别名桥接根上的
                             // 会话序号，每次载入条目重新聚焦
                             property <int> focus-trigger: root.session-seq;
-                            // 平铺观感（无框无圆角），但**不透明背景必须有**：
-                            // 软件渲染器擦除光标闪烁时按「重画脏区内 items」
-                            // 进行，容器无背景则光标白色像素残留在文字上方
-                            // 空隙（「文字上方小白点」根因）；canvas-default
-                            // 与窗口同色，视觉仍是一张纸
-                            background: Theme.canvas-default;
+                            // 平铺观感（无框无圆角）。底色必须**有**但不
+                            // 必须不透明：部分渲染器每条脏行以 Window.background
+                            // 为基线回填再画 items，重绘幂等（光标闪烁无残留
+                            // ——小白点真根因是光标条越界元素几何，由下方
+                            // 遮罩条盖住，见 adr-0003/0005）。恒定半透明：材质
+                            // 时透 backdrop，无材质时叠窗底实色（仅略淡）
+                            background: Theme.canvas-default.with-alpha(0.85);
                             clip: true;
                             init => {
                                 // 首次实例化即聚焦并置尾（对齐旧版
@@ -616,15 +620,15 @@ export component EditorWindow inherits Window {
                                     // 盒顶高于元素顶），而增量重绘的脏区只认元素几何
                                     // ——越界段「画得上、擦不掉」，在首行文字上方残留
                                     // 孤立白点（离屏复现实验证实，见 docs/adr-0003）。
-                                    // 此条盖住盲区让越界像素落在同色之下；与窗口同
-                                    // 底不可见、不遮首行墨迹；滚动后盲区随内容移出
-                                    // 视口被裁，无副作用
+                                    // 此条盖住盲区让越界像素落在同色之下；颜色须与
+                                    // 编辑区容器底一致才不可见、不遮首行墨迹；滚动后
+                                    // 盲区随内容移出视口被裁
                                     Rectangle {
                                         x: 0;
                                         y: 12px;
                                         width: parent.width;
                                         height: 4px;
-                                        background: Theme.canvas-default;
+                                        background: Theme.canvas-default.with-alpha(0.85);
                                     }
                                 }
                                 }
@@ -806,7 +810,8 @@ export component EditorWindow inherits Window {
             // ── 底栏（原 52px 精简：键位提示已移至按钮 tooltip）──
             footer := Rectangle {
                 height: 44px;
-                background: Theme.canvas-subtle;
+                // 恒定半透明：材质时透 backdrop，无材质时叠窗底实色
+                background: Theme.canvas-subtle.with-alpha(0.6);
                 HorizontalLayout {
                     padding-left: 20px;
                     padding-right: 20px;

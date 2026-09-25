@@ -565,6 +565,12 @@ pub struct ThemeTokens {
     pub accent_subtle_rgb: [u8; 3],
     pub accent_subtle_alpha: f32,
 
+    /// 材质窗根底色：canvas 色带 alpha，铺在 DWM 材质（Mica/Acrylic）
+    /// 之上作面板底。材质不可用（系统不支持/透明关闭）的窗口用
+    /// canvas_default 不透明底回退
+    pub material_base_rgb: [u8; 3],
+    pub material_base_alpha: f32,
+
     pub border_default: String,
     pub border_window: String,
     pub border_muted: &'static str,
@@ -689,6 +695,15 @@ pub fn derive_tokens(preset_id: &str, theme_accent: &str, resolved: ResolvedThem
         accent_subtle_rgb: hex_to_rgb_channels(&accent_fg),
         accent_subtle_alpha: subtle_alpha as f32,
 
+        material_base_rgb: hex_to_rgb_channels(scale.canvas),
+        // 深色 0.70：壁纸影明显、文字对比有 AA+ 余量（底色变化由
+        // backdrop 模糊采样摊平，无高频亮暗穿底；真机 24H2 实测）。
+        // 浅色 0.40 是系统材质白 tint 下的可用下限：DWM 在材质层给
+        // 浅色 backdrop 混重白雾，继续压 alpha 只拉开与行卡的层次、
+        // 壁纸影不会再明显（用户拍板接受；强透出需 SWCA 自定义
+        // tint，未采用）
+        material_base_alpha: if is_light { 0.40 } else { 0.70 },
+
         border_default: border,
         border_window: mix_colors(scale.border_muted, scale.canvas, 0.55),
         border_muted: scale.border_muted,
@@ -770,6 +785,18 @@ mod tests {
         assert_eq!(tokens.accent_subtle_rgb, [142, 78, 198]);
         // 旧版 --pg-border-accent = accentFg：聚焦边框跟随用户强调色
         assert_eq!(tokens.border_accent, "#8E4EC6");
+    }
+
+    #[test]
+    fn material_base_follows_canvas_with_mode_alpha() {
+        // 材质底 = canvas 直通色 + 按明暗分级的不透明度；rgb 通道
+        // 与 canvas 逐值一致是「回退不透明底观感连续」的前提
+        let light = derive_tokens("default", "default", ResolvedTheme::Light);
+        assert_eq!(light.material_base_rgb, [249, 249, 251]);
+        assert!((light.material_base_alpha - 0.40).abs() < f32::EPSILON);
+        let dark = derive_tokens("default", "default", ResolvedTheme::Dark);
+        assert_eq!(dark.material_base_rgb, [24, 25, 27]);
+        assert!((dark.material_base_alpha - 0.70).abs() < f32::EPSILON);
     }
 
     #[test]

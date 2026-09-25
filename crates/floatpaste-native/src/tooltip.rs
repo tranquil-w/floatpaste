@@ -314,7 +314,8 @@ fn render(
     };
 
     // ── 元信息 ──
-    win.set_badges(build_badges(item));
+    let badges = build_badges(item);
+    win.set_badges(ModelRc::new(Rc::new(VecModel::from(badges.clone()))));
     win.set_source_app(
         item.source_app
             .clone()
@@ -331,7 +332,23 @@ fn render(
     );
 
     // ── 窗口尺寸（chrome 读 slint 属性 + 安全余量）──
-    let width = (content_width + inset_h).clamp(MIN_WIDTH, MAX_WIDTH);
+    // 卡片宽不得小于元信息行的自然需求（徽章组 + 来源 + 时间 + 行内
+    // 间距 6px，与 tooltip.slint 元信息行布局对齐）：正文短于元信息
+    // 时只按正文定宽会把行尾时间裁掉
+    let meta_content_width = {
+        let badge_w: f32 = badges
+            .iter()
+            .map(|b| {
+                win.invoke_measure_natural_width(b.text.clone())
+                    + if b.kind == 0 { 10.0 } else { 0.0 }
+            })
+            .sum::<f32>()
+            + 6.0 * badges.len().saturating_sub(1) as f32;
+        let source_w = win.invoke_measure_natural_width(win.get_source_app());
+        let time_w = win.invoke_measure_natural_width(win.get_time_text());
+        badge_w + 6.0 + source_w + 6.0 + 6.0 + time_w
+    };
+    let width = (content_width.max(meta_content_width) + inset_h).clamp(MIN_WIDTH, MAX_WIDTH);
     let height = content_height + chrome_v + HEIGHT_SAFETY;
     present(
         app,
@@ -412,6 +429,8 @@ fn present(
     if PENDING_TOKEN.with(|value| value.get()) != token {
         return;
     }
+    // 出现动画从透明起步：重绘落盘期间不可见，上屏后置 true 渐显
+    win.set_appear(false);
     // 尺寸在停屏态落定：停屏窗口对 winit 保持「已显示」，resize 的重绘
     // 在屏外完成、无观感（SW_HIDE 隐藏期重绘被抑制是先前显示闪烁的根源）。
     // 几何一律走裸 SetWindowPos：只动几何、绝不激活（为何严格：
@@ -458,6 +477,9 @@ fn present(
             prev_foreground.map_or(ForegroundPolicy::Keep, ForegroundPolicy::RestoreIfStolen);
         overlay::after_show(tooltip_hwnd, true, restore, ForegroundPolicy::Keep);
         slint::Timer::single_shot(std::time::Duration::from_millis(16), move || {
+            if let Some(win) = win_cb.upgrade() {
+                win.set_appear(true);
+            }
             win32_ext::warm_surface(tooltip_hwnd);
         });
         slint::Timer::single_shot(std::time::Duration::from_millis(60), move || {
@@ -510,8 +532,8 @@ fn resolve_position(
     (x, y)
 }
 
-/// 构建元信息徽章模型（类型徽章 / 图片尺寸 / 图片格式）
-fn build_badges(item: &ClipItemSummary) -> ModelRc<TooltipMetaBadge> {
+/// 构建元信息徽章（类型徽章 / 图片尺寸 / 图片格式）；宽度计算复用同一数据
+fn build_badges(item: &ClipItemSummary) -> Vec<TooltipMetaBadge> {
     let mut badges: Vec<TooltipMetaBadge> = Vec::new();
     badges.push(TooltipMetaBadge {
         kind: 0,
@@ -531,5 +553,5 @@ fn build_badges(item: &ClipItemSummary) -> ModelRc<TooltipMetaBadge> {
             });
         }
     }
-    ModelRc::new(Rc::new(VecModel::from(badges)))
+    badges
 }

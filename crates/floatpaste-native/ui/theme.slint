@@ -5,6 +5,9 @@ export global Theme {
     in-out property <color> canvas-default;
     in-out property <color> canvas-subtle;
     in-out property <color> canvas-inset;
+    // 材质窗根底：canvas 带 alpha，铺在 DWM 材质（Mica/Acrylic）之上；
+    // 材质不可用的窗口回退 canvas-default 不透明底
+    in-out property <color> material-base;
 
     // 前景
     in-out property <color> fg-default;

@@ -197,6 +197,16 @@ pub fn activate(app: &App) {
         &tokens,
     );
 
+    // Win11 材质背景：速贴是瞬态浮层 → Acrylic，明暗随主题联动。
+    // 挂载结果回传 UI：失败（系统不支持/透明关闭）时面板用不透明
+    // canvas 底回退——窗口透明底在无材质时会直接透出桌面
+    let material_active = win32_ext::apply_window_backdrop(
+        hwnd,
+        true,
+        resolved == floatpaste_core::theme::ResolvedTheme::Dark,
+    );
+    win.set_material_active(material_active);
+
     app.state.begin_picker_activation();
 
     // 重现（无激活 + 置顶，对齐原版 always_on_top）。窗口自启动起保持

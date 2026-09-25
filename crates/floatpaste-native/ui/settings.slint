@@ -540,7 +540,8 @@ component RowGroup inherits Rectangle {
     border-radius: 12px;
     border-width: 1px;
     border-color: Theme.border-muted;
-    background: Theme.canvas-subtle;
+    // 恒定半透明：材质时透 backdrop，无材质时叠窗底实色（仅略淡）
+    background: Theme.canvas-subtle.with-alpha(0.72);
     clip: true;
     height: group-col.preferred-height + 2px;
     // 内容整体内缩 1px：Slint 子元素画在父边框之上，行悬停底色若延伸
@@ -832,7 +833,9 @@ export component SettingsWindow inherits Window {
     min-width: 880px;
     preferred-width: 920px;
     preferred-height: 760px;
-    background: Theme.canvas-default;
+    // 材质（Mica）挂载成功时窗底半透明透出 backdrop，否则不透明回退
+    background: root.material-active ? Theme.material-base : Theme.canvas-default;
+    in property <bool> material-active: false;
 
     // 整帧重绘开关（与编辑窗口同理：hide→show 后 Slint 只重绘变化区域，
     // 重开时静态区保持表面销毁时的白底；show 前翻转强制全窗变脏）
@@ -1173,7 +1176,9 @@ export component SettingsWindow inherits Window {
                             border-radius: Metrics.radius-md;
                             background: root.active-section == idx
                                 ? Theme.accent-subtle
-                                : (nav-ta.has-hover ? Theme.canvas-subtle : transparent);
+                                : (nav-ta.has-hover
+                                    ? Theme.canvas-subtle.with-alpha(0.62)
+                                    : transparent);
                             nav-ta := TouchArea {
                                 clicked() => { root.nav-selected(idx); }
                             }

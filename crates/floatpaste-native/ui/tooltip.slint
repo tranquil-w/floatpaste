@@ -40,6 +40,9 @@ export component TooltipWindow inherits Window {
     in-out property <string> time-text;
     // 静态提示模式（工具栏按钮等固定文案）：只显示一行文案，无元信息行
     in-out property <bool> simple-mode: false;
+    // 出现动画：Rust 在 present 时置 false（透明重绘），上屏后置 true
+    // 触发 100ms 渐显（每次悬停都是新的显示实例，重播不突兀）
+    in property <bool> appear: true;
 
     // ── 卡片固定几何：Rust 定窗口尺寸时读取（单一事实来源，禁双边手抄）──
     // 横向：内容宽之外的总占用 = 左右 padding + 1px 边框×2
@@ -87,6 +90,8 @@ export component TooltipWindow inherits Window {
         width: 100%;
         height: 100%;
         background: Theme.canvas-subtle;
+        opacity: root.appear ? 1.0 : 0.0;
+        animate opacity { duration: 100ms; easing: ease-out; }
         border-width: 1px;
         border-color: Theme.border-muted;
         border-radius: Metrics.radius-md;

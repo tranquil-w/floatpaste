@@ -12,10 +12,10 @@ use windows::{
         UI::{
             Input::KeyboardAndMouse::SetFocus,
             WindowsAndMessaging::{
-                BringWindowToTop, GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId,
-                IsIconic, IsWindow, SetForegroundWindow, SetWindowPos, ShowWindow, GUITHREADINFO,
-                HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-                SWP_SHOWWINDOW, SW_RESTORE,
+                BringWindowToTop, GetClassNameW, GetForegroundWindow, GetGUIThreadInfo,
+                GetWindowThreadProcessId, IsIconic, IsWindow, SetForegroundWindow, SetWindowPos,
+                ShowWindow, GUITHREADINFO, HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOACTIVATE,
+                SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SW_RESTORE,
             },
         },
     },
@@ -25,6 +25,18 @@ use windows::{
 pub struct WindowFocusTarget {
     pub window_hwnd: Option<isize>,
     pub focus_hwnd: Option<isize>,
+}
+
+/// 桌面窗口判定：Progman（桌面图标宿主，普通桌面态的前台）与
+/// WorkerW（壁纸层，Win+D 等场景下的前台桌面窗口）
+pub fn is_desktop_window(hwnd: isize) -> bool {
+    let hwnd = HWND(hwnd as *mut _);
+    let mut buf = [0u16; 32];
+    let len = unsafe { GetClassNameW(hwnd, &mut buf) };
+    matches!(
+        String::from_utf16_lossy(&buf[..len as usize]).as_str(),
+        "Progman" | "WorkerW"
+    )
 }
 
 pub struct ActiveAppResolver;
@@ -40,6 +52,13 @@ impl ActiveAppResolver {
     }
 
     pub fn restore_foreground_window(hwnd: isize) -> bool {
+        // 前台是桌面（无应用聚焦态，Progman 承载图标层、WorkerW 是壁纸层）
+        // 时无需归还——速贴/搜索窗口无激活显示并未改变前台；而
+        // SetForegroundWindow(Progman) 在桌面空闲态实测阻塞 1.3s
+        // （explorer 桌面线程慢路径，2026-09-25 真机日志定位），跳过
+        if is_desktop_window(hwnd) {
+            return true;
+        }
         let hwnd = HWND(hwnd as *mut _);
         unsafe { IsWindow(Some(hwnd)).as_bool() && SetForegroundWindow(hwnd).as_bool() }
     }

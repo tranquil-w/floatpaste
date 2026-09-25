@@ -45,6 +45,7 @@
 | `accent-fg` | canvas 上的强调文字/图标，≥ 4.5:1，不足则亮度校正 |
 | `accent-emphasis` | 实底按钮底，保持官方饱和原色；前景黑白自动二选一，均不足 4.5:1 时推移底色亮度 |
 | `accent-subtle` / `*-subtle` | 由对应前景色 rgba 生成，明暗模式各一组 alpha |
+| `material-base` | 材质窗根底：canvas 直通 rgb + 按明暗分级 alpha（浅 0.40 / 深 0.70），铺在 DWM 材质（Mica/Acrylic，见 adr-0005）之上；材质未挂载的窗口回退 `canvas-default` 不透明底，半透明色禁止直接用在无材质的透明窗上（会透出桌面） |
 | 阴影 | 阴影色随正文墨色派生，亮暗共享同一组 shadow token |
 
 ## 预设与强调色

@@ -135,6 +135,8 @@ export component ListScrollBar inherits Rectangle {
 component ClipRowCard inherits Rectangle {
     in property <ClipRow> data;
     in property <bool> selected;
+    // 材质门控：材质活跃时非选中行底走半透明（Acrylic 透出行卡）
+    in property <bool> material-active: false;
     in property <length> text-width;
     callback clicked();
     callback double-clicked();
@@ -149,14 +151,15 @@ component ClipRowCard inherits Rectangle {
         }
     }
 
-    // 描边用双层填充模拟（外层填边框色、内层填背景色）：
-    // 渲染器对带边框圆角在弧线切点附近的行会把外缘 AA
-    // 段与内容 AA 段重叠混色（同一像素 blend 两次），
-    // 高对比描边色下呈孤立亮点；纯填充路径无此问题
+    // 选中态：外层双层填充模拟 1px 强调描边（accent 实色高对比，必须
+    // 走纯填充路径——渲染器对带边框圆角在弧线切点附近把外缘 AA 段与
+    // 内容 AA 段重叠混色，高对比描边色下呈孤立亮点），内层垫不透明
+    // canvas 底（accent-subtle 半透明高亮叠不透明底色值才可控）。
+    // 非选中态：材质模式下行底半透明（Acrylic 透出行卡与面板一致通透），
+    // 模拟外层的灰底会透进行底污染色值，故外层透明、描边由内层低对比
+    // border-width 承担（弱灰无切点亮点）
     border-radius: Metrics.radius-lg;
-    background: selected
-        ? Theme.accent-fg.with-alpha(0.35)
-        : (item-ta.has-hover ? Theme.border-default : Theme.border-subtle);
+    background: selected ? Theme.accent-fg : transparent;
     animate background { duration: 120ms; }
 
     VerticalLayout {
@@ -164,13 +167,24 @@ component ClipRowCard inherits Rectangle {
 
         inner-card := Rectangle {
             border-radius: Metrics.radius-lg - 1px;
+            border-width: selected ? 0px : 1px;
+            border-color: item-ta.has-hover ? Theme.border-default : Theme.border-subtle;
             background: selected
-                ? Theme.accent-subtle
-                : (item-ta.has-hover ? Theme.canvas-inset : Theme.canvas-subtle);
+                ? Theme.canvas-default
+                : (item-ta.has-hover
+                    ? Theme.canvas-inset.with-alpha(material-active ? 0.62 : 1.0)
+                    : Theme.canvas-subtle.with-alpha(material-active ? 0.62 : 1.0));
             animate background { duration: 120ms; }
             // 兜底裁剪：字体度量与渲染器行高存在细微差异时，
             // 防止预览文本画穿条目边界（原版由 CSS overflow 保证）
             clip: true;
+
+            // 选中高亮：半透明强调色叠在不透明垫底上（浅色主题下
+            // 即淡雅的强调底，文字与白 chip 保持可读）
+            if (selected): Rectangle {
+                border-radius: Metrics.radius-lg - 1px;
+                background: Theme.accent-subtle;
+            }
 
             // 收藏条目左侧 3px 强调边条
             if (data.favorited && !selected): Rectangle {
@@ -180,14 +194,6 @@ component ClipRowCard inherits Rectangle {
                 height: parent.height;
                 background: Theme.accent-fg;
                 border-radius: 2px;
-            }
-
-            // 选中态内圈 1px 强调描边：原版为 inset box-shadow。
-            // 8% 透明度低对比，不会显出渲染器的切点混色
-            if (selected): Rectangle {
-                border-radius: Metrics.radius-lg - 1px;
-                border-width: 1px;
-                border-color: Theme.accent-fg.with-alpha(0.08);
             }
 
             // 每行一把隐藏标尺：与预览 Text 同文本、同宽度，
@@ -410,6 +416,9 @@ export component QuickPasteWindow inherits Window {
     in-out property <bool> load-failed: false;
     // 加载失败的具体原因（旧版 getErrorMessage 展示）
     in-out property <string> load-error-text;
+    // DWM 材质（Acrylic）是否挂载成功：false 时面板用不透明底回退
+    // （窗口 background 透明会把桌面透进来，不能作为回退态）
+    in property <bool> material-active: false;
 
     // ── 回调（Rust 接管）──
     callback row-clicked(int);
@@ -453,7 +462,9 @@ export component QuickPasteWindow inherits Window {
         root.message-tone == 1 ? Theme.success-fg : Theme.danger-fg;
 
     card := Rectangle {
-        background: Theme.canvas-default;
+        // 材质挂载成功 → 半透明材质底（Acrylic 透出在面板之下）；
+        // 未挂载 → 不透明 canvas 回退（透明窗底会直接透出桌面）
+        background: root.material-active ? Theme.material-base : Theme.canvas-default;
         border-radius: Metrics.radius-lg;
         border-width: PanelGeometry.card-border;
         border-color: Theme.border-window;
@@ -463,7 +474,8 @@ export component QuickPasteWindow inherits Window {
             // ── 头部（可拖拽）──
             Rectangle {
                 height: 30px;
-                background: Theme.canvas-default;
+                // 透出面板材质底（原 canvas-default 会形成不透明色带）
+                background: transparent;
 
                 // 底部分隔线（旧版 header 的 border-b border-pg-border-subtle）
                 Rectangle {
@@ -544,7 +556,9 @@ export component QuickPasteWindow inherits Window {
 
             // ── 列表区 ──
             Rectangle {
-                background: Theme.canvas-default;
+                // 透出面板材质底：行卡片保持不透明浮卡，间隙与空态处
+                // 见 Acrylic
+                background: transparent;
                 border-radius: 8px;
 
                 if (root.loading): VerticalLayout {
@@ -645,6 +659,7 @@ export component QuickPasteWindow inherits Window {
                             for row[i] in root.rows: ClipRowCard {
                                 data: row;
                                 selected: i == root.selected;
+                                material-active: root.material-active;
                                 text-width: row.has-thumb
                                     ? root.preview-width-thumb
                                     : root.preview-width-no-thumb;

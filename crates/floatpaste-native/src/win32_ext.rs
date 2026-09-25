@@ -5,8 +5,10 @@ use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use slint::ComponentHandle;
 use windows::Win32::Foundation::{HWND, POINT, RECT};
 use windows::Win32::Graphics::Dwm::{
-    DwmExtendFrameIntoClientArea, DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE,
-    DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DWM_WINDOW_CORNER_PREFERENCE,
+    DwmExtendFrameIntoClientArea, DwmSetWindowAttribute, DWMSBT_MAINWINDOW, DWMSBT_TRANSIENTWINDOW,
+    DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE, DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_USE_IMMERSIVE_DARK_MODE,
+    DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DWM_SYSTEMBACKDROP_TYPE,
+    DWM_WINDOW_CORNER_PREFERENCE,
 };
 use windows::Win32::Graphics::Gdi::{ClientToScreen, InvalidateRect, UpdateWindow};
 use windows::Win32::UI::Controls::MARGINS;
@@ -34,6 +36,81 @@ pub fn warm_surface(hwnd: isize) {
     unsafe {
         let _ = InvalidateRect(Some(hwnd), None, false);
         let _ = UpdateWindow(hwnd);
+    }
+}
+
+/// 系统是否开启「透明效果」（设置 > 个性化 > 颜色）。注册表值缺失
+/// 或读取失败（异常环境）按开启处理，不因检测问题阻断材质
+pub fn system_transparency_enabled() -> bool {
+    use windows::core::w;
+    use windows::Win32::Foundation::WIN32_ERROR;
+    use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RegGetValueW, RRF_RT_REG_DWORD};
+
+    let mut value: u32 = 1;
+    let mut size = std::mem::size_of::<u32>() as u32;
+    let result = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            w!("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"),
+            w!("EnableTransparency"),
+            RRF_RT_REG_DWORD,
+            None,
+            Some(&mut value as *mut u32 as *mut _),
+            Some(&mut size),
+        )
+    };
+    if result != WIN32_ERROR(0) {
+        return true;
+    }
+    value != 0
+}
+
+/// 给窗口挂 Win11 系统材质背景（Mica/Acrylic）：暗色联动 + SystemBackdrop
+/// + extend frame 铺满客户区。系统关闭「透明效果」或系统不支持该属性
+/// （Win10 / Win11 初版）时返回 false 静默跳过——窗口保持自身背景色，
+/// 回退即默认态。
+///
+/// DWM 属性挂在 HWND 上、不受 winit 样式重排影响，停屏方案窗口
+/// （速贴/搜索/tooltip）每次显示前挂载即可；走 hide 销毁重建的窗口
+/// （编辑/设置）须在重新 show 后重挂。`transient=true` 用 Acrylic
+/// （瞬态浮层），false 用 Mica（常驻内容窗）。extend frame 会覆盖
+/// [`apply_dwm_shadow`] 的 1px 底边——backdrop 窗口由 DWM 按窗口轮廓
+/// 投影与圆角，无需保留
+pub fn apply_window_backdrop(hwnd: isize, transient: bool, prefers_dark: bool) -> bool {
+    if !system_transparency_enabled() {
+        return false;
+    }
+    let hwnd = HWND(hwnd as *mut _);
+    let dark: u32 = u32::from(prefers_dark);
+    let backdrop = if transient { DWMSBT_TRANSIENTWINDOW } else { DWMSBT_MAINWINDOW };
+    unsafe {
+        if DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_USE_IMMERSIVE_DARK_MODE,
+            &dark as *const u32 as *const _,
+            std::mem::size_of::<u32>() as u32,
+        )
+        .is_err()
+        {
+            return false;
+        }
+        if DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_SYSTEMBACKDROP_TYPE,
+            &backdrop as *const DWM_SYSTEMBACKDROP_TYPE as *const _,
+            std::mem::size_of::<DWM_SYSTEMBACKDROP_TYPE>() as u32,
+        )
+        .is_err()
+        {
+            return false;
+        }
+        let margins = MARGINS {
+            cxLeftWidth: -1,
+            cxRightWidth: -1,
+            cyTopHeight: -1,
+            cyBottomHeight: -1,
+        };
+        DwmExtendFrameIntoClientArea(hwnd, &margins).is_ok()
     }
 }
 

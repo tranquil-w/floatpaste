@@ -597,6 +597,21 @@ pub fn open(app: &App) {
             win.invoke_focus_root_scope();
             if let Some(hwnd) = win32_ext::window_hwnd(&win) {
                 app_icon::apply_window_icon(hwnd);
+                // 全应用统一 Acrylic（Mica 视觉过弱用户实测否决）；
+                // hide 销毁重建型窗口每次打开重挂
+                {
+                    let settings = app_cb.state.current_settings();
+                    let resolved = floatpaste_core::theme::resolve_theme(
+                        settings.theme_mode.clone(),
+                        floatpaste_core::theme::system_prefers_dark(),
+                    );
+                    let active = win32_ext::apply_window_backdrop(
+                        hwnd,
+                        true,
+                        resolved == floatpaste_core::theme::ResolvedTheme::Dark,
+                    );
+                    win.set_material_active(active);
+                }
                 win32_ext::warm_surface(hwnd);
                 // 设置窗口需要真实前台（输入框键盘输入），绕前台锁获取
                 if !ActiveAppResolver::force_foreground_window(hwnd) {

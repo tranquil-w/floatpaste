@@ -4,6 +4,7 @@
 
 use crate::domain::error::AppError;
 use crate::domain::settings::{PickerPositionMode, StoredWindowPosition};
+use crate::platform::windows::active_app::is_desktop_window;
 use crate::platform::windows::picker_position::{
     caret_point_for_window, current_cursor_point, work_area_from_point, Anchor, ScreenPoint,
     ScreenRect,
@@ -114,7 +115,10 @@ fn resolve_from_caret(
     window_width: i32,
     window_height: i32,
 ) -> Option<ScreenPoint> {
+    // 桌面前台（无应用聚焦，Progman/WorkerW）没有插入符，而 UIA 对
+    // 桌面的解析实测阻塞 1.3s——直接按鼠标位置兜底
     let anchor = target_window_hwnd
+        .filter(|hwnd| !is_desktop_window(*hwnd))
         .and_then(|hwnd| caret_point_for_window(hwnd).ok())
         .or_else(|| {
             tracing::debug!("caret 定位失败，回退鼠标位置");

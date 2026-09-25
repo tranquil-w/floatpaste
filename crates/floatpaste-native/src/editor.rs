@@ -172,6 +172,21 @@ fn show_editor(app: &App, session: EditorSession, anchor: Option<HostAnchor>) {
             if let Some(editor_hwnd) = win32_ext::window_hwnd(&win) {
                 app_icon::apply_window_icon(editor_hwnd);
                 win32_ext::remove_dwm_border(editor_hwnd);
+                // 全应用统一 Acrylic（Mica 视觉过弱用户实测否决）；
+                // hide 销毁重建型窗口每次打开重挂
+                {
+                    let settings = app_cb.state.current_settings();
+                    let resolved = floatpaste_core::theme::resolve_theme(
+                        settings.theme_mode.clone(),
+                        floatpaste_core::theme::system_prefers_dark(),
+                    );
+                    let active = win32_ext::apply_window_backdrop(
+                        editor_hwnd,
+                        true,
+                        resolved == floatpaste_core::theme::ResolvedTheme::Dark,
+                    );
+                    win.set_material_active(active);
+                }
                 win32_ext::warm_surface(editor_hwnd);
                 // 前台获取放在全部尺寸/显隐操作之后：从速贴打开时本进程
                 // 不是前台（前台在目标应用上），裸 SetForegroundWindow 会
