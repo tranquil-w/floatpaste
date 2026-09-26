@@ -6,10 +6,9 @@
 // - 列表：单行省略恒定行高，选中仅高亮/左条/操作条浮层（不展开全文与大图）
 // - 键盘：根 FocusScope capture-key-pressed 先于输入框拦截会话键
 //   （↑↓/Enter/Shift+Enter/Ctrl+Enter/Ctrl+Space/Del/Esc），其余按键放行输入框
-// - 挂起态（键盘交给速贴面板）：输入框失焦、底栏切换为速贴键位提示
+// - 挂起态（键盘交给速贴面板）：输入框失焦
 // - 行高恒定：选中只换高亮/左条/操作条浮层，不展开（切换零跳动，用户要求）
 import { Theme, Metrics, Motion } from "theme.slint";
-import { Kbd } from "common.slint";
 import { ListScrollBar } from "picker.slint";
 
 export struct SearchRow {
@@ -118,23 +117,6 @@ component IconButton inherits Rectangle {
                 root.hover-left();
             }
         }
-    }
-}
-
-component KeyHint inherits HorizontalLayout {
-    in property <string> key;
-    in property <string> label;
-    spacing: 4px;
-    // 布局交叉轴对固定高子元素是顶对齐：包一层拉伸容器，
-    // 让 Kbd 走“默认 y = 居中”规则与右侧文案垂直居中对齐
-    Rectangle {
-        Kbd { key: root.key; }
-    }
-    Text {
-        text: root.label;
-        color: Theme.fg-muted;
-        font-size: Metrics.text-hint;
-        vertical-alignment: center;
     }
 }
 
@@ -711,8 +693,7 @@ export component SearchWindow inherits Window {
     out property <length> preview-width-no-thumb;
     out property <length> preview-width-thumb;
     // ── 高度同步度量（旧版：target = min(620, 5 + chrome + 列表内容高)）──
-    out property <length> chrome-height:
-        header-bar.height + filter-bar.height + footer-bar.height;
+    out property <length> chrome-height: header-bar.height + filter-bar.height;
     out property <length> list-content-height: list-stack.natural-height;
 
     public function focus-input() {
@@ -1245,26 +1226,6 @@ export component SearchWindow inherits Window {
                         changed generation => {
                             list-flick.content-y = 0;
                         }
-                    }
-                }
-
-                // ── 底栏键位提示 ──
-                footer-bar := Rectangle {
-                    height: 28px;
-                    // 恒定半透明：材质时透 backdrop，无材质时叠窗底实色
-                    background: Theme.canvas-subtle.with-alpha(0.6);
-                    HorizontalLayout {
-                        alignment: center;
-                        spacing: Metrics.space-3;
-                        if (!root.input-suspended): KeyHint { key: "↑↓"; label: "选择"; }
-                        if (!root.input-suspended): KeyHint { key: "Enter"; label: "粘贴"; }
-                        if (!root.input-suspended): KeyHint { key: "Ctrl+Enter"; label: "编辑"; }
-                        if (!root.input-suspended): KeyHint { key: "Del"; label: "删除"; }
-                        if (!root.input-suspended): KeyHint { key: "Esc"; label: "关闭"; }
-                        if (root.input-suspended): KeyHint { key: "↑↓"; label: "选择"; }
-                        if (root.input-suspended): KeyHint { key: "Enter"; label: "粘贴"; }
-                        if (root.input-suspended): KeyHint { key: "1-9"; label: "直达"; }
-                        if (root.input-suspended): KeyHint { key: "Esc"; label: "返回搜索"; }
                     }
                 }
             }
