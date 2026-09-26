@@ -222,6 +222,12 @@ pub fn is_window_minimized(hwnd: isize) -> bool {
     unsafe { IsIconic(hwnd_of(hwnd)).as_bool() }
 }
 
+/// 查询窗口是否处于最大化（自绘标题栏据此切换还原图标）
+pub fn is_window_maximized(hwnd: isize) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::IsZoomed;
+    unsafe { IsZoomed(hwnd_of(hwnd)).as_bool() }
+}
+
 pub fn is_window_visible(hwnd: isize) -> bool {
     unsafe { IsWindowVisible(hwnd_of(hwnd)).as_bool() }
 }

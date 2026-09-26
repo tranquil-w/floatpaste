@@ -31,11 +31,13 @@ export component Kbd inherits Rectangle {
     }
 }
 
-// no-frame 内容窗（编辑/设置）的自绘标题栏：拖拽命中 + 窗控三键。
-// 键位 46px 间距仿原生窗控布局；回调由宿主窗口接线，title-text 由
-// 宿主给定（编辑窗含脏状态 ●）
+// no-frame 内容窗（编辑/设置）的自绘标题栏：应用图标 + 拖拽命中 +
+// 窗控三键。键位 46px 间距仿原生窗控布局；回调由宿主窗口接线，
+// title-text 由宿主给定（编辑窗含脏状态 ●），maximized 由宿主在
+// 切换后回写（还原态图标随之切换）
 export component WindowTitleBar inherits Rectangle {
     in property <string> title-text;
+    in property <bool> maximized: false;
     callback drag-started();
     callback drag-moved();
     callback drag-finished();
@@ -45,9 +47,18 @@ export component WindowTitleBar inherits Rectangle {
 
     height: 32px;
     background: transparent;
+    Image {
+        x: 10px;
+        y: (parent.height - 16px) / 2;
+        width: 16px;
+        height: 16px;
+        // 32px 小尺寸规格源图（scripts/make_icon.py 产出）。512 源图
+        // 直缩 32 倍发糊；16px 又在 125%/150% DPI 下要放大
+        source: @image-url("titlebar-icon.png");
+    }
     Text {
-        x: 12px;
-        width: parent.width - 170px;
+        x: 34px;
+        width: parent.width - 180px;
         height: parent.height;
         text: root.title-text;
         color: Theme.fg-default;
@@ -79,18 +90,20 @@ export component WindowTitleBar inherits Rectangle {
             clicked => { root.minimize-requested(); }
         }
         Path {
-            x: (parent.width - 10px) / 2;
-            y: (parent.height - 10px) / 2;
-            width: 10px;
-            height: 10px;
-            viewbox-width: 10;
-            viewbox-height: 10;
+            x: (parent.width - 12px) / 2;
+            y: (parent.height - 12px) / 2;
+            width: 12px;
+            height: 12px;
+            viewbox-width: 12;
+            viewbox-height: 12;
             stroke: Theme.fg-default;
             stroke-width: 1px;
-            commands: "M 1 5 L 9 5";
+            // 线心 6.5：整数像素覆盖 6..7，100% DPI 下单行实线；
+            // 6.0 会跨像素糊成两行半透明灰线。线宽仿原生：通栏全宽
+            commands: "M 0 6.5 L 12 6.5";
         }
     }
-    // 最大化切换
+    // 最大化/还原切换（最大化后显示原生样式的双窗格还原图标）
     btn-max := Rectangle {
         x: parent.width - 92px;
         width: 46px;
@@ -101,15 +114,20 @@ export component WindowTitleBar inherits Rectangle {
             clicked => { root.max-toggle-requested(); }
         }
         Path {
-            x: (parent.width - 10px) / 2;
-            y: (parent.height - 10px) / 2;
-            width: 10px;
-            height: 10px;
-            viewbox-width: 10;
-            viewbox-height: 10;
+            x: (parent.width - 12px) / 2;
+            y: (parent.height - 12px) / 2;
+            width: 12px;
+            height: 12px;
+            viewbox-width: 12;
+            viewbox-height: 12;
             stroke: Theme.fg-default;
             stroke-width: 1px;
-            commands: "M 1.5 1.5 L 8.5 1.5 L 8.5 8.5 L 1.5 8.5 Z";
+            commands: !root.maximized
+                ? "M 1 1 L 11 1 L 11 11 L 1 11 Z"
+                // 前窗格整框 + 后窗格仅露出未被前窗格描边遮住的部分
+                // （前窗格无填充、遮不住线，被遮线段必须省略）
+                : "M 1 4 L 8 4 L 8 11 L 1 11 Z"
+                + " M 4 4 L 4 1 L 11 1 L 11 8 L 9 8";
         }
     }
     // 关闭（hover 红）
@@ -123,15 +141,16 @@ export component WindowTitleBar inherits Rectangle {
             clicked => { root.close-requested(); }
         }
         Path {
-            x: (parent.width - 10px) / 2;
-            y: (parent.height - 10px) / 2;
-            width: 10px;
-            height: 10px;
-            viewbox-width: 10;
-            viewbox-height: 10;
+            x: (parent.width - 12px) / 2;
+            y: (parent.height - 12px) / 2;
+            width: 12px;
+            height: 12px;
+            viewbox-width: 12;
+            viewbox-height: 12;
             stroke: Theme.fg-default;
             stroke-width: 1px;
-            commands: "M 1 1 L 9 9 M 9 1 L 1 9";
+            // X 比最大化方块略大（11 vs 10），仿原生窗控比例
+            commands: "M 0.5 0.5 L 11.5 11.5 M 11.5 0.5 L 0.5 11.5";
         }
     }
 }

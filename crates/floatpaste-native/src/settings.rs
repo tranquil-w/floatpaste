@@ -523,6 +523,10 @@ pub fn wire(app: &App) {
             let hwnd = app_cb.state.settings_hwnd.load(Ordering::SeqCst);
             if hwnd != 0 {
                 let _ = window_control::toggle_maximize_window(hwnd);
+                // 切换后回写最大化态，标题栏随之切换还原图标
+                if let Some(win) = app_cb.settings.upgrade() {
+                    win.set_is_maximized(window_control::is_window_maximized(hwnd));
+                }
             }
         });
     }

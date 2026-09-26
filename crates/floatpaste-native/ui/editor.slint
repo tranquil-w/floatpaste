@@ -79,6 +79,8 @@ export component EditorWindow inherits Window {
     // backdrop，否则不透明回退
     background: transparent;
     in property <bool> material-active: false;
+    // 最大化态（Rust 在切换后回写）：标题栏据此显示还原图标
+    in property <bool> is-maximized: false;
 
     // 自绘标题栏回调：拖拽手势与窗控（最小化/最大化切换/关闭）
     callback drag-started();
@@ -221,6 +223,7 @@ export component EditorWindow inherits Window {
         VerticalLayout {
             // ── 自绘标题栏（共享组件：拖拽 + 窗控按钮）──
             WindowTitleBar {
+                maximized: root.is-maximized;
                 title-text: root.has-session && root.is-dirty
                     ? "● FloatPaste · 编辑"
                     : "FloatPaste · 编辑";
