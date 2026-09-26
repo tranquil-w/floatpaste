@@ -556,3 +556,107 @@ pub(crate) fn sync_global_hotkeys(app: &App) {
     }
     app.state.set_hotkey_failures(last_failures);
 }
+
+#[cfg(test)]
+mod settings_scroll_tests {
+    //! 设置窗自管滚动（弃 Flickable，编辑窗 ADR-0003 同款方案）的行为契约：
+    //! 滚轮事件即时驱动 content-y，触底 clamp，不依赖内建平滑动画。
+    //! 单测试函数串行三段：winit 事件循环全局单例，多测试并行实例化会
+    //! 抢建失败（"EventLoop can't be recreated"）
+
+    use slint::ComponentHandle;
+
+    #[test]
+    fn wheel_scroll_clamp_and_spy_contract() {
+        let win = crate::SettingsWindow::new().expect("实例化设置窗失败");
+        // set_size 同步驱动布局求解（winit 的实际 resize 走事件循环，等不到），
+        // 未布局时元素几何为 0，滚轮命中落空
+        win.window()
+            .set_size(slint::LogicalSize::new(920.0, 760.0));
+
+        let window = win.window();
+        let pos = slint::LogicalPosition::new(500.0, 400.0);
+        let scroll = |dy: f32| {
+            window.dispatch_event(slint::platform::WindowEvent::PointerScrolled {
+                position: pos,
+                delta_x: 0.0,
+                delta_y: dy,
+            });
+        };
+
+        // ── 滚轮即时性与 clamp ──
+        // 向下滚一格（Flickable 数值语义：delta_y 为负累加，scroll-y 负向增大）
+        scroll(-180.0);
+        assert_eq!(
+            win.get_scroll_y(),
+            -180.0,
+            "一格滚轮应即时滚动 180 逻辑像素（无动画追赶）"
+        );
+
+        // 超大滚动量应 clamp 到内容底部，不越界
+        scroll(-1_000_000.0);
+        let max = (win.get_content_height() - win.get_view_height()).max(0.0);
+        assert_eq!(win.get_scroll_y(), -max, "触底应 clamp 到 -最大滚动量");
+        assert!(
+            max > 180.0,
+            "默认设置内容应高于一屏（否则滚动测试无意义）"
+        );
+
+        // 回滚到顶：向上滚超大值应 clamp 回 0
+        scroll(1_000_000.0);
+        assert_eq!(win.get_scroll_y(), 0.0, "回顶应 clamp 到 0");
+
+        // ── spy 契约：高亮 ≡ 视口顶 80px 线所在区（无触底特判）──
+        // 默认内容下末两区（排除应用/标签）不足一屏，锚点可达
+        // padding 保证滚到底时末区顶恰好贴 80px 线——滚动即可
+        // 抵达末区，无需点击导航
+        let view_h = win.get_view_height();
+        let content_h = win.get_content_height();
+        assert!(
+            content_h > view_h,
+            "默认设置内容应超出视口，测试才有意义"
+        );
+        let bottom = view_h - content_h; // 触底滚动量（负值）
+        win.set_scroll_y(bottom);
+        assert!(
+            win.get_sec_y5() + bottom <= 80.0,
+            "触底时末区顶应抵达 80px 线（锚点可达 padding 生效）"
+        );
+        assert_eq!(
+            win.get_active_section(),
+            5,
+            "滚到底高亮应为末区（标签），由线判定而非触底特判"
+        );
+
+        // 期望值与 spy 表达式同构：从 sec5 往前首个过 80px 线的区
+        let spy_at = |scroll_y: f32| {
+            [
+                win.get_sec_y5(),
+                win.get_sec_y4(),
+                win.get_sec_y3(),
+                win.get_sec_y2(),
+                win.get_sec_y1(),
+            ]
+            .iter()
+            .position(|y| y + scroll_y <= 80.0)
+            .map(|i| (5 - i) as i32)
+            .unwrap_or(0)
+        };
+        // ── 点击高亮保持到用户主动滚动（nav-override 不自动解锁）──
+        // 模拟点击"排除应用"导航后的程序性滚动停住（滚到底、排除
+        // 应用与标签同屏）：锁定期间 spy 让位，点击项保持高亮
+        win.set_scroll_y(bottom);
+        win.set_nav_override(4);
+        assert_eq!(
+            win.get_active_section(),
+            4,
+            "程序性滚动结束后高亮应保持点击项"
+        );
+        scroll(180.0); // 用户向上滚一格：解除锁定
+        assert_eq!(
+            win.get_active_section(),
+            spy_at(bottom + 180.0),
+            "用户滚轮后高亮交还 spy"
+        );
+    }
+}

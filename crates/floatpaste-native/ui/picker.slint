@@ -72,6 +72,9 @@ export component ListScrollBar inherits Rectangle {
     in property <length> content-height;
     in property <length> visible-height;
     in-out property <length> content-y;
+    // 用户以滚动条驱动滚动的信号（点击轨道/拖拽拇指）；设置窗用于
+    // 解除导航点击的 scroll-spy 锁定。不连接则无行为（速贴/搜索窗）
+    callback user-scrolled();
 
     track-ta := TouchArea {
         clicked => {
@@ -81,6 +84,7 @@ export component ListScrollBar inherits Rectangle {
                 if (thumb.max-y > 0) {
                     root.content-y = -(Math.min(thumb.max-y, Math.max(0, self.mouse-y - thumb.height / 2)) / thumb.max-y)
                         * (root.content-height - root.visible-height);
+                    root.user-scrolled();
                 }
             }
         }
@@ -123,6 +127,7 @@ export component ListScrollBar inherits Rectangle {
                             + (self.absolute-position.y + self.mouse-y - self.press-mouse-y)));
                     root.content-y = -(target / thumb.max-y)
                         * (root.content-height - root.visible-height);
+                    root.user-scrolled();
                 }
             }
         }

@@ -75,8 +75,6 @@ thread_local! {
     static NOTICE_TIMER: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
     /// 滚动动画驱动定时器（导航点击的程序性滚动）
     static ANIM_TIMER: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
-    /// 动画结束后延迟解锁 scroll-spy 的单发定时器
-    static UNLOCK_TIMER: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
     /// 滚动动画状态（Some=程序性滚动进行中，scroll-spy 锁定）
     static SCROLL_ANIM: RefCell<Option<ScrollAnim>> = const { RefCell::new(None) };
     /// 最近一次服务端设置：与本地草稿比对判定脏（对齐 lastServerSettingsRef）
@@ -541,6 +539,17 @@ pub fn wire(app: &App) {
             scroll_to_section(&win, index.max(0) as usize);
         });
     }
+    // 用户主动滚动（滚轮/滚动条，Slint 侧已清 nav-override 解除高亮
+    // 锁定）：停掉进行中的程序性滚动动画，避免与用户输入打架
+    win.on_user_scroll(|| {
+        SCROLL_ANIM.with(|slot| *slot.borrow_mut() = None);
+        ANIM_TIMER.with(|slot| {
+            if let Some(timer) = slot.borrow().as_ref() {
+                timer.stop();
+            }
+            *slot.borrow_mut() = None;
+        });
+    });
     // ── 标签管理 ──
     {
         let app_cb = app.clone();
@@ -1251,23 +1260,11 @@ fn scroll_to_section(win: &SettingsWindow, index: usize) {
             win.set_scroll_y(current.from + (current.to - current.from) * eased);
             if progress >= 1.0 {
                 win.set_scroll_y(current.to);
-                // 停止动画；120ms 后解除锁定，高亮交还表达式 scroll-spy
-                // （对齐旧版 PROGRAMMATIC_SCROLL_UNLOCK_DELAY）
+                // 停止动画。高亮保持到用户主动滚动（滚轮/滚动条清
+                // nav-override 并回调 user-scroll 停掉本动画）：定位
+                // 目标=分区顶贴 80px 线，滚动完成时 spy 结论与点击项
+                // 一致，锁定仅为防动画期间 spy 中间值闪动
                 SCROLL_ANIM.with(|slot| *slot.borrow_mut() = None);
-                let win_for_unlock = win.as_weak();
-                UNLOCK_TIMER.with(|slot| {
-                    let unlock = slint::Timer::default();
-                    unlock.start(
-                        slint::TimerMode::SingleShot,
-                        Duration::from_millis(120),
-                        move || {
-                            if let Some(win) = win_for_unlock.upgrade() {
-                                win.set_nav_override(-1);
-                            }
-                        },
-                    );
-                    *slot.borrow_mut() = Some(unlock);
-                });
             }
         });
         *slot.borrow_mut() = Some(timer);

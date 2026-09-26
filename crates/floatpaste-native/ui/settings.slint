@@ -8,6 +8,7 @@
 // Rust 计算高亮并驱动滚动。
 import { Theme, Metrics, Motion } from "theme.slint";
 import { WindowTitleBar } from "common.slint";
+import { ListScrollBar } from "picker.slint";
 
 // 主题预设卡（所见即所得迷你预览，颜色由 Rust 用 core derive_tokens 派生）
 export struct PresetCard {
@@ -928,18 +929,24 @@ export component SettingsWindow inherits Window {
     in-out property <length> sec-y3: sec3.y;
     in-out property <length> sec-y4: sec4.y;
     in-out property <length> sec-y5: sec5.y;
-    // scroll-spy：视口顶 80px 以上最后一个分区；触底强制末分区
-    // （对齐旧版 getActiveSectionId）；程序性滚动期间 nav-override 锁定
+    // scroll-spy 锚定线（对应 Rust 侧 SCROLL_OFFSET）：分区顶滚过
+    // 此线即接管目录高亮
+    property <length> spy-line: 80px;
+    // scroll-spy：锚定线所在的最后一个分区；程序性滚动期间
+    // nav-override 锁定。不设触底特判：末区可达性由内容底部补
+    // padding 保证（见 content-col），触底强制末区会抢占高亮
     in-out property <int> nav-override: -1;
     in-out property <int> active-section:
         root.nav-override >= 0 ? root.nav-override
-        : (content-col.height + scroll-y <= sv.height + 2px ? 5
-        : (sec5.y + scroll-y <= 80px ? 5
-        : (sec4.y + scroll-y <= 80px ? 4
-        : (sec3.y + scroll-y <= 80px ? 3
-        : (sec2.y + scroll-y <= 80px ? 2
-        : (sec1.y + scroll-y <= 80px ? 1 : 0))))));
+        : (sec5.y + scroll-y <= root.spy-line ? 5
+        : (sec4.y + scroll-y <= root.spy-line ? 4
+        : (sec3.y + scroll-y <= root.spy-line ? 3
+        : (sec2.y + scroll-y <= root.spy-line ? 2
+        : (sec1.y + scroll-y <= root.spy-line ? 1 : 0)))));
     callback nav-selected(int);
+    // 用户主动滚动（滚轮/滚动条）：Slint 侧清 nav-override 解除高亮
+    // 锁定，Rust 侧停掉进行中的程序性滚动动画
+    callback user-scroll();
 
     /* ── 编辑回调（Rust 统一防抖保存） ── */
     callback history-limit-edited(string);
@@ -1206,7 +1213,7 @@ export component SettingsWindow inherits Window {
             }
 
             // ── 主体：普通 Rectangle 绝对定位（picker 列表同款结构）。
-            // 不进布局：Flickable 的 min/max 约束经 HorizontalLayout 传播，
+            // 不进布局：滚动内容的 min/max 约束经 HorizontalLayout 传播，
             // 要么把行高压到内容最小高、要么把窗口撑到内容总高
             Rectangle {
                 // 侧边导航（旧版 SettingsNav sidebar：sticky top-16 self-start）
@@ -1268,13 +1275,53 @@ export component SettingsWindow inherits Window {
                     border-width: 1px;
                     border-color: Theme.border-muted;
                     clip: true;
-                    sv := Flickable {
+                    // 自管滚动（对齐编辑窗 ADR-0003 惯用法）：Flickable 内建
+                    // 滚轮平滑动画（180ms 恒定减速）在软件渲染下迟滞不跟手，
+                    // 改为滚轮事件直接驱动内容偏移。TouchArea 须为全部内容
+                    // 的祖先——子元素未消费的滚轮沿父链冒泡，兄弟层收不到。
+                    // content-y 保持 Flickable 数值语义（向下滚为负，范围
+                    // [-max, 0]）：scroll-spy、Rust 导航定位与 ListScrollBar
+                    // 均按此语义直连，零适配
+                    sv := Rectangle {
                         x: 16px;
                         y: 14px;
-                        width: parent.width - 32px;
+                        // 右侧预留 10px 滚动槽（速贴窗同款），内容与滚动条
+                        // 各占各宽，不叠加
+                        width: parent.width - 42px;
                         height: parent.height - 28px;
-                    content-col := VerticalLayout {
-                        spacing: 16px;
+                        clip: true;
+                        property <length> content-y: 0px;
+                        property <length> max-content-y:
+                            Math.max(0px, content-col.height - sv.height);
+                        // 内容变矮（保存横幅开合改 sv 高）时收口，对齐 Flickable
+                        // 的 ensure_in_bound，防底部露白
+                        changed max-content-y => {
+                            content-y = Math.max(content-y, -max-content-y);
+                        }
+                        content-ta := TouchArea {
+                            y: sv.content-y;
+                            width: 100%;
+                            height: Math.max(content-col.preferred-height, sv.height);
+                            scroll-event(event) => {
+                                // 用户滚轮：解除导航点击的高亮锁定（点击
+                                // 高亮保持到此刻），并停掉程序性滚动动画
+                                root.nav-override = -1;
+                                root.user-scroll();
+                                // Windows 滚轮向下 delta_y 为负 = content-y 负向
+                                // 增大（内容上移看下方），同 Flickable 符号约定
+                                sv.content-y = Math.clamp(
+                                    sv.content-y + event.delta_y,
+                                    -sv.max-content-y, 0px);
+                                return accept;
+                            }
+                        content-col := VerticalLayout {
+                            spacing: 16px;
+                            // 锚点可达性：底部补足视口余量，让末区顶能
+                            // 滚到 spy 锚定线。缺这段余量时末两区总高不
+                            // 足一屏，滚到底也过不了线，目录高亮永远停
+                            // 在倒数第三区；前面各区 y 值更小，自动满足
+                            padding-bottom: Math.max(
+                                0px, sv.height - root.spy-line - sec5.height);
 
                         /* ═══ 通用 ═══ */
                         sec0 := Rectangle {
@@ -2047,6 +2094,23 @@ export component SettingsWindow inherits Window {
                             }
                         }
                     }   // 宿主 Rectangle
+                        }
+                    }
+
+                    // ── 滚动条（绝对定位不进布局，速贴/搜索窗同款：
+                    // 贴容器右缘独占槽位，sv 内容已让出同宽）──
+                    if (sv.max-content-y > 0px): ListScrollBar {
+                        x: parent.width - 10px;
+                        y: 14px;
+                        width: 10px;
+                        height: parent.height - 28px;
+                        content-height: content-col.height;
+                        visible-height: sv.height;
+                        content-y <=> sv.content-y;
+                        user-scrolled() => {
+                            root.nav-override = -1;
+                            root.user-scroll();
+                        }
                     }
                 }
             }
