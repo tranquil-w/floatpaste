@@ -194,9 +194,9 @@ pub fn apply_window_host_backdrop_acrylic(hwnd: isize, prefers_dark: bool) -> bo
         use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
         let set_window_composition_attribute =
             LoadLibraryW(w!("user32.dll")).ok().and_then(|module| {
-                let proc =
-                    GetProcAddress(module, PCSTR(b"SetWindowCompositionAttribute\0".as_ptr()));
-                unsafe { std::mem::transmute::<_, Option<SetWindowCompositionAttributeFn>>(proc) }
+                std::mem::transmute::<_, Option<SetWindowCompositionAttributeFn>>(
+                    GetProcAddress(module, PCSTR(b"SetWindowCompositionAttribute\0".as_ptr())),
+                )
             });
         let Some(set_window_composition_attribute) = set_window_composition_attribute else {
             return false;

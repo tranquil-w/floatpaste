@@ -68,18 +68,18 @@ component ResizeHandle inherits Rectangle {
 // ── 列表滚动条：10px 稳定槽 + 4px 视觉拇指（对齐原版 webkit 拇指全槽可抓）──
 // 搜索窗口复用同一组件
 export component ListScrollBar inherits Rectangle {
-    in property <length> viewport-height;
+    in property <length> content-height;
     in property <length> visible-height;
-    in-out property <length> viewport-y;
+    in-out property <length> content-y;
 
     track-ta := TouchArea {
         clicked => {
-            // 点击轨道：滚到对应位置。只驱动 viewport-y，
+            // 点击轨道：滚到对应位置。只驱动 content-y，
             // thumb.y 始终由声明式绑定跟随滚动
             if (self.mouse-y < thumb.y || self.mouse-y > thumb.y + thumb.height) {
                 if (thumb.max-y > 0) {
-                    root.viewport-y = -(Math.min(thumb.max-y, Math.max(0, self.mouse-y - thumb.height / 2)) / thumb.max-y)
-                        * (root.viewport-height - root.visible-height);
+                    root.content-y = -(Math.min(thumb.max-y, Math.max(0, self.mouse-y - thumb.height / 2)) / thumb.max-y)
+                        * (root.content-height - root.visible-height);
                 }
             }
         }
@@ -87,10 +87,10 @@ export component ListScrollBar inherits Rectangle {
 
     thumb := Rectangle {
         property <length> max-y: parent.height - self.height;
-        y: root.viewport-height > root.visible-height && self.max-y > 0
-            ? Math.min(self.max-y, Math.max(0, (-root.viewport-y) / (root.viewport-height - root.visible-height) * self.max-y))
+        y: root.content-height > root.visible-height && self.max-y > 0
+            ? Math.min(self.max-y, Math.max(0, (-root.content-y) / (root.content-height - root.visible-height) * self.max-y))
             : 0;
-        height: Math.max(30px, root.visible-height * root.visible-height / root.viewport-height);
+        height: Math.max(30px, root.visible-height * root.visible-height / root.content-height);
         width: 4px;
         x: 3px;
         border-radius: 2px;
@@ -115,13 +115,13 @@ export component ListScrollBar inherits Rectangle {
             }
             moved => {
                 if (self.pressed && thumb.max-y > 0) {
-                    // 只写 viewport-y：直接赋值 thumb.y 会顶掉它的
+                    // 只写 content-y：直接赋值 thumb.y 会顶掉它的
                     // 绑定，拖拽一次后滚轮/惯性滚动不再更新拇指
                     let target = Math.min(thumb.max-y, Math.max(0,
                         self.press-thumb-y
                             + (self.absolute-position.y + self.mouse-y - self.press-mouse-y)));
-                    root.viewport-y = -(target / thumb.max-y)
-                        * (root.viewport-height - root.visible-height);
+                    root.content-y = -(target / thumb.max-y)
+                        * (root.content-height - root.visible-height);
                 }
             }
         }
@@ -685,10 +685,10 @@ export component QuickPasteWindow inherits Window {
                                 hover(x, y) => { root.row-hover(i, x, y); }
                                 hover-left => { root.row-hover-left(); }
                                 scroll-into-view(row-y, row-height) => {
-                                    if (row-y < -flick.viewport-y + 6px) {
-                                        flick.viewport-y = -row-y + 6px;
-                                    } else if (row-y + row-height > -flick.viewport-y + flick.height - 6px) {
-                                        flick.viewport-y = -(row-y + row-height - flick.height + 6px);
+                                    if (row-y < -flick.content-y + 6px) {
+                                        flick.content-y = -row-y + 6px;
+                                    } else if (row-y + row-height > -flick.content-y + flick.height - 6px) {
+                                        flick.content-y = -(row-y + row-height - flick.height + 6px);
                                     }
                                 }
                             }
@@ -696,14 +696,14 @@ export component QuickPasteWindow inherits Window {
                     }
 
                     // ── 滚动条（绝对定位不进布局）──
-                    if (flick.viewport-height > flick.height): ListScrollBar {
+                    if (flick.content-height > flick.height): ListScrollBar {
                         x: parent.width - PanelGeometry.scroll-slot;
                         y: 0;
                         width: PanelGeometry.scroll-slot;
                         height: parent.height;
-                        viewport-height: flick.viewport-height;
+                        content-height: flick.content-height;
                         visible-height: flick.height;
-                        viewport-y <=> flick.viewport-y;
+                        content-y <=> flick.content-y;
                     }
 
                     // 会话打开时滚回顶部（监听代数属性；changed 只能挂在本元素属性上）
@@ -711,7 +711,7 @@ export component QuickPasteWindow inherits Window {
                         visible: false;
                         property <int> generation: root.scroll-generation;
                         changed generation => {
-                            flick.viewport-y = 0;
+                            flick.content-y = 0;
                         }
                     }
                 }

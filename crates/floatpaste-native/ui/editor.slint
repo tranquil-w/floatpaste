@@ -1045,12 +1045,12 @@ export component EditorWindow inherits Window {
                                                 // 已选区高 + 行索引 × 行高
                                                 let row-top = root.tags.length * 32px
                                                     + root.tag-active * 32px;
-                                                if (row-top < -panel-flick.viewport-y) {
-                                                    panel-flick.viewport-y = -row-top;
+                                                if (row-top < -panel-flick.content-y) {
+                                                    panel-flick.content-y = -row-top;
                                                 } else if (row-top + 32px
-                                                    > -panel-flick.viewport-y + panel-flick.height)
+                                                    > -panel-flick.content-y + panel-flick.height)
                                                 {
-                                                    panel-flick.viewport-y =
+                                                    panel-flick.content-y =
                                                         -(row-top + 32px - panel-flick.height);
                                                 }
                                                 return accept;
@@ -1083,7 +1083,7 @@ export component EditorWindow inherits Window {
                         width: parent.width;
                         height: parent.height;
                         // false=行点击透传（列表超出面板封顶高时不吞点击），
-                        // 滚轮仍可滚；键盘导航的滚动跟随是显式写 viewport-y
+                        // 滚轮仍可滚；键盘导航的滚动跟随是显式写 content-y
                         interactive: false;
                         VerticalLayout {
                             padding: 4px;

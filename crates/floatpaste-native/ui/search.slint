@@ -1082,7 +1082,7 @@ export component SearchWindow inherits Window {
                             padding-right: SearchGeometry.content-pad-h;
                             spacing: 0px;
 
-                            // 内容自然高：viewport-height 有下限（不低于视口
+                            // 内容自然高：content-height 有下限（不低于视口
                             // 自身），窗口收不高、也收不矮；高度同步改用布局
                             // 的首选/最小高（含 padding，行卡片均显式高度）
                             property <length> natural-height:
@@ -1206,10 +1206,10 @@ export component SearchWindow inherits Window {
                                     toggle-favorite => { root.action-toggle-favorite(i); }
                                     delete-armed-request => { root.action-delete(i); }
                                     scroll-into-view(row-y, row-height) => {
-                                        if (row-y < -list-flick.viewport-y + 6px) {
-                                            list-flick.viewport-y = -row-y + 6px;
-                                        } else if (row-y + row-height > -list-flick.viewport-y + list-flick.height - 6px) {
-                                            list-flick.viewport-y = -(row-y + row-height - list-flick.height + 6px);
+                                        if (row-y < -list-flick.content-y + 6px) {
+                                            list-flick.content-y = -row-y + 6px;
+                                        } else if (row-y + row-height > -list-flick.content-y + list-flick.height - 6px) {
+                                            list-flick.content-y = -(row-y + row-height - list-flick.height + 6px);
                                         }
                                     }
                                 }
@@ -1231,24 +1231,24 @@ export component SearchWindow inherits Window {
                     Rectangle {
                         visible: false;
                         property <length> visible-bottom:
-                            -list-flick.viewport-y + list-flick.height;
+                            -list-flick.content-y + list-flick.height;
                         changed visible-bottom => {
-                            if (root.has-next-page && list-flick.viewport-height > 0
-                                && list-flick.viewport-height - self.visible-bottom
+                            if (root.has-next-page && list-flick.content-height > 0
+                                && list-flick.content-height - self.visible-bottom
                                     < SearchGeometry.load-more-margin) {
                                 root.near-bottom();
                             }
                         }
                     }
 
-                    if (list-flick.viewport-height > list-flick.height): ListScrollBar {
+                    if (list-flick.content-height > list-flick.height): ListScrollBar {
                         x: parent.width - SearchGeometry.scroll-slot;
                         y: 0;
                         width: SearchGeometry.scroll-slot;
                         height: parent.height;
-                        viewport-height: list-flick.viewport-height;
+                        content-height: list-flick.content-height;
                         visible-height: list-flick.height;
-                        viewport-y <=> list-flick.viewport-y;
+                        content-y <=> list-flick.content-y;
                     }
 
                     // 会话打开滚回顶部
@@ -1256,7 +1256,7 @@ export component SearchWindow inherits Window {
                         visible: false;
                         property <int> generation: root.scroll-generation;
                         changed generation => {
-                            list-flick.viewport-y = 0;
+                            list-flick.content-y = 0;
                         }
                     }
                 }

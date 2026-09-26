@@ -1194,7 +1194,7 @@ pub fn hover_left(app: &App) {
 /// 请求高度同步（结构变化语义：查询落地/删除/取消收藏）：仅置一次
 /// 收缩许可，读数与应用由 heights-changed 驱动（见 apply_height）。
 /// 命令式调用点不得自行读数——list-content-height 依赖布局 pass 写入的
-/// viewport-height，0ms 定时器读数可能先于渲染帧，拿到的是布局未跟上的
+/// content-height，0ms 定时器读数可能先于渲染帧，拿到的是布局未跟上的
 /// 陈旧值（曾致开窗会话按陈旧的空态高度重居中、消费 JUST_OPENED，真值
 /// 落地后窗口永久偏下）
 pub fn sync_height() {
