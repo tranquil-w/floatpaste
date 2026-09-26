@@ -1,7 +1,8 @@
 // 速贴面板：对齐原版 PickerShell.tsx 的完整复刻。
 // - 无边框透明窗 + 8px 圆角卡片 + 1px 窗口边框（DWM 阴影与系统圆角
 //   由 Rust 侧处理，见 win32_ext::apply_dwm_*）
-// - 头部：状态点 + FloatPaste 标题 + 成功/错误消息徽章（可拖拽移动窗口）
+// - 顶栏（PowerToys 高级粘贴式）：软件图标 + 居中拖拽横条 + 关闭按钮，
+//   整条背景可拖拽移动窗口；操作失败提示走托盘系统通知，不占面板 UI
 // - 列表：多行预览（最多 4 行）、72px 缩略图、数字徽章、类型徽章、来源、
 //   相对时间、收藏星标与左侧强调边条、标签行（常显，行高不随选中变化）
 // - 交互：单击选中 / 双击上屏 / 悬停 400ms 预览（Rust 调度）
@@ -410,9 +411,6 @@ export component QuickPasteWindow inherits Window {
     // ── 数据 ──
     in-out property <[ClipRow]> rows;
     in-out property <int> selected: 0;
-    in-out property <string> message-text;
-    // 0=无 1=成功 2=错误
-    in-out property <int> message-tone: 0;
     in-out property <string> empty-shortcut: "Ctrl+Q";
     in-out property <bool> digit-shortcuts-enabled: true;
     in-out property <bool> loading: false;
@@ -433,6 +431,8 @@ export component QuickPasteWindow inherits Window {
     callback header-drag-started();
     callback header-drag-moved();
     callback header-drag-finished();
+    // 顶栏关闭按钮（同 Esc 会话关闭路径）
+    callback close-clicked();
     callback resize-started(int); // 0=N 1=S 2=W 3=E 4=NW 5=NE 6=SW 7=SE
     callback resize-moved();
     callback resize-finished();
@@ -467,12 +467,6 @@ export component QuickPasteWindow inherits Window {
     in-out property <length> enter-offset: 0px;
     in-out property <bool> enter-animated: true;
 
-    // 消息徽章配色
-    property <color> message-bg:
-        root.message-tone == 1 ? Theme.success-subtle : Theme.danger-subtle;
-    property <color> message-fg:
-        root.message-tone == 1 ? Theme.success-fg : Theme.danger-fg;
-
     card := Rectangle {
         // 材质挂载成功 → material-layer 近实心底叠在系统 Acrylic 上
         // （速贴走 HOSTBACKDROP 组合：无焦点不降级，材质与搜索窗同源，
@@ -488,19 +482,12 @@ export component QuickPasteWindow inherits Window {
             y: root.enter-offset;
             animate y { duration: root.enter-animated ? 150ms : 0ms; easing: ease-out; }
 
-            // ── 头部（可拖拽）──
+            // ── 顶栏（PowerToys 高级粘贴式：图标 + 居中横条 + 关闭，可拖拽）──
             Rectangle {
                 height: 30px;
-                // 透出面板材质底（原 canvas-default 会形成不透明色带）
                 background: transparent;
 
-                // 底部分隔线（旧版 header 的 border-b border-pg-border-subtle）
-                Rectangle {
-                    y: parent.height - 1px;
-                    height: 1px;
-                    background: Theme.border-subtle;
-                }
-
+                // 拖拽命中（声明在按钮之前 = 按钮点击优先）
                 header-ta := TouchArea {
                     mouse-cursor: default;
                     pointer-event(e) => {
@@ -516,57 +503,46 @@ export component QuickPasteWindow inherits Window {
                     }
                 }
 
-                HorizontalLayout {
-                    padding-left: Metrics.space-3;
-                    padding-right: Metrics.space-3;
-                    spacing: Metrics.space-2;
-                    alignment: start;
-                    VerticalLayout {
-                        alignment: center;
-                        Rectangle {
-                            width: 14px;
-                            height: 14px;
-                            border-radius: 7px;
-                            background: Theme.accent-fg.with-alpha(0.10);
-                            Rectangle {
-                                x: 3px;
-                                y: 3px;
-                                width: 8px;
-                                height: 8px;
-                                border-radius: 4px;
-                                background: Theme.accent-fg;
-                            }
-                        }
+                // 软件图标（32px 小尺寸规格源图，同 WindowTitleBar）
+                Image {
+                    x: 10px;
+                    y: (parent.height - 16px) / 2;
+                    width: 16px;
+                    height: 16px;
+                    source: @image-url("titlebar-icon.png");
+                }
+
+                // 居中拖拽横条（装饰性把手，悬停不加粗避免行高跳动）
+                Rectangle {
+                    x: (parent.width - 28px) / 2;
+                    y: (parent.height - 3px) / 2;
+                    width: 28px;
+                    height: 3px;
+                    border-radius: Metrics.radius-pill;
+                    // border-default 为 border-subtle 与 fg 前景系之间的折中档
+                    background: Theme.border-default;
+                }
+
+                // 关闭（hover 淡红底；12px X 与 WindowTitleBar 窗控同规格）
+                btn-close := Rectangle {
+                    x: parent.width - 46px;
+                    width: 46px;
+                    height: parent.height;
+                    background: btn-close-ta.has-hover ? Theme.danger-subtle : transparent;
+                    btn-close-ta := TouchArea {
+                        mouse-cursor: default;
+                        clicked => { root.close-clicked(); }
                     }
-                    VerticalLayout {
-                        alignment: center;
-                        Text {
-                            text: "FloatPaste";
-                            color: Theme.fg-muted;
-                            font-size: Metrics.text-hint;
-                            font-weight: Metrics.weight-semibold;
-                            letter-spacing: 0.22px;
-                            vertical-alignment: center;
-                        }
-                    }
-                    if (root.message-tone != 0): VerticalLayout {
-                        alignment: center;
-                        Rectangle {
-                            height: 16px;
-                            background: root.message-bg;
-                            border-radius: Metrics.radius-sm;
-                            HorizontalLayout {
-                                padding-left: Metrics.space-1_5;
-                                padding-right: Metrics.space-1_5;
-                                Text {
-                                    text: root.message-text;
-                                    color: root.message-fg;
-                                    font-size: Metrics.text-meta;
-                                    font-weight: Metrics.weight-medium;
-                                    vertical-alignment: center;
-                                }
-                            }
-                        }
+                    Path {
+                        x: (parent.width - 12px) / 2;
+                        y: (parent.height - 12px) / 2;
+                        width: 12px;
+                        height: 12px;
+                        viewbox-width: 12;
+                        viewbox-height: 12;
+                        stroke: Theme.fg-default;
+                        stroke-width: 1px;
+                        commands: "M 0.5 0.5 L 11.5 11.5 M 11.5 0.5 L 0.5 11.5";
                     }
                 }
             }
@@ -719,7 +695,7 @@ export component QuickPasteWindow inherits Window {
         }
 
         // ── 拉伸手柄（最顶层，几何对齐原版 PICKER_RESIZE_HANDLES）──
-        // 北向两条（避开头部中央拖拽区）
+        // 北向两条（避开顶部中央拖拽区；右条右缘让位右上关闭按钮）
         ResizeHandle {
             direction: 0;
             x: 12px;
@@ -734,7 +710,8 @@ export component QuickPasteWindow inherits Window {
             direction: 0;
             x: 12px + (parent.width - 24px) / 2 + 36px;
             y: 0;
-            width: (parent.width - 24px) / 2 - 36px;
+            // 右缘止于关闭按钮左缘（46px 按钮区不响应拉伸，同原生窗控）
+            width: (parent.width - 24px) / 2 - 36px - 34px;
             height: 8px;
             started => { root.resize-started(0); }
             drag-moved => { root.resize-moved(); }
@@ -782,7 +759,9 @@ export component QuickPasteWindow inherits Window {
         }
         ResizeHandle {
             direction: 5;
-            x: parent.width - 16px;
+            // NE 角让位右上关闭按钮，退守按钮左侧（原 width-16px 位置
+            // 整块落在按钮命中区内，点击会变拉伸而非关闭）
+            x: parent.width - 46px - 16px;
             y: 0;
             width: 16px;
             height: 16px;

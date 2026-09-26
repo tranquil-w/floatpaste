@@ -513,8 +513,6 @@ pub fn set_selected(app: &App, index: usize) {
 fn refresh_list_reset(app: &App, settings: &floatpaste_core::domain::settings::UserSetting) {
     app.state.set_selected_id(None);
     if let Some(win) = app.picker.upgrade() {
-        win.set_message_text("".into());
-        win.set_message_tone(0);
         win.set_empty_shortcut(settings.shortcut.clone().into());
         win.set_digit_shortcuts_enabled(settings.picker_digit_shortcuts_enabled);
         win.set_loading(false);
@@ -823,19 +821,17 @@ pub fn confirm(app: &App, index: usize, as_path_text: bool) {
     };
 
     if let Err(error) = paste_flow::paste_item(app, &item.id, option) {
-        set_message(app, &format!("粘贴失败：{error}"), 2);
         warn!("粘贴失败: {error}");
+        crate::tray::notify_failure(&format!("粘贴失败：{error}"));
     }
 }
 
 /// 粘贴结果回写（paste_flow 后台线程经 invoke 调用）。
-/// 失败消息保留（面板此时多半已隐藏，下次会话开始会清空），
-/// 成功消息置空以避免下次打开闪过旧消息（对齐前端 confirmSelection）。
-pub fn set_outcome_message(app: &App, success: bool, message: &str) {
-    if success {
-        set_message(app, "", 0);
-    } else {
-        set_message(app, message, 2);
+/// 上屏异步完成时面板多半已隐藏，面板内提示无人看见——失败改走托盘
+/// 通知，成功无提示（内容贴进目标窗口即反馈）
+pub fn report_paste_outcome(success: bool, message: &str) {
+    if !success {
+        crate::tray::notify_failure(message);
     }
 }
 
@@ -861,21 +857,13 @@ pub fn toggle_favorite(app: &App) {
         .store(false, std::sync::atomic::Ordering::SeqCst);
 
     match result {
+        // 成功无提示：列表刷新后行上星标与强调边条即反馈
         Ok(()) => {
             refresh_list(app, true);
-            set_message(
-                app,
-                if next_favorited {
-                    "已收藏"
-                } else {
-                    "已取消收藏"
-                },
-                1,
-            );
         }
         Err(error) => {
             warn!("更新收藏状态失败: {error}");
-            set_message(app, "更新收藏失败，请稍后重试", 2);
+            crate::tray::notify_failure("更新收藏失败，请稍后重试");
         }
     }
 }
@@ -889,13 +877,6 @@ pub fn navigate(app: &App, up: bool) {
     let current = current_index(app);
     let next = search::next_navigation_index(count, current, up);
     set_selected(app, next);
-}
-
-fn set_message(app: &App, text: &str, tone: i32) {
-    app.with_picker(|win| {
-        win.set_message_text(text.into());
-        win.set_message_tone(tone);
-    });
 }
 
 /* ───────────────── 定位 ───────────────── */
@@ -1035,6 +1016,14 @@ pub fn wire(app: &App) {
             if hwnd != 0 {
                 window_control::end_window_gesture(hwnd);
             }
+        });
+    }
+
+    // 顶栏关闭按钮：同 Esc 会话关闭路径（隐藏并归还目标焦点）
+    {
+        let app_cb = app.clone();
+        win.on_close_clicked(move || {
+            hide(&app_cb, true);
         });
     }
 

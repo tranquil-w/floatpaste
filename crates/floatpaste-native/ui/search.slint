@@ -36,7 +36,7 @@ export struct SearchTagChip {
 export global SearchGeometry {
     out property <length> window-width: 780px;
     out property <length> window-max-height: 620px;
-    // 旧版 chromeHeight = 5 + 头部 + 错误条 + 筛选行 + 底栏
+    // 旧版 chromeHeight = 5 + 头部 + 筛选行 + 底栏（错误条已改托盘通知）
     out property <length> height-slack: 5px;
     out property <length> window-border: 1px;
     out property <length> scroll-slot: 10px;
@@ -641,7 +641,7 @@ export component SearchWindow inherits Window {
     in-out property <bool> show-result-count: true;
     in-out property <int> result-count: 0;
     in-out property <int> result-total: 0;
-    in-out property <string> error-text;
+    // 操作失败提示走托盘系统通知，不占面板 UI
     // 两段式删除待确认行号（-1 = 无）：悬停行与选中行都可发起删除，
     // 待确认标记只落在发起行上，不会同时染到其他行的操作条
     in-out property <int> delete-armed-row: -1;
@@ -706,8 +706,7 @@ export component SearchWindow inherits Window {
     out property <length> preview-width-thumb;
     // ── 高度同步度量（旧版：target = min(620, 5 + chrome + 列表内容高)）──
     out property <length> chrome-height:
-        header-bar.height + (error-bar.visible ? error-bar.height : 0px)
-        + filter-bar.height + footer-bar.height;
+        header-bar.height + filter-bar.height + footer-bar.height;
     out property <length> list-content-height: list-stack.natural-height;
 
     public function focus-input() {
@@ -948,30 +947,6 @@ export component SearchWindow inherits Window {
                                     vertical-alignment: center;
                                 }
                             }
-                        }
-                    }
-                }
-
-                // ── 错误条（3 秒自动消失由 Rust 控制）──
-                error-bar := Rectangle {
-                    visible: root.error-text != "";
-                    height: self.visible ? 36px : 0px;
-                    background: Theme.danger-subtle;
-                    Rectangle {
-                        y: parent.height - 1px;
-                        height: 1px;
-                        background: Theme.danger-fg.with-alpha(0.2);
-                    }
-                    HorizontalLayout {
-                        padding-left: 20px; // px-5
-                        padding-right: 20px;
-                        Text {
-                            text: root.error-text;
-                            color: Theme.danger-fg;
-                            font-size: Metrics.text-sm;
-                            vertical-alignment: center;
-                            wrap: no-wrap;
-                            overflow: elide;
                         }
                     }
                 }

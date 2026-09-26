@@ -75,11 +75,6 @@ pub fn paste_item(app: &App, id: &str, option: PasteOption) -> Result<(), AppErr
 
     if !option.paste_to_target {
         app.core().repository.mark_used(id)?;
-        picker::set_outcome_message(
-            app,
-            true,
-            &format!("已将{clip_type_label}写入系统剪贴板，可手动粘贴到目标位置。"),
-        );
         return Ok(());
     }
 
@@ -147,7 +142,7 @@ pub fn paste_item(app: &App, id: &str, option: PasteOption) -> Result<(), AppErr
         let _ = core.repository.mark_used(&id);
 
         let _ = slint::invoke_from_event_loop(move || {
-            picker::set_outcome_message(&app_for_result, success, &message);
+            picker::report_paste_outcome(success, &message);
             picker::notify_pasted(&app_for_result);
         });
     });

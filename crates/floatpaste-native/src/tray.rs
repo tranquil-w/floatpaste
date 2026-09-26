@@ -146,8 +146,10 @@ const ADMIN_TARGET_INFO: &str =
 const ELEVATION_DECLINED_INFO: &str =
     "已开启「始终以管理员身份运行」，但本次启动未获得管理员权限（UAC 未确认）。向管理员窗口的自动粘贴将无法生效；重新打开 FloatPaste 并确认即可。";
 
-/// 托盘警告气泡（不占用窗口 UI）。Win10+ 转系统通知，无弹窗打扰
-fn notify_warning(info: &str) {
+/// 操作失败的托盘警告气泡（不占用窗口 UI）。Win10+ 转系统通知，无弹窗打扰。
+/// 动态文案按 UTF-16 容量截断：szInfo 定长 256 且须以 NUL 结尾
+pub fn notify_failure(info: &str) {
+    let info: String = info.chars().take(200).collect();
     let hwnd = TRAY_HWND.load(std::sync::atomic::Ordering::SeqCst);
     if hwnd == 0 {
         return;
@@ -184,12 +186,12 @@ fn notify_warning(info: &str) {
 
 /// 管理员目标无法自动回贴时的一次性说明
 pub fn notify_admin_target() {
-    notify_warning(ADMIN_TARGET_INFO);
+    notify_failure(ADMIN_TARGET_INFO);
 }
 
 /// 启动期提权自检未获确认（用户在 UAC 中取消）时的一次性说明
 pub fn notify_elevation_declined() {
-    notify_warning(ELEVATION_DECLINED_INFO);
+    notify_failure(ELEVATION_DECLINED_INFO);
 }
 
 unsafe fn show_menu(hwnd: HWND) {

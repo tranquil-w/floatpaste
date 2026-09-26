@@ -54,8 +54,6 @@ const PAGE_SIZE: u32 = 50;
 const INPUT_DEBOUNCE_MS: u64 = 200;
 /// 二次确认删除的保持时长（对齐 ARMED_DELETE_RESET_DELAY_MS）
 const DELETE_ARM_TIMEOUT_MS: u64 = 3000;
-/// 错误条自动消失时长（对齐 ERROR_TIMEOUT_MS）
-const ERROR_TIMEOUT_MS: u64 = 3000;
 /// 焦点监视轮询间隔（对齐 SEARCH_FOCUS_WATCH_INTERVAL_MS）
 const FOCUS_WATCH_INTERVAL_MS: u64 = 120;
 const RESTORE_DELAY: Duration = Duration::from_millis(90);
@@ -339,7 +337,6 @@ fn reset_session_state(app: &App) {
     SELECTED_ID.with(|slot| *slot.borrow_mut() = None);
     ARMED_DELETE.with(|slot| *slot.borrow_mut() = None);
     DELETE_TOKEN.with(|token| token.set(token.get() + 1));
-    ERROR_TOKEN.with(|token| token.set(token.get() + 1));
     // LAST_HEIGHT 不清零：开窗直接用上次内容高度（open 会把基线对齐到
     // 实际应用的高度）。清零会让加载态的中间高度被视为「增长」而应用，
     // 窗口先缩后长、两次跳动（闪烁 + 最终偏下）
@@ -350,7 +347,6 @@ fn reset_session_state(app: &App) {
     win.set_selected(0);
     win.set_delete_armed_row(-1);
     win.set_active_filter(0);
-    win.set_error_text("".into());
     win.set_load_failed(false);
     win.set_fetching_next(false);
     win.set_has_next_page(false);
@@ -428,7 +424,6 @@ thread_local! {
     static SELECTED_ID: RefCell<Option<String>> = const { RefCell::new(None) };
     static ARMED_DELETE: RefCell<Option<String>> = const { RefCell::new(None) };
     static DELETE_TOKEN: Cell<u64> = const { Cell::new(0) };
-    static ERROR_TOKEN: Cell<u64> = const { Cell::new(0) };
     static LAST_HEIGHT: Cell<f32> = const { Cell::new(0.0) };
     static ALLOW_SHRINK: Cell<bool> = const { Cell::new(false) };
 }
@@ -912,21 +907,6 @@ fn empty_state(
     ("暂无剪贴板记录".to_string(), open_hint.to_string(), 0)
 }
 
-fn show_error(app: &App, message: &str) {
-    app.with_search(|win| win.set_error_text(message.into()));
-    let token = ERROR_TOKEN.with(|value| {
-        value.set(value.get() + 1);
-        value.get()
-    });
-    let app_cb = app.clone();
-    slint::Timer::single_shot(Duration::from_millis(ERROR_TIMEOUT_MS), move || {
-        if ERROR_TOKEN.with(|value| value.get()) != token {
-            return;
-        }
-        app_cb.with_search(|win| win.set_error_text("".into()));
-    });
-}
-
 /* ───────────────── 条目动作 ───────────────── */
 
 /// 挂 Win11 材质并回写门控（策略在 overlay::apply_material 统一）
@@ -966,7 +946,7 @@ fn paste_item(app: &App, item: &ClipItemSummary, as_path_text: bool) {
     };
     if let Err(error) = execute_paste(app, &item.id, option) {
         warn!("搜索粘贴失败: {error}");
-        show_error(app, "执行粘贴失败，请稍后重试");
+        crate::tray::notify_failure("执行粘贴失败，请稍后重试");
     }
 }
 
@@ -1050,7 +1030,7 @@ pub fn toggle_favorite(app: &App, index: usize) {
     match result {
         Err(error) => {
             warn!("更新收藏状态失败: {error}");
-            show_error(app, "更新收藏状态失败，请稍后重试");
+            crate::tray::notify_failure("更新收藏状态失败，请稍后重试");
         }
         Ok(()) => {
             let mut items = app.state.search_items();
@@ -1125,7 +1105,7 @@ fn perform_delete(app: &App, id: &str) {
     reset_delete_arm(app);
     if let Err(error) = ClipService::delete(app.core(), id) {
         warn!("删除条目失败: {error}");
-        show_error(app, "删除条目失败，请稍后重试");
+        crate::tray::notify_failure("删除条目失败，请稍后重试");
         return;
     }
     thumbnails::evict(id);
