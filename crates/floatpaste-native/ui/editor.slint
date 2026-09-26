@@ -7,7 +7,7 @@
 //   面板内搜索/勾选已选/创建；回车采纳、Tab 补全、上下键导航（滚动
 //   跟随）、Backspace 空输入删末位、Esc 分层退出（清输入→关面板→关窗）
 // - 键盘：窗口级 capture 先于输入框（对齐旧版 window keydown capture）
-import { Theme, Metrics } from "theme.slint";
+import { Theme, Metrics, Motion } from "theme.slint";
 import { Kbd, WindowTitleBar } from "common.slint";
 
 // 标签建议项：0=match（既有命中）1=create（新建）2=exists（已添加）
@@ -27,9 +27,10 @@ component DeleteButton inherits Rectangle {
     height: 28px;
     width: armed ? 68px : 28px;
     border-radius: Metrics.radius-md;
+    opacity: del-ta.pressed ? 0.85 : 1.0;
     background: armed ? Theme.danger-subtle
         : (del-ta.has-hover ? Theme.danger-subtle : transparent);
-    animate background { duration: 120ms; }
+    animate background { duration: Motion.dur-color; easing: Motion.ease; }
 
     del-ta := TouchArea {
         mouse-cursor: default;
@@ -240,9 +241,9 @@ export component EditorWindow inherits Window {
             // opacity 联动即「展开浮现/收起消失」
             Rectangle {
                 height: root.notice-text != "" ? 36px : 0px;
-                animate height { duration: 150ms; easing: ease-out; }
+                animate height { duration: Motion.dur-enter; easing: Motion.ease; }
                 opacity: root.notice-text != "" ? 1.0 : 0.0;
-                animate opacity { duration: 150ms; easing: ease-out; }
+                animate opacity { duration: Motion.dur-enter; easing: Motion.ease; }
                 clip: true;
                 background: Theme.success-subtle;
                 HorizontalLayout {
@@ -260,9 +261,9 @@ export component EditorWindow inherits Window {
             // ── 错误条（持续到下一次动作）──
             Rectangle {
                 height: root.error-text != "" ? 36px : 0px;
-                animate height { duration: 150ms; easing: ease-out; }
+                animate height { duration: Motion.dur-enter; easing: Motion.ease; }
                 opacity: root.error-text != "" ? 1.0 : 0.0;
-                animate opacity { duration: 150ms; easing: ease-out; }
+                animate opacity { duration: Motion.dur-enter; easing: Motion.ease; }
                 clip: true;
                 background: Theme.danger-subtle;
                 HorizontalLayout {
@@ -475,8 +476,8 @@ export component EditorWindow inherits Window {
                                         border-width: 1px;
                                         border-color: add-ta.has-hover ? Theme.border-default : Theme.border-subtle;
                                         background: add-ta.has-hover ? Theme.canvas-default : transparent;
-                                        animate background { duration: 120ms; easing: ease-out; }
-                                        animate border-color { duration: 120ms; easing: ease-out; }
+                                        animate background { duration: Motion.dur-color; easing: Motion.ease; }
+                                        animate border-color { duration: Motion.dur-color; easing: Motion.ease; }
                                         add-ta := TouchArea {
                                             mouse-cursor: pointer;
                                             clicked => { root.open-tag-panel(); }
@@ -701,7 +702,7 @@ export component EditorWindow inherits Window {
                                         border-radius: 2px;
                                         background: track-ta.pressed || track-ta.has-hover
                                             ? Theme.border-default : Theme.border-subtle;
-                                        animate background { duration: 120ms; easing: ease-out; }
+                                        animate background { duration: Motion.dur-color; easing: Motion.ease; }
                                     }
                                 }
                             }
@@ -741,8 +742,9 @@ export component EditorWindow inherits Window {
                                 border-radius: Metrics.radius-pill;
                                 border-width: 1px;
                                 border-color: Theme.border-default;
+                                opacity: open-img-ta.pressed ? 0.85 : 1.0;
                                 background: open-img-ta.has-hover ? Theme.canvas-subtle : Theme.canvas-default;
-                                animate background { duration: 120ms; easing: ease-out; }
+                                animate background { duration: Motion.dur-color; easing: Motion.ease; }
                                 open-img-ta := TouchArea {
                                     mouse-cursor: pointer;
                                     clicked => { root.open-externally(root.image-path); }
@@ -800,7 +802,7 @@ export component EditorWindow inherits Window {
                                     // hover 描边 + 文字提亮提示可点（行底色与
                                     // 预览区同底，色块反馈无区分度）
                                     border-color: path-ta.has-hover ? Theme.border-subtle : transparent;
-                                    animate border-color { duration: 120ms; easing: ease-out; }
+                                    animate border-color { duration: Motion.dur-color; easing: Motion.ease; }
                                     background: Theme.canvas-default;
                                     path-ta := TouchArea {
                                         mouse-cursor: pointer;
@@ -895,7 +897,9 @@ export component EditorWindow inherits Window {
                             border-radius: Metrics.radius-md;
                             border-width: 1px;
                             border-color: Theme.border-default;
+                            opacity: close-ta.pressed ? 0.85 : 1.0;
                             background: close-ta.has-hover ? Theme.canvas-default : transparent;
+                            animate background { duration: Motion.dur-color; easing: Motion.ease; }
                             close-ta := TouchArea {
                                 mouse-cursor: default;
                                 clicked => { root.request-close(); }
@@ -921,9 +925,14 @@ export component EditorWindow inherits Window {
                             width: 68px;
                             height: 32px;
                             border-radius: Metrics.radius-md;
-                            // 旧版 disabled:opacity-50：整键（底+字）半透明
-                            opacity: root.is-text && root.is-dirty ? 1.0 : 0.5;
-                            background: Theme.accent-emphasis;
+                            // 旧版 disabled:opacity-50：整键（底+字）半透明；
+                            // 可点时按压再压一档（叠加 0.85）
+                            opacity: root.is-text && root.is-dirty
+                                ? (save-ta.pressed ? 0.85 : 1.0) : 0.5;
+                            // 强调按钮悬停升 accent-hover（Primer emphasis 语义）
+                            background: save-ta.has-hover
+                                ? Theme.accent-hover : Theme.accent-emphasis;
+                            animate background { duration: Motion.dur-color; easing: Motion.ease; }
                             save-ta := TouchArea {
                                 enabled: root.is-text && root.is-dirty;
                                 mouse-cursor: root.is-text && root.is-dirty ? default : not-allowed;
@@ -970,13 +979,13 @@ export component EditorWindow inherits Window {
             height: Math.min(288px,
                 45px + (root.tags.length + root.tag-suggestions.length) * 32px + 8px);
             opacity: root.tag-open ? 1.0 : 0.0;
-            animate opacity { duration: 150ms; easing: ease-out; }
+            animate opacity { duration: Motion.dur-enter; easing: Motion.ease; }
             clip: true;
 
             panel-body := Rectangle {
                 x: 0;
                 y: root.tag-open ? 0px : 4px;
-                animate y { duration: 150ms; easing: ease-out; }
+                animate y { duration: Motion.dur-enter; easing: Motion.ease; }
                 width: parent.width;
                 height: parent.height;
                 border-radius: Metrics.radius-md;
@@ -1208,7 +1217,7 @@ export component EditorWindow inherits Window {
         Rectangle {
             visible: root.close-confirm-open;
             opacity: root.close-confirm-open ? 1.0 : 0.0;
-            animate opacity { duration: 120ms; easing: ease-out; }
+            animate opacity { duration: Motion.dur-color; easing: Motion.ease; }
             background: rgba(0, 0, 0, 0.45);
             HorizontalLayout {
                 alignment: center;
@@ -1245,7 +1254,9 @@ export component EditorWindow inherits Window {
                                     border-radius: Metrics.radius-md;
                                     border-width: 1px;
                                     border-color: Theme.border-default;
+                                    opacity: dlg-cancel-ta.pressed ? 0.85 : 1.0;
                                     background: dlg-cancel-ta.has-hover ? Theme.canvas-subtle : transparent;
+                                    animate background { duration: Motion.dur-color; easing: Motion.ease; }
                                     dlg-cancel-ta := TouchArea {
                                         mouse-cursor: default;
                                         clicked => { root.confirm-cancel(); }
@@ -1264,7 +1275,9 @@ export component EditorWindow inherits Window {
                                     border-radius: Metrics.radius-md;
                                     border-width: 1px;
                                     border-color: Theme.border-default;
+                                    opacity: dlg-discard-ta.pressed ? 0.85 : 1.0;
                                     background: dlg-discard-ta.has-hover ? Theme.canvas-subtle : transparent;
+                                    animate background { duration: Motion.dur-color; easing: Motion.ease; }
                                     dlg-discard-ta := TouchArea {
                                         mouse-cursor: default;
                                         clicked => { root.close-discard(); }
@@ -1281,7 +1294,10 @@ export component EditorWindow inherits Window {
                                     width: 100px;
                                     height: 36px;
                                     border-radius: Metrics.radius-md;
-                                    background: Theme.accent-emphasis;
+                                    opacity: dlg-save-ta.pressed ? 0.85 : 1.0;
+                                    background: dlg-save-ta.has-hover
+                                        ? Theme.accent-hover : Theme.accent-emphasis;
+                                    animate background { duration: Motion.dur-color; easing: Motion.ease; }
                                     dlg-save-ta := TouchArea {
                                         mouse-cursor: default;
                                         clicked => { root.close-save(); }

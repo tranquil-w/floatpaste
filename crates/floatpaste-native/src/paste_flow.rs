@@ -117,7 +117,7 @@ pub fn paste_item(app: &App, id: &str, option: PasteOption) -> Result<(), AppErr
                     } else {
                         thread::sleep(INJECT_DELAY);
                         if paste_support::trigger_ctrl_v() {
-                            (true, format!("已将{clip_type_label}写入系统剪贴板，并回贴到目标窗口。"))
+                            (true, format!("已将{clip_type_label}写入系统剪贴板，并上屏到目标窗口。"))
                         } else {
                             (false, format!(
                                 "已将{clip_type_label}写入系统剪贴板，但系统按键注入失败。你仍可手动执行 Ctrl+V。"

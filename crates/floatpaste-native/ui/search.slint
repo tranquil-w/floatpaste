@@ -8,7 +8,7 @@
 //   （↑↓/Enter/Shift+Enter/Ctrl+Enter/Ctrl+Space/Del/Esc），其余按键放行输入框
 // - 挂起态（键盘交给速贴面板）：输入框失焦、底栏切换为速贴键位提示
 // - 行高恒定：选中只换高亮/左条/操作条浮层，不展开（切换零跳动，用户要求）
-import { Theme, Metrics } from "theme.slint";
+import { Theme, Metrics, Motion } from "theme.slint";
 import { Kbd } from "common.slint";
 import { ListScrollBar } from "picker.slint";
 
@@ -97,7 +97,9 @@ component IconButton inherits Rectangle {
     out property <color> glyph-color: btn-ta.has-hover && root.danger-hover
         ? Theme.danger-fg : root.icon-color;
     // 旧版 actionButton 的 transition-colors：底色渐变而非瞬变
-    animate background { duration: 120ms; easing: ease-out; }
+    animate background { duration: Motion.dur-color; easing: Motion.ease; }
+    // 按压瞬变淡出：触发动作型按钮的即时确认感（与全窗按钮统一）
+    opacity: btn-ta.pressed ? 0.85 : 1.0;
 
     // 图标直接作为 Rectangle 子元素走“默认 y = 居中”规则；若套布局，
     // 固定高图标会被交叉轴顶对齐而整体偏高
@@ -146,6 +148,7 @@ component FilterChip inherits Rectangle {
     border-radius: Metrics.radius-md;
     background: root.active ? Theme.accent-subtle
         : (chip-ta.has-hover ? Theme.canvas-subtle : transparent);
+    animate background { duration: Motion.dur-color; easing: Motion.ease; }
     HorizontalLayout {
         padding-left: 10px;
         padding-right: 10px;
@@ -173,6 +176,7 @@ component TagChip inherits Rectangle {
     border-radius: Metrics.radius-pill;
     background: root.active ? Theme.accent-subtle
         : (chip-ta.has-hover ? Theme.canvas-subtle : transparent);
+    animate background { duration: Motion.dur-color; easing: Motion.ease; }
     HorizontalLayout {
         padding-left: 10px;
         padding-right: 10px;
@@ -282,6 +286,8 @@ component SearchRowCard inherits Rectangle {
     // 仅略淡，无害）——省去向行组件穿材质门控
     background: root.selected ? Theme.accent-subtle
         : (root.hovered ? Theme.canvas-subtle.with-alpha(0.62) : transparent);
+    // 与速贴行同款选中/悬停底渐变（两窗键盘导航观感一致）
+    animate background { duration: Motion.dur-color; easing: Motion.ease; }
 
     // 选中态左侧 2px 强调边（旧版 border-l-pg-accent-fg）。浏览器里
     // border-left 沿圆角转折，Slint 的 clip 只按矩形裁：底层铺整卡
@@ -489,7 +495,7 @@ component SearchRowCard inherits Rectangle {
         visible: root.selected || root.hovered;
         // 悬停出现淡入（旧版 hoverPasteButton 的 transition-opacity）
         opacity: (root.selected || root.hovered) ? 1.0 : 0.0;
-        animate opacity { duration: 150ms; easing: ease-out; }
+        animate opacity { duration: Motion.dur-enter; easing: Motion.ease; }
         clip: false;
         x: 0;
         y: 0;
@@ -780,7 +786,7 @@ export component SearchWindow inherits Window {
 
             VerticalLayout {
                 y: root.enter-offset;
-                animate y { duration: root.enter-animated ? 150ms : 0ms; easing: ease-out; }
+                animate y { duration: root.enter-animated ? Motion.dur-enter : 0ms; easing: Motion.ease; }
 
                 // ── 头部（背景可拖拽；px-4 py-3 gap-3）──
                 header-bar := Rectangle {
@@ -894,7 +900,9 @@ export component SearchWindow inherits Window {
                                         width: 28px;
                                         height: 28px;
                                         border-radius: Metrics.radius-pill;
+                                        opacity: clear-ta.pressed ? 0.85 : 1.0;
                                         background: clear-ta.has-hover ? Theme.canvas-subtle : transparent;
+                                        animate background { duration: Motion.dur-color; easing: Motion.ease; }
                                         clear-ta := TouchArea {
                                             clicked => {
                                                 root.clear-keyword();
@@ -1083,7 +1091,7 @@ export component SearchWindow inherits Window {
                                 alignment: center;
                                 spacing: Metrics.space-1;
                                 Text {
-                                    text: "记录加载失败";
+                                    text: "条目加载失败";
                                     color: Theme.fg-subtle;
                                     font-size: Metrics.text-sm;
                                     horizontal-alignment: center;
@@ -1099,7 +1107,9 @@ export component SearchWindow inherits Window {
                                     border-radius: Metrics.radius-md;
                                     border-width: 1px;
                                     border-color: Theme.border-default;
+                                    opacity: retry-ta.pressed ? 0.85 : 1.0;
                                     background: retry-ta.has-hover ? Theme.canvas-subtle : transparent;
+                                    animate background { duration: Motion.dur-color; easing: Motion.ease; }
                                     retry-ta := TouchArea {
                                         clicked => { root.retry-clicked(); }
                                     }
@@ -1139,7 +1149,9 @@ export component SearchWindow inherits Window {
                                     border-radius: Metrics.radius-md;
                                     border-width: 1px;
                                     border-color: Theme.border-default;
+                                    opacity: empty-ta.pressed ? 0.85 : 1.0;
                                     background: empty-ta.has-hover ? Theme.canvas-subtle : transparent;
+                                    animate background { duration: Motion.dur-color; easing: Motion.ease; }
                                     empty-ta := TouchArea {
                                         clicked => {
                                             if (root.empty-action == 1) {

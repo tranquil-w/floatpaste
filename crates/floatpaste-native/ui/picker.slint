@@ -7,7 +7,7 @@
 //   相对时间、收藏星标与左侧强调边条、标签行（常显，行高不随选中变化）
 // - 交互：单击选中 / 双击上屏 / 悬停 400ms 预览（Rust 调度）
 // - 键盘全程不经窗口焦点（LL 键盘钩子会话），窗口本身不抢焦点
-import { Theme, Metrics } from "theme.slint";
+import { Theme, Metrics, Motion } from "theme.slint";
 
 export struct ClipRow {
     id: string,
@@ -161,7 +161,7 @@ component ClipRowCard inherits Rectangle {
     // border-width 承担（弱灰无切点亮点）
     border-radius: Metrics.radius-lg;
     background: selected ? Theme.accent-fg : transparent;
-    animate background { duration: 120ms; }
+    animate background { duration: Motion.dur-color; easing: Motion.ease; }
 
     VerticalLayout {
         padding: 1px;
@@ -178,7 +178,7 @@ component ClipRowCard inherits Rectangle {
                 : (item-ta.has-hover
                     ? Theme.canvas-inset.with-alpha(material-active ? 0.62 : 1.0)
                     : transparent);
-            animate background { duration: 120ms; }
+            animate background { duration: Motion.dur-color; easing: Motion.ease; }
             // 兜底裁剪：字体度量与渲染器行高存在细微差异时，
             // 防止预览文本画穿条目边界（原版由 CSS overflow 保证）
             clip: true;
@@ -288,9 +288,11 @@ component ClipRowCard inherits Rectangle {
                                 padding-right: Metrics.space-1;
                                 Text {
                                     text: data.digit;
+                                    // 文字恒 fg-muted：徽章底 canvas-subtle/inset 比 canvas
+                                    // 深，fg-subtle 落上去跌破 4.5 对比度门禁
                                     color: selected
                                         ? Theme.fg-on-emphasis
-                                        : (item-ta.has-hover ? Theme.fg-muted : Theme.fg-subtle);
+                                        : Theme.fg-muted;
                                     font-size: Metrics.text-micro;
                                     font-weight: Metrics.weight-bold;
                                     font-family: "Consolas";
@@ -309,7 +311,8 @@ component ClipRowCard inherits Rectangle {
                                 padding-right: Metrics.space-1_5;
                                 Text {
                                     text: data.type-label;
-                                    color: selected ? Theme.fg-muted : Theme.fg-subtle;
+                                    // 同数字徽章：canvas-inset 底上用 fg-muted 保对比度
+                                    color: Theme.fg-muted;
                                     font-size: Metrics.text-meta;
                                     font-weight: Metrics.weight-medium;
                                     vertical-alignment: center;
@@ -480,7 +483,7 @@ export component QuickPasteWindow inherits Window {
 
         VerticalLayout {
             y: root.enter-offset;
-            animate y { duration: root.enter-animated ? 150ms : 0ms; easing: ease-out; }
+            animate y { duration: root.enter-animated ? Motion.dur-enter : 0ms; easing: Motion.ease; }
 
             // ── 顶栏（PowerToys 高级粘贴式：图标 + 居中横条 + 关闭，可拖拽）──
             Rectangle {
@@ -528,6 +531,7 @@ export component QuickPasteWindow inherits Window {
                     x: parent.width - 46px;
                     width: 46px;
                     height: parent.height;
+                    opacity: btn-close-ta.pressed ? 0.85 : 1.0;
                     background: btn-close-ta.has-hover ? Theme.danger-subtle : transparent;
                     btn-close-ta := TouchArea {
                         mouse-cursor: default;
@@ -557,7 +561,7 @@ export component QuickPasteWindow inherits Window {
                 if (root.loading): VerticalLayout {
                     alignment: center;
                     Text {
-                        text: "正在加载记录...";
+                        text: "正在加载条目...";
                         color: Theme.fg-muted;
                         font-size: 13px;
                         horizontal-alignment: center;
@@ -568,7 +572,7 @@ export component QuickPasteWindow inherits Window {
                     padding: 32px;
                     spacing: Metrics.space-1_5;
                     Text {
-                        text: "记录加载失败";
+                        text: "条目加载失败";
                         color: Theme.fg-muted;
                         font-size: Metrics.text-sm;
                         horizontal-alignment: center;
@@ -585,7 +589,9 @@ export component QuickPasteWindow inherits Window {
                         border-color: Theme.border-default;
                         height: 30px;
                         horizontal-stretch: 0;
+                        opacity: retry-ta.pressed ? 0.85 : 1.0;
                         background: retry-ta.has-hover ? Theme.canvas-subtle : transparent;
+                        animate background { duration: Motion.dur-color; easing: Motion.ease; }
                         retry-ta := TouchArea {
                             clicked => { root.retry-clicked(); }
                         }
@@ -607,7 +613,7 @@ export component QuickPasteWindow inherits Window {
                     alignment: center;
                     spacing: Metrics.space-1;
                     Text {
-                        text: "暂无剪贴板记录";
+                        text: "暂无剪贴板条目";
                         color: Theme.fg-muted;
                         font-size: Metrics.text-sm;
                         horizontal-alignment: center;

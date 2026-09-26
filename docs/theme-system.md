@@ -31,6 +31,7 @@
 - **原始层**：每个预设在单一明暗模式下提供一份角色化色板（`PaletteScale`：canvas/surface/ink/border/accent/状态色等）。色值为社区配色官方原值，出处写在注释里。
 - **派生层**（`theme.rs`）：纯函数，从色板 + 强调色派生全套语义 token。文字/边框/强调文字先取官方原值，对比度不足时经 `ensure_contrast` 在 OKLCH 空间只调亮度校正达标（幂等，已达标不动）；混合一律走 OKLab 插值（`mix_colors`），不用 sRGB 通道线性混合。
 - **语义层**：token 键集恒定，运行时由 `theme_bridge.rs` 写入各窗口的 Slint `Theme` 全局；组件**不得**直接引用原始色阶。
+- **消费层全局**：`ui/theme.slint` 导出三个全局——`Theme`（颜色语义 token）、`Metrics`（尺寸刻度）、`Motion`（动效时长与曲线）。`animate` 一律引用 `Motion` 档位（`dur-color` 120ms 颜色类反馈 / `dur-enter` 150ms 浮层进场），不散写字面量；速贴/搜索窗的呼出、键盘导航选中、粘贴回车是每日百次级高频交互，除既有进场语言外不加重入动画。
 
 色彩数学（OKLCH/OKLab 转换、WCAG 亮度与对比度）为 `theme.rs` 内原生实现，单元测试与运行时共用同一套函数，保证口径一致。
 

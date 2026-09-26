@@ -84,3 +84,16 @@ export global Metrics {
     out property <int> weight-semibold: 600;
     out property <int> weight-bold: 700;
 }
+
+// 动效 token：时长与曲线的单一来源，animate 一律引用，不散写字面量。
+// 频率纪律——速贴/搜索窗的呼出、键盘导航选中、粘贴回车是每日百次级
+// 高频交互，除既有进场语言外不加重入动画；动效只服务 hover/按压
+// 反馈、浮层与横幅进场。
+export global Motion {
+    // 颜色类反馈：hover 底、描边、徽章底、按压渐变
+    out property <duration> dur-color: 120ms;
+    // 浮层与面板进场：tooltip 渐显、标签面板、操作条、横幅收放、滑入
+    out property <duration> dur-enter: 150ms;
+    // 曲线统一 ease-out：快起缓收，反馈即时；状态切换颜色过渡亦用之
+    out property <easing> ease: ease-out;
+}

@@ -2,7 +2,7 @@
 // 6px 圆角、左右/上 12px 下 8px 内边距、图片最大 560×420 居中、元信息
 // 分隔行）。点击穿透与置顶不激活由 Rust 侧 Win32 处理；窗口尺寸由
 // Rust 度量后设置。
-import { Theme, Metrics } from "theme.slint";
+import { Theme, Metrics, Motion } from "theme.slint";
 
 export struct TooltipMetaBadge {
     kind: int, // 0=类型徽章（带底色）1=尺寸 2=格式
@@ -41,7 +41,7 @@ export component TooltipWindow inherits Window {
     // 静态提示模式（工具栏按钮等固定文案）：只显示一行文案，无元信息行
     in-out property <bool> simple-mode: false;
     // 出现动画：Rust 在 present 时置 false（透明重绘），上屏后置 true
-    // 触发 100ms 渐显（每次悬停都是新的显示实例，重播不突兀）
+    // 触发 120ms 渐显（每次悬停都是新的显示实例，重播不突兀）
     in property <bool> appear: true;
 
     // ── 卡片固定几何：Rust 定窗口尺寸时读取（单一事实来源，禁双边手抄）──
@@ -91,7 +91,7 @@ export component TooltipWindow inherits Window {
         height: 100%;
         background: Theme.canvas-subtle;
         opacity: root.appear ? 1.0 : 0.0;
-        animate opacity { duration: 100ms; easing: ease-out; }
+        animate opacity { duration: Motion.dur-color; easing: Motion.ease; }
         border-width: 1px;
         border-color: Theme.border-muted;
         border-radius: Metrics.radius-md;
