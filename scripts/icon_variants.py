@@ -936,7 +936,7 @@ def render_variant(draw_fn, px: int, supersample: int) -> Image.Image:
     tile.putalpha(mi._rounded_mask(size, (0, 0, mi.BASE, mi.BASE), mi.TILE_RADIUS))
     img.alpha_composite(tile)
     draw_fn(img, size, size / mi.BASE)
-    return mi._downscale_premultiplied(img, px)
+    return mi._downscale(img, px)
 
 
 def build_sheet(variants, out_name: str) -> None:

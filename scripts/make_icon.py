@@ -1,7 +1,7 @@
 """FloatPaste 应用图标生成脚本。
 
 最终设计「双人字疾进」（V56）：
-- 深夜蓝三段对角渐变圆角底板 + 左上光斑 + 边缘提亮描边
+- 深夜蓝三段对角渐变圆角底板 + 左上光斑
 - 两道人字形色块一浅蓝一白，整体逆时针倾斜 20° 向右上疾进——
   「连续速贴、内容快进上屏」的速度感
 
@@ -44,7 +44,6 @@ TILE_STOPS = ((0.0, "#2A3F6B"), (0.55, "#16224A"), (1.0, "#0A1230"))
 GLOW_CX, GLOW_CY, GLOW_R = 0.28, 0.16, 0.9
 GLOW_COLOR = "#4F8FFF"
 GLOW_ALPHA = 0.55
-EDGE_ALPHA = 0.22  # 底板边缘提亮描边
 
 # 双人字主体（V56 几何，BASE 尺度）
 CHEVRON_PTS = [
@@ -113,20 +112,15 @@ def _rounded_mask(size: int, box: tuple[float, float, float, float], radius: flo
     return mask
 
 
-def _downscale_premultiplied(img: Image.Image, px: int) -> Image.Image:
-    """预乘 alpha 后缩放再还原：避免 LANCZOS 把透明区(RGB=0)混入边缘，
-    产生圆角暗晕与振铃毛刺。"""
-    arr = np.asarray(img).astype(np.float32)
-    alpha = arr[..., 3:4] / 255.0
-    packed = np.dstack([arr[..., :3] * alpha, arr[..., 3:]]).astype(np.uint8)
-    small = np.asarray(
-        Image.fromarray(packed, "RGBA").resize((px, px), Image.LANCZOS)
-    ).astype(np.float32)
-    small[..., 3][small[..., 3] < 8] = 0  # 清除缩放产生的近透明白尘
-    al = small[..., 3:4] / 255.0
-    rgb = np.where(al > 0, small[..., :3] / np.maximum(al, 1e-6), 0.0)
-    out = np.dstack([np.clip(rgb, 0, 255).astype(np.uint8), small[..., 3].astype(np.uint8)])
-    return Image.fromarray(out, "RGBA")
+def _downscale(img: Image.Image, px: int) -> Image.Image:
+    """LANCZOS 降采样。Pillow 对 RGBA 缩放内部自带预乘/反预乘，透明区
+    不会污染边缘；切勿再手动预乘——那会让反预乘执行两次，低 alpha 处
+    除法放大量化噪声成白色（圆角白边毛刺）。极低 alpha 处 Pillow 反预乘
+    仍有量化白尘，<8 置零兜底。"""
+    small = img.resize((px, px), Image.LANCZOS)
+    arr = np.asarray(small).copy()
+    arr[..., 3][arr[..., 3] < 8] = 0
+    return Image.fromarray(arr, "RGBA")
 
 
 def _rot_pts(
@@ -185,21 +179,10 @@ def draw_icon(px: int, supersample: int = 4) -> Image.Image:
     )
     img.alpha_composite(glow)
 
-    # 底板边缘提亮描边：直接画 outline，避免腐蚀滤波的边界泄漏
-    sw = 15.36  # viewBox 1.5 → BASE 尺度
-    edge = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    ImageDraw.Draw(edge).rounded_rectangle(
-        [sw / 2 * k, sw / 2 * k, (BASE - sw / 2) * k, (BASE - sw / 2) * k],
-        radius=(TILE_RADIUS - sw / 2) * k,
-        outline=(255, 255, 255, round(EDGE_ALPHA * 255)),
-        width=max(1, round(sw * k)),
-    )
-    img.alpha_composite(edge)
-
     # 双人字主体：浅蓝后翼 + 白渐变前翼
     _draw_chevrons(img)
 
-    return _downscale_premultiplied(img, px)
+    return _downscale(img, px)
 
 
 def _rounded_mask_px(size: int, box: tuple[float, float, float, float], radius: float, px: int) -> Image.Image:
@@ -227,21 +210,6 @@ def render_small_canvas(px: int, supersample: int = 8) -> Image.Image:
     tile = _multi_stop_gradient(size).convert("RGBA")
     tile.putalpha(_rounded_mask_px(size, (0, 0, px, px), spec["radius"], px))
     img.alpha_composite(tile)
-
-    # 边缘提亮描边：与底板圆角同心，且用底板 mask 裁剪——
-    # 否则圆角弧上描边会凸出底板轮廓，在透明角区漏白
-    sw = max(2, round(0.7 * supersample))
-    inset = sw / 2
-    edge = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    ImageDraw.Draw(edge).rounded_rectangle(
-        [inset, inset, size - inset, size - inset],
-        radius=max(1.0, spec["radius"] * size / px - inset),
-        outline=(255, 255, 255, round(0.22 * 255)),
-        width=sw,
-    )
-    tile_mask = _rounded_mask_px(size, (0, 0, px, px), spec["radius"], px)
-    edge.putalpha(ImageChops.multiply(edge.getchannel("A"), tile_mask))
-    img.alpha_composite(edge)
 
     # 双人字主体：与母图同一几何（色块占比大、无细笔画，等比即可锐利）
     _draw_chevrons(img)
@@ -281,7 +249,7 @@ def _draw_quad_wave(
 
 def draw_small(px: int, supersample: int = 8) -> Image.Image:
     """小尺寸路径：与母图同一几何，8x 超采样 + 预乘降采样保证锐利。"""
-    return _downscale_premultiplied(render_small_canvas(px, supersample), px)
+    return _downscale(render_small_canvas(px, supersample), px)
 
 
 def render_size(px: int) -> Image.Image:
