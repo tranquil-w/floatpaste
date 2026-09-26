@@ -71,7 +71,6 @@ component GlyphPath inherits Path {
 // actionButtonDanger 的 h-7 px-2 自适应宽 + armed 底色），文案由调用方传入
 component IconButton inherits Rectangle {
     in property <color> icon-color;
-    in property <bool> emphasized: false;
     in property <bool> danger-hover: false;
     in property <bool> armed: false;
     // 静态提示文案（悬停经悬浮气泡显示，空串 = 无提示）
@@ -79,20 +78,24 @@ component IconButton inherits Rectangle {
     callback clicked();
     callback hover(string, length, length);
     callback hover-left();
+    // 悬停命中变化上报 + 当前命中外读：行卡片汇总所有命中区判定操作条显隐
+    // （按钮 TouchArea 在最上层，行背景/操作条间隙在此刻都无命中，
+    //  不上报会把操作条误判为非悬停而隐藏）
+    callback hover-changed();
+    out property <bool> pointer-hover: btn-ta.has-hover;
 
     width: root.armed ? 64px : 28px;
     height: 28px;
     border-radius: Metrics.radius-md;
+    // 悬停底色用前景墨半透明叠层（暗色≈提亮、亮色≈压暗）：与行悬停底
+    // canvas-subtle 同源会几乎不可见，PowerToys Run 同款悬停语言
     background: root.armed ? Theme.danger-subtle
-        : (root.emphasized ? Theme.accent-emphasis
-            : (btn-ta.has-hover
-                ? (root.danger-hover ? Theme.danger-subtle : Theme.canvas-subtle)
-                : transparent));
-    // 危险悬停时图标同步转危险色（旧版 hover:text-pg-danger-fg）；
-    // 实底强调键悬停降不透明度（旧版 hover:opacity-90）
+        : (btn-ta.has-hover
+            ? (root.danger-hover ? Theme.danger-subtle : Theme.fg-default.with-alpha(0.1))
+            : transparent);
+    // 危险悬停时图标同步转危险色（旧版 hover:text-pg-danger-fg）
     out property <color> glyph-color: btn-ta.has-hover && root.danger-hover
         ? Theme.danger-fg : root.icon-color;
-    opacity: root.emphasized && btn-ta.has-hover ? 0.9 : 1.0;
     // 旧版 actionButton 的 transition-colors：底色渐变而非瞬变
     animate background { duration: 120ms; easing: ease-out; }
 
@@ -103,6 +106,7 @@ component IconButton inherits Rectangle {
     btn-ta := TouchArea {
         clicked => { root.clicked(); }
         changed has-hover => {
+            root.hover-changed();
             // 提示锚点取按钮下方，气泡稳定悬于按钮之下而非跟随鼠标
             if (self.has-hover && root.hint != "") {
                 root.hover(root.hint,
@@ -241,9 +245,19 @@ component SearchRowCard inherits Rectangle {
     callback delete-armed-request();
     callback scroll-into-view(length, length);
 
-    // 事件驱动悬停态：行命中区与操作条/快捷粘贴按钮互斥命中，
-    // 各自的 has-hover 变化都从当前实际命中重算，与回调触发顺序无关
+    // 事件驱动悬停态：行背景 / 操作条间隙 / 各图标按钮互斥命中，
+    // 任一 has-hover 变化都从当前实际命中重算，与回调触发顺序无关。
+    // 操作条显隐依赖 hovered，任一命中区漏报都会让操作条在移入
+    // 按钮瞬间被误判离开而消失
     property <bool> hovered: false;
+    function sync-hover() {
+        root.hovered = row-ta.has-hover || act-ta.has-hover
+            || paste-btn.pointer-hover || sec-btn.pointer-hover
+            || fav-btn.pointer-hover || del-btn.pointer-hover;
+        if (!root.hovered) {
+            root.hover-left();
+        }
+    }
     property <bool> is-selected: selected;
     // 右列纵向排布链。行高恒定（不随选中展开）：切换选中时下方行
     // 才不会被推挤跳动（用户要求；选中只换高亮/左条/操作条浮层）
@@ -314,12 +328,7 @@ component SearchRowCard inherits Rectangle {
             root.hover(self.absolute-position.x + self.mouse-x,
                 self.absolute-position.y + self.mouse-y);
         }
-        changed has-hover => {
-            root.hovered = self.has-hover || act-ta.has-hover || hover-paste-ta.has-hover;
-            if (!root.hovered) {
-                root.hover-left();
-            }
-        }
+        changed has-hover => { root.sync-hover(); }
     }
 
     // ── 行主体（py-2.5 pl-3 pr-3 gap-3）──
@@ -329,6 +338,11 @@ component SearchRowCard inherits Rectangle {
     property <length> col-x: SearchGeometry.row-border-l + SearchGeometry.row-pad-h;
     // 上报的 preview-width 已扣除图标列，这里直接就是右列宽
     property <length> col-w: root.preview-width;
+    // 操作条显出时右列文本的让位宽度（对齐 PowerToys Run：激活行文字
+    // 重排给按钮区让位）。操作条右缘越出列右缘 2px（外层右距 10px <
+    // 行右距 12px），再留 4px 呼吸空隙；随删除确认键加宽自动增长
+    property <length> bar-reserve: (root.selected || root.hovered)
+        ? action-bar.width + 2px : 0px;
 
     if (data.has-thumb): Rectangle {
         x: SearchGeometry.row-border-l + SearchGeometry.row-pad-h;
@@ -375,7 +389,7 @@ component SearchRowCard inherits Rectangle {
                 x: 0;
                 y: 0;
                 height: 24px;
-                width: root.col-w - 4px;
+                width: root.col-w - 4px - root.bar-reserve;
                 text: data.preview;
                 color: Theme.fg-default;
                 font-size: 15px;
@@ -384,26 +398,42 @@ component SearchRowCard inherits Rectangle {
                 vertical-alignment: center;
             }
 
-            // 收藏星标（旧版 ★ 12px，悬挂在内容列右上）
-            if (data.favorited && !root.selected): Text {
-                x: root.col-w - 14px;
-                y: 3px;
-                text: "★";
-                color: Theme.favorite;
-                font-size: 12px;
-            }
-
-            // 元信息行（mt-0.5 text-xs fg-subtle）
-            Text {
+            // 元信息行（mt-0.5 text-xs fg-subtle）。让位定宽裁剪：变窄后
+            // 多折出的整行落在 meta-h 之外被整行裁掉，不会截半行；行高
+            // 仍由全宽标尺实测（恒定行高）
+            Rectangle {
                 x: 0;
                 y: root.meta-y;
+                width: root.col-w - root.bar-reserve;
                 height: root.meta-h;
-                width: root.col-w;
-                text: data.meta;
-                color: Theme.fg-subtle;
-                font-size: Metrics.text-xs;
-                wrap: word-wrap;
-                vertical-alignment: top;
+                clip: true;
+                Text {
+                    width: parent.width;
+                    text: data.meta;
+                    color: Theme.fg-subtle;
+                    font-size: Metrics.text-xs;
+                    wrap: word-wrap;
+                    vertical-alignment: top;
+                }
+                // 首行宽度实测：收藏星标内联跟随文字末尾（对齐速贴窗
+                // 时间行末尾的星标），元信息超行时退到首行右缘
+                meta-line-ruler := Text {
+                    opacity: 0;
+                    text: data.meta;
+                    font-size: Metrics.text-xs;
+                    wrap: no-wrap;
+                }
+                if (data.favorited): Text {
+                    x: min(meta-line-ruler.width + 6px, parent.width - self.width);
+                    y: 0;
+                    // 盒高取标尺自然高（= 首行真实行高），星标与首行
+                    // 同一行框内居中，避免写死像素对不齐
+                    height: meta-line-ruler.height;
+                    text: "★";
+                    color: Theme.favorite;
+                    font-size: root.selected ? 11px : 12px;
+                    vertical-alignment: center;
+                }
             }
 
             // 标签行（mt-1，最多 3 个 + 溢出计数）
@@ -412,7 +442,7 @@ component SearchRowCard inherits Rectangle {
                 x: 0;
                 y: root.tags-y;
                 height: root.tags-h;
-                width: root.col-w;
+                width: root.col-w - root.bar-reserve;
                 clip: true;
                 HorizontalLayout {
                     spacing: Metrics.space-1;
@@ -453,219 +483,138 @@ component SearchRowCard inherits Rectangle {
             }
     }
 
-    // ── 选中态操作条（absolute right-2.5 top-1.5）──
+    // ── 操作条（PowerToys Run 语言：裸图标组直接浮在行上，无卡片包裹；
+    // 选中与悬停显示同一组按钮）──
     Rectangle {
-        visible: root.selected;
-        clip: false;
-        x: 0;
-        y: 0;
-        width: parent.width;
-        height: parent.height;
-        HorizontalLayout {
-            width: parent.width;
-            padding-right: 10px;
-            padding-top: 6px;
-            alignment: end;
-
-            Rectangle {
-                height: 32px; // p-0.5 + h-7 按钮
-                border-radius: Metrics.radius-md;
-                border-width: 1px;
-                border-color: Theme.border-subtle;
-                background: Theme.canvas-default;
-                drop-shadow-blur: 12px;
-                drop-shadow-offset-y: 4px;
-                drop-shadow-color: Theme.shadow-color.with-alpha(0.14);
-
-                act-ta := TouchArea {
-                    changed has-hover => {
-                        root.hovered = row-ta.has-hover || self.has-hover;
-                        if (!root.hovered) {
-                            root.hover-left();
-                        }
-                    }
-                    // 挡住行级点击
-                    clicked => { }
-                }
-
-                HorizontalLayout {
-                    padding: 2px;
-                    spacing: Metrics.space-1;
-
-                    paste-btn := IconButton {
-                        emphasized: true;
-                        icon-color: Theme.fg-on-emphasis;
-                        hint: "粘贴（Enter）";
-                        clicked => { root.paste(); }
-                        hover(t, x, y) => { root.button-hint(t, x, y); }
-                        hover-left => { root.button-hint-left(); }
-                        Path {
-                            width: 16px;
-                            height: 16px;
-                            viewbox-width: 24;
-                            viewbox-height: 24;
-                            stroke: paste-btn.icon-color;
-                            stroke-width: 1.2px;
-                            commands: "M 9.75 3 L 14.25 3 A 1.75 1.75 0 0 1 16 4.75 L 16 6 L 8 6 L 8 4.75 A 1.75 1.75 0 0 1 9.75 3 Z M 7.75 6 L 16.25 6 A 2.75 2.75 0 0 1 19 8.75 L 19 18.25 A 2.75 2.75 0 0 1 16.25 21 L 7.75 21 A 2.75 2.75 0 0 1 5 18.25 L 5 8.75 A 2.75 2.75 0 0 1 7.75 6 Z M 9 11 L 15 11 M 9 15 L 15 15";
-                        }
-                    }
-                    // 次级上屏（图片/文件行）：把所在路径作为文本上屏。
-                    // 图标随类型切换——图片=相框+双山（与类型图标 image
-                    // 同源）、文件=折角文档（与类型图标 file 同源）
-                    if (data.kind != 0): IconButton {
-                        icon-color: Theme.fg-default;
-                        hint: data.kind == 1
-                            ? "粘贴为图片路径（Shift+Enter）"
-                            : "粘贴为文件路径（Shift+Enter）";
-                        clicked => { root.paste-as-path(); }
-                        hover(t, x, y) => { root.button-hint(t, x, y); }
-                        hover-left => { root.button-hint-left(); }
-                        Path {
-                            width: 16px;
-                            height: 16px;
-                            viewbox-width: 24;
-                            viewbox-height: 24;
-                            stroke: Theme.fg-default;
-                            stroke-width: 1.2px;
-                            commands: data.kind == 1
-                                ? "M 5.5 5 L 18.5 5 A 2.5 2.5 0 0 1 21 7.5 L 21 16.5 A 2.5 2.5 0 0 1 18.5 19 L 5.5 19 A 2.5 2.5 0 0 1 3 16.5 L 3 7.5 A 2.5 2.5 0 0 1 5.5 5 Z M 5 16 L 9.2 11.8 A 1.5 1.5 0 0 1 11.3 11.8 L 15 15.5 M 13 13 L 14.7 11.3 A 1.5 1.5 0 0 1 16.8 11.3 L 21 15.5"
-                                : "M 6 3.75 L 13 3.75 L 18.25 9 L 18.25 20.25 L 6 20.25 Z M 13 3.75 L 13 9 L 18.25 9";
-                        }
-                    }
-                    if (data.kind == 0): IconButton {
-                        icon-color: Theme.fg-default;
-                        hint: "编辑内容（Ctrl+Enter）";
-                        clicked => { root.edit(); }
-                        hover(t, x, y) => { root.button-hint(t, x, y); }
-                        hover-left => { root.button-hint-left(); }
-                        Path {
-                            width: 16px;
-                            height: 16px;
-                            viewbox-width: 24;
-                            viewbox-height: 24;
-                            stroke: Theme.fg-default;
-                            stroke-width: 1.2px;
-                            commands: "M 4.75 19.25 L 8.25 19.25 L 18.5 9 L 15 5.5 L 4.75 15.75 L 4.75 19.25 Z M 13.75 6.75 L 17.25 10.25 M 4.75 19.25 L 8 19.2";
-                        }
-                    }
-                    fav-btn := IconButton {
-                        icon-color: data.favorited ? Theme.favorite : Theme.fg-default;
-                        hint: data.favorited ? "取消收藏（Ctrl+Space）" : "收藏（Ctrl+Space）";
-                        clicked => { root.toggle-favorite(); }
-                        hover(t, x, y) => { root.button-hint(t, x, y); }
-                        hover-left => { root.button-hint-left(); }
-                        Path {
-                            width: 16px;
-                            height: 16px;
-                            viewbox-width: 24;
-                            viewbox-height: 24;
-                            stroke: fav-btn.icon-color;
-                            stroke-width: 1.2px;
-                            fill: data.favorited ? Theme.favorite : transparent;
-                            commands: "M 12 3.85 L 14.55 9.02 L 20.26 9.85 L 16.13 13.88 L 17.11 19.57 L 12 16.89 L 6.89 19.57 L 7.87 13.88 L 3.74 9.85 L 9.45 9.02 Z";
-                        }
-                    }
-                    del-btn := IconButton {
-                        armed: root.delete-armed;
-                        icon-color: root.delete-armed ? Theme.danger-fg : Theme.fg-muted;
-                        danger-hover: true;
-                        hint: "删除（Del）";
-                        clicked => { root.delete-armed-request(); }
-                        hover(t, x, y) => { root.button-hint(t, x, y); }
-                        hover-left => { root.button-hint-left(); }
-                        if (root.delete-armed): HorizontalLayout {
-                            padding-left: 8px;
-                            padding-right: 8px;
-                            Text {
-                                text: "确认删除";
-                                color: del-btn.icon-color;
-                                font-size: Metrics.text-xs;
-                                font-weight: Metrics.weight-medium;
-                                vertical-alignment: center;
-                            }
-                        }
-                        if (!root.delete-armed): Path {
-                            width: 16px;
-                            height: 16px;
-                            viewbox-width: 24;
-                            viewbox-height: 24;
-                            stroke: del-btn.glyph-color;
-                            stroke-width: 1.2px;
-                            commands: "M 4 7 L 20 7 M 9.5 4.75 L 14.5 4.75 L 14.5 7 L 9.5 7 Z M 6.5 7 L 7.3 19.25 L 16.7 19.25 L 17.5 7 M 10 10.5 L 10 16.5 M 14 10.5 L 14 16.5";
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // ── 非选中悬停快捷粘贴（absolute right-2.5 top-1.5）──
-    Rectangle {
-        visible: !root.selected && root.hovered;
-        // 旧版 hoverPasteButton 的 transition-opacity：出现时淡入
-        opacity: root.hovered ? 1.0 : 0.0;
+        visible: root.selected || root.hovered;
+        // 悬停出现淡入（旧版 hoverPasteButton 的 transition-opacity）
+        opacity: (root.selected || root.hovered) ? 1.0 : 0.0;
         animate opacity { duration: 150ms; easing: ease-out; }
         clip: false;
         x: 0;
         y: 0;
         width: parent.width;
         height: parent.height;
-        HorizontalLayout {
-            width: parent.width;
-            padding-right: 10px;
-            padding-top: 6px;
-            alignment: end;
+        VerticalLayout {
+            alignment: center;
+            HorizontalLayout {
+                alignment: end;
+                padding-right: 10px;
 
-            Rectangle {
-                // 旧版 h-7 px-2 gap-1：28×58 = 左8 + 图标14 + 间隔4 + 文案24 + 右8。
-                // 此结构下布局首选宽会被压小，必须显式定宽并逐项定位
-                width: 58px;
-                height: 28px;
-                border-radius: Metrics.radius-md;
-                border-width: 1px;
-                border-color: Theme.border-default;
-                // 悬停自身也给出反馈：底色沉一档并渐变（旧版 transition-colors 语言）
-                background: hover-paste-ta.has-hover ? Theme.canvas-subtle : Theme.canvas-default;
-                animate background { duration: 120ms; easing: ease-out; }
-                drop-shadow-blur: 8px;
-                drop-shadow-offset-y: 2px;
-                drop-shadow-color: Theme.shadow-color.with-alpha(0.12);
+                action-bar := Rectangle {
+                    height: 32px; // p-0.5 + h-7 按钮
 
-                hover-paste-ta := TouchArea {
-                    clicked => { root.paste(); }
-                    changed has-hover => {
-                        root.hovered = row-ta.has-hover || self.has-hover;
-                        if (!root.hovered) {
-                            root.hover-left();
+                    // 按钮间隙命中：挡住行级点击并上报悬停
+                    act-ta := TouchArea {
+                        clicked => { }
+                        changed has-hover => { root.sync-hover(); }
+                    }
+
+                    HorizontalLayout {
+                        padding: 2px;
+                        spacing: Metrics.space-1;
+
+                        // 粘贴：PowerToys Run 首位动作的双叠圆角方块图形
+                        paste-btn := IconButton {
+                            icon-color: Theme.fg-default;
+                            hint: "粘贴（Enter）";
+                            clicked => { root.paste(); }
+                            hover(t, x, y) => { root.button-hint(t, x, y); }
+                            hover-left => { root.button-hint-left(); }
+                            hover-changed => { root.sync-hover(); }
+                            Path {
+                                width: 16px;
+                                height: 16px;
+                                viewbox-width: 24;
+                                viewbox-height: 24;
+                                stroke: paste-btn.icon-color;
+                                stroke-width: 1.2px;
+                                commands: "M 8 10 A 2 2 0 0 1 10 8 L 20 8 A 2 2 0 0 1 22 10 L 22 18 A 2 2 0 0 1 20 20 L 10 20 A 2 2 0 0 1 8 18 Z M 4 16 A 2 2 0 0 1 2 14 L 2 4 A 2 2 0 0 1 4 2 L 14 2 A 2 2 0 0 1 16 4";
+                            }
+                        }
+                        // 第二键随类型切换：文本行=编辑内容；图片/文件行=
+                        // 次级上屏（把所在路径作为文本上屏）。图标与类型
+                        // 图标同源——图片=相框+双山、文件=折角文档
+                        sec-btn := IconButton {
+                            icon-color: Theme.fg-default;
+                            hint: data.kind == 0
+                                ? "编辑内容（Ctrl+Enter）"
+                                : (data.kind == 1
+                                    ? "粘贴为图片路径（Shift+Enter）"
+                                    : "粘贴为文件路径（Shift+Enter）");
+                            clicked => {
+                                if (data.kind == 0) {
+                                    root.edit();
+                                } else {
+                                    root.paste-as-path();
+                                }
+                            }
+                            hover(t, x, y) => { root.button-hint(t, x, y); }
+                            hover-left => { root.button-hint-left(); }
+                            hover-changed => { root.sync-hover(); }
+                            Path {
+                                width: 16px;
+                                height: 16px;
+                                viewbox-width: 24;
+                                viewbox-height: 24;
+                                stroke: Theme.fg-default;
+                                stroke-width: 1.2px;
+                                commands: data.kind == 0
+                                    ? "M 4.75 19.25 L 8.25 19.25 L 18.5 9 L 15 5.5 L 4.75 15.75 L 4.75 19.25 Z M 13.75 6.75 L 17.25 10.25 M 4.75 19.25 L 8 19.2"
+                                    : (data.kind == 1
+                                        ? "M 5.5 5 L 18.5 5 A 2.5 2.5 0 0 1 21 7.5 L 21 16.5 A 2.5 2.5 0 0 1 18.5 19 L 5.5 19 A 2.5 2.5 0 0 1 3 16.5 L 3 7.5 A 2.5 2.5 0 0 1 5.5 5 Z M 5 16 L 9.2 11.8 A 1.5 1.5 0 0 1 11.3 11.8 L 15 15.5 M 13 13 L 14.7 11.3 A 1.5 1.5 0 0 1 16.8 11.3 L 21 15.5"
+                                        : "M 6 3.75 L 13 3.75 L 18.25 9 L 18.25 20.25 L 6 20.25 Z M 13 3.75 L 13 9 L 18.25 9");
+                            }
+                        }
+                        fav-btn := IconButton {
+                            icon-color: data.favorited ? Theme.favorite : Theme.fg-default;
+                            hint: data.favorited ? "取消收藏（Ctrl+Space）" : "收藏（Ctrl+Space）";
+                            clicked => { root.toggle-favorite(); }
+                            hover(t, x, y) => { root.button-hint(t, x, y); }
+                            hover-left => { root.button-hint-left(); }
+                            hover-changed => { root.sync-hover(); }
+                            Path {
+                                width: 16px;
+                                height: 16px;
+                                viewbox-width: 24;
+                                viewbox-height: 24;
+                                stroke: fav-btn.icon-color;
+                                stroke-width: 1.2px;
+                                fill: data.favorited ? Theme.favorite : transparent;
+                                commands: "M 12 3.85 L 14.55 9.02 L 20.26 9.85 L 16.13 13.88 L 17.11 19.57 L 12 16.89 L 6.89 19.57 L 7.87 13.88 L 3.74 9.85 L 9.45 9.02 Z";
+                            }
+                        }
+                        del-btn := IconButton {
+                            armed: root.delete-armed;
+                            icon-color: root.delete-armed ? Theme.danger-fg : Theme.fg-muted;
+                            danger-hover: true;
+                            hint: "删除（Del）";
+                            clicked => { root.delete-armed-request(); }
+                            hover(t, x, y) => { root.button-hint(t, x, y); }
+                            hover-left => { root.button-hint-left(); }
+                            hover-changed => { root.sync-hover(); }
+                            if (root.delete-armed): HorizontalLayout {
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                Text {
+                                    text: "确认删除";
+                                    color: del-btn.icon-color;
+                                    font-size: Metrics.text-xs;
+                                    font-weight: Metrics.weight-medium;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            if (!root.delete-armed): Path {
+                                width: 16px;
+                                height: 16px;
+                                viewbox-width: 24;
+                                viewbox-height: 24;
+                                stroke: del-btn.glyph-color;
+                                stroke-width: 1.2px;
+                                commands: "M 4 7 L 20 7 M 9.5 4.75 L 14.5 4.75 L 14.5 7 L 9.5 7 Z M 6.5 7 L 7.3 19.25 L 16.7 19.25 L 17.5 7 M 10 10.5 L 10 16.5 M 14 10.5 L 14 16.5";
+                            }
                         }
                     }
-                }
-                // 图标：x=8（px-2），垂直居中；路径与旧版 svg 同源（圆角夹子+圆角盒身）
-                Rectangle {
-                    x: 8px;
-                    y: (parent.height - self.height) / 2;
-                    width: 14px;
-                    height: 14px;
-                    Path {
-                        width: 14px;
-                        height: 14px;
-                        viewbox-width: 24;
-                        viewbox-height: 24;
-                        stroke: Theme.fg-default;
-                        // 1.8 × 14/24：Slint 描边不随视框缩放，需按显示尺寸折算
-                        stroke-width: 1.05px;
-                        commands: "M 9.75 3 L 14.25 3 A 1.75 1.75 0 0 1 16 4.75 L 16 6 L 8 6 L 8 4.75 A 1.75 1.75 0 0 1 9.75 3 Z M 7.75 6 L 16.25 6 A 2.75 2.75 0 0 1 19 8.75 L 19 18.25 A 2.75 2.75 0 0 1 16.25 21 L 7.75 21 A 2.75 2.75 0 0 1 5 18.25 L 5 8.75 A 2.75 2.75 0 0 1 7.75 6 Z";
-                    }
-                }
-                Text {
-                    x: 26px;
-                    width: 26px;
-                    height: parent.height;
-                    text: "粘贴";
-                    color: Theme.fg-default;
-                    font-size: Metrics.text-xs;
-                    font-weight: Metrics.weight-medium;
-                    vertical-alignment: center;
                 }
             }
         }
@@ -693,7 +642,9 @@ export component SearchWindow inherits Window {
     in-out property <int> result-count: 0;
     in-out property <int> result-total: 0;
     in-out property <string> error-text;
-    in-out property <bool> delete-armed: false;
+    // 两段式删除待确认行号（-1 = 无）：悬停行与选中行都可发起删除，
+    // 待确认标记只落在发起行上，不会同时染到其他行的操作条
+    in-out property <int> delete-armed-row: -1;
     in-out property <bool> has-next-page: false;
     in-out property <bool> fetching-next: false;
     in-out property <[SearchTagChip]> tag-chips;
@@ -730,10 +681,10 @@ export component SearchWindow inherits Window {
     callback button-hint(string, length, length);
     callback button-hint-left();
     callback action-paste(int);
-    callback action-paste-as-path();
-    callback action-edit();
-    callback action-toggle-favorite();
-    callback action-delete();
+    callback action-paste-as-path(int);
+    callback action-edit(int);
+    callback action-toggle-favorite(int);
+    callback action-delete(int);
     callback key-navigate-up();
     callback key-navigate-down();
     callback key-paste(bool); // shift=次级上屏（粘贴为路径）
@@ -1242,7 +1193,7 @@ export component SearchWindow inherits Window {
                                     data: row;
                                     selected: i == root.selected;
                                     preview-width: root.preview-width-no-thumb;
-                                    delete-armed: root.delete-armed;
+                                    delete-armed: root.delete-armed-row == i;
                                     clicked => { root.row-clicked(i); }
                                     double-clicked => { root.row-double-clicked(i); }
                                     hover(x, y) => { root.row-hover(i, x, y); }
@@ -1250,10 +1201,10 @@ export component SearchWindow inherits Window {
                                     button-hint(t, x, y) => { root.button-hint(t, x, y); }
                                     button-hint-left => { root.button-hint-left(); }
                                     paste => { root.action-paste(i); }
-                                    paste-as-path => { root.action-paste-as-path(); }
-                                    edit => { root.action-edit(); }
-                                    toggle-favorite => { root.action-toggle-favorite(); }
-                                    delete-armed-request => { root.action-delete(); }
+                                    paste-as-path => { root.action-paste-as-path(i); }
+                                    edit => { root.action-edit(i); }
+                                    toggle-favorite => { root.action-toggle-favorite(i); }
+                                    delete-armed-request => { root.action-delete(i); }
                                     scroll-into-view(row-y, row-height) => {
                                         if (row-y < -list-flick.viewport-y + 6px) {
                                             list-flick.viewport-y = -row-y + 6px;

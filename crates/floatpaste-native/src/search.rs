@@ -348,7 +348,7 @@ fn reset_session_state(app: &App) {
     win.set_keyword("".into());
     win.set_input_suspended(false);
     win.set_selected(0);
-    win.set_delete_armed(false);
+    win.set_delete_armed_row(-1);
     win.set_active_filter(0);
     win.set_error_text("".into());
     win.set_load_failed(false);
@@ -945,13 +945,15 @@ pub fn paste_index(app: &App, index: usize, as_path_text: bool) {
     paste_item(app, &item, as_path_text);
 }
 
+/// 键盘路径的行号来源：当前选中行（鼠标路径由行回调直接带行号）
+fn selected_index(app: &App) -> usize {
+    app.with_search(|win| win.get_selected().max(0) as usize).unwrap_or(0)
+}
+
 /// 选中条目上屏（键盘路径）；次级形态按类型生效：图片上屏为图片路径、
 /// 文件上屏为逐行路径列表文本（文本暂无次级形态，等同主上屏）
 pub fn paste_selected(app: &App, as_path_text: bool) {
-    let index = app
-        .with_search(|win| win.get_selected().max(0) as usize)
-        .unwrap_or(0);
-    paste_index(app, index, as_path_text);
+    paste_index(app, selected_index(app), as_path_text);
 }
 
 fn paste_item(app: &App, item: &ClipItemSummary, as_path_text: bool) {
@@ -1030,41 +1032,37 @@ fn execute_paste(app: &App, id: &str, option: PasteOption) -> Result<(), AppErro
     Ok(())
 }
 
-/// 收藏切换（对齐 toggleFavorite：乐观更新 + 收藏视图内取消收藏即时移除）
-pub fn toggle_favorite(app: &App) {
+/// 收藏切换（对齐 toggleFavorite：乐观更新 + 收藏视图内取消收藏即时移除）。
+/// 行级动作按行号作用：悬停行与选中行的按钮、键盘路径（选中行）共用
+pub fn toggle_favorite(app: &App, index: usize) {
     if app.state.favorite_pending.swap(true, Ordering::SeqCst) {
         return;
     }
-    let selected_id = SELECTED_ID.with(|slot| slot.borrow().clone());
-    let mut items = app.state.search_items();
-    let result = items
-        .iter()
-        .find(|item| Some(item.id.as_str()) == selected_id.as_deref())
-        .map(|item| {
-            let next = !item.is_favorited;
-            (next, ClipService::set_favorited(app.core(), &item.id, next))
-        });
-    app.state.favorite_pending.store(false, Ordering::SeqCst);
-
-    let Some((next_favorited, result)) = result else {
+    let Some(item) = app.state.search_item_at(index) else {
+        app.state.favorite_pending.store(false, Ordering::SeqCst);
         return;
     };
+    let target_id = item.id.clone();
+    let next = !item.is_favorited;
+    let result = ClipService::set_favorited(app.core(), &target_id, next);
+    app.state.favorite_pending.store(false, Ordering::SeqCst);
+
     match result {
         Err(error) => {
             warn!("更新收藏状态失败: {error}");
             show_error(app, "更新收藏状态失败，请稍后重试");
         }
         Ok(()) => {
+            let mut items = app.state.search_items();
             items
                 .iter_mut()
-                .filter(|item| Some(item.id.as_str()) == selected_id.as_deref())
-                .for_each(|item| item.is_favorited = next_favorited);
+                .filter(|item| item.id == target_id)
+                .for_each(|item| item.is_favorited = next);
 
-            let favorite_view_removed =
-                !next_favorited && QUERY.with(|state| state.borrow().filter == 1);
+            let favorite_view_removed = !next && QUERY.with(|state| state.borrow().filter == 1);
             if favorite_view_removed {
                 // 收藏视图内取消收藏：从当前页移除、总数回补、选中重锚
-                items.retain(|item| Some(item.id.as_str()) != selected_id.as_deref());
+                items.retain(|item| item.id != target_id);
                 let total = QUERY.with(|state| {
                     let mut state = state.borrow_mut();
                     state.total = state.total.saturating_sub(1);
@@ -1088,18 +1086,21 @@ pub fn toggle_favorite(app: &App) {
 
 /* ───────────────── 两段式删除 ───────────────── */
 
-/// Del 或删除按钮：首次进入待确认态（3 秒后自动解除），再次触发执行
-pub fn request_delete(app: &App) {
-    let Some(id) = SELECTED_ID.with(|slot| slot.borrow().clone()) else {
+/// Del 或删除按钮：首次进入待确认态（3 秒后自动解除），再次触发执行。
+/// 行级动作按行号作用：待确认以条目 id 为准（列表位移不错删），
+/// UI 标记记行号，只落在发起行
+pub fn request_delete(app: &App, index: usize) {
+    let Some(item) = app.state.search_item_at(index) else {
         return;
     };
+    let id = item.id.clone();
     let armed = ARMED_DELETE.with(|slot| slot.borrow().as_deref() == Some(id.as_str()));
     if armed {
         perform_delete(app, &id);
         return;
     }
     ARMED_DELETE.with(|slot| *slot.borrow_mut() = Some(id.clone()));
-    app.with_search(|win| win.set_delete_armed(true));
+    app.with_search(|win| win.set_delete_armed_row(index as i32));
     let token = DELETE_TOKEN.with(|value| {
         value.set(value.get() + 1);
         value.get()
@@ -1110,14 +1111,14 @@ pub fn request_delete(app: &App) {
             return;
         }
         ARMED_DELETE.with(|slot| *slot.borrow_mut() = None);
-        app_cb.with_search(|win| win.set_delete_armed(false));
+        app_cb.with_search(|win| win.set_delete_armed_row(-1));
     });
 }
 
 fn reset_delete_arm(app: &App) {
     DELETE_TOKEN.with(|value| value.set(value.get() + 1));
     ARMED_DELETE.with(|slot| *slot.borrow_mut() = None);
-    app.with_search(|win| win.set_delete_armed(false));
+    app.with_search(|win| win.set_delete_armed_row(-1));
 }
 
 fn perform_delete(app: &App, id: &str) {
@@ -1286,11 +1287,11 @@ pub fn retry(app: &App) {
 
 /// Ctrl+Enter / 编辑按钮：打开编辑器（搜索窗停屏、会话让位，关闭后
 /// 原样恢复选中与关键词；对齐旧版 SEARCH_EDIT_ITEM_EVENT）
-pub fn edit_requested(app: &App) {
-    let Some(id) = SELECTED_ID.with(|slot| slot.borrow().clone()) else {
+pub fn edit_requested(app: &App, index: usize) {
+    let Some(item) = app.state.search_item_at(index) else {
         return;
     };
-    crate::editor::open_from_search(app, id);
+    crate::editor::open_from_search(app, item.id.clone());
 }
 
 /* ───────────────── 回调装配 ───────────────── */
@@ -1474,35 +1475,35 @@ pub fn wire(app: &App) {
             hover_left(&app_cb);
         });
     }
+    // 行级按钮动作：一律按发起行号作用（悬停行与选中行同款按钮）
     {
         let app_cb = app.clone();
         win.on_action_paste(move |index| {
             paste_index(&app_cb, index.max(0) as usize, false);
         });
     }
-    // 次级上屏按钮（图片/文件行）只在选中行上出现，作用于当前选中
     {
         let app_cb = app.clone();
-        win.on_action_paste_as_path(move || {
-            paste_selected(&app_cb, true);
+        win.on_action_paste_as_path(move |index| {
+            paste_index(&app_cb, index.max(0) as usize, true);
         });
     }
     {
         let app_cb = app.clone();
-        win.on_action_edit(move || {
-            edit_requested(&app_cb);
+        win.on_action_edit(move |index| {
+            edit_requested(&app_cb, index.max(0) as usize);
         });
     }
     {
         let app_cb = app.clone();
-        win.on_action_toggle_favorite(move || {
-            toggle_favorite(&app_cb);
+        win.on_action_toggle_favorite(move |index| {
+            toggle_favorite(&app_cb, index.max(0) as usize);
         });
     }
     {
         let app_cb = app.clone();
-        win.on_action_delete(move || {
-            request_delete(&app_cb);
+        win.on_action_delete(move |index| {
+            request_delete(&app_cb, index.max(0) as usize);
         });
     }
 
@@ -1536,19 +1537,19 @@ pub fn wire(app: &App) {
     {
         let app_cb = app.clone();
         win.on_key_edit(move || {
-            edit_requested(&app_cb);
+            edit_requested(&app_cb, selected_index(&app_cb));
         });
     }
     {
         let app_cb = app.clone();
         win.on_key_toggle_favorite(move || {
-            toggle_favorite(&app_cb);
+            toggle_favorite(&app_cb, selected_index(&app_cb));
         });
     }
     {
         let app_cb = app.clone();
         win.on_key_delete(move || {
-            request_delete(&app_cb);
+            request_delete(&app_cb, selected_index(&app_cb));
         });
     }
     {
