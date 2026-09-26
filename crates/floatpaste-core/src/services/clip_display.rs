@@ -147,6 +147,9 @@ mod tests {
         let mut item = item_of("file", 2, 1);
         item.source_app = Some("资源管理器".into());
         item.created_at = chrono::Local::now().to_rfc3339();
-        assert_eq!(build_meta(&item), "资源管理器 • 刚刚 • 2 个文件 • 1 个文件夹");
+        assert_eq!(
+            build_meta(&item),
+            "资源管理器 • 刚刚 • 2 个文件 • 1 个文件夹"
+        );
     }
 }

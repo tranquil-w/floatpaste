@@ -25,17 +25,22 @@ use floatpaste_core::launch_mode;
 use floatpaste_core::platform::windows::active_app::ActiveAppResolver;
 use floatpaste_core::platform::windows::elevated_task;
 use floatpaste_core::platform::windows::elevation;
-use floatpaste_core::platform::windows::picker_position::{current_cursor_point, work_area_from_point};
+use floatpaste_core::platform::windows::picker_position::{
+    current_cursor_point, work_area_from_point,
+};
 use floatpaste_core::platform::windows::session_keyboard::parse_session_combo;
 use floatpaste_core::platform::windows::startup;
+use floatpaste_core::platform::windows::window_control;
 use floatpaste_core::services::tag_service::TagService;
-use floatpaste_core::theme::ResolvedTheme;
 use floatpaste_core::theme;
+use floatpaste_core::theme::ResolvedTheme;
 
+use crate::overlay;
 use crate::picker::App;
 use crate::theme_bridge::hex_color;
-use crate::{app_icon, theme_bridge, win32_ext, winv_takeover};
+use crate::{theme_bridge, win32_ext, winv_takeover};
 use crate::{AccentSwatch, PresetCard, SessionKeyRow, SettingsWindow, TagRowData};
+use std::sync::atomic::Ordering;
 
 const SAVE_DEBOUNCE: Duration = Duration::from_millis(800);
 const NOTICE_TIMEOUT: Duration = Duration::from_millis(1800);
@@ -45,7 +50,10 @@ const SCROLL_OFFSET: f32 = 80.0;
 /// 会话键行定义（序号 = SessionKeys 字段序号，顺序即界面行序）
 const SESSION_KEY_DEFS: [(&str, &str); 8] = [
     ("上屏", "把选中条目粘贴到目标应用。"),
-    ("粘贴为图片路径 / 文件路径", "次级上屏：图片上屏为所在路径，文件上屏为逐行路径列表（均作为文本）。"),
+    (
+        "粘贴为图片路径 / 文件路径",
+        "次级上屏：图片上屏为所在路径，文件上屏为逐行路径列表（均作为文本）。",
+    ),
     ("编辑内容", "打开编辑窗口修改条目文本与标签。"),
     ("收藏 / 取消收藏", "切换选中条目的收藏状态。"),
     ("关闭 / 取消", "收起速贴面板或搜索窗口。"),
@@ -391,14 +399,14 @@ pub fn wire(app: &App) {
         // main 收尾统一停钩子与监听；失败在状态行提示
         let app_cb = app.clone();
         win.on_restart_as_admin(move || {
-            if let Err(error) = elevation::relaunch_elevated(launch_mode::ELEVATED_RELAUNCH_ARG)
-            {
+            if let Err(error) = elevation::relaunch_elevated(launch_mode::ELEVATED_RELAUNCH_ARG) {
                 warn!("提权重启失败: {error}");
                 if let Some(win) = app_cb.settings.upgrade() {
                     win.set_elevated_status_text(format!("提权重启失败：{error}").into());
                 }
                 return;
             }
+            info!("管理员重启获准，请求事件循环退出");
             app_cb.state.core.begin_quit();
             let _ = slint::quit_event_loop();
         });
@@ -454,25 +462,71 @@ pub fn wire(app: &App) {
         });
     }
 
-    // ── 关闭：Esc flush 后隐藏；X 仅隐藏 ──
+    // ── 关闭：Esc flush 后停屏；X 仅停屏 ──
     {
         let app_cb = app.clone();
         win.on_request_close(move || {
             flush_pending_save(&app_cb);
-            if let Some(win) = app_cb.settings.upgrade() {
-                let _ = win.window().hide();
-            }
+            park_settings_window(&app_cb);
         });
     }
     {
         let app_cb = app.clone();
         win.window().on_close_requested(move || {
-            // 对齐旧壳 configure_settings_window：拦截关闭仅隐藏；
-            // 防抖中的修改由仍存活的定时器随后落盘
-            let _ = app_cb;
-            slint::CloseRequestResponse::HideWindow
+            // Alt+F4/任务栏「关闭窗口」等 WM_CLOSE 路径同样停屏：默认
+            // HideWindow 会销毁 winit 窗口，settings_hwnd 随之失效。防抖
+            // 中的修改由仍存活的定时器随后落盘
+            park_settings_window(&app_cb);
+            slint::CloseRequestResponse::KeepWindowShown
         });
     }
+    // ── 自绘标题栏：拖拽手势与窗控 ──
+    {
+        let app_cb = app.clone();
+        win.on_drag_started(move || {
+            let hwnd = app_cb.state.settings_hwnd.load(Ordering::SeqCst);
+            if hwnd != 0 {
+                window_control::begin_window_gesture(hwnd, window_control::GestureMode::Move, 0, 0);
+            }
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_drag_moved(move || {
+            let hwnd = app_cb.state.settings_hwnd.load(Ordering::SeqCst);
+            if hwnd != 0 {
+                window_control::update_window_gesture(hwnd);
+            }
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_drag_finished(move || {
+            let hwnd = app_cb.state.settings_hwnd.load(Ordering::SeqCst);
+            if hwnd != 0 {
+                window_control::end_window_gesture(hwnd);
+            }
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_minimize_requested(move || {
+            let hwnd = app_cb.state.settings_hwnd.load(Ordering::SeqCst);
+            if hwnd != 0 {
+                let _ = window_control::minimize_window(hwnd);
+            }
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_max_toggle_requested(move || {
+            let hwnd = app_cb.state.settings_hwnd.load(Ordering::SeqCst);
+            if hwnd != 0 {
+                let _ = window_control::toggle_maximize_window(hwnd);
+            }
+        });
+    }
+
     // ── 导航与滚动 ──
     {
         let app_cb = app.clone();
@@ -562,64 +616,67 @@ pub fn open(app: &App) {
         warn!("设置窗口尚未就绪，无法打开");
         return;
     };
+    let hwnd = app.state.settings_hwnd.load(Ordering::SeqCst);
+    if hwnd == 0 {
+        warn!("设置窗口 HWND 尚未就绪，无法打开");
+        return;
+    }
 
     hydrate(app, &win);
+    // 尺寸走 Win32 直接设物理像素：停屏窗口的 Slint set_size 异步落地，
+    // 回读尺寸会错位（首开底部出屏即此因）；尺寸用已知逻辑值 × 缩放
+    // 换算，不回读窗口
+    let scale = win.window().scale_factor();
+    let width_px = (920.0 * scale).round() as i32;
+    let height_px = (760.0 * scale).round() as i32;
+    window_control::set_window_size_no_activate(hwnd, width_px, height_px);
+    // 上屏位置：光标所在显示器工作区中心（不保留位置记忆），用同一组
+    // 已知尺寸求中心。先计算不移动——停屏窗口 Win32 可见，移动即上屏，
+    // 须待内容就绪后进行
+    let target = current_cursor_point()
+        .and_then(work_area_from_point)
+        .ok()
+        .map(|area| {
+            (
+                (area.left + area.right) / 2 - width_px / 2,
+                (area.top + area.bottom) / 2 - height_px / 2,
+            )
+        });
+    info!("打开设置窗口");
 
-    // 整帧重绘：hide→show 周期后 Slint 只重绘变化区域（与编辑窗口同理）
-    win.set_force_repaint(!win.get_force_repaint());
-    let _ = win.window().show();
-    // 尺寸在 show 之后显式设置：Slint 隐藏窗口不带真实尺寸，show 首帧会
-    // 按根布局收缩到最小（搜索/编辑窗口同款问题），后置 set_size 才生效。
-    // 每次打开重置为 920×760（旧版 inner_size 在窗口重建时同样复位；
-    // 用户逐次调整的尺寸记忆属旧版 window 级持久化，本壳暂不保留）
-    win.window()
-        .set_size(slint::LogicalSize::new(920.0 as f32, 760.0 as f32));
+    // 上屏序列（对齐编辑窗）：摘 TOOLWINDOW（任务栏按钮回归）→ 重挂
+    // 材质 → 暖帧 → 移动上屏 → 抢前台。窗口停屏且不销毁（不走
+    // SLINT_DESTROY_WINDOW_ON_HIDE 的销毁重建），上屏首帧即完整内容
+    win32_ext::set_toolwindow_style(hwnd, false);
+    win.set_material_active(overlay::apply_material(
+        app,
+        hwnd,
+        overlay::MaterialSurface::Content,
+    ));
+    win32_ext::warm_surface(hwnd);
+    win32_ext::force_full_repaint(hwnd);
+    if let Some((x, y)) = target {
+        win.window()
+            .set_position(slint::PhysicalPosition::new(x, y));
+    }
+    // 设置窗口需要真实前台（输入框键盘输入），绕前台锁获取
+    if !ActiveAppResolver::force_foreground_window(hwnd) {
+        warn!("设置窗口获取前台失败");
+    }
+    overlay::schedule_caption_strip(hwnd);
     // 窗口级键盘（Esc 关窗）挂在 root-scope capture 上，开窗先聚焦
     win.invoke_focus_root_scope();
-    info!("打开设置窗口");
-    // SLINT_DESTROY_WINDOW_ON_HIDE 下每次隐藏都销毁 winit 窗口，再次
-    // 打开是重建：建窗在下一拍事件循环落地，句柄相关收尾（尺寸补齐/
-    // 图标/暖屏/前置）延后执行，否则窗口不在前台
-    let app_cb = app.clone();
-    slint::Timer::single_shot(std::time::Duration::from_millis(50), move || {
-        if let Some(win) = app_cb.settings.upgrade() {
-            win.window()
-                .set_size(slint::LogicalSize::new(920.0 as f32, 760.0 as f32));
-            // 默认摆位：光标所在显示器工作区中心（设置窗不保留位置记忆；
-            // 尺寸此时刚落到真实物理值，直接取窗口尺寸求中心）
-            if let Ok(area) = current_cursor_point().and_then(work_area_from_point) {
-                let size = win.window().size();
-                win.window().set_position(slint::PhysicalPosition::new(
-                    (area.left + area.right) / 2 - size.width as i32 / 2,
-                    (area.top + area.bottom) / 2 - size.height as i32 / 2,
-                ));
-            }
-            win.invoke_focus_root_scope();
-            if let Some(hwnd) = win32_ext::window_hwnd(&win) {
-                app_icon::apply_window_icon(hwnd);
-                // 全应用统一 Acrylic（Mica 视觉过弱用户实测否决）；
-                // hide 销毁重建型窗口每次打开重挂
-                {
-                    let settings = app_cb.state.current_settings();
-                    let resolved = floatpaste_core::theme::resolve_theme(
-                        settings.theme_mode.clone(),
-                        floatpaste_core::theme::system_prefers_dark(),
-                    );
-                    let active = win32_ext::apply_window_backdrop(
-                        hwnd,
-                        true,
-                        resolved == floatpaste_core::theme::ResolvedTheme::Dark,
-                    );
-                    win.set_material_active(active);
-                }
-                win32_ext::warm_surface(hwnd);
-                // 设置窗口需要真实前台（输入框键盘输入），绕前台锁获取
-                if !ActiveAppResolver::force_foreground_window(hwnd) {
-                    warn!("设置窗口获取前台失败");
-                }
-            }
-        }
-    });
+}
+
+/// 设置窗停屏：挂 TOOLWINDOW（任务栏按钮消失）+ 平移屏外。保持 Slint
+/// 「已显示」与表面内容有效，下次打开免重建
+fn park_settings_window(app: &App) {
+    let hwnd = app.state.settings_hwnd.load(Ordering::SeqCst);
+    win32_ext::set_toolwindow_style(hwnd, true);
+    if let Some(win) = app.settings.upgrade() {
+        win.window()
+            .set_position(slint::PhysicalPosition::new(-32000, -32000));
+    }
 }
 
 /// 把当前持久化设置水合进界面（对齐旧版 applyServerSettings：
@@ -665,10 +722,12 @@ fn hydrate(app: &App, win: &SettingsWindow) {
         ThemeMode::Light => 1,
         ThemeMode::Dark => 2,
     });
-    win.set_theme_preset(theme::THEME_PRESET_IDS
-        .iter()
-        .position(|id| *id == settings.theme_preset)
-        .unwrap_or(0) as i32);
+    win.set_theme_preset(
+        theme::THEME_PRESET_IDS
+            .iter()
+            .position(|id| *id == settings.theme_preset)
+            .unwrap_or(0) as i32,
+    );
     win.set_theme_accent_id(settings.theme_accent.clone().into());
     win.set_launch_on_startup(settings.launch_on_startup);
     win.set_silent_on_startup(settings.silent_on_startup);
@@ -786,7 +845,10 @@ fn session_conflict_reason(win: &SettingsWindow) -> Option<String> {
     for i in 0..entries.len() {
         for j in (i + 1)..entries.len() {
             if !entries[i].1.is_empty() && entries[i].1 == entries[j].1 {
-                return Some(format!("「{}」与「{}」键位相同。", entries[i].0, entries[j].0));
+                return Some(format!(
+                    "「{}」与「{}」键位相同。",
+                    entries[i].0, entries[j].0
+                ));
             }
         }
     }
@@ -836,7 +898,12 @@ fn session_keys_from_rows(win: &SettingsWindow) -> SessionKeys {
 }
 
 /// 更新会话键行：value 传 None 表示只改提示（录制取消/拒绝时保留原值）
-fn update_session_row(win: &SettingsWindow, action: usize, value: Option<&str>, notice: Option<&str>) {
+fn update_session_row(
+    win: &SettingsWindow,
+    action: usize,
+    value: Option<&str>,
+    notice: Option<&str>,
+) {
     let model = win.get_session_key_rows();
     if action >= model.row_count() {
         return;
@@ -873,11 +940,9 @@ fn schedule_save(app: &App) {
     win.set_search_shortcut_hint("".into());
     let app_cb = app.clone();
     let timer = slint::Timer::default();
-    timer.start(
-        slint::TimerMode::SingleShot,
-        SAVE_DEBOUNCE,
-        move || perform_save(&app_cb),
-    );
+    timer.start(slint::TimerMode::SingleShot, SAVE_DEBOUNCE, move || {
+        perform_save(&app_cb)
+    });
     SAVE_TIMER.with(|slot| *slot.borrow_mut() = Some(timer));
 }
 
@@ -949,6 +1014,30 @@ pub fn apply_side_effects(app: &App) {
     let resolved = theme::resolve_theme(settings.theme_mode.clone(), theme::system_prefers_dark());
     let tokens = theme::derive_tokens(&settings.theme_preset, &settings.theme_accent, resolved);
     theme_bridge::reapply_theme(app, &tokens);
+    // 明暗切换后可见窗的 DWM 材质按新明暗重挂：Mica/Acrylic 的 tint
+    // 明暗跟随 DWMWA_USE_IMMERSIVE_DARK_MODE，仅换 token 不重挂会让
+    // 可见窗残留旧明暗的材质底（浅色下透出深色 Mica，实测灰环）。
+    // 停屏窗在各自 show 路径重挂，此处补挂常驻的设置/编辑窗
+    if let Some(win) = app.settings.upgrade() {
+        let hwnd = app.state.settings_hwnd.load(Ordering::SeqCst);
+        if hwnd != 0 {
+            win.set_material_active(overlay::apply_material(
+                app,
+                hwnd,
+                overlay::MaterialSurface::Content,
+            ));
+        }
+    }
+    if let Some(win) = app.editor.upgrade() {
+        let hwnd = app.state.editor_hwnd.load(Ordering::SeqCst);
+        if hwnd != 0 {
+            win.set_material_active(overlay::apply_material(
+                app,
+                hwnd,
+                overlay::MaterialSurface::Content,
+            ));
+        }
+    }
     if let Some(win) = app.settings.upgrade() {
         rebuild_preview_models(&win, &settings, resolved);
         // 保存路径可能改变快捷键（含 Win+V 接管），注册结果即时呈现
@@ -991,8 +1080,7 @@ pub fn on_explorer_restarted(app: &App) {
 /// 状态给出针对性指引而非笼统的「请换一组」
 fn refresh_hotkey_status_hints(win: &SettingsWindow, failures: &[(u32, u32)]) {
     let uses_win = |text: &str| {
-        floatpaste_core::platform::windows::hotkey::parse_hotkey(text)
-            .is_some_and(|spec| spec.win)
+        floatpaste_core::platform::windows::hotkey::parse_hotkey(text).is_some_and(|spec| spec.win)
     };
     let text_for = |id: u32, text: &str| {
         failures
@@ -1061,18 +1149,17 @@ fn rebuild_preview_models(win: &SettingsWindow, settings: &UserSetting, resolved
         .iter()
         .position(|id| *id == settings.theme_preset)
         .unwrap_or(0);
-    let preset_names = [("默认", "低色度中性灰基调，跨设备观感最稳定。"),
+    let preset_names = [
+        ("默认", "低色度中性灰基调，跨设备观感最稳定。"),
         ("Catppuccin", "柔和低饱和的社区配色，亮暗为 Latte / Mocha。"),
-        ("Tokyo Night", "蓝墨夜色风格，亮暗为 day / night。")];
+        ("Tokyo Night", "蓝墨夜色风格，亮暗为 day / night。"),
+    ];
     let cards: Vec<PresetCard> = theme::THEME_PRESET_IDS
         .iter()
         .enumerate()
         .map(|(index, id)| {
             let tokens = theme::derive_tokens(id, &settings.theme_accent, resolved);
-            let (name, description) = preset_names
-                .get(index)
-                .copied()
-                .unwrap_or((*id, ""));
+            let (name, description) = preset_names.get(index).copied().unwrap_or((*id, ""));
             PresetCard {
                 name: name.into(),
                 description: description.into(),
@@ -1094,7 +1181,11 @@ fn rebuild_preview_models(win: &SettingsWindow, settings: &UserSetting, resolved
     let dark = matches!(resolved, ResolvedTheme::Dark);
     let mut swatches = vec![AccentSwatch {
         id: "default".into(),
-        hex: hex_color(&theme::resolve_accent_hex("default", &settings.theme_preset, resolved)),
+        hex: hex_color(&theme::resolve_accent_hex(
+            "default",
+            &settings.theme_preset,
+            resolved,
+        )),
         selected: settings.theme_accent == "default",
     }];
     swatches.extend(theme::ACCENT_CHOICES.iter().map(|choice| AccentSwatch {
@@ -1139,46 +1230,42 @@ fn scroll_to_section(win: &SettingsWindow, index: usize) {
     let win_cb = win.as_weak();
     ANIM_TIMER.with(|slot| {
         let timer = slint::Timer::default();
-        timer.start(
-            slint::TimerMode::Repeated,
-            ANIM_STEP,
-            move || {
-                let Some(win) = win_cb.upgrade() else {
-                    SCROLL_ANIM.with(|slot| *slot.borrow_mut() = None);
-                    return;
-                };
-                let Some(current) = SCROLL_ANIM.with(|slot| slot.borrow().clone()) else {
-                    return;
-                };
-                let elapsed = std::time::Instant::now()
-                    .duration_since(current.started_at)
-                    .min(ANIM_DURATION);
-                let progress = elapsed.as_secs_f32() / ANIM_DURATION.as_secs_f32();
-                // ease-out（二次缓出，近似浏览器 smooth 滚动手感）
-                let eased = 1.0 - (1.0 - progress) * (1.0 - progress);
-                win.set_scroll_y(current.from + (current.to - current.from) * eased);
-                if progress >= 1.0 {
-                    win.set_scroll_y(current.to);
-                    // 停止动画；120ms 后解除锁定，高亮交还表达式 scroll-spy
-                    // （对齐旧版 PROGRAMMATIC_SCROLL_UNLOCK_DELAY）
-                    SCROLL_ANIM.with(|slot| *slot.borrow_mut() = None);
-                    let win_for_unlock = win.as_weak();
-                    UNLOCK_TIMER.with(|slot| {
-                        let unlock = slint::Timer::default();
-                        unlock.start(
-                            slint::TimerMode::SingleShot,
-                            Duration::from_millis(120),
-                            move || {
-                                if let Some(win) = win_for_unlock.upgrade() {
-                                    win.set_nav_override(-1);
-                                }
-                            },
-                        );
-                        *slot.borrow_mut() = Some(unlock);
-                    });
-                }
-            },
-        );
+        timer.start(slint::TimerMode::Repeated, ANIM_STEP, move || {
+            let Some(win) = win_cb.upgrade() else {
+                SCROLL_ANIM.with(|slot| *slot.borrow_mut() = None);
+                return;
+            };
+            let Some(current) = SCROLL_ANIM.with(|slot| slot.borrow().clone()) else {
+                return;
+            };
+            let elapsed = std::time::Instant::now()
+                .duration_since(current.started_at)
+                .min(ANIM_DURATION);
+            let progress = elapsed.as_secs_f32() / ANIM_DURATION.as_secs_f32();
+            // ease-out（二次缓出，近似浏览器 smooth 滚动手感）
+            let eased = 1.0 - (1.0 - progress) * (1.0 - progress);
+            win.set_scroll_y(current.from + (current.to - current.from) * eased);
+            if progress >= 1.0 {
+                win.set_scroll_y(current.to);
+                // 停止动画；120ms 后解除锁定，高亮交还表达式 scroll-spy
+                // （对齐旧版 PROGRAMMATIC_SCROLL_UNLOCK_DELAY）
+                SCROLL_ANIM.with(|slot| *slot.borrow_mut() = None);
+                let win_for_unlock = win.as_weak();
+                UNLOCK_TIMER.with(|slot| {
+                    let unlock = slint::Timer::default();
+                    unlock.start(
+                        slint::TimerMode::SingleShot,
+                        Duration::from_millis(120),
+                        move || {
+                            if let Some(win) = win_for_unlock.upgrade() {
+                                win.set_nav_override(-1);
+                            }
+                        },
+                    );
+                    *slot.borrow_mut() = Some(unlock);
+                });
+            }
+        });
         *slot.borrow_mut() = Some(timer);
     });
 }
@@ -1315,8 +1402,9 @@ impl std::fmt::Display for AutostartError {
 pub fn spawn_autostart_sync(app: &App, allow_prompt: bool) {
     let app_cb = app.clone();
     std::thread::spawn(move || {
-        let _guard =
-            AUTOSTART_SYNC_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _guard = AUTOSTART_SYNC_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         let settings = app_cb.state.current_settings();
         if let Err(error) = sync_autostart_task(&settings, allow_prompt) {
             warn!("自启任务同步失败: {error}");
@@ -1328,9 +1416,7 @@ pub fn spawn_autostart_sync(app: &App, allow_prompt: bool) {
                 match &error {
                     AutostartError::Launch(message) => {
                         win.set_launch_on_startup(false);
-                        win.set_elevated_status_text(
-                            format!("开机自启设置失败：{message}").into(),
-                        );
+                        win.set_elevated_status_text(format!("开机自启设置失败：{message}").into());
                     }
                     AutostartError::Elevated(message) => {
                         win.set_always_run_elevated(false);
@@ -1360,7 +1446,8 @@ fn sync_autostart_task(settings: &UserSetting, allow_prompt: bool) -> Result<(),
     // 关自启 = 无任务（提权偏好保留，下次开启自启时按其生效）
     if !settings.launch_on_startup {
         if snapshot.present {
-            elevated_task::uninstall().map_err(|error| AutostartError::Launch(error.to_string()))?;
+            elevated_task::uninstall()
+                .map_err(|error| AutostartError::Launch(error.to_string()))?;
         }
         return Ok(());
     }
@@ -1389,8 +1476,8 @@ fn sync_autostart_task(settings: &UserSetting, allow_prompt: bool) -> Result<(),
         arguments.push(' ');
         arguments.push_str(&expected_arguments);
     }
-    let exe = std::env::current_exe()
-        .map_err(|error| AutostartError::Elevated(error.to_string()))?;
+    let exe =
+        std::env::current_exe().map_err(|error| AutostartError::Elevated(error.to_string()))?;
     let code = elevation::run_elevated_and_wait(&exe.to_string_lossy(), &arguments)
         .map_err(|error| AutostartError::Elevated(error.to_string()))?;
     if code != 0 {
@@ -1422,8 +1509,9 @@ fn normalize_captured(value: &str) -> Captured {
 fn clamp_number_text(text: &str, min: u32, max: u32, fallback: u32) -> String {
     let parsed: Option<f64> = text.trim().parse().ok();
     let value = match parsed {
-        Some(value) if value.is_finite() => (value.round() as f64)
-            .clamp(min as f64, max as f64) as u32,
+        Some(value) if value.is_finite() => {
+            (value.round() as f64).clamp(min as f64, max as f64) as u32
+        }
         _ => fallback,
     };
     value.to_string()

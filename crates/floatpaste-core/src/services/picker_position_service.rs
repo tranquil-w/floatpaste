@@ -360,7 +360,10 @@ mod tests {
         let placed = place_window_near_point(caret, work, 360, 420);
         assert_eq!(placed.x, 1140 - 180);
 
-        let lead = Anchor { centered: false, ..caret };
+        let lead = Anchor {
+            centered: false,
+            ..caret
+        };
         let placed = place_window_near_point(lead, work, 360, 420);
         assert_eq!(placed.x, 1140 - 72);
     }

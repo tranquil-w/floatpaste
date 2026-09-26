@@ -25,8 +25,8 @@ use tracing::{info, warn};
 use floatpaste_core::domain::clip_item::{
     ClipItemSummary, ClipType, PasteOption, SearchFilters, SearchQuery, SearchResult, SearchSort,
 };
-use floatpaste_core::domain::settings::{PasteTrigger, UserSetting};
 use floatpaste_core::domain::error::AppError;
+use floatpaste_core::domain::settings::{PasteTrigger, UserSetting};
 use floatpaste_core::platform::windows::active_app::ActiveAppResolver;
 use floatpaste_core::platform::windows::picker_position::{
     current_cursor_point, work_area_from_point, ScreenRect,
@@ -38,7 +38,6 @@ use floatpaste_core::services::clip_service::ClipService;
 use floatpaste_core::services::paste_support;
 use floatpaste_core::services::picker_position_service::center_in_work_area;
 use floatpaste_core::services::time_format::format_relative_time_or_unused;
-use floatpaste_core::theme;
 
 use crate::app_state::SearchSession;
 use crate::overlay;
@@ -65,7 +64,8 @@ const INJECT_DELAY: Duration = Duration::from_millis(60);
 /* ───────────────── 会话生命周期 ───────────────── */
 
 /// 全局搜索快捷键命中：活跃则关闭并还原目标；速贴活跃则先收起速贴（不还
-/// 原目标，焦点交给搜索窗口），再打开搜索（对齐 open_search_global）
+/// 原目标，焦点交给搜索窗口），再打开搜索（对齐 open_search_global）。
+/// 每击必响应，不做防抖（系统重复由注册层 MOD_NOREPEAT 过滤）
 pub fn toggle_from_shortcut(app: &App) {
     if app.state.is_search_active() {
         hide(app, true);
@@ -129,6 +129,10 @@ pub fn open(app: &App) {
     // 匹配即闪一下（对齐 picker::activate 的「尺寸/数据就绪 → 暖表面 →
     // 上屏」顺序）
     reset_session_state(app);
+    // 出现滑入准备：停屏期关动画重置内容偏移，暖首帧落盘的即 4px 起步态
+    // （见 search.slint enter-offset 注释）
+    win.set_enter_animated(false);
+    win.set_enter_offset(4.0);
     // 尺寸先于定位：首开会话时窗口还是装配期自然尺寸（根布局钳制，不是
     // 设计尺寸），直接拿 window().size() 居中必偏（winit set_size 亦非
     // 同步可读回）。定位用同一组计算值，不经窗口回读
@@ -164,10 +168,14 @@ pub fn open(app: &App) {
         }
     }
     win32_ext::warm_surface(hwnd);
+    win32_ext::force_full_repaint(hwnd);
 
     if let Err(error) = window_control::restore_window_and_focus(hwnd) {
         warn!("搜索窗口获取焦点失败: {error}");
     }
+    // 上屏即滑入：解锁动画归零，内容从 4px 滑到位（窗底不动，不露窗外）
+    win.set_enter_animated(true);
+    win.set_enter_offset(0.0);
     // 兜底重挂浮层样式（可聚焦变体，不带 WS_EX_NOACTIVATE）并复查置顶
     overlay::after_show_focusable(hwnd);
     apply_material(app, &win, hwnd);
@@ -264,8 +272,12 @@ pub fn restore_after_editor(app: &App) {
     let Some(win) = app.search.upgrade() else {
         return;
     };
+    // 出现滑入准备：同 open，停屏期无动画重置内容偏移，暖首帧即起步态
+    win.set_enter_animated(false);
+    win.set_enter_offset(4.0);
     // 上屏前先暖表面（同步泵一次 WM_PAINT 呈现），移回原位即有内容
     win32_ext::warm_surface(hwnd);
+    win32_ext::force_full_repaint(hwnd);
     if let Ok(mut slot) = PARKED_POSITION.lock() {
         if let Some((x, y)) = slot.take() {
             win.window()
@@ -277,6 +289,9 @@ pub fn restore_after_editor(app: &App) {
     if let Err(error) = window_control::restore_window_and_focus(hwnd) {
         warn!("搜索窗口恢复焦点失败: {error}");
     }
+    // 上屏即滑入（同 open）
+    win.set_enter_animated(true);
+    win.set_enter_offset(0.0);
     overlay::after_show_focusable(hwnd);
     apply_material(app, &win, hwnd);
     app.state.begin_search_activation();
@@ -914,15 +929,13 @@ fn show_error(app: &App, message: &str) {
 
 /* ───────────────── 条目动作 ───────────────── */
 
-/// 挂 Win11 材质并回写门控：全应用统一 Acrylic 浮层家族观感（速贴
-/// 同款；Mica 视觉过弱用户实测否决），明暗随主题联动。不支持/透明
-/// 关闭时 false，面板回不透明底（搜索窗停屏不销毁，重复挂载幂等）
+/// 挂 Win11 材质并回写门控（策略在 overlay::apply_material 统一）
 fn apply_material(app: &App, win: &SearchWindow, hwnd: isize) {
-    let settings = app.state.current_settings();
-    let resolved = theme::resolve_theme(settings.theme_mode.clone(), theme::system_prefers_dark());
-    let active =
-        win32_ext::apply_window_backdrop(hwnd, true, resolved == theme::ResolvedTheme::Dark);
-    win.set_material_active(active);
+    win.set_material_active(overlay::apply_material(
+        app,
+        hwnd,
+        overlay::MaterialSurface::Transient,
+    ));
 }
 
 pub fn paste_index(app: &App, index: usize, as_path_text: bool) {
@@ -1679,17 +1692,47 @@ mod tests {
     fn session_action_resolves_default_combinations() {
         let settings = UserSetting::default();
         // Slint 事件文本：Return=\u{a}、Escape=\u{1b}、UpArrow=\u{F700}
-        assert_eq!(resolve_session_action(&settings, "\u{a}", false, false, false, false), 3);
-        assert_eq!(resolve_session_action(&settings, "\u{a}", false, false, true, false), 4);
-        assert_eq!(resolve_session_action(&settings, "\u{a}", true, false, false, false), 5);
-        assert_eq!(resolve_session_action(&settings, "\u{1b}", false, false, false, false), 7);
-        assert_eq!(resolve_session_action(&settings, "\u{F700}", false, false, false, false), 1);
-        assert_eq!(resolve_session_action(&settings, "\u{F701}", false, false, false, false), 2);
-        assert_eq!(resolve_session_action(&settings, "\u{20}", true, false, false, false), 6);
-        assert_eq!(resolve_session_action(&settings, "\u{7f}", false, false, false, false), 8);
+        assert_eq!(
+            resolve_session_action(&settings, "\u{a}", false, false, false, false),
+            3
+        );
+        assert_eq!(
+            resolve_session_action(&settings, "\u{a}", false, false, true, false),
+            4
+        );
+        assert_eq!(
+            resolve_session_action(&settings, "\u{a}", true, false, false, false),
+            5
+        );
+        assert_eq!(
+            resolve_session_action(&settings, "\u{1b}", false, false, false, false),
+            7
+        );
+        assert_eq!(
+            resolve_session_action(&settings, "\u{F700}", false, false, false, false),
+            1
+        );
+        assert_eq!(
+            resolve_session_action(&settings, "\u{F701}", false, false, false, false),
+            2
+        );
+        assert_eq!(
+            resolve_session_action(&settings, "\u{20}", true, false, false, false),
+            6
+        );
+        assert_eq!(
+            resolve_session_action(&settings, "\u{7f}", false, false, false, false),
+            8
+        );
         // 未配置组合放行（0），修饰键集合不一致不命中
-        assert_eq!(resolve_session_action(&settings, "\u{20}", false, false, false, false), 0);
-        assert_eq!(resolve_session_action(&settings, "x", false, false, false, false), 0);
+        assert_eq!(
+            resolve_session_action(&settings, "\u{20}", false, false, false, false),
+            0
+        );
+        assert_eq!(
+            resolve_session_action(&settings, "x", false, false, false, false),
+            0
+        );
     }
 
     #[test]
@@ -1702,10 +1745,19 @@ mod tests {
             },
             ..UserSetting::default()
         };
-        assert_eq!(resolve_session_action(&settings, "k", true, false, false, false), 3);
-        assert_eq!(resolve_session_action(&settings, "q", false, false, false, false), 7);
+        assert_eq!(
+            resolve_session_action(&settings, "k", true, false, false, false),
+            3
+        );
+        assert_eq!(
+            resolve_session_action(&settings, "q", false, false, false, false),
+            7
+        );
         // 旧默认键位不再命中
-        assert_eq!(resolve_session_action(&settings, "\u{1b}", false, false, false, false), 0);
+        assert_eq!(
+            resolve_session_action(&settings, "\u{1b}", false, false, false, false),
+            0
+        );
     }
 
     #[test]

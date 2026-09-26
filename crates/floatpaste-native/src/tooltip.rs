@@ -242,8 +242,7 @@ fn render(
                 .map(|line| win.invoke_measure_natural_width(line.clone()))
                 .collect();
             let natural_width = naturals.iter().copied().fold(0.0f32, f32::max);
-            let initial_width = (natural_width + inset_h).clamp(MIN_WIDTH, MAX_WIDTH)
-                - inset_h;
+            let initial_width = (natural_width + inset_h).clamp(MIN_WIDTH, MAX_WIDTH) - inset_h;
             // 宽度收敛：折行行的断行残端会让右边距比左边大出一个词的
             // 空白。对每个折行行二分「保持行数不变的最小宽度」（行高在
             // 宽度上单调不增），不折行行以其自然宽为下限；卡片取约束
@@ -382,9 +381,8 @@ fn render_static(
 
     let natural_width = win.invoke_measure_simple_width(text.into());
     let width = (natural_width + win.get_card_inset_h()).clamp(MIN_WIDTH_STATIC, MAX_WIDTH);
-    let height = win.get_simple_line_height()
-        + win.get_card_chrome_v_simple()
-        + HEIGHT_SAFETY_STATIC;
+    let height =
+        win.get_simple_line_height() + win.get_card_chrome_v_simple() + HEIGHT_SAFETY_STATIC;
 
     win.set_simple_mode(true);
     win.set_has_image(false);
@@ -451,45 +449,48 @@ fn present(
     // 移动不触发重绘，首帧即完整内容；上屏后 16ms 补泵兜底
     let reveal_delay_ms = if cfg!(debug_assertions) { 200 } else { 16 };
     let win_cb = win.as_weak();
-    slint::Timer::single_shot(std::time::Duration::from_millis(reveal_delay_ms), move || {
-        // 窗口已销毁则放弃（仅作生命周期检查，几何走裸 Win32）
-        if win_cb.upgrade().is_none() {
-            return;
-        }
-        // 期间有新的悬停请求或取消（令牌递增）则放弃本次显示
-        if PENDING_TOKEN.with(|value| value.get()) != token {
-            return;
-        }
-        win32_ext::warm_surface(tooltip_hwnd);
-        // ── 定位：宿主窗口原点 + 锚点×scale，越界按光标翻转 ──
-        let position =
-            resolve_position(host_hwnd, anchor.0, anchor.1, dpi, physical_w, physical_h);
-        window_control::set_window_bounds(
-            tooltip_hwnd,
-            position.0,
-            position.1,
-            physical_w as i32,
-            physical_h as i32,
-        );
-        // 置顶不激活、前台若被抢则归还（RestoreIfStolen 双保险：归还后
-        // 须把 tooltip 抬回置顶带顶部，宿主同为置顶会盖住它）
-        let restore =
-            prev_foreground.map_or(ForegroundPolicy::Keep, ForegroundPolicy::RestoreIfStolen);
-        overlay::after_show(tooltip_hwnd, true, restore, ForegroundPolicy::Keep);
-        slint::Timer::single_shot(std::time::Duration::from_millis(16), move || {
-            if let Some(win) = win_cb.upgrade() {
-                win.set_appear(true);
+    slint::Timer::single_shot(
+        std::time::Duration::from_millis(reveal_delay_ms),
+        move || {
+            // 窗口已销毁则放弃（仅作生命周期检查，几何走裸 Win32）
+            if win_cb.upgrade().is_none() {
+                return;
+            }
+            // 期间有新的悬停请求或取消（令牌递增）则放弃本次显示
+            if PENDING_TOKEN.with(|value| value.get()) != token {
+                return;
             }
             win32_ext::warm_surface(tooltip_hwnd);
-        });
-        slint::Timer::single_shot(std::time::Duration::from_millis(60), move || {
-            if ActiveAppResolver::current_foreground_hwnd() == Some(tooltip_hwnd)
-                && ActiveAppResolver::restore_foreground_window(host_hwnd)
-            {
-                window_control::set_window_topmost_no_activate(tooltip_hwnd);
-            }
-        });
-    });
+            // ── 定位：宿主窗口原点 + 锚点×scale，越界按光标翻转 ──
+            let position =
+                resolve_position(host_hwnd, anchor.0, anchor.1, dpi, physical_w, physical_h);
+            window_control::set_window_bounds(
+                tooltip_hwnd,
+                position.0,
+                position.1,
+                physical_w as i32,
+                physical_h as i32,
+            );
+            // 置顶不激活、前台若被抢则归还（RestoreIfStolen 双保险：归还后
+            // 须把 tooltip 抬回置顶带顶部，宿主同为置顶会盖住它）
+            let restore =
+                prev_foreground.map_or(ForegroundPolicy::Keep, ForegroundPolicy::RestoreIfStolen);
+            overlay::after_show(tooltip_hwnd, true, restore, ForegroundPolicy::Keep);
+            slint::Timer::single_shot(std::time::Duration::from_millis(16), move || {
+                if let Some(win) = win_cb.upgrade() {
+                    win.set_appear(true);
+                }
+                win32_ext::warm_surface(tooltip_hwnd);
+            });
+            slint::Timer::single_shot(std::time::Duration::from_millis(60), move || {
+                if ActiveAppResolver::current_foreground_hwnd() == Some(tooltip_hwnd)
+                    && ActiveAppResolver::restore_foreground_window(host_hwnd)
+                {
+                    window_control::set_window_topmost_no_activate(tooltip_hwnd);
+                }
+            });
+        },
+    );
 }
 
 /// 定位与翻转（对齐 TooltipWindow::resolve_clamped_position：

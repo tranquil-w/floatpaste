@@ -11,7 +11,7 @@
 use std::sync::atomic::{AtomicIsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 
-use tracing::warn;
+use tracing::{info, warn};
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -263,6 +263,9 @@ fn toggle_monitoring(app: &App) {
 /// 退出：置退出标志并结束事件循环，main 在循环退出后统一收尾
 /// （停钩子/监听/热键，对齐旧壳 prepare_for_exit + exit(0)）
 fn quit(app: &App) {
+    // 「事件循环已返回」日志无法区分 quit 来源，此处留痕：出现非用户
+    // 操作的退出时可排查菜单命令是否被误配
+    info!("托盘退出菜单命中，请求事件循环退出");
     app.state.core.begin_quit();
     let _ = slint::quit_event_loop();
 }

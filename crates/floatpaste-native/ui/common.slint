@@ -30,3 +30,108 @@ export component Kbd inherits Rectangle {
         }
     }
 }
+
+// no-frame 内容窗（编辑/设置）的自绘标题栏：拖拽命中 + 窗控三键。
+// 键位 46px 间距仿原生窗控布局；回调由宿主窗口接线，title-text 由
+// 宿主给定（编辑窗含脏状态 ●）
+export component WindowTitleBar inherits Rectangle {
+    in property <string> title-text;
+    callback drag-started();
+    callback drag-moved();
+    callback drag-finished();
+    callback minimize-requested();
+    callback max-toggle-requested();
+    callback close-requested();
+
+    height: 32px;
+    background: transparent;
+    Text {
+        x: 12px;
+        width: parent.width - 170px;
+        height: parent.height;
+        text: root.title-text;
+        color: Theme.fg-default;
+        font-size: Metrics.text-hint;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    // 拖拽命中区（声明在按钮之前 = 按钮点击优先）
+    title-ta := TouchArea {
+        mouse-cursor: default;
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down) {
+                root.drag-started();
+            }
+            if (e.kind == PointerEventKind.up) {
+                root.drag-finished();
+            }
+        }
+        moved => { root.drag-moved(); }
+    }
+    // 最小化
+    btn-min := Rectangle {
+        x: parent.width - 138px;
+        width: 46px;
+        height: parent.height;
+        background: btn-min-ta.has-hover ? Theme.canvas-subtle : transparent;
+        btn-min-ta := TouchArea {
+            mouse-cursor: default;
+            clicked => { root.minimize-requested(); }
+        }
+        Path {
+            x: (parent.width - 10px) / 2;
+            y: (parent.height - 10px) / 2;
+            width: 10px;
+            height: 10px;
+            viewbox-width: 10;
+            viewbox-height: 10;
+            stroke: Theme.fg-default;
+            stroke-width: 1px;
+            commands: "M 1 5 L 9 5";
+        }
+    }
+    // 最大化切换
+    btn-max := Rectangle {
+        x: parent.width - 92px;
+        width: 46px;
+        height: parent.height;
+        background: btn-max-ta.has-hover ? Theme.canvas-subtle : transparent;
+        btn-max-ta := TouchArea {
+            mouse-cursor: default;
+            clicked => { root.max-toggle-requested(); }
+        }
+        Path {
+            x: (parent.width - 10px) / 2;
+            y: (parent.height - 10px) / 2;
+            width: 10px;
+            height: 10px;
+            viewbox-width: 10;
+            viewbox-height: 10;
+            stroke: Theme.fg-default;
+            stroke-width: 1px;
+            commands: "M 1.5 1.5 L 8.5 1.5 L 8.5 8.5 L 1.5 8.5 Z";
+        }
+    }
+    // 关闭（hover 红）
+    btn-close := Rectangle {
+        x: parent.width - 46px;
+        width: 46px;
+        height: parent.height;
+        background: btn-close-ta.has-hover ? Theme.danger-subtle : transparent;
+        btn-close-ta := TouchArea {
+            mouse-cursor: default;
+            clicked => { root.close-requested(); }
+        }
+        Path {
+            x: (parent.width - 10px) / 2;
+            y: (parent.height - 10px) / 2;
+            width: 10px;
+            height: 10px;
+            viewbox-width: 10;
+            viewbox-height: 10;
+            stroke: Theme.fg-default;
+            stroke-width: 1px;
+            commands: "M 1 1 L 9 9 M 9 1 L 1 9";
+        }
+    }
+}

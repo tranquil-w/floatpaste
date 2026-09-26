@@ -704,8 +704,16 @@ export component SearchWindow inherits Window {
     in-out property <int> empty-action: 0;
     // 每次会话打开滚回顶部
     in-out property <int> scroll-generation: 0;
-    // DWM 材质（Mica）挂载成功与否：false 时面板用不透明底回退
+    // DWM 材质挂载成功与否：false 时面板用不透明底回退
     in property <bool> material-active: false;
+
+    // 出现滑入：内容层从 4px 滑到位（与浮层进场语言一致的 150ms ease-out）。
+    // 窗底（材质面）不动、只动内容——内容移开露出的区域是 panel 自身底色，
+    // 任何时刻都不露窗外，规避透明起步帧问题。Rust 侧时序：停屏期
+    // enter-animated=false 重置 enter-offset → 暖首帧落盘起步态 → 上屏后
+    // 解锁动画归零触发滑入
+    in-out property <length> enter-offset: 0px;
+    in-out property <bool> enter-animated: true;
 
     // ── 回调（Rust 接管）──
     callback keyword-edited(string);
@@ -813,12 +821,17 @@ export component SearchWindow inherits Window {
         }
 
         panel := Rectangle {
-            background: root.material-active ? Theme.material-base : Theme.canvas-default;
+            // 整窗近实心层（Acrylic 透出压到 ~10%）：前景脚下不渗噪点，
+            // 材质感以低透保留——对齐 PowerToys Run 的实底浮层语言
+            background: root.material-active ? Theme.material-layer : Theme.canvas-default;
             border-width: SearchGeometry.window-border;
             border-color: Theme.border-window;
             clip: true;
 
             VerticalLayout {
+                y: root.enter-offset;
+                animate y { duration: root.enter-animated ? 150ms : 0ms; easing: ease-out; }
+
                 // ── 头部（背景可拖拽；px-4 py-3 gap-3）──
                 header-bar := Rectangle {
                     height: 56px;
@@ -1086,7 +1099,9 @@ export component SearchWindow inherits Window {
                 // ── 列表区（flex-1；四态共用同一 Flickable 保证实测高度）──
                 Rectangle {
                     horizontal-stretch: 1;
-                    background: Theme.canvas-default;
+                    // 无独立底色：与 header/footer/窗底完全同一透明语义，
+                    // 透明程度天然一致；透出强度由材质 alpha 统一控制
+                    background: transparent;
                     clip: true;
 
                     list-flick := Flickable {

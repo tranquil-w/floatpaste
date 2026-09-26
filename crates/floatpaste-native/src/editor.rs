@@ -17,19 +17,21 @@ use tracing::{info, warn};
 
 use floatpaste_core::domain::clip_item::ClipItemDetail;
 use floatpaste_core::platform::windows::active_app::ActiveAppResolver;
-use floatpaste_core::platform::windows::picker_position::{ScreenPoint, work_area_from_point};
+use floatpaste_core::platform::windows::picker_position::{work_area_from_point, ScreenPoint};
+use floatpaste_core::platform::windows::window_control;
 use floatpaste_core::services::clip_display::format_file_size;
 use floatpaste_core::services::clip_service::ClipService;
 use floatpaste_core::services::tag_service::TagService;
 use floatpaste_core::services::time_format::format_relative_time_or_unused;
 
 use crate::app_state::{EditorSession, TargetSession};
+use crate::overlay;
 use crate::picker::{self, App};
 use crate::search;
 use crate::thumbnails;
 use crate::tooltip::HoverHost;
 use crate::win32_ext;
-use crate::{app_icon, EditorTagSuggestion, EditorWindow};
+use crate::{EditorTagSuggestion, EditorWindow};
 
 const NOTICE_TIMEOUT_MS: u64 = 3000;
 const DELETE_ARM_TIMEOUT_MS: u64 = 3000;
@@ -124,84 +126,69 @@ fn show_editor(app: &App, session: EditorSession, anchor: Option<HostAnchor>) {
         warn!("编辑窗口尚未就绪，无法打开编辑器");
         return;
     };
+    let hwnd = app.state.editor_hwnd.load(Ordering::SeqCst);
+    if hwnd == 0 {
+        warn!("编辑窗口 HWND 尚未就绪，无法打开编辑器");
+        app.state.set_editor_session(None);
+        return;
+    }
 
     reset_delete_arm(&win);
     // 显式定尺寸：窗口根布局的首选高被 stretch 子元素拉成极小，会被钳到
-    // min（400×300），不能依赖 preferred（对齐旧版 inner_size(800,600)）
-    // 整帧重绘：hide→show 后 Slint 只重绘「与上次渲染不同的区域」，静态
-    // 的窗口背景/头部/底栏保持表面销毁时的白底（尺寸变化与同步翻转均
-    // 实测无效——同步翻转在渲染前自我抵消）。在 show 之前翻转
-    // force-repaint 并保留到下一次打开再翻回：覆盖层颜色变化固化进新帧，
-    // 重开时全窗每个区域都与上次渲染不同 → 脏区覆盖全窗（0.4% 白视觉
-    // 不可感知）
-    win.set_force_repaint(!win.get_force_repaint());
-    win.window()
-        .set_size(slint::LogicalSize::new(EDITOR_LOGICAL_WIDTH, EDITOR_LOGICAL_HEIGHT));
-    // 位置：本会话有用过且位置可见则原样还原（用户拖过的位置不丢）；
-    // 否则以停屏前捕获的宿主中心弹出，编辑器不出现在别的屏
-    match LAST_POSITION.get().filter(|pos| position_is_visible(*pos)) {
-        Some((x, y)) => win.window().set_position(slint::PhysicalPosition::new(x, y)),
-        None => {
-            if let Some(anchor) = anchor {
+    // min（400×300），不能依赖 preferred（对齐旧版 inner_size(800,600)）。
+    // 走 Win32 直接设物理尺寸：停屏窗口的 Slint set_size 异步落地，回读
+    // 与实际尺寸会错位（设置窗首开底部出屏即此因）。窗口处于停屏态
+    // （Win32 可见、位于屏外），几何变化在屏外完成无可见中间帧
+    let scale = win.window().scale_factor();
+    let width_px = (EDITOR_LOGICAL_WIDTH as f32 * scale).round() as i32;
+    let height_px = (EDITOR_LOGICAL_HEIGHT as f32 * scale).round() as i32;
+    window_control::set_window_size_no_activate(hwnd, width_px, height_px);
+    // 位置先只计算不上屏：上屏动作（移动到目标位置）必须放在内容就绪
+    // 与暖帧之后——停屏窗口 Win32 可见，移动即显示
+    let target = LAST_POSITION
+        .get()
+        .filter(|pos| position_is_visible(*pos))
+        .or_else(|| {
+            anchor.map(|anchor| {
                 let width = (EDITOR_LOGICAL_WIDTH * anchor.dpi) as i32;
                 let height = (EDITOR_LOGICAL_HEIGHT * anchor.dpi) as i32;
-                win.window().set_position(slint::PhysicalPosition::new(
-                    anchor.center.0 - width / 2,
-                    anchor.center.1 - height / 2,
-                ));
-            }
-        }
-    }
-    let _ = win.window().show();
+                (anchor.center.0 - width / 2, anchor.center.1 - height / 2)
+            })
+        });
+    // 数据就绪：停屏期属性更新不渲染，warm 时一次成帧
     load_session(app, &win, &session.item_id);
     info!("打开 Editor，item={}", session.item_id);
-    // SLINT_DESTROY_WINDOW_ON_HIDE 下每次隐藏都销毁 winit 窗口，再次
-    // 打开是重建：建窗在下一拍事件循环落地，句柄相关收尾（边框/暖屏/
-    // 前置/焦点）延后执行，否则编辑器不在前台
-    let app_cb = app.clone();
-    let item_id_cb = session.item_id.clone();
-    slint::Timer::single_shot(std::time::Duration::from_millis(50), move || {
-        if let Some(win) = app_cb.editor.upgrade() {
-            if !app_cb
-                .state
-                .editor_session()
-                .is_some_and(|session| session.item_id == item_id_cb)
-            {
-                return;
-            }
-            if let Some(editor_hwnd) = win32_ext::window_hwnd(&win) {
-                app_icon::apply_window_icon(editor_hwnd);
-                win32_ext::remove_dwm_border(editor_hwnd);
-                // 全应用统一 Acrylic（Mica 视觉过弱用户实测否决）；
-                // hide 销毁重建型窗口每次打开重挂
-                {
-                    let settings = app_cb.state.current_settings();
-                    let resolved = floatpaste_core::theme::resolve_theme(
-                        settings.theme_mode.clone(),
-                        floatpaste_core::theme::system_prefers_dark(),
-                    );
-                    let active = win32_ext::apply_window_backdrop(
-                        editor_hwnd,
-                        true,
-                        resolved == floatpaste_core::theme::ResolvedTheme::Dark,
-                    );
-                    win.set_material_active(active);
-                }
-                win32_ext::warm_surface(editor_hwnd);
-                // 前台获取放在全部尺寸/显隐操作之后：从速贴打开时本进程
-                // 不是前台（前台在目标应用上），裸 SetForegroundWindow 会
-                // 被前台锁拒绝、编辑器被目标窗口遮挡——force_foreground_window
-                // 经 AttachThreadInput + BringWindowToTop 绕过（对齐旧版
-                // window.set_focus() 语义），仍失败时以 TOPMOST 提升→回落
-                // 保底可见，且不常驻置顶（不能复用带 TOPMOST 的
-                // restore_window_and_focus）
-                if !ActiveAppResolver::force_foreground_window(editor_hwnd) {
-                    warn!("编辑窗口获取前台失败");
-                }
-                win.invoke_focus_root_scope();
-            }
-        }
-    });
+
+    // 上屏序列（对齐 picker 的「内容就绪 → 暖表面 → 移上屏」）：窗口
+    // 停屏且不销毁（不再走 SLINT_DESTROY_WINDOW_ON_HIDE 的销毁重建——
+    // 重建是首开无材质、透明首帧、显示态异常的共同根源），摘 TOOLWINDOW
+    // 让任务栏按钮回归，重挂材质后暖帧，最后一步移动上屏
+    win32_ext::set_toolwindow_style(hwnd, false);
+    win.set_material_active(overlay::apply_material(
+        app,
+        hwnd,
+        overlay::MaterialSurface::Content,
+    ));
+    win32_ext::warm_surface(hwnd);
+    win32_ext::force_full_repaint(hwnd);
+    if let Some((x, y)) = target {
+        win.window()
+            .set_position(slint::PhysicalPosition::new(x, y));
+    } else {
+        warn!("编辑窗口无可用位置，保持停屏");
+        win32_ext::set_toolwindow_style(hwnd, true);
+        return;
+    }
+    // 从速贴打开时本进程不是前台（前台在目标应用上），裸
+    // SetForegroundWindow 会被前台锁拒绝——force_foreground_window 经
+    // AttachThreadInput + BringWindowToTop 绕过（对齐旧版
+    // window.set_focus() 语义），仍失败时以 TOPMOST 提升→回落保底可见，
+    // 且不常驻置顶
+    if !ActiveAppResolver::force_foreground_window(hwnd) {
+        warn!("编辑窗口获取前台失败");
+    }
+    overlay::schedule_caption_strip(hwnd);
+    win.invoke_focus_root_scope();
 }
 
 /// 载入条目详情并填充界面（同步读库：单条查询延迟可忽略，省去加载态）
@@ -452,13 +439,13 @@ pub fn save_then_close(app: &App) {
         return;
     };
     if !win.get_is_text() {
-        close_editor(app);
+        close_editor(app, "confirm_save_close");
         return;
     }
     save(app);
     // 保存失败时 error 条已展示且 saved 仍是旧值（dirty 保持），不关闭
     if !win.get_is_dirty() {
-        close_editor(app);
+        close_editor(app, "confirm_save_close");
     }
 }
 
@@ -470,7 +457,7 @@ pub fn request_close(app: &App) {
         win.set_close_confirm_open(true);
         return;
     }
-    close_editor(app);
+    close_editor(app, "request_close");
 }
 
 pub fn cancel_confirm(app: &App) {
@@ -479,30 +466,38 @@ pub fn cancel_confirm(app: &App) {
     }
 }
 
-pub fn close_editor(app: &App) {
+pub fn close_editor(app: &App, source: &str) {
     let Some(win) = app.editor.upgrade() else {
         return;
     };
+    // 关闭来源诊断：排查「编辑窗闪开即关」（打开后亚秒级返回速贴）
+    info!("关闭 Editor，source={source}, dirty={}", win.get_is_dirty());
     win.set_close_confirm_open(false);
     win.set_error_text("".into());
-    // 位置记忆须在 hide 前读取：SLINT_DESTROY_WINDOW_ON_HIDE 会销毁 winit 窗口
+    // 位置记忆须在停屏前读取
     let position = win.window().position();
     LAST_POSITION.set(Some((position.x, position.y)));
-    let _ = win.window().hide();
+    // 停屏：挂 TOOLWINDOW（任务栏按钮消失）+ 平移屏外。不走 Slint hide——
+    // SLINT_DESTROY_WINDOW_ON_HIDE 下 hide 即销毁 winit 窗口，下次打开
+    // 重建是首开无材质、透明首帧等问题的根源；停屏保持 Slint「已显示」
+    // 与表面内容有效
+    let hwnd = app.state.editor_hwnd.load(Ordering::SeqCst);
+    win32_ext::set_toolwindow_style(hwnd, true);
+    win.window()
+        .set_position(slint::PhysicalPosition::new(-32000, -32000));
     hide_and_restore_source(app);
 }
 
 /// 标题栏 X 关闭：脏 → 弹确认框拦截；干净 → 放行隐藏（返回流程同上）
-pub fn window_close_requested(app: &App) -> bool {
+pub fn window_close_requested(app: &App) {
     let Some(win) = app.editor.upgrade() else {
-        return true;
+        return;
     };
     if win.get_is_dirty() {
         win.set_close_confirm_open(true);
-        return false;
+        return;
     }
-    close_editor(app);
-    true
+    close_editor(app, "titlebar_x");
 }
 
 pub fn delete_requested(app: &App) {
@@ -542,7 +537,7 @@ pub fn delete_requested(app: &App) {
         Ok(()) => {
             thumbnails::evict(&session.item_id);
             refresh_lists(app);
-            close_editor(app);
+            close_editor(app, "deleted");
         }
         Err(error) => {
             warn!("删除条目失败: {error}");
@@ -558,6 +553,28 @@ fn reset_delete_arm(win: &EditorWindow) {
     DELETE_ARMED.with(|slot| slot.set(false));
     DELETE_TOKEN.with(|slot| slot.set(slot.get() + 1));
     win.set_delete_armed(false);
+}
+
+/// 自绘标题栏拖拽手势（search 同款：begin/update/end 三段）
+fn drag_started(app: &App) {
+    let hwnd = app.state.editor_hwnd.load(Ordering::SeqCst);
+    if hwnd != 0 {
+        window_control::begin_window_gesture(hwnd, window_control::GestureMode::Move, 0, 0);
+    }
+}
+
+fn drag_moved(app: &App) {
+    let hwnd = app.state.editor_hwnd.load(Ordering::SeqCst);
+    if hwnd != 0 {
+        window_control::update_window_gesture(hwnd);
+    }
+}
+
+fn drag_finished(app: &App) {
+    let hwnd = app.state.editor_hwnd.load(Ordering::SeqCst);
+    if hwnd != 0 {
+        window_control::end_window_gesture(hwnd);
+    }
 }
 
 fn hide_and_restore_source(app: &App) {
@@ -898,9 +915,40 @@ pub fn wire(app: &App) {
     win.on_request_close(move || {
         request_close(&app_cb);
     });
+    // 自绘标题栏：拖拽手势与窗控
+    {
+        let app_cb = app.clone();
+        win.on_drag_started(move || drag_started(&app_cb));
+    }
+    {
+        let app_cb = app.clone();
+        win.on_drag_moved(move || drag_moved(&app_cb));
+    }
+    {
+        let app_cb = app.clone();
+        win.on_drag_finished(move || drag_finished(&app_cb));
+    }
+    {
+        let app_cb = app.clone();
+        win.on_minimize_requested(move || {
+            let hwnd = app_cb.state.editor_hwnd.load(Ordering::SeqCst);
+            if hwnd != 0 {
+                let _ = window_control::minimize_window(hwnd);
+            }
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_max_toggle_requested(move || {
+            let hwnd = app_cb.state.editor_hwnd.load(Ordering::SeqCst);
+            if hwnd != 0 {
+                let _ = window_control::toggle_maximize_window(hwnd);
+            }
+        });
+    }
     let app_cb = app.clone();
     win.on_close_discard(move || {
-        close_editor(&app_cb);
+        close_editor(&app_cb, "confirm_discard");
     });
     let app_cb = app.clone();
     win.on_close_save(move || {
@@ -942,14 +990,13 @@ pub fn wire(app: &App) {
     win.on_tag_escape(move || {
         tag_escape(&app_cb);
     });
-    // 标题栏 X：脏 → 确认框拦截；干净 → 隐藏并返回来源窗口
+    // 标题栏 X：脏 → 确认框拦截；干净 → 停屏并返回来源窗口。
+    // 一律 KeepWindowShown：HideWindow 走 Slint hide → 销毁 winit 窗口，
+    // 停屏模型下窗口由 close_editor 内部平移屏外
     let app_cb = app.clone();
     win.window().on_close_requested(move || {
-        if window_close_requested(&app_cb) {
-            slint::CloseRequestResponse::HideWindow
-        } else {
-            slint::CloseRequestResponse::KeepWindowShown
-        }
+        window_close_requested(&app_cb);
+        slint::CloseRequestResponse::KeepWindowShown
     });
 }
 

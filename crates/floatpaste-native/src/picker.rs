@@ -99,8 +99,7 @@ fn start_topmost_guard(app: &App) {
             }
             // 自家 tooltip 悬浮在速贴之上属正常预览，不算被覆盖
             let tooltip_hwnd = app.state.tooltip_hwnd.load(Ordering::SeqCst);
-            let covered =
-                window_control::is_covered_by_visible_window(hwnd, &[tooltip_hwnd]);
+            let covered = window_control::is_covered_by_visible_window(hwnd, &[tooltip_hwnd]);
             if !window_control::is_topmost(hwnd) || covered {
                 warn!("速贴置顶失效（位丢失或被覆盖），重抬 TOPMOST");
                 window_control::set_window_topmost_no_activate(hwnd);
@@ -159,11 +158,7 @@ pub fn activate(app: &App) {
     let size = resolve_physical_size(app, win.window().scale_factor());
     // 停屏态定尺寸走裸 SetWindowPos（单一确定的「只动几何、绝不激活」，
     // 不经 Slint/winit 的窗口 API 附带语义），见 window_control 注释
-    window_control::set_window_size_no_activate(
-        hwnd,
-        size.width as i32,
-        size.height as i32,
-    );
+    window_control::set_window_size_no_activate(hwnd, size.width as i32, size.height as i32);
     window_control::set_window_min_size(
         hwnd,
         (PICKER_MIN_WIDTH as f32 * win.window().scale_factor()) as i32,
@@ -197,14 +192,11 @@ pub fn activate(app: &App) {
         &tokens,
     );
 
-    // Win11 材质背景：速贴是瞬态浮层 → Acrylic，明暗随主题联动。
-    // 挂载结果回传 UI：失败（系统不支持/透明关闭）时面板用不透明
-    // canvas 底回退——窗口透明底在无材质时会直接透出桌面
-    let material_active = win32_ext::apply_window_backdrop(
-        hwnd,
-        true,
-        resolved == floatpaste_core::theme::ResolvedTheme::Dark,
-    );
+    // 速贴无焦点窗：SWCA HOSTBACKDROP + SystemBackdrop Acrylic（非前台
+    // 不降级，材质与搜索窗同源）；面板底用 material-layer 近实心压住
+    // 渗出，材质感以 ~10% 保留
+    let material_active = overlay::apply_material(app, hwnd, overlay::MaterialSurface::HostAcrylic);
+    info!("速贴材质挂载: active={material_active}");
     win.set_material_active(material_active);
 
     app.state.begin_picker_activation();
@@ -215,6 +207,11 @@ pub fn activate(app: &App) {
     // 根源。样式重挂与前台策略仍交 overlay 公共层处理
     let _ = window_control::show_window_no_activate(hwnd);
 
+    // 出现滑入准备：停屏期关动画重置内容偏移，暖首帧落盘的即 4px 起步态
+    // （见 picker.slint enter-offset 注释）
+    win.set_enter_animated(false);
+    win.set_enter_offset(4.0);
+
     // 会话开始：刷新列表、选中归零、滚回顶部、清空消息。放在上屏之前：
     // 列表重活（查询 + 逐行裁排）跑在停屏期间，上屏即最新内容
     refresh_list_reset(app, &settings);
@@ -224,6 +221,11 @@ pub fn activate(app: &App) {
     // 既不透明也不闪旧列表
     win32_ext::warm_surface(hwnd);
     apply_window_position(app, &settings, size, hwnd, session.target_window_hwnd);
+    win32_ext::force_full_repaint(hwnd);
+
+    // 上屏即滑入：解锁动画归零，内容从 4px 滑到位（窗底不动，不露窗外）
+    win.set_enter_animated(true);
+    win.set_enter_offset(0.0);
 
     let immediate = session
         .target_window_hwnd
@@ -353,7 +355,8 @@ pub fn hide_for_editor(app: &App) {
 
 /// 主快捷键命中：活跃则关闭并恢复目标，否则打开。
 /// 搜索窗口活跃时先无还原收起（对齐旧版 toggle_picker_from_shortcut，
-/// 避免两窗口争抢焦点导致闪烁）
+/// 避免两窗口争抢焦点导致闪烁）。每击必响应，不做防抖（系统重复由
+/// 注册层 MOD_NOREPEAT 过滤）
 pub fn toggle(app: &App) {
     if app.state.is_picker_active() {
         hide(app, true);
@@ -386,11 +389,7 @@ pub fn restore_after_editor(app: &App, target: TargetSession) {
     // 恢复记忆尺寸（无记忆则按设计尺寸与当前缩放折算），同 activate：
     // 尺寸与定位取自同一组数，不回读窗口
     let size = resolve_physical_size(app, win.window().scale_factor());
-    window_control::set_window_size_no_activate(
-        hwnd,
-        size.width as i32,
-        size.height as i32,
-    );
+    window_control::set_window_size_no_activate(hwnd, size.width as i32, size.height as i32);
     window_control::set_window_min_size(
         hwnd,
         (PICKER_MIN_WIDTH as f32 * win.window().scale_factor()) as i32,
@@ -398,6 +397,9 @@ pub fn restore_after_editor(app: &App, target: TargetSession) {
     );
 
     app.state.set_picker_session(target);
+    // 出现滑入准备：同 activate，停屏期无动画重置内容偏移，暖首帧即起步态
+    win.set_enter_animated(false);
+    win.set_enter_offset(4.0);
     // 上屏前先暖表面（同步泵一次 WM_PAINT 呈现），移回即有内容
     win32_ext::warm_surface(hwnd);
     apply_window_position(app, &settings, size, hwnd, target.target_window_hwnd);
@@ -408,6 +410,9 @@ pub fn restore_after_editor(app: &App, target: TargetSession) {
     // 只是停屏，移回屏上后表面内容原样有效；这里顺带从最小化恢复。
     // 主题随设置刷新照常执行
     let _ = window_control::show_window_no_activate(hwnd);
+    // 上屏即滑入（同 activate）
+    win.set_enter_animated(true);
+    win.set_enter_offset(0.0);
 
     // 主题随设置刷新（编辑期间设置可能已被外部修改）
     let resolved = theme::resolve_theme(settings.theme_mode.clone(), theme::system_prefers_dark());
@@ -455,6 +460,9 @@ fn begin_input_session(app: &App, hwnd: isize, settings: &UserSetting) {
 fn handle_session_action(app: &App, action: session_keyboard::SessionAction) {
     use session_keyboard::SessionAction;
     if !app.state.is_picker_active() {
+        // 钩子常驻，会话残留动作（如窗口消失瞬间的按键）在此过滤；
+        // 留痕用于诊断「面板已显但按键无响应」类问题
+        info!("会话动作忽略（面板非活跃）: {action:?}");
         return;
     }
     match action {
@@ -469,6 +477,7 @@ fn handle_session_action(app: &App, action: session_keyboard::SessionAction) {
             // 对齐旧版 PICKER_OPEN_EDITOR_EVENT）
             let index = current_index(app);
             let Some(item) = app.state.item_at(index) else {
+                warn!("打开编辑器失败: 选中索引 {index} 无对应条目（列表缓存与选中态脱节）");
                 return;
             };
             crate::editor::open_from_picker(app, item.id);

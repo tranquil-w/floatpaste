@@ -42,6 +42,8 @@ pub struct SharedState {
     search_active: AtomicBool,
     pub search_hwnd: AtomicIsize,
     search_session: Mutex<SearchSession>,
+    pub editor_hwnd: AtomicIsize,
+    pub settings_hwnd: AtomicIsize,
     editor_session: Mutex<Option<EditorSession>>,
     /// 列表缓存：会话键（Enter/Esc 路径按 id 取条目，避免与 UI 行模型竞态）
     items: Mutex<Vec<ClipItemSummary>>,
@@ -71,6 +73,8 @@ impl SharedState {
             search_active: AtomicBool::new(false),
             search_hwnd: AtomicIsize::new(0),
             search_session: Mutex::new(SearchSession::default()),
+            editor_hwnd: AtomicIsize::new(0),
+            settings_hwnd: AtomicIsize::new(0),
             editor_session: Mutex::new(None),
             items: Mutex::new(Vec::new()),
             search_items: Mutex::new(Vec::new()),

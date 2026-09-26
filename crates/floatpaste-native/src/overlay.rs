@@ -17,7 +17,9 @@ use std::time::Duration;
 use slint::ComponentHandle;
 
 use floatpaste_core::platform::windows::{active_app::ActiveAppResolver, window_control};
+use floatpaste_core::theme;
 
+use crate::picker::App;
 use crate::win32_ext;
 
 /// 显示后的前台归还策略
@@ -62,9 +64,32 @@ pub fn silent_assemble_focusable<W: ComponentHandle>(win: &W) -> Option<isize> {
     win32_ext::apply_overlay_style(hwnd, false);
     win32_ext::apply_dwm_shadow(hwnd);
     let _ = window_control::remove_window_system_menu(hwnd);
+    win32_ext::install_caption_strip_subclass(hwnd);
     park_offscreen(win);
     surrender_startup_foreground(hwnd, previous_foreground);
     schedule_style_reassert(hwnd, false);
+    Some(hwnd)
+}
+
+/// 内容窗（编辑/设置）的启动期静默装配：no-frame 自绘标题栏窗，停屏
+/// 期挂 TOOLWINDOW 屏蔽任务栏按钮（上屏前由显示流程摘除）；阴影、
+/// 系统圆角与系统窗控样式剥除须显式挂载。停屏到屏幕外保持 Slint
+/// 「已显示」与表面内容有效，显隐一律屏外/屏上平移——彻底绕开
+/// SLINT_DESTROY_WINDOW_ON_HIDE 的销毁重建时序（重建是首开无材质、
+/// 透明首帧、显示态异常等问题的共同根源）
+pub fn silent_assemble_content<W: ComponentHandle>(win: &W) -> Option<isize> {
+    let previous_foreground = ActiveAppResolver::current_foreground_hwnd();
+    let _ = win.window().show();
+    let hwnd = win32_ext::window_hwnd(win)?;
+    win32_ext::set_toolwindow_style(hwnd, true);
+    // no-frame 窗（WS_POPUP）：阴影与系统圆角都须显式挂载
+    win32_ext::apply_dwm_shadow(hwnd);
+    win32_ext::apply_dwm_rounded_corners(hwnd);
+    let _ = window_control::remove_window_system_menu(hwnd);
+    win32_ext::install_caption_strip_subclass(hwnd);
+    win.window()
+        .set_position(slint::PhysicalPosition::new(-32000, -32000));
+    surrender_startup_foreground(hwnd, previous_foreground);
     Some(hwnd)
 }
 
@@ -96,6 +121,45 @@ fn schedule_style_reassert(hwnd: isize, no_activate: bool) {
             win32_ext::apply_overlay_style(hwnd, no_activate);
             let _ = window_control::remove_window_system_menu(hwnd);
         });
+    }
+}
+
+/// 内容窗上屏后两拍补剥系统窗控样式：WS_SYSMENU 硬编码在 winit 的期望
+/// 样式里（window_state.rs to_window_styles），显示序列中随时可能被重刷
+/// 回来且时机不定；上屏后补剥收口，此后的异步重刷由 caption_strip
+/// 子类兜底（见 [`win32_ext::install_caption_strip_subclass`]）
+pub fn schedule_caption_strip(hwnd: isize) {
+    for delay_ms in [0u64, 50] {
+        slint::Timer::single_shot(Duration::from_millis(delay_ms), move || {
+            let _ = window_control::remove_window_system_menu(hwnd);
+        });
+    }
+}
+
+/// 材质管线按窗口生命周期分流（对齐 PowerToys 选型：常驻内容窗
+/// Mica、可激活瞬态浮层 Acrylic、无焦点窗专项管线）
+pub enum MaterialSurface {
+    /// 编辑/设置：常驻内容窗 → SystemBackdrop Mica
+    Content,
+    /// 搜索：有焦点瞬态浮层 → SystemBackdrop Acrylic
+    Transient,
+    /// 速贴：无焦点窗，SystemBackdrop 非前台自动降级纯色 →
+    /// SWCA HOSTBACKDROP + Acrylic 绕过降级
+    HostAcrylic,
+}
+
+/// 全应用统一材质挂载（明暗/回退门控在此收口）。
+///
+/// 不支持/系统透明关闭时返回 false，调用方把 material-active 置 false
+/// 让面板回不透明底。挂载幂等，每次显示/恢复重挂即可
+pub fn apply_material(app: &App, hwnd: isize, surface: MaterialSurface) -> bool {
+    let settings = app.state.current_settings();
+    let resolved = theme::resolve_theme(settings.theme_mode.clone(), theme::system_prefers_dark());
+    let dark = resolved == theme::ResolvedTheme::Dark;
+    match surface {
+        MaterialSurface::Content => win32_ext::apply_window_backdrop(hwnd, false, dark),
+        MaterialSurface::Transient => win32_ext::apply_window_backdrop(hwnd, true, dark),
+        MaterialSurface::HostAcrylic => win32_ext::apply_window_host_backdrop_acrylic(hwnd, dark),
     }
 }
 

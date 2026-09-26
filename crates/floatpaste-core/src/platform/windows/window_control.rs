@@ -12,9 +12,9 @@ use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindow
 use windows::Win32::UI::WindowsAndMessaging::{
     BringWindowToTop, GetCursorPos, GetWindow, GetWindowLongPtrW, GetWindowRect, IsIconic,
     IsWindowVisible, SetForegroundWindow, SetLayeredWindowAttributes, SetWindowLongPtrW,
-    SetWindowPos, ShowWindow, GW_HWNDPREV, GWL_EXSTYLE, GWL_STYLE, HWND_TOPMOST, LWA_ALPHA,
+    SetWindowPos, ShowWindow, GWL_EXSTYLE, GWL_STYLE, GW_HWNDPREV, HWND_TOPMOST, LWA_ALPHA,
     SC_KEYMENU, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
-    SWP_SHOWWINDOW, SW_HIDE, SW_RESTORE, SW_SHOW, SW_SHOWNOACTIVATE, WM_GETMINMAXINFO,
+    SWP_SHOWWINDOW, SW_HIDE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SW_SHOWNOACTIVATE, WM_GETMINMAXINFO,
     WM_SYSCOMMAND, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
     WS_EX_TRANSPARENT, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_SYSMENU,
 };
@@ -111,6 +111,28 @@ pub fn hide_window(hwnd: isize) -> Result<(), AppError> {
     Ok(())
 }
 
+/// 最小化（自绘标题栏的最小化按钮）
+pub fn minimize_window(hwnd: isize) -> Result<(), AppError> {
+    unsafe {
+        let _ = ShowWindow(hwnd_of(hwnd), SW_MINIMIZE);
+    }
+    Ok(())
+}
+
+/// 最大化/还原切换（自绘标题栏的最大化按钮）。IsZoomed 判定当前态
+pub fn toggle_maximize_window(hwnd: isize) -> Result<(), AppError> {
+    use windows::Win32::UI::WindowsAndMessaging::{IsZoomed, SW_MAXIMIZE};
+    let hwnd = hwnd_of(hwnd);
+    unsafe {
+        if IsZoomed(hwnd).as_bool() {
+            let _ = ShowWindow(hwnd, SW_RESTORE);
+        } else {
+            let _ = ShowWindow(hwnd, SW_MAXIMIZE);
+        }
+    }
+    Ok(())
+}
+
 /// 置顶但不激活（tooltip 显示路径）
 pub fn set_window_topmost_no_activate(hwnd: isize) -> bool {
     let handle = hwnd_of(hwnd);
@@ -150,9 +172,7 @@ pub fn is_covered_by_visible_window(hwnd: isize, skip: &[isize]) -> bool {
         let Some(h) = cur else {
             break;
         };
-        if unsafe { IsWindowVisible(h) }.as_bool()
-            && !skip_handles.contains(&h)
-        {
+        if unsafe { IsWindowVisible(h) }.as_bool() && !skip_handles.contains(&h) {
             let mut other = RECT::default();
             if unsafe { GetWindowRect(h, &mut other) }.is_ok() {
                 let intersects = other.left < rect.right

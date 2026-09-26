@@ -8,6 +8,12 @@ export global Theme {
     // 材质窗根底：canvas 带 alpha，铺在 DWM 材质（Mica/Acrylic）之上；
     // 材质不可用的窗口回退 canvas-default 不透明底
     in-out property <color> material-base;
+    // 材质窗内容层：深 0.90 近实心压噪点；浅 0.62 取 surface 纯白、
+    // 让浅色 Mica 的壁纸 tint 透出（对齐 WinUI Layer=50% 白的语言）。
+    // 前景文字与卡片一律坐这层。速贴整面板、搜索整窗、设置内容层
+    // 卡、编辑整窗消费它
+    in-out property <color> material-layer;
+
 
     // 前景
     in-out property <color> fg-default;

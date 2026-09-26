@@ -1,6 +1,6 @@
 // 编辑窗口：对齐旧版 EditorShell.tsx + tagEditor.tsx + keyboard.ts。
-// 普通带框窗口（旧版 decorations(true)，任务栏可见、可缩放、800×600 起
-// min 400×300）。会话与数据由 Rust 接管：
+// no-frame 窗 + 自绘标题栏（任务栏可见、可缩放、800×600 起 min 400×300，
+// 停屏常驻不销毁重建）。会话与数据由 Rust 接管：
 // - 文本条目：多行编辑 + Ctrl+S 保存 + 未保存关闭确认 + 两段式删除
 // - 图片/文件条目：只读预览（大图 contain / 路径列表，可系统程序打开）
 // - 标签：Notion 式多选面板——行内 chips（× 删除）+「添加标签」入口，
@@ -8,7 +8,7 @@
 //   跟随）、Backspace 空输入删末位、Esc 分层退出（清输入→关面板→关窗）
 // - 键盘：窗口级 capture 先于输入框（对齐旧版 window keydown capture）
 import { Theme, Metrics } from "theme.slint";
-import { Kbd } from "common.slint";
+import { Kbd, WindowTitleBar } from "common.slint";
 
 // 标签建议项：0=match（既有命中）1=create（新建）2=exists（已添加）
 export struct EditorTagSuggestion {
@@ -68,16 +68,24 @@ component DeleteButton inherits Rectangle {
 }
 
 export component EditorWindow inherits Window {
-    // 脏状态上标题栏（VS Code 惯例的 ●）
-    title: root.has-session && root.is-dirty ? "● FloatPaste · 编辑" : "FloatPaste · 编辑";
+    no-frame: true;
     icon: @image-url("app-icon.png");
     min-width: 400px;
     min-height: 300px;
     preferred-width: 800px;
     preferred-height: 600px;
-    // 材质（Mica）挂载成功时窗底半透明透出 backdrop，否则不透明回退
-    background: root.material-active ? Theme.material-base : Theme.canvas-default;
+    // no-frame 后窗体矩形透明，全部观感由 panel 圆角面板绘制（与速贴
+    // 卡片/搜索面板同构）；材质（Mica）挂载成功时面板半透明透出
+    // backdrop，否则不透明回退
+    background: transparent;
     in property <bool> material-active: false;
+
+    // 自绘标题栏回调：拖拽手势与窗控（最小化/最大化切换/关闭）
+    callback drag-started();
+    callback drag-moved();
+    callback drag-finished();
+    callback minimize-requested();
+    callback max-toggle-requested();
 
     // ── 会话与数据（Rust 接管）──
     in-out property <bool> has-session: false;
@@ -116,13 +124,6 @@ export component EditorWindow inherits Window {
     // 每次载入条目自增：驱动编辑区 changed 重新聚焦（init 只在首次
     // 实例化时执行，同窗口第二次打开不会再次触发）
     in-out property <int> session-seq: 0;
-
-    // 整帧重绘开关：重开路径中 hide→show 后 Slint 只重绘「变化了的区域」，
-    // 静态的窗口背景/头部/底栏保持表面销毁时的白底（尺寸变化实测不触发
-    // 整帧重建）。翻转此属性增删一层全窗口覆盖元素，强制全部区域变脏；
-    // 颜色必须非全透明——全透明会被场景优化判定为无变化，翻转即空操作
-    // （0.4% 白在深底上亮度差 1/255，不可感知）；无 TouchArea 不拦截指针
-    in-out property <bool> force-repaint;
 
     // 标签面板开关（Notion 式：添加/搜索/创建在面板内完成）。显式状态
     // 而非绑定表达式：打开由「+ 添加」触发，关闭由 Esc（tag-escape）或
@@ -169,6 +170,17 @@ export component EditorWindow inherits Window {
 
     // 窗口级键盘（capture 先于输入框；对齐旧版 window keydown capture）。
     // 窗口直接子元素不自动铺满，必须显式全屏（对齐旧版 h-screen w-screen）
+    // 圆角面板：no-frame 窗的可见形态。DWM 圆角（apply_dwm_rounded_corners）
+    // 裁窗体轮廓，面板圆角与窗底同色系，边缘由 DWM 阴影勾勒
+    panel := Rectangle {
+        width: 100%;
+        height: 100%;
+        border-radius: 8px;
+        // Mica 常驻内容窗 + 近实心层：正文脚下不透材质（PowerRename
+        // 同款），材质感留给层下的 Mica 底
+        background: root.material-active ? Theme.material-layer : Theme.canvas-default;
+        clip: true;
+
     root-scope := FocusScope {
         width: 100%;
         height: 100%;
@@ -207,6 +219,18 @@ export component EditorWindow inherits Window {
         }
 
         VerticalLayout {
+            // ── 自绘标题栏（共享组件：拖拽 + 窗控按钮）──
+            WindowTitleBar {
+                title-text: root.has-session && root.is-dirty
+                    ? "● FloatPaste · 编辑"
+                    : "FloatPaste · 编辑";
+                drag-started => root.drag-started();
+                drag-moved => root.drag-moved();
+                drag-finished => root.drag-finished();
+                minimize-requested => root.minimize-requested();
+                max-toggle-requested => root.max-toggle-requested();
+                close-requested => root.request-close();
+            }
             // ── 顶部通知条（成功 3 秒自动消失，由 Rust 计时）──
             // 高度收放而非 if 条件实例化：条件实例化无法做进场动画；
             // visible 又不参与布局计算（隐藏仍占位），0 高 + clip +
@@ -493,13 +517,13 @@ export component EditorWindow inherits Window {
                             // changed 只监听本元素属性：用本地别名桥接根上的
                             // 会话序号，每次载入条目重新聚焦
                             property <int> focus-trigger: root.session-seq;
-                            // 平铺观感（无框无圆角）。底色必须**有**但不
-                            // 必须不透明：部分渲染器每条脏行以 Window.background
-                            // 为基线回填再画 items，重绘幂等（光标闪烁无残留
-                            // ——小白点真根因是光标条越界元素几何，由下方
-                            // 遮罩条盖住，见 adr-0003/0005）。恒定半透明：材质
-                            // 时透 backdrop，无材质时叠窗底实色（仅略淡）
-                            background: Theme.canvas-default.with-alpha(0.85);
+                            // 无独立底色：正文直接坐在 Window.background 材质
+                            // 底上，与头部/底栏/标题栏完全同一透明语义——
+                            // 任何半透明叠加都会比周围更实（区域差 = α叠加·
+                            // (1-α材质)，与材质联动永远存在），统一透明是
+                            // 唯一无区域差的形态。透出强度只由材质 alpha
+                            // 统一控制（theme.rs material_base_alpha）
+                            background: transparent;
                             clip: true;
                             init => {
                                 // 首次实例化即聚焦并置尾（对齐旧版
@@ -578,58 +602,57 @@ export component EditorWindow inherits Window {
                                         font-size: Metrics.text-sm;
                                         vertical-alignment: top;
                                     }
-                                    edit-input := TextInput {
+                                    // 顶边对齐的裁剪容器：软件渲染器在非整数 DPI
+                                    // 缩放（125% 实测）下会把光标条顶端画出 TextInput
+                                    // 元素几何 1-2px（parley 行盒顶高于元素顶），增量
+                                    // 重绘的脏区只认元素几何——越界段「画得上、擦不
+                                    // 掉」，在首行文字上方残留孤立白点（离屏复现实验
+                                    // 证实，见 docs/adr-0003；旧修复是同色遮罩条盖
+                                    // 住，与透明底不兼容已退役）。裁剪层顶与 TextInput
+                                    // 顶重合，越界段在绘制管线直接被裁，不依赖底色
+                                    Rectangle {
                                         x: 20px;
                                         y: 16px;
                                         width: parent.width - 40px;
-                                        min-width: 0px;
                                         height: parent.height - 32px;
-                                        single-line: false;
-                                        wrap: word-wrap;
-                                        font-size: Metrics.text-sm;
-                                        color: Theme.fg-default;
-                                        selection-foreground-color: Theme.selection-fg;
-                                        selection-background-color: Theme.selection-bg;
-                                        text <=> root.draft-text;
-                                        edited() => { root.text-edited(self.text); }
-                                        cursor-position-changed(cursor) => {
-                                            // 行列上报（byte offset 由 TextInput 内部
-                                            // 属性读出，Rust 按 draft 文本换算）
-                                            root.editor-cursor-moved(
-                                                edit-input.cursor-position_byte-offset);
-                                            // 光标跟随滚动：cursor.y 是 TextInput 内
-                                            // 坐标，视口内位置 = cursor.y + 16 - scroll
-                                            let view-y = cursor.y + 16px - edit-scroll.scroll-y;
-                                            if (view-y < 8px) {
-                                                edit-scroll.scroll-y = Math.clamp(
-                                                    cursor.y + 16px - 8px,
-                                                    0px, edit-scroll.max-scroll-y);
-                                            } else if (view-y + 23px
-                                                > edit-scroll.height - 8px)
-                                            {
-                                                edit-scroll.scroll-y = Math.clamp(
-                                                    cursor.y + 16px + 23px - edit-scroll.height + 8px,
-                                                    0px, edit-scroll.max-scroll-y);
+                                        clip: true;
+
+                                        edit-input := TextInput {
+                                            x: 0;
+                                            y: 0;
+                                            width: 100%;
+                                            height: 100%;
+                                            single-line: false;
+                                            wrap: word-wrap;
+                                            font-size: Metrics.text-sm;
+                                            color: Theme.fg-default;
+                                            selection-foreground-color: Theme.selection-fg;
+                                            selection-background-color: Theme.selection-bg;
+                                            text <=> root.draft-text;
+                                            edited() => { root.text-edited(self.text); }
+                                            cursor-position-changed(cursor) => {
+                                                // 行列上报（byte offset 由 TextInput 内部
+                                                // 属性读出，Rust 按 draft 文本换算）
+                                                root.editor-cursor-moved(
+                                                    edit-input.cursor-position_byte-offset);
+                                                // 光标跟随滚动：cursor.y 是 TextInput 内
+                                                // 坐标，视口内位置 = cursor.y + 16 - scroll
+                                                let view-y = cursor.y + 16px - edit-scroll.scroll-y;
+                                                if (view-y < 8px) {
+                                                    edit-scroll.scroll-y = Math.clamp(
+                                                        cursor.y + 16px - 8px,
+                                                        0px, edit-scroll.max-scroll-y);
+                                                } else if (view-y + 23px
+                                                    > edit-scroll.height - 8px)
+                                                {
+                                                    edit-scroll.scroll-y = Math.clamp(
+                                                        cursor.y + 16px + 23px - edit-scroll.height + 8px,
+                                                        0px, edit-scroll.max-scroll-y);
+                                                }
                                             }
                                         }
                                     }
 
-                                    // 光标越界盲区遮罩（声明在 TextInput 后 = 画在其
-                                    // 上）：软件渲染器在非整数 DPI 缩放（125% 实测）
-                                    // 下会把光标条顶端画出元素几何 1-2px（parley 行
-                                    // 盒顶高于元素顶），而增量重绘的脏区只认元素几何
-                                    // ——越界段「画得上、擦不掉」，在首行文字上方残留
-                                    // 孤立白点（离屏复现实验证实，见 docs/adr-0003）。
-                                    // 此条盖住盲区让越界像素落在同色之下；颜色须与
-                                    // 编辑区容器底一致才不可见、不遮首行墨迹；滚动后
-                                    // 盲区随内容移出视口被裁
-                                    Rectangle {
-                                        x: 0;
-                                        y: 12px;
-                                        width: parent.width;
-                                        height: 4px;
-                                        background: Theme.canvas-default.with-alpha(0.85);
-                                    }
                                 }
                                 }
 
@@ -1175,13 +1198,6 @@ export component EditorWindow inherits Window {
             }
         }
 
-        // ── 整帧重绘覆盖层（force-repaint，见属性注释）──
-        if (root.force-repaint): Rectangle {
-            width: 100%;
-            height: 100%;
-            background: rgba(255, 255, 255, 0.004);
-        }
-
         // ── 未保存关闭确认（旧版 role=dialog，max-w-sm p-6）──
         // visible 而非 if：dlg-save 需在会话打开时被 focus（对齐旧版
         // closeConfirmOpen effect 聚焦主按钮）；opacity 进场淡入
@@ -1285,5 +1301,6 @@ export component EditorWindow inherits Window {
         // 统一处理，不依赖按钮焦点
         }
     }
+    } // panel
 
 }

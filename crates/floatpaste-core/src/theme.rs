@@ -571,6 +571,13 @@ pub struct ThemeTokens {
     pub material_base_rgb: [u8; 3],
     pub material_base_alpha: f32,
 
+    /// 材质窗内容层：内容区/面板的近实心底，前景（文字/卡片）一律坐
+    /// 这层上，材质渗出压到 ~10%，材质感留给窗缘与 material-base 底。
+    /// 取值方向对齐 PowerToys 自定义 acrylic 的「往实里调」（luminosity
+    /// opacity 0.96）——宁可实不可透
+    pub material_layer_rgb: [u8; 3],
+    pub material_layer_alpha: f32,
+
     pub border_default: String,
     pub border_window: String,
     pub border_muted: &'static str,
@@ -696,13 +703,22 @@ pub fn derive_tokens(preset_id: &str, theme_accent: &str, resolved: ResolvedThem
         accent_subtle_alpha: subtle_alpha as f32,
 
         material_base_rgb: hex_to_rgb_channels(scale.canvas),
-        // 深色 0.70：壁纸影明显、文字对比有 AA+ 余量（底色变化由
-        // backdrop 模糊采样摊平，无高频亮暗穿底；真机 24H2 实测）。
-        // 浅色 0.40 是系统材质白 tint 下的可用下限：DWM 在材质层给
-        // 浅色 backdrop 混重白雾，继续压 alpha 只拉开与行卡的层次、
-        // 壁纸影不会再明显（用户拍板接受；强透出需 SWCA 自定义
-        // tint，未采用）
-        material_base_alpha: if is_light { 0.40 } else { 0.70 },
+        // 深 0.85：内容面迁到 material-layer 后，这层膜只剩设置窗底/
+        // 侧栏一条，收实让侧栏贴近 PowerToys 的近实底导航。浅 0.45：
+        // 放开让浅色 Mica 的壁纸 tint 进侧栏（对齐 WinUI 导航直坐
+        // Mica）；transparent 直露（100%）依旧否决
+        material_base_alpha: if is_light { 0.45 } else { 0.85 },
+
+        material_layer_rgb: hex_to_rgb_channels(if is_light {
+            scale.surface
+        } else {
+            scale.canvas
+        }),
+        // 深 0.90 / 浅 0.62：深色近实心压噪点；浅色对齐 WinUI Layer
+        // （50% 白）让 Mica tint 透出——「浅色 Acrylic 白雾重」的实测
+        // 结论只适用于 Acrylic，常驻窗的浅色 Mica 是透壁纸色的。速贴
+        // 整面板直接坐这层，即「底往实里调」的落地
+        material_layer_alpha: if is_light { 0.62 } else { 0.90 },
 
         border_default: border,
         border_window: mix_colors(scale.border_muted, scale.canvas, 0.55),
@@ -788,15 +804,28 @@ mod tests {
     }
 
     #[test]
-    fn material_base_follows_canvas_with_mode_alpha() {
-        // 材质底 = canvas 直通色 + 按明暗分级的不透明度；rgb 通道
-        // 与 canvas 逐值一致是「回退不透明底观感连续」的前提
+    fn material_base_follows_canvas() {
+        // 材质底 = canvas 直通色；rgb 通道与 canvas 逐值一致是
+        // 「回退不透明底观感连续」的前提
         let light = derive_tokens("default", "default", ResolvedTheme::Light);
         assert_eq!(light.material_base_rgb, [249, 249, 251]);
-        assert!((light.material_base_alpha - 0.40).abs() < f32::EPSILON);
+        assert!((light.material_base_alpha - 0.45).abs() < f32::EPSILON);
         let dark = derive_tokens("default", "default", ResolvedTheme::Dark);
         assert_eq!(dark.material_base_rgb, [24, 25, 27]);
-        assert!((dark.material_base_alpha - 0.70).abs() < f32::EPSILON);
+        assert!((dark.material_base_alpha - 0.85).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn material_layer_is_near_opaque_canvas() {
+        // 深色内容层近实心压噪点（alpha 不得低于 0.90、rgb 同 canvas）；
+        // 浅色对齐 WinUI Layer 语言：surface 纯白 + 半透明让 Mica tint
+        // 透出，靠表面色阶分层
+        let light = derive_tokens("default", "default", ResolvedTheme::Light);
+        assert_eq!(light.material_layer_rgb, [255, 255, 255]);
+        assert!((light.material_layer_alpha - 0.62).abs() < f32::EPSILON);
+        let dark = derive_tokens("default", "default", ResolvedTheme::Dark);
+        assert_eq!(dark.material_layer_rgb, [24, 25, 27]);
+        assert!((dark.material_layer_alpha - 0.90).abs() < f32::EPSILON);
     }
 
     #[test]

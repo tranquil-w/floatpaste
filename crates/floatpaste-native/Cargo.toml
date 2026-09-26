@@ -24,10 +24,20 @@ slint = { version = "1", default-features = false, features = [
 tracing = "0.1.41"
 tracing-appender = "0.2.3"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt"] }
+# SystemBackdrops(DesktopAcrylicController)自 22H1 SDK 起,windows 0.61 未收录,
+# 独立引入 0.62 与 winit 依赖的 0.61 共存
+windows62 = { package = "windows", version = "0.62.2", features = [
+  "Foundation",
+  "System",
+  "UI_Composition",
+  "Win32_Foundation",
+  "Win32_System_WinRT",
+] }
 windows = { version = "0.61.3", features = [
   "Win32_Foundation",
   "Win32_Graphics_Dwm",
   "Win32_Graphics_Gdi",
+  "Win32_System_LibraryLoader",
   "Win32_System_Registry",
   "Win32_UI_Controls",
   "Win32_UI_HiDpi",

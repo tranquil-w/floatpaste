@@ -315,8 +315,7 @@ impl UserSetting {
         if self.shortcut.is_empty() {
             self.shortcut = DEFAULT_MAIN_SHORTCUT.to_string();
         } else if LEGACY_MAIN_SHORTCUTS.iter().any(|legacy| {
-            normalize_shortcut_for_compare(&self.shortcut)
-                == normalize_shortcut_for_compare(legacy)
+            normalize_shortcut_for_compare(&self.shortcut) == normalize_shortcut_for_compare(legacy)
         }) {
             self.shortcut = DEFAULT_MAIN_SHORTCUT.to_string();
         }
@@ -509,10 +508,8 @@ mod tests {
 
     #[test]
     fn deserialize_unknown_paste_trigger_falls_back_to_click() {
-        let settings: UserSetting = serde_json::from_str(
-            r#"{"pasteTrigger":"tripleClick"}"#,
-        )
-        .unwrap();
+        let settings: UserSetting =
+            serde_json::from_str(r#"{"pasteTrigger":"tripleClick"}"#).unwrap();
         assert_eq!(settings.paste_trigger, super::PasteTrigger::Click);
 
         let double: UserSetting =
@@ -772,8 +769,7 @@ mod tests {
 
         assert!(!settings.takeover_winv);
 
-        let enabled: UserSetting =
-            serde_json::from_str(r#"{"takeoverWinv":true}"#).unwrap();
+        let enabled: UserSetting = serde_json::from_str(r#"{"takeoverWinv":true}"#).unwrap();
         assert!(enabled.takeover_winv);
     }
 

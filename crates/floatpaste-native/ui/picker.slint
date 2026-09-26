@@ -169,11 +169,14 @@ component ClipRowCard inherits Rectangle {
             border-radius: Metrics.radius-lg - 1px;
             border-width: selected ? 0px : 1px;
             border-color: item-ta.has-hover ? Theme.border-default : Theme.border-subtle;
+            // 普通态无底色：与搜索窗行一致，条目透出窗底材质（常驻 0.62
+            // 叠加后 92% 实，是速贴「看不出透明」的根源）；hover 瞬时反馈
+            // 保留半透明 inset 底，选中态三层实色结构不变
             background: selected
                 ? Theme.canvas-default
                 : (item-ta.has-hover
                     ? Theme.canvas-inset.with-alpha(material-active ? 0.62 : 1.0)
-                    : Theme.canvas-subtle.with-alpha(material-active ? 0.62 : 1.0));
+                    : transparent);
             animate background { duration: 120ms; }
             // 兜底裁剪：字体度量与渲染器行高存在细微差异时，
             // 防止预览文本画穿条目边界（原版由 CSS overflow 保证）
@@ -420,6 +423,7 @@ export component QuickPasteWindow inherits Window {
     // （窗口 background 透明会把桌面透进来，不能作为回退态）
     in property <bool> material-active: false;
 
+
     // ── 回调（Rust 接管）──
     callback row-clicked(int);
     callback row-double-clicked(int);
@@ -455,6 +459,14 @@ export component QuickPasteWindow inherits Window {
     // （窗口经 hide/show 复用会保留滚动位置）
     in-out property <int> scroll-generation: 0;
 
+    // 出现滑入：内容层从 4px 滑到位（与浮层进场语言一致的 150ms ease-out）。
+    // 窗底（材质面）不动、只动内容——内容移开露出的区域是 card 自身底色，
+    // 任何时刻都不露窗外，规避透明起步帧问题。Rust 侧时序：停屏期
+    // enter-animated=false 重置 enter-offset → 暖首帧落盘起步态 → 上屏后
+    // 解锁动画归零触发滑入
+    in-out property <length> enter-offset: 0px;
+    in-out property <bool> enter-animated: true;
+
     // 消息徽章配色
     property <color> message-bg:
         root.message-tone == 1 ? Theme.success-subtle : Theme.danger-subtle;
@@ -462,15 +474,20 @@ export component QuickPasteWindow inherits Window {
         root.message-tone == 1 ? Theme.success-fg : Theme.danger-fg;
 
     card := Rectangle {
-        // 材质挂载成功 → 半透明材质底（Acrylic 透出在面板之下）；
-        // 未挂载 → 不透明 canvas 回退（透明窗底会直接透出桌面）
-        background: root.material-active ? Theme.material-base : Theme.canvas-default;
+        // 材质挂载成功 → material-layer 近实心底叠在系统 Acrylic 上
+        // （速贴走 HOSTBACKDROP 组合：无焦点不降级，材质与搜索窗同源，
+        // 透出压到 ~10%）；未挂载 → 不透明 canvas 回退（透明窗底会
+        // 直接透出桌面）
+        background: root.material-active ? Theme.material-layer : Theme.canvas-default;
         border-radius: Metrics.radius-lg;
         border-width: PanelGeometry.card-border;
         border-color: Theme.border-window;
         clip: true;
 
         VerticalLayout {
+            y: root.enter-offset;
+            animate y { duration: root.enter-animated ? 150ms : 0ms; easing: ease-out; }
+
             // ── 头部（可拖拽）──
             Rectangle {
                 height: 30px;

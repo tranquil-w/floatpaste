@@ -1,12 +1,13 @@
 // 设置窗口：对齐旧版 SettingsShell.tsx + SettingsNav.tsx + SettingsSection.tsx
 // + ShortcutInput.tsx + ThemePresetPicker.tsx + TagsSection.tsx。
-// 独立带框窗口（旧版 label=manager，920×760 起、min 宽 880、任务栏可见、
-// 关闭=隐藏）。Tauri 运行时下 useSettingsNavigation 恒为 sidebar 布局
-// （176px 侧边导航 + 右侧滚动内容），故只复刻 sidebar 形态。
+// no-frame 窗 + 自绘标题栏（旧版 label=manager，920×760 起、min 宽 880、
+// 任务栏可见，停屏常驻、关闭=停屏）。Tauri 运行时下 useSettingsNavigation
+// 恒为 sidebar 布局（176px 侧边导航 + 右侧滚动内容），故只复刻 sidebar 形态。
 // 数据流：全部字段以 in-out property 供 Rust 水合/回写，编辑回调触发
 // Rust 的 800ms 防抖自动保存；滚动跟随（scroll-spy）由各分区上报 y，
 // Rust 计算高亮并驱动滚动。
 import { Theme, Metrics } from "theme.slint";
+import { WindowTitleBar } from "common.slint";
 
 // 主题预设卡（所见即所得迷你预览，颜色由 Rust 用 core derive_tokens 派生）
 export struct PresetCard {
@@ -540,8 +541,10 @@ component RowGroup inherits Rectangle {
     border-radius: 12px;
     border-width: 1px;
     border-color: Theme.border-muted;
-    // 恒定半透明：材质时透 backdrop，无材质时叠窗底实色（仅略淡）
-    background: Theme.canvas-subtle.with-alpha(0.72);
+    // 分组卡填充（PowerToys 卡片三件套的 fill）：canvas-subtle 实色，
+    // 坐在近实心内容层上无叠加算术问题——第四轮的分组透明化针对
+    // 「半透明容器叠半透明底」的显形，不适用于实色填充
+    background: Theme.canvas-subtle;
     clip: true;
     height: group-col.preferred-height + 2px;
     // 内容整体内缩 1px：Slint 子元素画在父边框之上，行悬停底色若延伸
@@ -825,7 +828,7 @@ component TagRow inherits Rectangle {
 }
 
 export component SettingsWindow inherits Window {
-    title: "FloatPaste · 设置";
+    no-frame: true;
     icon: @image-url("app-icon.png");
     // 尺寸对齐旧版 manager 窗口：inner_size 920×760 起、min 宽 880
     // （Slint 窗口按根布局 preferred 自撑，必须显式给 preferred，
@@ -833,13 +836,18 @@ export component SettingsWindow inherits Window {
     min-width: 880px;
     preferred-width: 920px;
     preferred-height: 760px;
-    // 材质（Mica）挂载成功时窗底半透明透出 backdrop，否则不透明回退
-    background: root.material-active ? Theme.material-base : Theme.canvas-default;
+    // no-frame 后窗体矩形透明，全部观感由 panel 圆角面板绘制（与速贴
+    // 卡片/搜索面板同构）；材质挂载成功时面板半透明透出 backdrop，
+    // 否则不透明回退
+    background: transparent;
     in property <bool> material-active: false;
 
-    // 整帧重绘开关（与编辑窗口同理：hide→show 后 Slint 只重绘变化区域，
-    // 重开时静态区保持表面销毁时的白底；show 前翻转强制全窗变脏）
-    in-out property <bool> force-repaint;
+    // 自绘标题栏回调：拖拽手势与窗控（最小化/最大化切换/关闭）
+    callback drag-started();
+    callback drag-moved();
+    callback drag-finished();
+    callback minimize-requested();
+    callback max-toggle-requested();
 
     /* ── 设置字段（Rust 水合 + 回写） ── */
     in-out property <string> shortcut;
@@ -964,12 +972,13 @@ export component SettingsWindow inherits Window {
         root-scope.focus();
     }
 
-    // ── 整帧重绘覆盖层（颜色非全透明，0.4% 白不可感知；无 TouchArea）──
-    if (root.force-repaint): Rectangle {
+    // 圆角面板：no-frame 窗的可见形态（DWM 圆角 + 阴影由装配挂载）
+    panel := Rectangle {
         width: 100%;
         height: 100%;
-        background: rgba(255, 255, 255, 0.004);
-    }
+        border-radius: 8px;
+        background: root.material-active ? Theme.material-base : Theme.canvas-default;
+        clip: true;
 
     root-scope := FocusScope {
         width: 100%;
@@ -990,6 +999,16 @@ export component SettingsWindow inherits Window {
         }
 
         VerticalLayout {
+            // ── 自绘标题栏（共享组件：拖拽 + 窗控按钮）──
+            WindowTitleBar {
+                title-text: "FloatPaste · 设置";
+                drag-started => root.drag-started();
+                drag-moved => root.drag-moved();
+                drag-finished => root.drag-finished();
+                minimize-requested => root.minimize-requested();
+                max-toggle-requested => root.max-toggle-requested();
+                close-requested => root.request-close();
+            }
             // ── 头部（旧版 sticky header：-mx-5 border-b px-5 py-2）──
             Rectangle {
                 height: 41px;
@@ -1206,17 +1225,24 @@ export component SettingsWindow inherits Window {
                     }
                 }
 
-                // 滚动内容宿主：显式几何占满导航右侧余宽与主体全高
+                // 滚动内容宿主：显式几何占满导航右侧余宽与主体全高。
+                // 内容层卡（WinUI Layer 同构）：近实心底 + 1px 描边压住
+                // 材质渗出，前景坐实色上；侧栏留在材质底上形成层次
                 Rectangle {
                     x: 216px;
                     y: root.save-banner-visible ? 0px : 14px;
                     width: parent.width - 216px - 20px;
                     height: parent.height - (root.save-banner-visible ? 0px : 14px) - 14px;
+                    background: root.material-active ? Theme.material-layer : Theme.canvas-default;
+                    border-radius: Metrics.radius-lg;
+                    border-width: 1px;
+                    border-color: Theme.border-muted;
+                    clip: true;
                     sv := Flickable {
-                        x: 0;
-                        y: 0;
-                        width: parent.width;
-                        height: parent.height;
+                        x: 16px;
+                        y: 14px;
+                        width: parent.width - 32px;
+                        height: parent.height - 28px;
                     content-col := VerticalLayout {
                         spacing: 16px;
 
@@ -1986,5 +2012,6 @@ export component SettingsWindow inherits Window {
             }
         }
     }
+    } // panel
 }
 

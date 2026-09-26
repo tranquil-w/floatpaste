@@ -352,7 +352,10 @@ mod tests {
             file_paths_text(&["C:\\a.txt".to_string(), "D:\\dir\\b.txt".to_string()]),
             "C:\\a.txt\r\nD:\\dir\\b.txt"
         );
-        assert_eq!(file_paths_text(&["C:\\only.txt".to_string()]), "C:\\only.txt");
+        assert_eq!(
+            file_paths_text(&["C:\\only.txt".to_string()]),
+            "C:\\only.txt"
+        );
         assert_eq!(file_paths_text(&[]), "");
     }
 }

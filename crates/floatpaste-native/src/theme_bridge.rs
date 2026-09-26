@@ -41,6 +41,10 @@ fn write_full_tokens(theme: &Theme, tokens: &ThemeTokens) {
         tokens.material_base_rgb,
         tokens.material_base_alpha,
     ));
+    theme.set_material_layer(rgba_color(
+        tokens.material_layer_rgb,
+        tokens.material_layer_alpha,
+    ));
     theme.set_fg_default(hex_color(&tokens.fg_default));
     theme.set_fg_muted(hex_color(&tokens.fg_muted));
     theme.set_fg_subtle(hex_color(&tokens.fg_subtle));
@@ -118,7 +122,9 @@ pub fn apply_theme(
     }
 }
 
-/// 运行时主题重应用（设置保存后的联动路径）：从 App 弱引用升级全部窗口
+/// 运行时主题重应用（设置保存后的联动路径）：从 App 弱引用升级全部窗口。
+/// 停屏窗口的旧主题残影由各 show 路径的
+/// [`crate::win32_ext::force_full_repaint`] 收口（此处泵帧不可靠）
 pub fn reapply_theme(app: &crate::picker::App, tokens: &ThemeTokens) {
     apply_theme(
         app.picker.upgrade().as_ref(),

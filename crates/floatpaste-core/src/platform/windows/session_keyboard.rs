@@ -1,37 +1,37 @@
-//! 速贴面板会话期键盘拦截：低级键盘钩子 + 长按导航连发。
+//! 速贴面板会话期快捷键：RegisterHotKey（专用线程装载/泵送/注销）。
 //!
-//! 原版行为（Tauri global-shortcut 会话热键）的等价复刻：
+//! 原版行为（Tauri global-shortcut 会话热键）的同源复刻：
 //! - 面板可见期间全局接管 ↑↓ / Enter / Shift+Enter / Esc / Ctrl+Space /
-//!   Ctrl+Enter / 数字 1-9（可关），按键不再落到目标应用；
-//! - ↑↓ 按住 280ms 后每 85ms 连发一次导航，松开立即停止
-//!   （RegisterHotKey 拿不到松键事件，这里用 WH_KEYBOARD_LL 的
-//!   keydown/keyup 精确复刻 press/release 语义）；
-//! - 其余按键一律放行（主快捷键、搜索快捷键仍由 RegisterHotKey 线程处理）。
+//!   Ctrl+Enter / 数字 1-9（可关），命中即吞、不再落到目标应用；
+//! - ↑↓ 注册时不带 MOD_NOREPEAT，按住连发走系统按键重复速率（对齐旧壳
+//!   global-shortcut 行为）；其余键带 MOD_NOREPEAT，长按只触发一次；
+//! - 会话热键全局生效，不依赖前台焦点——「编辑窗停屏后残留焦点吃掉
+//!   按键」的形态随之消除。
 //!
-//! 钩子常驻：WH_KEYBOARD_LL 只在首次会话时装载、进程退出随安装线程
-//! 回收，会话结束只翻转 HOOK_ACTIVE（回调在关闭态对每个按键一次原子
-//! 读即放行，无拦截开销）。不得在会话间 Unhook/重装：实测本进程中
-//! LL 键盘钩子经卸载→重装循环后，第二次安装虽返回成功句柄，系统却
-//! 静默不再调用——速贴每轮显隐/进出编辑器都装卸一次，一轮后快捷键
-//! 即全灭（WH_MOUSE_LL 无此问题，实测可照常装卸）。
+//! 历史教训：本模块曾用 WH_KEYBOARD_LL 复刻以获得 keydown/keyup 精确
+//! 语义，但 LL 键盘钩子会被系统静默摘除（回调超时等诱因，不可观测、
+//! 不可预防；实测卸载→重装、探针自愈重装后系统同样静默不调用），表现
+//! 为「关闭编辑窗后会话快捷键全灭而鼠标路径正常」。会话快捷键回到
+//! RegisterHotKey：装卸在本项目长期验证可靠（全局热键线程反复重注册
+//! 从未失效），与全局热键共用同一套系统机制。
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 use std::thread;
-use std::time::Duration;
 
-use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+use windows::Win32::System::Threading::GetCurrentThreadId;
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    RegisterHotKey, UnregisterHotKey, HOT_KEY_MODIFIERS, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT,
+    MOD_SHIFT, MOD_WIN,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, SetWindowsHookExW, HHOOK, KBDLLHOOKSTRUCT, WH_KEYBOARD_LL, WM_KEYDOWN,
-    WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    DispatchMessageW, GetMessageW, MSG, PostThreadMessageW, TranslateMessage, WM_HOTKEY, WM_QUIT,
 };
 
-use tracing::{error, warn};
+use tracing::{info, warn};
 
 use crate::domain::settings::UserSetting;
-
-const NAV_REPEAT_INITIAL_DELAY: Duration = Duration::from_millis(280);
-const NAV_REPEAT_INTERVAL: Duration = Duration::from_millis(85);
 
 /// 会话键盘动作（对齐原版 picker:// 事件族）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,9 +79,6 @@ pub fn parse_session_combo(text: &str) -> Option<SessionCombo> {
 
     for token in text.split('+') {
         let trimmed = token.trim();
-        if trimmed.is_empty() {
-            return None;
-        }
         let lower = trimmed.to_ascii_lowercase();
         match lower.as_str() {
             "ctrl" | "control" => combo.ctrl = true,
@@ -105,18 +102,9 @@ pub fn parse_session_combo(text: &str) -> Option<SessionCombo> {
 }
 
 impl SessionCombo {
-    /// 虚拟键码（LL 钩子按虚拟键匹配）
+    /// 虚拟键码（热键注册按虚拟键匹配）
     pub fn virtual_key(&self) -> Option<u32> {
         virtual_key_for(&self.key.to_ascii_lowercase())
-    }
-
-    /// 当前修饰键状态是否精确匹配组合（供 LL 钩子判定）：
-    /// 组合含有的修饰键须按下，未含的须抬起
-    fn modifiers_match(&self) -> bool {
-        self.ctrl == modifier_down(VK_CONTROL)
-            && self.alt == modifier_down(VK_ALT)
-            && self.shift == modifier_down(VK_SHIFT)
-            && self.win == (modifier_down(VK_LWIN) || modifier_down(VK_RWIN))
     }
 }
 
@@ -162,7 +150,7 @@ pub struct SessionKeyConfig {
 }
 
 impl SessionKeyConfig {
-    /// 从用户设置构建。删除条目键仅搜索窗口消费，不在 LL 钩子拦截范围
+    /// 从用户设置构建。删除条目键仅搜索窗口消费，不在会话拦截范围
     pub fn from_settings(settings: &UserSetting) -> Self {
         let keys = &settings.session_keys;
         let bind = |text: &str, action: SessionAction| {
@@ -187,236 +175,162 @@ impl SessionKeyConfig {
     }
 }
 
-static HOOK_ACTIVE: AtomicBool = AtomicBool::new(false);
-static NAV_REPEAT_DIRECTION: Mutex<Option<NavDirection>> = Mutex::new(None);
-static NAV_REPEAT_TOKEN: AtomicU64 = AtomicU64::new(0);
+/// 会话热键线程 id：0=无会话，其余=线程 id（泵送 WM_HOTKEY）
+static SESSION_THREAD_ID: AtomicU32 = AtomicU32::new(0);
+/// 会话代数：begin/end 各递增，供装载线程识别「注册完成前会话已被
+/// 替换」的竞态，避免装卸交错导致热键泄漏
+static SESSION_GEN: AtomicU32 = AtomicU32::new(0);
+/// 会话热键 id 起始（避开 main.rs 全局热键的 1-3）
+const SESSION_HOTKEY_ID_BASE: i32 = 64;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum NavDirection {
-    Up,
-    Down,
-}
-
-static SESSION_CONFIG: Mutex<Option<SessionKeyConfig>> = Mutex::new(None);
-
-/// 按键会话回调：在钩子线程上调用，须尽快返回（连发导航由独立线程投递）
+/// 按键会话回调：在会话热键线程上调用，须尽快返回
 pub type SessionKeyCallback = Box<dyn Fn(SessionAction) + Send + Sync>;
 
 static SESSION_CALLBACK: Mutex<Option<SessionKeyCallback>> = Mutex::new(None);
 
-/// 开始会话：装载 WH_KEYBOARD_LL（钩子常驻，重复调用只更新配置与回调）。
-/// digit_shortcuts_enabled=false 时不拦截数字键
+/// 开始会话：把会话组合键注册为全局热键（专用线程装载并泵送 WM_HOTKEY）。
+/// 重复调用先结束上一会话（幂等）。全局热键命中与前台焦点无关
 pub fn begin_session(config: SessionKeyConfig, callback: SessionKeyCallback) {
-    if let Ok(mut slot) = SESSION_CONFIG.lock() {
-        *slot = Some(config);
-    }
+    end_session();
     if let Ok(mut slot) = SESSION_CALLBACK.lock() {
         *slot = Some(callback);
     }
-    stop_navigation_repeat();
-    HOOK_ACTIVE.store(true, Ordering::SeqCst);
-    HOOK_HANDLE.with(|handle| {
-        if handle.borrow().is_some() {
+
+    // 组合键展开为热键注册项：数字 1-9 直达（可关）+ 动作键绑定。
+    // 导航键不带 MOD_NOREPEAT 以获得按住连发（系统重复速率，对齐旧壳），
+    // 其余键带 MOD_NOREPEAT，长按只触发一次
+    let mut hotkeys: Vec<(i32, HOT_KEY_MODIFIERS, u32, SessionAction)> = Vec::new();
+    if config.digit_shortcuts_enabled {
+        for digit in 0..9u32 {
+            hotkeys.push((
+                SESSION_HOTKEY_ID_BASE + hotkeys.len() as i32,
+                HOT_KEY_MODIFIERS(0),
+                0x31 + digit,
+                SessionAction::SelectIndex(digit as u8 + 1),
+            ));
+        }
+    }
+    for (action, combo) in &config.bindings {
+        let Some(vk) = combo.virtual_key() else {
+            continue;
+        };
+        let mut modifiers = modifiers_mask(combo);
+        if !matches!(action, SessionAction::NavigateUp | SessionAction::NavigateDown) {
+            modifiers |= MOD_NOREPEAT;
+        }
+        hotkeys.push((
+            SESSION_HOTKEY_ID_BASE + hotkeys.len() as i32,
+            modifiers,
+            vk,
+            *action,
+        ));
+    }
+    if hotkeys.is_empty() {
+        warn!("会话快捷键配置为空，本次会话不拦截键盘");
+        return;
+    }
+
+    let session_generation = SESSION_GEN.fetch_add(1, Ordering::SeqCst) + 1;
+    thread::spawn(move || unsafe {
+        let mut registered: Vec<(i32, SessionAction)> = Vec::new();
+        for (id, modifiers, vk, action) in &hotkeys {
+            match RegisterHotKey(None, *id, *modifiers, *vk) {
+                Ok(()) => registered.push((*id, *action)),
+                Err(reg_error) => {
+                    let code = (reg_error.code().0 as u32) & 0xFFFF;
+                    if code == 1409 {
+                        warn!("会话快捷键 {action:?} 被其他程序占用，本次会话该键不生效");
+                    } else {
+                        warn!("会话快捷键 {action:?} 注册失败: {reg_error}");
+                    }
+                }
+            }
+        }
+        if registered.is_empty() {
+            warn!("会话快捷键全部注册失败，本次会话不拦截键盘");
             return;
         }
-        let installed =
-            unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_hook_proc), None, 0) };
-        match installed {
-            Ok(hook) => *handle.borrow_mut() = Some(hook),
-            Err(error) => {
-                HOOK_ACTIVE.store(false, Ordering::SeqCst);
-                error!("装载会话键盘钩子失败: {error}");
+        let thread_id = GetCurrentThreadId();
+        SESSION_THREAD_ID.store(thread_id, Ordering::SeqCst);
+        info!(
+            "会话快捷键已注册（{} 组，专用线程 id={thread_id}）",
+            registered.len()
+        );
+        // 注册期间会话可能已被替换（快速开关面板），此时不进泵，
+        // 立即注销退出，避免热键泄漏
+        if SESSION_GEN.load(Ordering::SeqCst) != session_generation {
+            for (id, _) in &registered {
+                let _ = UnregisterHotKey(Some(HWND::default()), *id);
             }
+            return;
+        }
+
+        let mut message = MSG::default();
+        loop {
+            let result = GetMessageW(&mut message, None, 0, 0);
+            if result.0 <= 0 {
+                break;
+            }
+            if message.message == WM_HOTKEY {
+                let hotkey_id = message.wParam.0 as i32;
+                if let Some(action) = registered
+                    .iter()
+                    .find(|(id, _)| *id == hotkey_id)
+                    .map(|(_, action)| *action)
+                {
+                    if let Ok(slot) = SESSION_CALLBACK.lock() {
+                        if let Some(callback) = slot.as_ref() {
+                            callback(action);
+                        }
+                    }
+                }
+            }
+            let _ = TranslateMessage(&message);
+            DispatchMessageW(&message);
+        }
+        for (id, _) in &registered {
+            let _ = UnregisterHotKey(Some(HWND::default()), *id);
         }
     });
 }
 
-/// 结束会话：停连发、清回调、关闭拦截开关。
-/// 不卸载钩子（常驻语义见模块文档）；回调清空后即使钩子仍被调用，
-/// 关闭态的早退分支也不触达回调
+/// 结束会话：注销全部会话热键并回收会话线程。幂等
 pub fn end_session() {
-    HOOK_ACTIVE.store(false, Ordering::SeqCst);
-    stop_navigation_repeat();
+    info!("键盘会话结束（拦截态关闭）");
+    SESSION_GEN.fetch_add(1, Ordering::SeqCst);
     if let Ok(mut slot) = SESSION_CALLBACK.lock() {
         *slot = None;
     }
-    if let Ok(mut config) = SESSION_CONFIG.lock() {
-        *config = None;
-    }
-}
-
-thread_local! {
-    static HOOK_HANDLE: std::cell::RefCell<Option<HHOOK>> = const { std::cell::RefCell::new(None) };
-}
-
-extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    if code < 0 || !HOOK_ACTIVE.load(Ordering::SeqCst) {
-        return unsafe { CallNextHookEx(None, code, wparam, lparam) };
-    }
-
-    let msg = wparam.0 as u32;
-    let is_down = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
-    let is_up = msg == WM_KEYUP || msg == WM_SYSKEYUP;
-    if !is_down && !is_up {
-        return unsafe { CallNextHookEx(None, code, wparam, lparam) };
-    }
-
-    let event = unsafe { &*(lparam.0 as *const KBDLLHOOKSTRUCT) };
-    let vk = event.vkCode;
-
-    let Some(action) = classify(vk) else {
-        return unsafe { CallNextHookEx(None, code, wparam, lparam) };
-    };
-
-    // 长按 ↑↓：按下启动连发，松开停止；连发线程回调在按下时同步触发一次
-    if matches!(
-        action,
-        SessionAction::NavigateUp | SessionAction::NavigateDown
-    ) {
-        if is_up {
-            stop_navigation_repeat();
-            return LRESULT(1);
-        }
-        let direction = match action {
-            SessionAction::NavigateUp => NavDirection::Up,
-            _ => NavDirection::Down,
-        };
-        if start_navigation_repeat(direction) {
-            emit(action);
-        }
-        return LRESULT(1);
-    }
-
-    if is_up {
-        return LRESULT(1);
-    }
-
-    // 其余会话键：按下触发，长按不重复（对齐 RegisterHotKey + 前端一次性处理）
-    stop_navigation_repeat();
-    emit(action);
-    LRESULT(1)
-}
-
-/// 判定虚拟键是否命中会话键：数字 1-9 直达（可关）外，其余按用户配置
-/// 的动作键绑定精确匹配（键相同且修饰键集合一致）
-fn classify(vk: u32) -> Option<SessionAction> {
-    // 简化: 每键事件深拷贝配置（≤8 组合键）并在匹配时小写化键名，开销
-    // 相对系统每击键自身处理可忽略；升级: 解析时预存虚拟键码 + Arc 共享
-    let config = SESSION_CONFIG.lock().ok().and_then(|guard| guard.clone());
-
-    if (0x31..=0x39).contains(&vk) {
-        // 主行数字 1-9：无修饰时直达直贴；小键盘不拦截（对齐 Digit1-9 语义）
-        let modifier_held = modifier_down(VK_CONTROL)
-            || modifier_down(VK_ALT)
-            || modifier_down(VK_SHIFT)
-            || modifier_down(VK_LWIN)
-            || modifier_down(VK_RWIN);
-        if modifier_held {
-            return None;
-        }
-        if config
-            .as_ref()
-            .is_some_and(|value| !value.digit_shortcuts_enabled)
-        {
-            return None;
-        }
-        return Some(SessionAction::SelectIndex((vk - 0x31 + 1) as u8));
-    }
-
-    let config = config?;
-    config
-        .bindings
-        .iter()
-        .find(|(_, combo)| combo.virtual_key() == Some(vk) && combo.modifiers_match())
-        .map(|(action, _)| *action)
-}
-
-const VK_SHIFT: u32 = 0x10;
-const VK_CONTROL: u32 = 0x11;
-const VK_ALT: u32 = 0x12;
-const VK_LWIN: u32 = 0x5B;
-const VK_RWIN: u32 = 0x5C;
-
-fn modifier_down(vk: u32) -> bool {
-    use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
-    (unsafe { GetAsyncKeyState(vk as i32) } as u32 & 0x8000) != 0
-}
-
-fn emit(action: SessionAction) {
-    if let Ok(slot) = SESSION_CALLBACK.lock() {
-        if let Some(callback) = slot.as_ref() {
-            callback(action);
+    let thread_id = SESSION_THREAD_ID.swap(0, Ordering::SeqCst);
+    if thread_id != 0 {
+        unsafe {
+            // 会话热键线程对 WM_QUIT 的响应点在消息泵，注册阶段的线程
+            // 由代数检查自行注销退出
+            let _ = PostThreadMessageW(thread_id, WM_QUIT, WPARAM(0), LPARAM(0));
         }
     }
 }
 
-/// 启动长按连发；已在同方向连发时返回 false（避免重复触发首步导航）
-fn start_navigation_repeat(direction: NavDirection) -> bool {
-    let mut active = match NAV_REPEAT_DIRECTION.lock() {
-        Ok(value) => value,
-        Err(error) => {
-            error!("读取长按导航状态失败: {error}");
-            return true;
-        }
-    };
-
-    if *active == Some(direction) {
-        return false;
+/// 组合键 → RegisterHotKey 修饰掩码（精确集合：未含的修饰键不置位）
+fn modifiers_mask(combo: &SessionCombo) -> HOT_KEY_MODIFIERS {
+    let mut mask = HOT_KEY_MODIFIERS(0);
+    if combo.ctrl {
+        mask |= MOD_CONTROL;
     }
-    *active = Some(direction);
-    let token = NAV_REPEAT_TOKEN.fetch_add(1, Ordering::SeqCst) + 1;
-
-    thread::spawn(move || {
-        thread::sleep(NAV_REPEAT_INITIAL_DELAY);
-        loop {
-            if NAV_REPEAT_TOKEN.load(Ordering::SeqCst) != token {
-                break;
-            }
-            if !HOOK_ACTIVE.load(Ordering::SeqCst) {
-                break;
-            }
-            if current_navigation_direction() != Some(direction) {
-                break;
-            }
-
-            emit(match direction {
-                NavDirection::Up => SessionAction::NavigateUp,
-                NavDirection::Down => SessionAction::NavigateDown,
-            });
-
-            thread::sleep(NAV_REPEAT_INTERVAL);
-        }
-    });
-
-    true
-}
-
-fn stop_navigation_repeat() {
-    let mut active = match NAV_REPEAT_DIRECTION.lock() {
-        Ok(value) => value,
-        Err(error) => {
-            warn!("停止长按导航失败: {error}");
-            NAV_REPEAT_TOKEN.fetch_add(1, Ordering::SeqCst);
-            return;
-        }
-    };
-    *active = None;
-    NAV_REPEAT_TOKEN.fetch_add(1, Ordering::SeqCst);
-}
-
-fn current_navigation_direction() -> Option<NavDirection> {
-    NAV_REPEAT_DIRECTION.lock().ok().and_then(|value| *value)
-}
-
-/// 供测试/诊断：会话是否处于活跃状态
-pub fn is_session_active() -> bool {
-    HOOK_ACTIVE.load(Ordering::SeqCst)
+    if combo.alt {
+        mask |= MOD_ALT;
+    }
+    if combo.shift {
+        mask |= MOD_SHIFT;
+    }
+    if combo.win {
+        mask |= MOD_WIN;
+    }
+    mask
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::Ordering;
-
     use super::{parse_session_combo, SessionKeyConfig};
     use crate::domain::settings::UserSetting;
 
@@ -468,11 +382,5 @@ mod tests {
         assert_eq!(config.bindings.len(), 6);
         assert_eq!(config.bindings[0].1.virtual_key(), Some(0x21)); // PageUp
         assert!(config.digit_shortcuts_enabled);
-    }
-
-    #[test]
-    fn select_index_maps_digit_range() {
-        // 分类逻辑依赖进程级修饰键状态，这里只验证会话开关语义
-        assert!(!super::HOOK_ACTIVE.load(Ordering::SeqCst));
     }
 }
