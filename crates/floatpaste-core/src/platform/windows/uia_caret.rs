@@ -84,6 +84,13 @@
 //!     位置错）——放宽候选的选区几何仍采信（VS Code 根文档依赖），陈旧值
 //!     经它漏进来的形态若再发，再收口。
 //!
+//! 11. **空字段的 `GetSelection` 是文档级共享选区，不是本字段的插入符**。
+//!     实测 VS Code 搜索视图替换框（空、插入符在起点）：字段自身带
+//!     TextPattern，但 `GetSelection` 返回的是全文档共享的最后已知选区
+//!     （探针实测窗口内全部文本元素返回同一几何），「选区范围」路径照单
+//!     全收会把锚点甩到编辑器/搜索部件的旧选区上。确证的空文本字段插入符
+//!     必然在文本起点，范围路径在入口整段短路，直接走字段框左沿。
+//!
 //! 客户端按线程缓存：COM 对象不能跨公寓共享，而探测固定发生在事件循环
 //! 线程上，缓存即等价于复用 UIA 的跨进程连接（连接一旦建立，后续调用
 //! 不再受连接超时约束）。
@@ -270,7 +277,10 @@ fn caret_anchor(
     attempt
 }
 
-/// 元素级插入符定位（GetCaretRange → GetSelection → 字段框兜底）。
+/// 元素级插入符定位。确证的空文本字段在入口直取字段框左沿（模块文档坑 11，
+/// 范围几何对空字段只可能是文档级共享选区的谎言）；其余元素按
+/// GetCaretRange → GetSelection 找范围几何，全空时不给字段框兜底——非空
+/// 元素的框与插入符列无必然联系。
 ///
 /// `allow_drilldown` 控制元素没有任何 TextPattern 时是否下钻后代搜文本框：
 /// 只有焦点元素这一层允许——下钻命中的候选复用本函数时必须关掉，候选已按
@@ -291,6 +301,19 @@ fn element_caret_anchor(
 ) -> Option<Anchor> {
     // 元素框只服务一件事：识别「provider 拿整个元素充当字符」的无效几何
     let element_rect = unsafe { element.CurrentBoundingRectangle() }.ok();
+
+    // 确证的空文本字段插入符必然在文本起点，范围路径整段短路（见模块文档
+    // 坑 11）：Chromium 字段（VS Code 替换框实测）的 GetSelection 返回的是
+    // 文档级共享选区，与本字段插入符无关，字段框左沿是唯一可信锚点。
+    // 字段框兜底的前提「插入符就在这个元素框内」只对持焦点的元素成立，
+    // 放宽候选（无焦点背书）照旧不给
+    if element_text_empty(element) {
+        return if allow_field_anchor {
+            field_rect_anchor(element_rect, window_rect, true)
+        } else {
+            None
+        };
+    }
 
     // 插入符范围（TextPattern2）优先：选区反向时它也指向真正的插入点
     if let Ok(pattern) =
@@ -346,15 +369,11 @@ fn element_caret_anchor(
         debug_anchor("选区范围", anchor);
         return selected;
     }
-    // 焦点元素自己是文本元素时，「插入符就在这个框内」只对确证的空输入框
-    // 成立（Value 空白，插入符=文本起点）；Chromium 会把 UIA 焦点报在对话
-    // 气泡等任意文本元素上（ZCode 实测：锚到对话区 (1288,673)），非空或读
-    // 不出 Value 的元素框与键盘焦点无必然联系，宁可回退鼠标
-    if allow_field_anchor && element_text_empty(element) {
-        field_rect_anchor(element_rect, window_rect, true)
-    } else {
-        None
-    }
+    // 走到这里说明元素非空或读不出 Value（空字段已在入口短路）：元素框与
+    // 键盘焦点虽同属一处，但范围几何全空时分不清插入符在框内哪一格，
+    // 字段框兜底只认确证的空输入框（Chromium 会把 UIA 焦点报在对话气泡
+    // 等任意文本元素上，ZCode 实测：锚到对话区 (1288,673)），宁可回退鼠标
+    None
 }
 
 /// 焦点元素没有任何 TextPattern 时的后代下钻：对 `TreeScope_Descendants` 用
