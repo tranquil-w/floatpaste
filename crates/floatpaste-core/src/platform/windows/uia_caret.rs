@@ -67,14 +67,19 @@
 //!
 //! 10. **焦点归属失真有三种形态，都不给锚点**。Chromium 开 IME 输入捕获窗
 //!     （IHWindowClass「Input Capture Window」，整虚拟屏大小）时，
-//!     `GetFocusedElement` 返回的是它而非真实文本框；另一种形态是焦点被报在
+//!     `GetFocusedElement` 返回的是它而非真实文本框——这是唯一实证的
+//!     「焦点跑出目标窗口」形态，判据只认类名，**不能用「焦点元素框须在
+//!     客户区内」的几何判据**：Chromium 把滚动区外的坐标也算进编辑器元素
+//!     框（坑 6：Obsidian 文档框 bottom 比窗口底低 488px），超界框是合法
+//!     焦点，按几何拦会把 Obsidian 长文档整条 UIA 路径判死（2026-09-27
+//!     回归实测）；另一种形态是焦点被报在
 //!     窗口内某个无关容器上（ZCode 空输入框实测：对话区容器，第二级下钻
 //!     候选的字段框兜底把锚点猜到 (1288,673)）；第三种是焦点元素本身就是
 //!     无关文本元素——Chromium 把 UIA 焦点报在「最后交互的元素」上（ZCode
 //!     实测：对话气泡持有 TextPattern 但无范围几何，字段框兜底曾把锚点给
 //!     到气泡框）。三种形态的共同点是真实键盘焦点不在焦点元素上。对策分
-//!     三层：焦点元素矩形必须落在目标窗口客户区内（含等于客户区的窗口根
-//!     形态，那是坑 7 的正常形态），否则整条 UIA 路径不给锚点，回退鼠标；
+//!     三层：焦点元素是 IME 输入捕获窗（IHWindowClass）时整条 UIA 路径
+//!     不给锚点、回退鼠标（判据只认类名，几何判据的教训见上）；
 //!     放宽条件的下钻候选（无焦点背书）范围几何拿不到时不给字段框兜底；
 //!     焦点元素**自己有 TextPattern** 时字段框兜底仅限确证的空输入框
 //!     （Value 只含空白）——气泡等文本元素框与键盘焦点无必然联系，猜框
@@ -167,14 +172,15 @@ pub fn caret_point_via_uia(target_hwnd: isize) -> Result<Anchor, AppError> {
     let element = unsafe { uia_client()?.GetFocusedElement() }
         .map_err(|error| AppError::Message(format!("读取焦点元素失败: {error}")))?;
 
-    let client = window_client_rect(target_hwnd);
-
-    // 焦点归属守卫（见模块文档坑 10）：焦点元素本身必须落在目标窗口客户区内，
-    // 窗口根焦点（框==客户区）是坑 7 的正常形态，判据是包含而非真子矩形
-    if !focus_within_client(unsafe { element.CurrentBoundingRectangle() }.ok(), client) {
-        tracing::debug!("焦点元素不在目标窗口客户区内，插入符归属失真，回退鼠标");
+    // 焦点归属守卫（见模块文档坑 10）：只拦 IME 输入捕获窗这一个实证的
+    // 「焦点跑出目标窗口」形态。不用「焦点元素框须在客户区内」的几何判据：
+    // Chromium 把滚动区外的坐标也算进编辑器元素框（坑 6，Obsidian 文档框
+    // bottom 比窗口底低 488px），超界框是合法焦点，按几何拦会把 Obsidian
+    // 长文档整条 UIA 路径判死
+    if is_ime_capture_window(&element) {
+        tracing::debug!("焦点元素是 IME 输入捕获窗，插入符归属失真，回退鼠标");
         return Err(AppError::Message(
-            "焦点元素不在目标窗口客户区内".to_string(),
+            "焦点元素是 IME 输入捕获窗".to_string(),
         ));
     }
 
@@ -186,6 +192,7 @@ pub fn caret_point_via_uia(target_hwnd: isize) -> Result<Anchor, AppError> {
     }
     .ok();
 
+    let client = window_client_rect(target_hwnd);
     let attempt = caret_anchor(&element, client, window_root.as_ref());
     match attempt.anchor {
         Some(anchor) => Ok(anchor),
@@ -230,8 +237,8 @@ fn window_client_rect(target_hwnd: isize) -> Option<RECT> {
     })
 }
 
-/// 四边包含判定（含 2px 渲染舍入容差）。焦点归属守卫与字段框兜底共用：
-/// 前者要求「包含即可」（窗口根焦点是正常形态），后者还要叠加整页拒收
+/// 四边包含判定（含 2px 渲染舍入容差），字段框兜底用：插入符「就在焦点
+/// 元素框内」的前提要求框本身是客户区内的真子矩形
 fn rect_contained(rect: &RECT, client: &RECT) -> bool {
     let slack = 2;
     rect.left >= client.left - slack
@@ -240,14 +247,16 @@ fn rect_contained(rect: &RECT, client: &RECT) -> bool {
         && rect.bottom <= client.bottom + slack
 }
 
-/// 焦点元素是否落在目标窗口客户区内（允许边界贴合与微小越界）。矩形或
-/// 客户区读不到时不拦——后续既有守卫（字段框兜底等）自会处理，别在这里
-/// 引入新的失败源
-fn focus_within_client(element_rect: Option<RECT>, client: Option<RECT>) -> bool {
-    match (element_rect, client) {
-        (Some(rect), Some(client)) => rect_contained(&rect, &client),
-        _ => true,
-    }
+/// Chromium 的 IME 输入捕获窗类名（「Input Capture Window」）
+const IME_CAPTURE_WINDOW_CLASS: &str = "IHWindowClass";
+
+/// 焦点元素是否为 IME 输入捕获窗：持有 UIA 焦点时真实键盘焦点不在它上面
+/// （见模块文档坑 10）。类名读取失败不拦——判据本身不能成为新的失败源，
+/// 交给下游守卫
+fn is_ime_capture_window(element: &IUIAutomationElement) -> bool {
+    (unsafe { element.CurrentClassName() })
+        .map(|class| class.to_string() == IME_CAPTURE_WINDOW_CLASS)
+        .unwrap_or(false)
 }
 
 /// 一次焦点元素定位的产出：锚点 + 下钻记录。下钻记录只在定位最终失败时
@@ -1229,45 +1238,6 @@ mod tests {
         };
         assert_eq!(field_rect_anchor(Some(icon), Some(client), false), None);
         assert_eq!(MAX_CARET_LINE_HEIGHT, 100);
-    }
-
-    /// ZCode（Chromium 开 IME 输入捕获窗）实测：焦点元素是整虚拟屏大小的
-    /// IHWindowClass「Input Capture Window」，矩形远超目标窗口客户区——
-    /// 焦点归属失真，整条 UIA 路径不给锚点。窗口根焦点（框==客户区，坑 7
-    /// 的 WorkBuddy/Obsidian 容器形态）与客户区内矩形是正常形态，照常放行
-    #[test]
-    fn focus_element_outside_client_is_rejected() {
-        let client = RECT {
-            left: 224,
-            top: 140,
-            right: 2065,
-            bottom: 1269,
-        };
-        // ZCode 真机：焦点元素矩形 = 整个 2560×1440 虚拟屏
-        let input_capture = RECT {
-            left: 0,
-            top: 0,
-            right: 2560,
-            bottom: 1440,
-        };
-        assert!(!super::focus_within_client(Some(input_capture), Some(client)));
-
-        // 窗口根当焦点元素：框==客户区（坑 7 的正常形态，非真子矩形也放行）
-        let window_root = client;
-        assert!(super::focus_within_client(Some(window_root), Some(client)));
-
-        // 客户区内的正常焦点元素（带 1px 渲染舍入越界）
-        let inner = RECT {
-            left: 224,
-            top: 500,
-            right: 2066,
-            bottom: 521,
-        };
-        assert!(super::focus_within_client(Some(inner), Some(client)));
-
-        // 矩形/客户区读不到时不拦，交给后续既有守卫
-        assert!(super::focus_within_client(None, Some(client)));
-        assert!(super::focus_within_client(Some(input_capture), None));
     }
 
     /// 夸克空搜索框（折叠插入符，真机探针）：各粒度展开都返回整条输入行
