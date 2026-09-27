@@ -1,6 +1,5 @@
-//! 速贴窗口定位与尺寸恢复：三种定位模式（鼠标 / 光标插入符 / 上次位置），
-//! 与原版 `picker_position_service.rs` 同算法同常量；窗口尺寸/位置的
-//! 读取与落盘由调用方传入，本模块只做纯计算与仓储读写。
+//! 速贴窗口定位与尺寸恢复：三种定位模式（鼠标 / 光标插入符 / 上次位置）；
+//! 窗口尺寸/位置的读取与落盘由调用方传入，本模块只做纯计算与仓储读写。
 
 use crate::domain::error::AppError;
 use crate::domain::settings::{PickerPositionMode, StoredWindowPosition};
@@ -12,7 +11,6 @@ use crate::platform::windows::picker_position::{
 use crate::repository::sqlite_repository::SqliteRepository;
 
 const PICKER_ANCHOR_GAP_PX: i32 = 12;
-const PICKER_TOP_ANCHOR_X_DIVISOR: i32 = 5;
 /// 设计尺寸（**逻辑像素**，与 `ui/picker.slint` 的 preferred-width/height 同值）。
 /// 不对外导出：直接当物理尺寸用就是这个模块踩过的坑，落窗口前必须过
 /// [`default_window_size`] 折算
@@ -179,22 +177,14 @@ fn place_window_near_point(
     }
 
     // 无列信息的锚点（字段框兜底）在锚点上**水平居中**打开：行带中间才是
-    // 「贴着这一行」的预期位置；有列信息的锚点保持左收 1/5 窗口宽的候选框
-    // 风格，窗口主体落在插入符右侧
-    let x_offset = if anchor.centered {
-        window_width / 2
+    // 「贴着这一行」的预期位置；其余锚点（插入符列/鼠标）以窗口左上角对齐
+    // 锚点，不横向偏移
+    let x = if anchor.centered {
+        point.x - window_width / 2
     } else {
-        window_width / PICKER_TOP_ANCHOR_X_DIVISOR
+        point.x
     };
-    clamp_top_left(
-        ScreenPoint {
-            x: point.x - x_offset,
-            y,
-        },
-        work_area,
-        window_width,
-        window_height,
-    )
+    clamp_top_left(ScreenPoint { x, y }, work_area, window_width, window_height)
 }
 
 /// 工作区内居中放置 width×height 窗口的左上角（物理像素）；窗口大于
@@ -295,7 +285,7 @@ mod tests {
             420,
         );
 
-        assert_eq!(point.x, 628);
+        assert_eq!(point.x, 700);
         assert_eq!(point.y, 212);
     }
 
@@ -313,7 +303,7 @@ mod tests {
             420,
         );
 
-        assert_eq!(point.x, 628);
+        assert_eq!(point.x, 700);
         assert_eq!(point.y, 428);
     }
 
@@ -341,8 +331,8 @@ mod tests {
         assert!(placed.y + 460 < 1170, "窗口压在插入符行上: {placed:?}");
     }
 
-    /// 无列信息的锚点（字段框兜底）窗口**水平居中**于锚点打开；有列信息的
-    /// 锚点保持左收 1/5 窗口宽（窗口主体在插入符右侧）
+    /// 无列信息的锚点（字段框兜底）窗口**水平居中**于锚点打开；其余锚点
+    /// （插入符列/鼠标）窗口左上角对齐锚点
     #[test]
     fn centered_anchor_opens_window_centered_on_point() {
         let work = ScreenRect {
@@ -365,7 +355,7 @@ mod tests {
             ..caret
         };
         let placed = place_window_near_point(lead, work, 360, 420);
-        assert_eq!(placed.x, 1140 - 72);
+        assert_eq!(placed.x, 1140);
     }
 
     /// 下方放得下时行高不参与（免得平白把窗口往下推）

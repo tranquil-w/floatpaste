@@ -49,8 +49,8 @@ impl ScreenRect {
 /// `line_height` 是这一行的高度，翻到上方时要用它让开**整行**——只让开空隙
 /// 会把窗口压在插入符自己那行上（如输入框首行被切掉半行）。鼠标锚点没有行
 /// 概念，取 0。`centered` 标记 provider 给不出插入符列位置的锚点（字段框
-/// 兜底）：窗口在 `point` 上**水平居中**打开而非左收偏移——行带/字段框中间
-/// 才是「贴着这一行」的预期位置
+/// 兜底）：窗口在 `point` 上**水平居中**打开而非左上角对齐——行带/字段框
+/// 中间才是「贴着这一行」的预期位置
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Anchor {
     pub point: ScreenPoint,
