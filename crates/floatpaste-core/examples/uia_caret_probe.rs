@@ -27,18 +27,20 @@ use windows::Win32::System::Threading::{
 use windows::Win32::UI::Accessibility::{
     CUIAutomation8, IUIAutomation, IUIAutomation2, IUIAutomationCacheRequest,
     IUIAutomationElement, IUIAutomationTextPattern, IUIAutomationTextPattern2,
-    IUIAutomationTextRange, TextPatternRangeEndpoint, TextPatternRangeEndpoint_End,
-    TextPatternRangeEndpoint_Start, TextUnit, TextUnit_Character, TextUnit_Line,
-    TextUnit_Paragraph, TextUnit_Word, TreeScope_Descendants, UIA_BoundingRectanglePropertyId,
-    UIA_ClassNamePropertyId, UIA_HasKeyboardFocusPropertyId, UIA_IsTextPatternAvailablePropertyId,
-    UIA_NamePropertyId, UIA_TextPattern2Id, UIA_TextPatternId,
+    IUIAutomationTextRange, IUIAutomationValuePattern, TextPatternRangeEndpoint,
+    TextPatternRangeEndpoint_End, TextPatternRangeEndpoint_Start, TextUnit, TextUnit_Character,
+    TextUnit_Line, TextUnit_Paragraph, TextUnit_Word, TreeScope_Descendants,
+    UIA_BoundingRectanglePropertyId, UIA_ClassNamePropertyId, UIA_HasKeyboardFocusPropertyId,
+    UIA_IsTextPatternAvailablePropertyId, UIA_NamePropertyId, UIA_TextPattern2Id,
+    UIA_TextPatternId, UIA_ValuePatternId,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible,
 };
 
-/// 每个窗口最多 dump 的文本元素数——Chromium 全树可达数千，诊断用不到
-const MAX_TEXT_ELEMENTS: i32 = 20;
+/// 每个窗口最多 dump 的文本元素数——Chromium 全树可达数千，诊断用不到；
+/// 放得较宽是因为输入框元素常排在树尾（前 20 个被会话列表与对话区占满）
+const MAX_TEXT_ELEMENTS: i32 = 60;
 
 const EXPAND_UNITS: [(&str, TextUnit); 4] = [
     ("字符", TextUnit_Character),
@@ -170,7 +172,30 @@ fn dump_window(client: &IUIAutomation, hwnd: HWND) {
     // 窗口外/落在无 TextPattern 的条带上（实测 VS Code 焦点在顶部条带时
     // 光标行在编辑区中部），单独 dump 才能对上生产的失败形态
     match unsafe { client.GetFocusedElement() } {
-        Ok(focused) => println!("焦点元素 {}", element_summary(&focused)),
+        Ok(focused) => {
+            println!("焦点元素 {}", element_summary(&focused));
+            // 焦点元素的 pattern 支持与 Value：生产端「空输入框」判据的输入，
+            // 焦点元素形态（IME 捕获窗/输入框/对话气泡）切换时对照用
+            let text2 = unsafe {
+                focused.GetCurrentPatternAs::<IUIAutomationTextPattern2>(UIA_TextPattern2Id)
+            }
+            .is_ok();
+            let text = unsafe {
+                focused.GetCurrentPatternAs::<IUIAutomationTextPattern>(UIA_TextPatternId)
+            }
+            .is_ok();
+            let value = match unsafe {
+                focused.GetCurrentPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId)
+            } {
+                Ok(pattern) => unsafe { pattern.CurrentValue() }
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|error| format!("<读取失败 {error}>")),
+                Err(_) => "<无 ValuePattern>".to_string(),
+            };
+            println!(
+                "焦点元素 pattern: TextPattern2={text2} TextPattern={text} Value='{value}'"
+            );
+        }
         Err(error) => println!("焦点元素读取失败: {error}"),
     }
 
@@ -257,6 +282,19 @@ fn dump_text_element(element: &IUIAutomationElement) {
         .map(|rect| format_rect(&rect))
         .unwrap_or_else(|_| "不可读".to_string());
     println!("\n--- 文本元素 ClassName='{class}' Name='{name}' 焦点={focused} 矩形={rect} ---");
+
+    // ValuePattern：表单控件（输入框）才有，文本内容元素（气泡/正文）没有；
+    // Value 空串与否是「空输入框」判据的依据
+    if let Ok(value_pattern) =
+        unsafe { element.GetCurrentPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId) }
+    {
+        match unsafe { value_pattern.CurrentValue() } {
+            Ok(value) => println!("Value='{value}'"),
+            Err(error) => println!("Value 读取失败: {error}"),
+        }
+    } else {
+        println!("无 ValuePattern");
+    }
 
     if let Ok(pattern) =
         unsafe { element.GetCurrentPatternAs::<IUIAutomationTextPattern2>(UIA_TextPattern2Id) }

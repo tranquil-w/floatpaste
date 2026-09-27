@@ -32,10 +32,14 @@
 //!    在字符/行/段粒度上都非折叠但矩形为空、词粒度干脆保持折叠；Obsidian
 //!    的内联标题（点进去编辑）：焦点元素是无 TextPattern 的容器，连根文档
 //!    的插入符范围都落在 0 且无几何。这类插入符就在焦点元素框内，范围路径
-//!    全空时改用**元素框底边中心**兜底（provider 无列信息时，行带中间才是
-//!    「贴着这一行」的预期，左沿会压住行号栏/输入框左端）——但仅当元素框是
-//!    目标窗口客户区内的真
-//!    子矩形：焦点散在整页（元素框≈客户区）或 Chromium 把滚动区外的坐标
+//!    全空时改用**元素框底边**兜底，水平位置分两档（2026-09-27 拍板）：空
+//!    文本字段（Value 只含空白——contenteditable 空态的 Value 是一个换行
+//!    符，ZCode 输入框实测 '\n'）的插入符确定在文本起点，
+//!    取框**左沿**、窗口按非居中风格左收——与「有字时贴插入符列」连续，
+//!    空框打第一个字窗口几乎不动；文本非空或读不出 Value 的（VS Code 行带，
+//!    插入符可能在任意列）取底边**中心**——行带中间才是「贴着这一行」的
+//!    预期，左沿会压住行号栏/输入框左端。但仅当元素框是目标窗口客户区内的
+//!    真子矩形：焦点散在整页（元素框≈客户区）或 Chromium 把滚动区外的坐标
 //!    也算进框（编辑器文档框 bottom 比窗口底还低 488px，实测）时，框与插入
 //!    符的相对位置无从谈起，宁可回退鼠标。
 //!
@@ -61,6 +65,25 @@
 //!    [`anchor_from_range`]/[`field_rect_anchor`] 出口就地过滤，让调用链
 //!    继续找下一个来源。
 //!
+//! 10. **焦点归属失真有三种形态，都不给锚点**。Chromium 开 IME 输入捕获窗
+//!     （IHWindowClass「Input Capture Window」，整虚拟屏大小）时，
+//!     `GetFocusedElement` 返回的是它而非真实文本框；另一种形态是焦点被报在
+//!     窗口内某个无关容器上（ZCode 空输入框实测：对话区容器，第二级下钻
+//!     候选的字段框兜底把锚点猜到 (1288,673)）；第三种是焦点元素本身就是
+//!     无关文本元素——Chromium 把 UIA 焦点报在「最后交互的元素」上（ZCode
+//!     实测：对话气泡持有 TextPattern 但无范围几何，字段框兜底曾把锚点给
+//!     到气泡框）。三种形态的共同点是真实键盘焦点不在焦点元素上。对策分
+//!     三层：焦点元素矩形必须落在目标窗口客户区内（含等于客户区的窗口根
+//!     形态，那是坑 7 的正常形态），否则整条 UIA 路径不给锚点，回退鼠标；
+//!     放宽条件的下钻候选（无焦点背书）范围几何拿不到时不给字段框兜底；
+//!     焦点元素**自己有 TextPattern** 时字段框兜底仅限确证的空输入框
+//!     （Value 只含空白）——气泡等文本元素框与键盘焦点无必然联系，猜框
+//!     只会把锚点甩到无关位置。文档级 `GetSelection` 是全文档共享的陈旧
+//!     插入符（ZCode 实测：所有文本元素的段展开都带同一对块，输入框刚敲
+//!     过字时「最后已知插入符」碰巧在输入框内，表现为有字位置对、空框
+//!     位置错）——放宽候选的选区几何仍采信（VS Code 根文档依赖），陈旧值
+//!     经它漏进来的形态若再发，再收口。
+//!
 //! 客户端按线程缓存：COM 对象不能跨公寓共享，而探测固定发生在事件循环
 //! 线程上，缓存即等价于复用 UIA 的跨进程连接（连接一旦建立，后续调用
 //! 不再受连接超时约束）。
@@ -82,11 +105,11 @@ use windows::Win32::System::{
 use windows::Win32::UI::Accessibility::{
     CUIAutomation8, IUIAutomation, IUIAutomation2, IUIAutomationCacheRequest, IUIAutomationElement,
     IUIAutomationTextPattern, IUIAutomationTextPattern2, IUIAutomationTextRange,
-    TextPatternRangeEndpoint, TextPatternRangeEndpoint_End, TextPatternRangeEndpoint_Start,
-    TextUnit, TextUnit_Character, TextUnit_Line, TextUnit_Paragraph, TextUnit_Word,
-    TreeScope_Descendants, UIA_ClassNamePropertyId, UIA_HasKeyboardFocusPropertyId,
-    UIA_IsTextPatternAvailablePropertyId, UIA_NamePropertyId, UIA_TextPattern2Id,
-    UIA_TextPatternId,
+    IUIAutomationValuePattern, TextPatternRangeEndpoint, TextPatternRangeEndpoint_End,
+    TextPatternRangeEndpoint_Start, TextUnit, TextUnit_Character, TextUnit_Line,
+    TextUnit_Paragraph, TextUnit_Word, TreeScope_Descendants, UIA_ClassNamePropertyId,
+    UIA_HasKeyboardFocusPropertyId, UIA_IsTextPatternAvailablePropertyId, UIA_NamePropertyId,
+    UIA_TextPattern2Id, UIA_TextPatternId, UIA_ValuePatternId,
 };
 use windows::Win32::UI::WindowsAndMessaging::GetClientRect;
 
@@ -137,6 +160,17 @@ pub fn caret_point_via_uia(target_hwnd: isize) -> Result<Anchor, AppError> {
     let element = unsafe { uia_client()?.GetFocusedElement() }
         .map_err(|error| AppError::Message(format!("读取焦点元素失败: {error}")))?;
 
+    let client = window_client_rect(target_hwnd);
+
+    // 焦点归属守卫（见模块文档坑 10）：焦点元素本身必须落在目标窗口客户区内，
+    // 窗口根焦点（框==客户区）是坑 7 的正常形态，判据是包含而非真子矩形
+    if !focus_within_client(unsafe { element.CurrentBoundingRectangle() }.ok(), client) {
+        tracing::debug!("焦点元素不在目标窗口客户区内，插入符归属失真，回退鼠标");
+        return Err(AppError::Message(
+            "焦点元素不在目标窗口客户区内".to_string(),
+        ));
+    }
+
     // 窗口根元素：焦点条带（VS Code 的 EditContext 宿主）自身无 TextPattern
     // 且无文本后代时，从窗口根搜文本元素——根文档的选区几何是实时光标行
     let window_root = unsafe {
@@ -145,7 +179,7 @@ pub fn caret_point_via_uia(target_hwnd: isize) -> Result<Anchor, AppError> {
     }
     .ok();
 
-    let attempt = caret_anchor(&element, window_client_rect(target_hwnd), window_root.as_ref());
+    let attempt = caret_anchor(&element, client, window_root.as_ref());
     match attempt.anchor {
         Some(anchor) => Ok(anchor),
         None => {
@@ -189,6 +223,26 @@ fn window_client_rect(target_hwnd: isize) -> Option<RECT> {
     })
 }
 
+/// 四边包含判定（含 2px 渲染舍入容差）。焦点归属守卫与字段框兜底共用：
+/// 前者要求「包含即可」（窗口根焦点是正常形态），后者还要叠加整页拒收
+fn rect_contained(rect: &RECT, client: &RECT) -> bool {
+    let slack = 2;
+    rect.left >= client.left - slack
+        && rect.top >= client.top - slack
+        && rect.right <= client.right + slack
+        && rect.bottom <= client.bottom + slack
+}
+
+/// 焦点元素是否落在目标窗口客户区内（允许边界贴合与微小越界）。矩形或
+/// 客户区读不到时不拦——后续既有守卫（字段框兜底等）自会处理，别在这里
+/// 引入新的失败源
+fn focus_within_client(element_rect: Option<RECT>, client: Option<RECT>) -> bool {
+    match (element_rect, client) {
+        (Some(rect), Some(client)) => rect_contained(&rect, &client),
+        _ => true,
+    }
+}
+
 /// 一次焦点元素定位的产出：锚点 + 下钻记录。下钻记录只在定位最终失败时
 /// 被失败现场 dump 读取
 struct CaretAttempt {
@@ -209,6 +263,7 @@ fn caret_anchor(
         element,
         window_rect,
         true,
+        true,
         &mut attempt.drilldown,
         window_root,
     );
@@ -220,11 +275,17 @@ fn caret_anchor(
 /// `allow_drilldown` 控制元素没有任何 TextPattern 时是否下钻后代搜文本框：
 /// 只有焦点元素这一层允许——下钻命中的候选复用本函数时必须关掉，候选已按
 /// 「支持 TextPattern」筛过，病态 provider 连 pattern 查询都不兑现时再下钻
-/// 只会把搜索递归下去
+/// 只会把搜索递归下去。
+///
+/// `allow_field_anchor` 控制范围路径全空时是否允许用元素框兜底：字段框兜底
+/// 的前提是「插入符就在这个元素框内」，这只对焦点元素与持焦点的下钻候选
+/// 成立；放宽条件搜出的候选（无焦点背书）拿不到范围几何时，元素框与插入符
+/// 无必然联系，猜框会把锚点甩到无关元素上（见模块文档坑 10）
 fn element_caret_anchor(
     element: &IUIAutomationElement,
     window_rect: Option<RECT>,
     allow_drilldown: bool,
+    allow_field_anchor: bool,
     drilldown: &mut DrilldownRecord,
     window_root: Option<&IUIAutomationElement>,
 ) -> Option<Anchor> {
@@ -267,7 +328,12 @@ fn element_caret_anchor(
                 return Some(anchor);
             }
         }
-        return field_rect_anchor(element_rect, window_rect);
+        // 容器/条带没有 ValuePattern，空文本分岔只对有 TextPattern 的字段生效
+        return if allow_field_anchor {
+            field_rect_anchor(element_rect, window_rect, false)
+        } else {
+            None
+        };
     };
     let ranges = unsafe { pattern.GetSelection() }.ok()?;
     let count = unsafe { ranges.Length() }.unwrap_or(0);
@@ -280,15 +346,30 @@ fn element_caret_anchor(
         debug_anchor("选区范围", anchor);
         return selected;
     }
-    field_rect_anchor(element_rect, window_rect)
+    // 焦点元素自己是文本元素时，「插入符就在这个框内」只对确证的空输入框
+    // 成立（Value 空白，插入符=文本起点）；Chromium 会把 UIA 焦点报在对话
+    // 气泡等任意文本元素上（ZCode 实测：锚到对话区 (1288,673)），非空或读
+    // 不出 Value 的元素框与键盘焦点无必然联系，宁可回退鼠标
+    if allow_field_anchor && element_text_empty(element) {
+        field_rect_anchor(element_rect, window_rect, true)
+    } else {
+        None
+    }
 }
 
 /// 焦点元素没有任何 TextPattern 时的后代下钻：对 `TreeScope_Descendants` 用
 /// `FindFirstBuildCache` 搜文本框。两级条件从紧到松：先「持有键盘焦点且支持
-/// TextPattern」——下钻场景正是真实键盘焦点在文本框里；搜不到再放宽为只
-/// 「支持 TextPattern」（HasKeyboardFocus 更新不可靠的 provider 上兜一手）。
-/// 命中候选后复用 [`element_caret_anchor`]（此时调 GetCaretRange，provider
-/// 会给出真实插入符）；搜不到返回 `None`，由调用方走字段框兜底
+/// TextPattern」——下钻场景正是真实键盘焦点在文本框里，候选有焦点背书，
+/// 范围路径全空时允许字段框兜底；搜不到再放宽为只「支持 TextPattern」
+/// （HasKeyboardFocus 更新不可靠的 provider 上兜一手），但放宽候选**没有
+/// 焦点背书**：只信它自己的范围几何，不给字段框兜底——树序第一个文本元素
+/// 与真实键盘焦点无必然联系，猜框会把锚点甩到无关元素上（ZCode 空输入框
+/// 实测：锚到对话区元素 (1288,673) 行高=41）。命中候选后复用
+/// [`element_caret_anchor`]（此时调 GetCaretRange，provider 会给出真实插入
+/// 符）；搜不到返回 `None`，由调用方走字段框兜底。
+///
+/// 简化: 放宽候选的 GetSelection 几何仍采信（VS Code 根文档依赖它给实时光
+/// 标行）；若日后「窗口根下钻命中的文档级选区是陈旧值」形态再发，再收这一口
 fn descendant_caret_anchor(
     element: &IUIAutomationElement,
     window_rect: Option<RECT>,
@@ -306,7 +387,7 @@ fn descendant_caret_anchor(
     .ok()?;
     let focused_text = unsafe { client.CreateAndCondition(&focused, &text_pattern) }.ok()?;
 
-    for condition in [&focused_text, &text_pattern] {
+    for (condition, candidate_has_focus) in [(&focused_text, true), (&text_pattern, false)] {
         // FindFirst 跨进程扫树，provider 卡顿靠事务超时兜住（见
         // UIA_TRANSACTION_TIMEOUT_MS）；无匹配时 windows crate 返回 Err
         let Ok(candidate) =
@@ -320,7 +401,14 @@ fn descendant_caret_anchor(
             record.candidate.as_deref().unwrap_or("")
         );
         let mut discarded = DrilldownRecord::default();
-        return element_caret_anchor(&candidate, window_rect, false, &mut discarded, None);
+        return element_caret_anchor(
+            &candidate,
+            window_rect,
+            false,
+            candidate_has_focus,
+            &mut discarded,
+            None,
+        );
     }
     None
 }
@@ -718,8 +806,18 @@ fn covers_element(rect: [f64; 4], element_rect: Option<RECT>) -> bool {
 /// （provider 给不出插入符列位置时，行带/字段框中间是「贴着这一行」的合理
 /// 位置——左沿会让速贴压住行号栏/输入框左端）。仅当元素框是窗口客户区内的
 /// **真子矩形**才兜底：焦点散在整页（元素框≈客户区）或框滚出窗口（见模块
-/// 文档坑 6）时框与插入符的相对位置无从谈起；拿不到元素框/客户区同理
-fn field_rect_anchor(element_rect: Option<RECT>, window_rect: Option<RECT>) -> Option<Anchor> {
+/// 文档坑 6）时框与插入符的相对位置无从谈起；拿不到元素框/客户区同理。
+///
+/// `text_empty` 是字段框的水平语义分岔：空输入框（Value 为空串）的插入符
+/// 确定在文本起点，锚点取框左沿、窗口按非居中风格左收——与「有字时贴
+/// 插入符列」连续（空框打第一个字，窗口位置几乎不动）；文本非空或读不出
+/// Value 的元素（如 VS Code 的行带，插入符可能在任意列）维持行带中间的
+/// 拍板语义（2026-09-23：左沿会压行号栏/输入框左端）
+fn field_rect_anchor(
+    element_rect: Option<RECT>,
+    window_rect: Option<RECT>,
+    text_empty: bool,
+) -> Option<Anchor> {
     let rect = element_rect?;
     let window = window_rect?;
     if rect.left >= rect.right || rect.top >= rect.bottom {
@@ -727,35 +825,52 @@ fn field_rect_anchor(element_rect: Option<RECT>, window_rect: Option<RECT>) -> O
     }
 
     let slack = 2;
-    let contained = rect.left >= window.left - slack
-        && rect.top >= window.top - slack
-        && rect.right <= window.right + slack
-        && rect.bottom <= window.bottom + slack;
     let near = |value: i32, edge: i32| (value - edge).abs() <= slack;
     let page_sized = near(rect.left, window.left)
         && near(rect.top, window.top)
         && near(rect.right, window.right)
         && near(rect.bottom, window.bottom);
-    if !contained || page_sized {
+    if !rect_contained(&rect, &window) || page_sized {
         return None;
     }
 
-    // provider 只给行带/字段框、分辨不出插入符列位置时，锚点取框**底边中心**
-    // 而非左下角：贴左沿会让速贴压住行号栏/输入框左端（VS Code 焦点条带宽
-    // 1038px 时曾恒落行首），行带中间才是「贴着这一行」的预期；有列信息的
-    // 来源（插入符窄条、字符/词单元、上一行末块）都走不到这里，优先级照旧
+    // provider 只给行带/字段框、分辨不出插入符列位置时，锚点取框**底边**：
+    // 空文本字段贴左沿（插入符即文本起点），否则取底边中心——贴左沿会让
+    // 速贴压住行号栏/输入框左端（VS Code 焦点条带宽 1038px 时曾恒落行首），
+    // 行带中间才是「贴着这一行」的预期；有列信息的来源（插入符窄条、
+    // 字符/词单元、上一行末块）都走不到这里，优先级照旧
     let height = f64::from(rect.bottom - rect.top);
-    let center_x = f64::from(rect.left) + f64::from(rect.right - rect.left) / 2.0;
+    let anchor_x = if text_empty {
+        f64::from(rect.left)
+    } else {
+        f64::from(rect.left) + f64::from(rect.right - rect.left) / 2.0
+    };
     let anchor = trusted(Some(Anchor {
         point: ScreenPoint {
-            x: center_x.round() as i32,
+            x: anchor_x.round() as i32,
             y: f64::from(rect.bottom).round() as i32,
         },
         line_height: height.round() as i32,
-        centered: true,
+        centered: !text_empty,
     }))?;
     debug_anchor("字段框兜底", &anchor);
     Some(anchor)
+}
+
+/// 焦点元素是否为空文本字段：ValuePattern 存在且 Value 只含空白。按空白
+/// 而非严格空串判——contenteditable 的空态 Value 是一个换行符（ZCode 输入框
+/// 实测 '\n'）。只对确证为空的返回 `true`：读不到 ValuePattern（对话气泡、
+/// VS Code 的 EditContext 行带）或读取失败都按非空处理，别让判据本身成为
+/// 新的失败源
+fn element_text_empty(element: &IUIAutomationElement) -> bool {
+    let Ok(pattern) = (unsafe {
+        element.GetCurrentPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId)
+    }) else {
+        return false;
+    };
+    unsafe { pattern.CurrentValue() }
+        .map(|value| value.to_string().trim().is_empty())
+        .unwrap_or(false)
 }
 
 /// UIA 定位最终失败时的一次性现场：焦点元素身份、模式支持、选区现状与下钻
@@ -1093,14 +1208,53 @@ mod tests {
             right: 2349,
             bottom: 1329,
         };
-        assert_eq!(field_rect_anchor(Some(icon), Some(client)), None);
+        assert_eq!(field_rect_anchor(Some(icon), Some(client), false), None);
         assert_eq!(MAX_CARET_LINE_HEIGHT, 100);
+    }
+
+    /// ZCode（Chromium 开 IME 输入捕获窗）实测：焦点元素是整虚拟屏大小的
+    /// IHWindowClass「Input Capture Window」，矩形远超目标窗口客户区——
+    /// 焦点归属失真，整条 UIA 路径不给锚点。窗口根焦点（框==客户区，坑 7
+    /// 的 WorkBuddy/Obsidian 容器形态）与客户区内矩形是正常形态，照常放行
+    #[test]
+    fn focus_element_outside_client_is_rejected() {
+        let client = RECT {
+            left: 224,
+            top: 140,
+            right: 2065,
+            bottom: 1269,
+        };
+        // ZCode 真机：焦点元素矩形 = 整个 2560×1440 虚拟屏
+        let input_capture = RECT {
+            left: 0,
+            top: 0,
+            right: 2560,
+            bottom: 1440,
+        };
+        assert!(!super::focus_within_client(Some(input_capture), Some(client)));
+
+        // 窗口根当焦点元素：框==客户区（坑 7 的正常形态，非真子矩形也放行）
+        let window_root = client;
+        assert!(super::focus_within_client(Some(window_root), Some(client)));
+
+        // 客户区内的正常焦点元素（带 1px 渲染舍入越界）
+        let inner = RECT {
+            left: 224,
+            top: 500,
+            right: 2066,
+            bottom: 521,
+        };
+        assert!(super::focus_within_client(Some(inner), Some(client)));
+
+        // 矩形/客户区读不到时不拦，交给后续既有守卫
+        assert!(super::focus_within_client(None, Some(client)));
+        assert!(super::focus_within_client(Some(input_capture), None));
     }
 
     /// 夸克空搜索框（折叠插入符，真机探针）：各粒度展开都返回整条输入行
     /// （≈元素框，covers_element 会拒掉），段展开带进图标容器与按钮块。
-    /// 过滤后只剩输入行，软换行判定不误判，最终落到字段框兜底＝输入行
-    /// 底边中心，锚点贴住输入行
+    /// 过滤后只剩输入行，软换行判定不误判，最终落到字段框兜底——搜索框
+    /// 文本为空，插入符即文本起点，锚点贴输入行**左端**
     #[test]
     fn quark_collapsed_caret_falls_to_field_anchor_not_icon_block() {
         let rects = [
@@ -1118,19 +1272,23 @@ mod tests {
         assert_eq!(kept, line);
         // 行粒度探针与过滤后段落同块：不是软换行，不回退上一行（图标容器）
         assert!(!is_soft_wrap(&kept, &line));
-        // 整行 == 元素框：covers_element 拒掉，字段框兜底接管（底边中心锚点）
+        // 整行 == 元素框：covers_element 拒掉，字段框兜底接管（空文本左端锚点）
         assert!(covers_element(line, Some(element)));
         assert_eq!(
-            field_rect_anchor(Some(element), Some(RECT {
-                left: 873,
-                top: 446,
-                right: 2349,
-                bottom: 1329,
-            })),
+            field_rect_anchor(
+                Some(element),
+                Some(RECT {
+                    left: 873,
+                    top: 446,
+                    right: 2349,
+                    bottom: 1329,
+                }),
+                true
+            ),
             Some(Anchor {
-                point: ScreenPoint { x: (1277 + 1945) / 2, y: 789 },
+                point: ScreenPoint { x: 1277, y: 789 },
                 line_height: 20,
-                centered: true,
+                centered: false,
             })
         );
     }
@@ -1327,7 +1485,7 @@ mod tests {
             bottom: 462,
         };
         assert_eq!(
-            field_rect_anchor(Some(title), Some(client)),
+            field_rect_anchor(Some(title), Some(client), false),
             Some(Anchor {
                 point: ScreenPoint { x: 1865, y: 462 },
                 line_height: 32,
@@ -1342,10 +1500,46 @@ mod tests {
             bottom: 402,
         };
         assert_eq!(
-            field_rect_anchor(Some(search), Some(client)),
+            field_rect_anchor(Some(search), Some(client), false),
             Some(Anchor {
                 point: ScreenPoint { x: 1113, y: 402 },
                 line_height: 30,
+                centered: true,
+            })
+        );
+    }
+
+    /// 空文本字段（ZCode 输入框，2026-09-27 真机日志）：插入符确定在文本
+    /// 起点，锚点取框左沿、窗口按非居中风格左收——与「有字时贴插入符列」
+    /// 连续（有字时插入符 (647,1175)，空框左沿 940，打第一个字窗口几乎不动）；
+    /// 非空文本（读不出 Value 的行带同此）维持居中的拍板语义
+    #[test]
+    fn empty_text_field_anchors_left_edge_not_center() {
+        let client = RECT {
+            left: 224,
+            top: 140,
+            right: 2065,
+            bottom: 1269,
+        };
+        let input = RECT {
+            left: 940,
+            top: 1155,
+            right: 1300,
+            bottom: 1195,
+        };
+        assert_eq!(
+            field_rect_anchor(Some(input), Some(client), true),
+            Some(Anchor {
+                point: ScreenPoint { x: 940, y: 1195 },
+                line_height: 40,
+                centered: false,
+            })
+        );
+        assert_eq!(
+            field_rect_anchor(Some(input), Some(client), false),
+            Some(Anchor {
+                point: ScreenPoint { x: 1120, y: 1195 },
+                line_height: 40,
                 centered: true,
             })
         );
@@ -1362,7 +1556,7 @@ mod tests {
             bottom: 1251,
         };
 
-        assert_eq!(field_rect_anchor(Some(client), Some(client)), None);
+        assert_eq!(field_rect_anchor(Some(client), Some(client), false), None);
 
         let editor_doc = RECT {
             left: 1514,
@@ -1370,9 +1564,12 @@ mod tests {
             right: 2215,
             bottom: 1739,
         };
-        assert_eq!(field_rect_anchor(Some(editor_doc), Some(client)), None);
+        assert_eq!(
+            field_rect_anchor(Some(editor_doc), Some(client), false),
+            None
+        );
 
-        assert_eq!(field_rect_anchor(None, Some(client)), None);
+        assert_eq!(field_rect_anchor(None, Some(client), false), None);
         assert_eq!(
             field_rect_anchor(
                 Some(RECT {
@@ -1381,7 +1578,8 @@ mod tests {
                     right: 1223,
                     bottom: 402
                 }),
-                None
+                None,
+                false
             ),
             None
         );
@@ -1393,7 +1591,8 @@ mod tests {
                     right: 1223,
                     bottom: 402
                 }),
-                Some(client)
+                Some(client),
+                false
             ),
             None
         );
