@@ -5,8 +5,9 @@
 ## 发布形态
 
 - 安装包：Inno Setup `FloatPaste_版本号_x64-setup.exe`（脚本见 `packaging/floatpaste.iss`）
-  - 中文向导；默认安装到 `C:\Program Files\FloatPaste`，需管理员权限
-  - 安装时自动卸载检测到的旧版本（兼容 Tauri NSIS 与 MSI），并把指向旧位置的自启动条目迁移到新位置
+  - 中文向导；许可协议页（文本为 `packaging/license.txt`）需接受后方可继续
+  - 默认安装到 `C:\Program Files\FloatPaste`，需管理员权限
+  - 附加任务页提供"卸载检测到的旧版本"复选项（默认勾选，仅检测到旧版时出现；兼容 Tauri NSIS 与 MSI，静默安装沿用勾选值），并把指向旧位置的自启动条目迁移到新位置
 - 便携版：`FloatPaste-v版本号-windows-x64-portable.zip`（内含 `floatpaste.exe` 与使用说明）
 - 校验文件：`SHA256SUMS.txt`，覆盖 Release 全部资产
 - 渠道：GitHub Release，先草稿、本机验收后正式发布

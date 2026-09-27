@@ -44,7 +44,7 @@
 
 从 [Releases](../../releases) 下载最新版本：
 
-- **安装包**（Inno Setup，中文向导，默认安装至 Program Files，自动迁移旧版与自启动设置）
+- **安装包**（Inno Setup）
 - **便携版** zip，解压即用
 
 系统要求：Windows 10 / Windows 11 x64。

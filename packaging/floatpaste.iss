@@ -19,6 +19,7 @@ AppPublisher={#AppName}
 ; 默认安装到 C:\Program Files\FloatPaste，需要管理员权限
 DefaultDirName={autopf}\{#AppName}
 PrivilegesRequired=admin
+LicenseFile=license.txt
 OutputDir=output
 OutputBaseFilename=FloatPaste_{#AppVersion}_x64-setup
 SetupIconFile=..\crates\floatpaste-native\assets\icon.ico
@@ -35,6 +36,8 @@ Name: "chs"; MessagesFile: "ChineseSimplified.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "创建桌面快捷方式(&D)"; GroupDescription: "附加任务："; Flags: unchecked
+; 仅在检测到旧版卸载条目时显示；默认勾选，静默安装沿用勾选值自动卸载
+Name: "uninstallold"; Description: "卸载检测到的旧版本(&U)"; GroupDescription: "附加任务："; Check: ShouldOfferUninstallOld
 
 [Files]
 Source: "..\target\release\{#AppExeName}"; DestDir: "{app}"; Flags: ignoreversion
@@ -55,6 +58,7 @@ const
   DisabledHotkeysValue = 'DisabledHotkeys';
 
 var
+  g_OldVersionsFound: Boolean; // 是否检测到旧版（MSI/NSIS 时代）卸载条目
   g_RunMigrate: Boolean;   // 检测到指向旧安装位置的自启动条目
   g_RunArgs: String;       // 自启动条目的启动参数（如 --silent）
 
@@ -66,19 +70,28 @@ begin
   Exec('taskkill.exe', '/IM {#AppExeName} /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
-// 尝试卸载一个旧版卸载条目；跳过当前安装器的条目
-function TryUninstallEntry(RootKey: Integer; SubKey: String): Boolean;
+// 卸载条目是否属于旧版 FloatPaste；跳过本安装器自己的条目
+function IsOldEntry(RootKey: Integer; SubKey: String): Boolean;
 var
-  DisplayName, Cmd, Guid: String;
-  P: Integer;
-  ResultCode: Integer;
+  DisplayName: String;
 begin
   Result := False;
   if CompareText(SubKey, '{#UninstKeyName}') = 0 then
     Exit;
   if not RegQueryStringValue(RootKey, UninstallKey + '\' + SubKey, 'DisplayName', DisplayName) then
     Exit;
-  if CompareText(DisplayName, '{#AppName}') <> 0 then
+  Result := CompareText(DisplayName, '{#AppName}') = 0;
+end;
+
+// 尝试卸载一个旧版卸载条目（MSI 静默 msiexec，NSIS 走卸载器 /S）
+function TryUninstallEntry(RootKey: Integer; SubKey: String): Boolean;
+var
+  Cmd, Guid: String;
+  P: Integer;
+  ResultCode: Integer;
+begin
+  Result := False;
+  if not IsOldEntry(RootKey, SubKey) then
     Exit;
   if not RegQueryStringValue(RootKey, UninstallKey + '\' + SubKey, 'UninstallString', Cmd) then
     Exit;
@@ -127,7 +140,46 @@ begin
       if TryUninstallEntry(HKEY_LOCAL_MACHINE_32, Keys[I]) then
         Count := Count + 1;
   if (Count > 0) and (not WizardSilent()) then
-    MsgBox('检测到旧版本，已自动卸载。', mbInformation, MB_OK);
+    MsgBox('已卸载旧版本 FloatPaste（共 ' + IntToStr(Count) + ' 个）。', mbInformation, MB_OK);
+end;
+
+// 只检测是否存在旧版卸载条目，不执行卸载；结果供任务页与安装前卸载共用
+function FindOldVersions: Boolean;
+var
+  Keys: TArrayOfString;
+  I: Integer;
+begin
+  Result := False;
+  if RegGetSubkeyNames(HKEY_CURRENT_USER, UninstallKey, Keys) then
+    for I := 0 to GetArrayLength(Keys) - 1 do
+      if IsOldEntry(HKEY_CURRENT_USER, Keys[I]) then begin
+        Result := True;
+        Exit;
+      end;
+  if RegGetSubkeyNames(HKEY_LOCAL_MACHINE_64, UninstallKey, Keys) then
+    for I := 0 to GetArrayLength(Keys) - 1 do
+      if IsOldEntry(HKEY_LOCAL_MACHINE_64, Keys[I]) then begin
+        Result := True;
+        Exit;
+      end;
+  if RegGetSubkeyNames(HKEY_LOCAL_MACHINE_32, UninstallKey, Keys) then
+    for I := 0 to GetArrayLength(Keys) - 1 do
+      if IsOldEntry(HKEY_LOCAL_MACHINE_32, Keys[I]) then begin
+        Result := True;
+        Exit;
+      end;
+end;
+
+// 任务页仅在检测到旧版时显示“卸载旧版本”选项
+function ShouldOfferUninstallOld: Boolean;
+begin
+  Result := g_OldVersionsFound;
+end;
+
+function InitializeSetup(): Boolean;
+begin
+  g_OldVersionsFound := FindOldVersions();
+  Result := True;
 end;
 
 // 记录旧的自启动条目（仅当指向旧版安装位置时才迁移）
@@ -177,7 +229,8 @@ begin
   Result := '';
   CloseApp;
   CaptureRunEntry;
-  UninstallOldVersions;
+  if WizardIsTaskSelected('uninstallold') then
+    UninstallOldVersions;
   MigrateRunEntry;
 end;
 
