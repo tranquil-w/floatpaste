@@ -658,8 +658,8 @@ pub fn open(app: &App) {
     let height_px = (760.0 * scale).round() as i32;
     window_control::set_window_size_no_activate(hwnd, width_px, height_px);
     // 上屏位置：光标所在显示器工作区中心（不保留位置记忆），用同一组
-    // 已知尺寸求中心。先计算不移动——停屏窗口 Win32 可见，移动即上屏，
-    // 须待内容就绪后进行
+    // 已知尺寸求中心。无可用工作区（光标定位失败等罕见路径）直接保持
+    // 停屏，窗口保持隐藏
     let target = current_cursor_point()
         .and_then(work_area_from_point)
         .ok()
@@ -669,12 +669,18 @@ pub fn open(app: &App) {
                 (area.top + area.bottom) / 2 - height_px / 2,
             )
         });
+    let Some((x, y)) = target else {
+        warn!("设置窗口无可用上屏位置，保持停屏");
+        return;
+    };
     info!("打开设置窗口");
 
-    // 上屏序列（对齐编辑窗）：摘 TOOLWINDOW（任务栏按钮回归）→ 重挂
-    // 材质 → 暖帧 → 移动上屏 → 抢前台。窗口停屏且不销毁（不走
-    // SLINT_DESTROY_WINDOW_ON_HIDE 的销毁重建），上屏首帧即完整内容
-    win32_ext::set_toolwindow_style(hwnd, false);
+    // 上屏序列（对齐编辑窗）：SW_SHOW → 重挂材质 → 暖帧 → 移动上屏 →
+    // 抢前台。按钮生灭由真实可见性驱动（样式从创建起不变，任务栏在
+    // 首次可见的瞬间完成分类，见 silent_assemble_content）；显示发生在
+    // 屏外，暖帧与全量重绘渲染出完整内容后再移动上屏，首帧不闪透明，
+    // 抢前台激活发生在最终位置
+    win32_ext::set_window_visible(hwnd, true);
     win.set_material_active(overlay::apply_material(
         app,
         hwnd,
@@ -682,10 +688,8 @@ pub fn open(app: &App) {
     ));
     win32_ext::warm_surface(hwnd);
     win32_ext::force_full_repaint(hwnd);
-    if let Some((x, y)) = target {
-        win.window()
-            .set_position(slint::PhysicalPosition::new(x, y));
-    }
+    win.window()
+        .set_position(slint::PhysicalPosition::new(x, y));
     // 设置窗口需要真实前台（输入框键盘输入），绕前台锁获取
     if !ActiveAppResolver::force_foreground_window(hwnd) {
         warn!("设置窗口获取前台失败");
@@ -695,11 +699,13 @@ pub fn open(app: &App) {
     win.invoke_focus_root_scope();
 }
 
-/// 设置窗停屏：挂 TOOLWINDOW（任务栏按钮消失）+ 平移屏外。保持 Slint
-/// 「已显示」与表面内容有效，下次打开免重建
+/// 设置窗停屏：真隐藏（任务栏按钮与 Alt+Tab 随可见性消失）+ 平移屏外。
+/// 不走 Slint hide——SLINT_DESTROY_WINDOW_ON_HIDE 下 hide 即销毁 winit
+/// 窗口，下次打开重建是首开无材质、透明首帧等问题的根源；Win32 隐藏
+/// 对 Slint 不可见，Slint 端保持「已显示」，表面与缓冲存活
 fn park_settings_window(app: &App) {
     let hwnd = app.state.settings_hwnd.load(Ordering::SeqCst);
-    win32_ext::set_toolwindow_style(hwnd, true);
+    win32_ext::set_window_visible(hwnd, false);
     if let Some(win) = app.settings.upgrade() {
         win.window()
             .set_position(slint::PhysicalPosition::new(-32000, -32000));

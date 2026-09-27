@@ -222,12 +222,12 @@ fn main() {
             None => tracing::error!("获取搜索窗口句柄失败，搜索会话不可用"),
         }
         // 编辑/设置窗：内容窗停屏装配（带系统标题栏；屏外保持 Slint 可见
-        // 与表面有效，显隐走平移不销毁重建）
+        // 与表面有效，显隐走平移不销毁重建）。图标施加在装配内 show 前
+        // 完成（见 silent_assemble_content 的首接触缓存说明）
         if let Some(win) = editor_win.as_ref() {
             match overlay::silent_assemble_content(win) {
                 Some(hwnd) => {
                     app_for_init.state.editor_hwnd.store(hwnd, Ordering::SeqCst);
-                    app_icon::apply_window_icon(hwnd);
                 }
                 None => tracing::error!("获取编辑窗口句柄失败，编辑会话不可用"),
             }
@@ -239,7 +239,6 @@ fn main() {
                         .state
                         .settings_hwnd
                         .store(hwnd, Ordering::SeqCst);
-                    app_icon::apply_window_icon(hwnd);
                 }
                 None => tracing::error!("获取设置窗口句柄失败，设置会话不可用"),
             }

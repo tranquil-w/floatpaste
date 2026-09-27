@@ -71,24 +71,42 @@ pub fn silent_assemble_focusable<W: ComponentHandle>(win: &W) -> Option<isize> {
     Some(hwnd)
 }
 
-/// 内容窗（编辑/设置）的启动期静默装配：no-frame 自绘标题栏窗，停屏
-/// 期挂 TOOLWINDOW 屏蔽任务栏按钮（上屏前由显示流程摘除）；阴影、
-/// 系统圆角与系统窗控样式剥除须显式挂载。停屏到屏幕外保持 Slint
-/// 「已显示」与表面内容有效，显隐一律屏外/屏上平移——彻底绕开
-/// SLINT_DESTROY_WINDOW_ON_HIDE 的销毁重建时序（重建是首开无材质、
-/// 透明首帧、显示态异常等问题的共同根源）
+/// 内容窗（编辑/设置）的启动期静默装配：no-frame 自绘标题栏窗，隐藏式
+/// 停屏（Slint 保持「已显示」，Win32 真隐藏），显隐一律走
+/// [`win32_ext::set_window_visible`] 的真实 SW_SHOW/SW_HIDE——扩展样式
+/// 从创建起恒为普通 APPWINDOW，永不变动。任务栏在窗口首次可见的瞬间按
+/// 当时样式做「上/不上任务栏」分类且事后不可靠修正（常驻可见窗口上翻
+/// TOOLWINDOW 的旧方案：首开按钮缺席乃至永远缺席），因此首次可见必须
+/// 就是最终形态：图标齐备、位于屏外。阴影、系统圆角与系统窗控样式剥除
+/// 须显式挂载；隐藏期表面内容有效，重现由 open 流程 warm 出完整帧
 pub fn silent_assemble_content<W: ComponentHandle>(win: &W) -> Option<isize> {
     let previous_foreground = ActiveAppResolver::current_foreground_hwnd();
+    // winit 窗口在事件循环恢复时已预建（隐藏态），show 前即可取 HWND：
+    // 先写图标、移到屏外再 show——首次可见发生在屏外且形态已终，show 后
+    // 立即真隐藏进入停屏。预建不可得（Slint 行为变更）则回退 show 后取
+    // 句柄，首次可见发生在默认位置（有微秒级屏内闪现）
+    let pre_assembled = win32_ext::window_hwnd(win);
+    if let Some(hwnd) = pre_assembled {
+        crate::app_icon::apply_window_icon(hwnd);
+        win.window()
+            .set_position(slint::PhysicalPosition::new(-32000, -32000));
+    }
     let _ = win.window().show();
-    let hwnd = win32_ext::window_hwnd(win)?;
-    win32_ext::set_toolwindow_style(hwnd, true);
+    let hwnd = match pre_assembled {
+        Some(hwnd) => hwnd,
+        None => {
+            let hwnd = win32_ext::window_hwnd(win)?;
+            win.window()
+                .set_position(slint::PhysicalPosition::new(-32000, -32000));
+            hwnd
+        }
+    };
+    win32_ext::set_window_visible(hwnd, false);
     // no-frame 窗（WS_POPUP）：阴影与系统圆角都须显式挂载
     win32_ext::apply_dwm_shadow(hwnd);
     win32_ext::apply_dwm_rounded_corners(hwnd);
     let _ = window_control::remove_window_system_menu(hwnd);
     win32_ext::install_caption_strip_subclass(hwnd);
-    win.window()
-        .set_position(slint::PhysicalPosition::new(-32000, -32000));
     surrender_startup_foreground(hwnd, previous_foreground);
     Some(hwnd)
 }

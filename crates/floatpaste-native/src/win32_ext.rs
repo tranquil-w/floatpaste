@@ -15,10 +15,10 @@ use windows::Win32::UI::Controls::MARGINS;
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetWindowLongPtrW, GetWindowRect, SetWindowLongPtrW, GWL_EXSTYLE, GWL_STYLE, SIZE_RESTORED,
-    WM_ACTIVATE, WM_SHOWWINDOW, WM_SIZE, WM_WINDOWPOSCHANGED, WS_EX_APPWINDOW, WS_EX_LAYERED,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
-    WS_SYSMENU,
+    GetWindowLongPtrW, GetWindowRect, SetWindowLongPtrW, ShowWindow, GWL_EXSTYLE, GWL_STYLE,
+    SIZE_RESTORED, SW_HIDE, SW_SHOWNOACTIVATE, WM_ACTIVATE, WM_SHOWWINDOW, WM_SIZE,
+    WM_WINDOWPOSCHANGED, WS_EX_APPWINDOW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    WS_EX_TRANSPARENT, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_SYSMENU,
 };
 
 /// 取 Slint 窗口的原始 HWND（窗口创建后可用）
@@ -292,19 +292,18 @@ pub fn apply_overlay_style(hwnd: isize, no_activate: bool) {
     }
 }
 
-/// 内容窗（编辑/设置）的 TOOLWINDOW 样式开关。停屏期 tool=true：任务栏
-/// 不出现按钮；上屏前 tool=false：恢复普通 APPWINDOW 外观（任务栏按钮
-/// 随显示出现）。样式切换在屏外完成，无可见跳变
-pub fn set_toolwindow_style(hwnd: isize, tool: bool) {
-    let hwnd = HWND(hwnd as *mut _);
+/// 内容窗（编辑/设置）的真实显隐：ShowWindow(SW_SHOWNOACTIVATE/SW_HIDE)。
+/// 窗口扩展样式从创建起恒为普通 APPWINDOW、永不变动，任务栏按钮的生灭
+/// 完全由真实可见性驱动——任务栏在窗口首次可见的瞬间按当时的扩展样式
+/// 做「上/不上任务栏」分类，对常驻可见窗口事后翻 TOOLWINDOW 的分类修正
+/// 不可靠（首开无按钮乃至永远无按钮的根源）。隐藏对 Slint 不可见：
+/// Slint 端保持「已显示」，表面与缓冲存活，重现由 open 流程 warm 出
+/// 完整帧。SW_SHOWNOACTIVATE：显示但不抢激活，激活由上屏序列的
+/// force_foreground 在最终位置完成
+pub fn set_window_visible(hwnd: isize, visible: bool) {
+    let cmd = if visible { SW_SHOWNOACTIVATE } else { SW_HIDE };
     unsafe {
-        let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-        let next = if tool {
-            ex_style & !(WS_EX_APPWINDOW.0 as isize) | WS_EX_TOOLWINDOW.0 as isize
-        } else {
-            ex_style & !WS_EX_TOOLWINDOW.0 as isize | WS_EX_APPWINDOW.0 as isize
-        };
-        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, next);
+        let _ = ShowWindow(HWND(hwnd as *mut _), cmd);
     }
 }
 

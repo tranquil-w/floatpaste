@@ -179,15 +179,21 @@ fn show_editor(app: &App, session: EditorSession, anchor: Option<HostAnchor>) {
         Some((area, width, height))
     });
     let target = resolve_target_position(memory, memory_area, anchor);
+    // 无可用位置：保持停屏（窗口保持隐藏）
+    let Some((x, y)) = target else {
+        warn!("编辑窗口无可用位置，保持停屏");
+        return;
+    };
     // 数据就绪：停屏期属性更新不渲染，warm 时一次成帧
     load_session(app, &win, &session.item_id);
     info!("打开 Editor，item={}", session.item_id);
 
-    // 上屏序列（对齐 picker 的「内容就绪 → 暖表面 → 移上屏」）：窗口
-    // 停屏且不销毁（不再走 SLINT_DESTROY_WINDOW_ON_HIDE 的销毁重建——
-    // 重建是首开无材质、透明首帧、显示态异常的共同根源），摘 TOOLWINDOW
-    // 让任务栏按钮回归，重挂材质后暖帧，最后一步移动上屏
-    win32_ext::set_toolwindow_style(hwnd, false);
+    // 上屏序列（对齐设置窗）：SW_SHOW → 重挂材质 → 暖帧 → 移动上屏 →
+    // 抢前台。按钮生灭由真实可见性驱动（样式从创建起不变，任务栏在
+    // 首次可见的瞬间完成分类，见 silent_assemble_content）；显示发生在
+    // 屏外，暖帧与全量重绘渲染出完整内容后再移动上屏，首帧不闪透明，
+    // 抢前台激活发生在最终位置
+    win32_ext::set_window_visible(hwnd, true);
     win.set_material_active(overlay::apply_material(
         app,
         hwnd,
@@ -195,14 +201,8 @@ fn show_editor(app: &App, session: EditorSession, anchor: Option<HostAnchor>) {
     ));
     win32_ext::warm_surface(hwnd);
     win32_ext::force_full_repaint(hwnd);
-    if let Some((x, y)) = target {
-        win.window()
-            .set_position(slint::PhysicalPosition::new(x, y));
-    } else {
-        warn!("编辑窗口无可用位置，保持停屏");
-        win32_ext::set_toolwindow_style(hwnd, true);
-        return;
-    }
+    win.window()
+        .set_position(slint::PhysicalPosition::new(x, y));
     // 从速贴打开时本进程不是前台（前台在目标应用上），裸
     // SetForegroundWindow 会被前台锁拒绝——force_foreground_window 经
     // AttachThreadInput + BringWindowToTop 绕过（对齐旧版
@@ -501,12 +501,12 @@ pub fn close_editor(app: &App, source: &str) {
     // 位置记忆须在停屏前读取
     let position = win.window().position();
     LAST_POSITION.set(Some((position.x, position.y)));
-    // 停屏：挂 TOOLWINDOW（任务栏按钮消失）+ 平移屏外。不走 Slint hide——
-    // SLINT_DESTROY_WINDOW_ON_HIDE 下 hide 即销毁 winit 窗口，下次打开
-    // 重建是首开无材质、透明首帧等问题的根源；停屏保持 Slint「已显示」
-    // 与表面内容有效
+    // 停屏：真隐藏（任务栏按钮与 Alt+Tab 随可见性消失）+ 平移屏外。
+    // 不走 Slint hide——SLINT_DESTROY_WINDOW_ON_HIDE 下 hide 即销毁
+    // winit 窗口，下次打开重建是首开无材质、透明首帧等问题的根源；
+    // Win32 隐藏对 Slint 不可见，Slint 端保持「已显示」，表面内容有效
     let hwnd = app.state.editor_hwnd.load(Ordering::SeqCst);
-    win32_ext::set_toolwindow_style(hwnd, true);
+    win32_ext::set_window_visible(hwnd, false);
     win.window()
         .set_position(slint::PhysicalPosition::new(-32000, -32000));
     hide_and_restore_source(app);
