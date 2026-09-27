@@ -15,7 +15,7 @@ use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use tracing::{info, warn};
 
 use floatpaste_core::domain::clip_item::{ClipItemSummary, PasteOption};
-use floatpaste_core::domain::settings::{PasteTrigger, UserSetting};
+use floatpaste_core::domain::settings::{PasteTrigger, PickerPositionMode, UserSetting};
 use floatpaste_core::platform::windows::active_app::ActiveAppResolver;
 use floatpaste_core::platform::windows::window_control::{self, GestureMode, ResizeDirection};
 use floatpaste_core::platform::windows::{mouse_monitor, session_keyboard};
@@ -368,10 +368,11 @@ pub fn toggle(app: &App) {
     activate(app);
 }
 
-/// 从编辑器返回速贴：恢复会话快捷键与外击关闭，窗口以无激活方式重现，
-/// **故意不重置列表与选中**（对齐旧版 restore_picker_after_editor 不发
-/// SESSION_START，保留进入编辑器时的上下文与滚动位置）。前台留在用户
-/// 此前所在位置，键盘会话经 LL 钩子接回，无需窗口持有焦点
+/// 从编辑器返回速贴：恢复会话快捷键与外击关闭，窗口以无激活方式在
+/// 停屏前的原位重现，**故意不重置列表与选中**（对齐旧版
+/// restore_picker_after_editor 不发 SESSION_START，保留进入编辑器时的
+/// 上下文与滚动位置）。前台留在用户此前所在位置，键盘会话经 LL 钩子
+/// 接回，无需窗口持有焦点
 pub fn restore_after_editor(app: &App, target: TargetSession) {
     let Some(win) = app.picker.upgrade() else {
         return;
@@ -402,7 +403,7 @@ pub fn restore_after_editor(app: &App, target: TargetSession) {
     win.set_enter_offset(4.0);
     // 上屏前先暖表面（同步泵一次 WM_PAINT 呈现），移回即有内容
     win32_ext::warm_surface(hwnd);
-    apply_window_position(app, &settings, size, hwnd, target.target_window_hwnd);
+    restore_parked_position(app, size, hwnd);
 
     app.state.begin_picker_activation();
 
@@ -927,6 +928,31 @@ fn apply_window_position(
 
     // 尺寸与位置一次 SetWindowPos 落地：定位用的尺寸必须与真正生效的
     // 尺寸一致，分开调用还会露出「先长高后移位」的中间帧
+    window_control::set_window_bounds(hwnd, point.x, point.y, width, height);
+}
+
+/// 从编辑器返回的归位：不重跑定位模式——鼠标/插入符锚点在编辑往返后
+/// 已漂移，重算必然换位。hide_for_editor 停屏前已把当时的几何落盘，
+/// 按「上次位置」读回并钳进工作区即原位重现（尺寸同源：上面的
+/// resolve_physical_size 读的也是这份落盘几何）。读不到记忆时兜底贴
+/// 光标，不把窗口留在屏外停屏位
+fn restore_parked_position(app: &App, physical_size: slint::PhysicalSize, hwnd: isize) {
+    let width = physical_size.width.max(1) as i32;
+    let height = physical_size.height.max(1) as i32;
+    let point = PickerPositionService::resolve_window_position(
+        &app.core().repository,
+        &PickerPositionMode::LastPosition,
+        width,
+        height,
+        None,
+    )
+    .ok()
+    .flatten()
+    .or_else(|| resolve_near_cursor(width, height));
+    let Some(point) = point else {
+        warn!("速贴归位失败：记忆位置与光标锚点均不可得，窗口留在停屏位");
+        return;
+    };
     window_control::set_window_bounds(hwnd, point.x, point.y, width, height);
 }
 
