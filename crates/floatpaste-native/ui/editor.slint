@@ -400,14 +400,6 @@ export component EditorWindow inherits Window {
                         height: 30px;
                         clip: false;
 
-                        // 点击行空白也打开面板（超宽滚动时由 Flickable 拦截）
-                        tag-field-ta := TouchArea {
-                            width: parent.width;
-                            height: parent.height;
-                            mouse-cursor: default;
-                            clicked => { root.open-tag-panel(); }
-                        }
-
                         tag-flick := Flickable {
                             x: 0;
                             y: 0;
