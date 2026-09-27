@@ -11,8 +11,8 @@ use windows::core::PCWSTR;
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetSystemMetrics, LoadImageW, SendMessageW, HICON, IMAGE_ICON, LR_DEFAULTSIZE,
-    SM_CXICON, SM_CXSMICON, SM_CYICON, SM_CYSMICON, WM_SETICON,
+    GetSystemMetrics, LoadImageW, SendMessageW, SetClassLongPtrW, GCL_HICON, GCL_HICONSM, HICON,
+    IMAGE_ICON, LR_DEFAULTSIZE, SM_CXICON, SM_CXSMICON, SM_CYICON, SM_CYSMICON, WM_SETICON,
 };
 
 const ICON_RESOURCE_ID: u16 = 1;
@@ -22,7 +22,13 @@ const ICON_RESOURCE_ID: u16 = 1;
 /// 因此常驻缓存、从不销毁；句柄按系统 DPI 加载，系统缩放变更需重启应用刷新。
 static CACHED_WINDOW_ICONS: OnceLock<(isize, isize)> = OnceLock::new();
 
-/// 给窗口设置小/大图标（WM_SETICON：0=标题栏小图标，1=任务栏大图标）。
+/// 给窗口设置小/大图标。除 WM_SETICON（0=标题栏小图标，1=任务栏大
+/// 图标）外，还写入窗口类图标（GCL_HICON/HICONSM）：任务栏创建按钮时
+/// 以带超时的跨线程查询向窗口线程取图标，开窗序列（材质/暖帧/移动/
+/// 抢前台）正占用窗口线程时查询超时落空且不重试——首开任务栏无图标
+/// 即此因；类图标是纯内存读取、不经过窗口线程，作为查询链 fallback
+/// 对忙窗免疫。winit 各窗口共用一个窗口类，此处一并覆盖浮层窗口，
+/// 无副作用（浮层常驻 TOOLWINDOW，不上任务栏）。
 /// 加载失败静默跳过（保持系统默认图标）。
 pub fn apply_window_icon(hwnd: isize) {
     let Some((small, big)) = load_window_icons() else {
@@ -32,6 +38,8 @@ pub fn apply_window_icon(hwnd: isize) {
     unsafe {
         SendMessageW(hwnd, WM_SETICON, Some(WPARAM(0)), Some(LPARAM(small)));
         SendMessageW(hwnd, WM_SETICON, Some(WPARAM(1)), Some(LPARAM(big)));
+        SetClassLongPtrW(hwnd, GCL_HICON, big);
+        SetClassLongPtrW(hwnd, GCL_HICONSM, small);
     }
 }
 
