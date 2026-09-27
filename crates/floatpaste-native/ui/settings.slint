@@ -908,6 +908,10 @@ export component SettingsWindow inherits Window {
     in-out property <bool> pause-monitoring;
     in-out property <string> excluded-apps-text;
 
+    /* ── 关于（静态信息，wire 时注入一次） ── */
+    in property <string> app-version;
+    callback open-project-page();
+
     /* ── 保存状态（旧版 SaveStatusText）0=idle 1=saving 2=saved 3=error 4=blocked ── */
     in-out property <int> status-kind: 0;
     in-out property <string> status-reasons;
@@ -929,6 +933,7 @@ export component SettingsWindow inherits Window {
     in-out property <length> sec-y3: sec3.y;
     in-out property <length> sec-y4: sec4.y;
     in-out property <length> sec-y5: sec5.y;
+    in-out property <length> sec-y6: sec6.y;
     // scroll-spy 锚定线（对应 Rust 侧 SCROLL_OFFSET）：分区顶滚过
     // 此线即接管目录高亮
     property <length> spy-line: 80px;
@@ -938,11 +943,12 @@ export component SettingsWindow inherits Window {
     in-out property <int> nav-override: -1;
     in-out property <int> active-section:
         root.nav-override >= 0 ? root.nav-override
+        : (sec6.y + scroll-y <= root.spy-line ? 6
         : (sec5.y + scroll-y <= root.spy-line ? 5
         : (sec4.y + scroll-y <= root.spy-line ? 4
         : (sec3.y + scroll-y <= root.spy-line ? 3
         : (sec2.y + scroll-y <= root.spy-line ? 2
-        : (sec1.y + scroll-y <= root.spy-line ? 1 : 0)))));
+        : (sec1.y + scroll-y <= root.spy-line ? 1 : 0))))));
     callback nav-selected(int);
     // 用户主动滚动（滚轮/滚动条）：Slint 侧清 nav-override 解除高亮
     // 锁定，Rust 侧停掉进行中的程序性滚动动画
@@ -1225,7 +1231,7 @@ export component SettingsWindow inherits Window {
                     nav-col := VerticalLayout {
                         spacing: 2px;
                         for section[idx] in [
-                            "通用", "行为", "外观", "快捷键", "排除应用", "标签",
+                            "通用", "行为", "外观", "快捷键", "排除应用", "标签", "关于",
                         ]: Rectangle {
                             height: 30px;
                             border-radius: Metrics.radius-md;
@@ -1321,7 +1327,7 @@ export component SettingsWindow inherits Window {
                             // 足一屏，滚到底也过不了线，目录高亮永远停
                             // 在倒数第三区；前面各区 y 值更小，自动满足
                             padding-bottom: Math.max(
-                                0px, sv.height - root.spy-line - sec5.height);
+                                0px, sv.height - root.spy-line - sec6.height);
 
                         /* ═══ 通用 ═══ */
                         sec0 := Rectangle {
@@ -2088,6 +2094,91 @@ export component SettingsWindow inherits Window {
                                             delete-requested => { root.tag-delete-request(idx); }
                                             delete-confirmed => { root.tag-delete-confirm(idx); }
                                             delete-cancelled => { root.tag-delete-cancel(); }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        /* ═══ 关于 ═══ */
+                        sec6 := Rectangle {
+                            height: sec6-col.preferred-height;
+                            sec6-col := VerticalLayout {
+                                spacing: 6px;
+                                SectionHeader {
+                                    title: "关于";
+                                    description: "查看应用版本与项目信息。";
+                                }
+                                RowGroup {
+                                    // 应用标识：图标 + 名称 + 版本 + 简介。
+                                    // 交叉轴顶对齐下行高由图标撑满 48px，
+                                    // 文本列被拉伸后内部 center 居中
+                                    VerticalLayout {
+                                        padding-left: 16px;
+                                        padding-right: 16px;
+                                        padding-top: 16px;
+                                        padding-bottom: 14px;
+                                        HorizontalLayout {
+                                            spacing: 14px;
+                                            Image {
+                                                width: 48px;
+                                                height: 48px;
+                                                source: @image-url("app-icon.png");
+                                                image-fit: contain;
+                                            }
+                                            VerticalLayout {
+                                                alignment: center;
+                                                spacing: 2px;
+                                                Text {
+                                                    text: "FloatPaste";
+                                                    color: Theme.fg-default;
+                                                    font-size: 16px;
+                                                    font-weight: Metrics.weight-semibold;
+                                                }
+                                                Text {
+                                                    text: "版本 " + root.app-version;
+                                                    color: Theme.fg-subtle;
+                                                    font-size: Metrics.text-xs;
+                                                }
+                                                Text {
+                                                    text: "剪贴板历史管理与速贴上屏工具。";
+                                                    color: Theme.fg-muted;
+                                                    font-size: Metrics.text-xs;
+                                                    wrap: word-wrap;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    RowDivider { }
+                                    SettingRow {
+                                        title: "项目主页";
+                                        description: "查看源码、提交问题与发版说明。";
+                                        Rectangle {
+                                            width: about-page-btn.width;
+                                            about-page-btn := Rectangle {
+                                                x: 0;
+                                                y: (parent.height - self.height) / 2;
+                                                width: about-page-btn-text.preferred-width + 24px;
+                                                height: 30px;
+                                                border-radius: 8px;
+                                                border-width: 1px;
+                                                border-color: Theme.border-default;
+                                                background: about-ta.has-hover
+                                                    ? Theme.canvas-subtle : Theme.canvas-default;
+                                                animate background { duration: Motion.dur-color; easing: Motion.ease; }
+                                                opacity: about-ta.pressed ? 0.85 : 1.0;
+                                                about-ta := TouchArea {
+                                                    mouse-cursor: MouseCursor.pointer;
+                                                    clicked() => { root.open-project-page(); }
+                                                }
+                                                about-page-btn-text := Text {
+                                                    text: "打开 GitHub 仓库";
+                                                    color: Theme.fg-default;
+                                                    font-size: Metrics.text-xs;
+                                                    vertical-alignment: center;
+                                                    horizontal-alignment: center;
+                                                }
+                                            }
                                         }
                                     }
                                 }

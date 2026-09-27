@@ -607,9 +607,8 @@ mod settings_scroll_tests {
         assert_eq!(win.get_scroll_y(), 0.0, "回顶应 clamp 到 0");
 
         // ── spy 契约：高亮 ≡ 视口顶 80px 线所在区（无触底特判）──
-        // 默认内容下末两区（排除应用/标签）不足一屏，锚点可达
-        // padding 保证滚到底时末区顶恰好贴 80px 线——滚动即可
-        // 抵达末区，无需点击导航
+        // 默认内容下末几区不足一屏，锚点可达 padding 保证滚到底时
+        // 末区顶恰好贴 80px 线——滚动即可抵达末区，无需点击导航
         let view_h = win.get_view_height();
         let content_h = win.get_content_height();
         assert!(
@@ -619,18 +618,19 @@ mod settings_scroll_tests {
         let bottom = view_h - content_h; // 触底滚动量（负值）
         win.set_scroll_y(bottom);
         assert!(
-            win.get_sec_y5() + bottom <= 80.0,
+            win.get_sec_y6() + bottom <= 80.0,
             "触底时末区顶应抵达 80px 线（锚点可达 padding 生效）"
         );
         assert_eq!(
             win.get_active_section(),
-            5,
-            "滚到底高亮应为末区（标签），由线判定而非触底特判"
+            6,
+            "滚到底高亮应为末区（关于），由线判定而非触底特判"
         );
 
-        // 期望值与 spy 表达式同构：从 sec5 往前首个过 80px 线的区
+        // 期望值与 spy 表达式同构：从 sec6 往前首个过 80px 线的区
         let spy_at = |scroll_y: f32| {
             [
+                win.get_sec_y6(),
                 win.get_sec_y5(),
                 win.get_sec_y4(),
                 win.get_sec_y3(),
@@ -639,7 +639,7 @@ mod settings_scroll_tests {
             ]
             .iter()
             .position(|y| y + scroll_y <= 80.0)
-            .map(|i| (5 - i) as i32)
+            .map(|i| (6 - i) as i32)
             .unwrap_or(0)
         };
         // ── 点击高亮保持到用户主动滚动（nav-override 不自动解锁）──

@@ -46,6 +46,8 @@ const SAVE_DEBOUNCE: Duration = Duration::from_millis(800);
 const NOTICE_TIMEOUT: Duration = Duration::from_millis(1800);
 /// 分区滚动定位偏移（旧版 settingsScrollSpy SCROLL_OFFSET）
 const SCROLL_OFFSET: f32 = 80.0;
+/// 项目主页（设置窗「关于」区打开）
+const PROJECT_PAGE_URL: &str = "https://github.com/tranquil-w/floatpaste";
 
 /// 会话键行定义（序号 = SessionKeys 字段序号，顺序即界面行序）
 const SESSION_KEY_DEFS: [(&str, &str); 8] = [
@@ -528,6 +530,18 @@ pub fn wire(app: &App) {
             }
         });
     }
+
+    // ── 关于 ──
+    // 版本是编译期常量，wire 时注入一次即可
+    win.set_app_version(env!("CARGO_PKG_VERSION").into());
+    win.on_open_project_page(|| {
+        if let Err(error) =
+            floatpaste_core::platform::windows::shell_open::open_url(PROJECT_PAGE_URL)
+        {
+            tracing::warn!("打开项目主页失败：{error}");
+            crate::tray::notify_failure(&format!("打开项目主页失败：{error}"));
+        }
+    });
 
     // ── 导航与滚动 ──
     {
@@ -1221,6 +1235,7 @@ fn sec_y(win: &SettingsWindow, index: usize) -> Option<f32> {
         3 => Some(win.get_sec_y3()),
         4 => Some(win.get_sec_y4()),
         5 => Some(win.get_sec_y5()),
+        6 => Some(win.get_sec_y6()),
         _ => None,
     }
 }
