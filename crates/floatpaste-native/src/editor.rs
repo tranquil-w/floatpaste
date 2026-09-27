@@ -17,10 +17,13 @@ use tracing::{info, warn};
 
 use floatpaste_core::domain::clip_item::ClipItemDetail;
 use floatpaste_core::platform::windows::active_app::ActiveAppResolver;
-use floatpaste_core::platform::windows::picker_position::{work_area_from_point, ScreenPoint};
+use floatpaste_core::platform::windows::picker_position::{
+    work_area_from_point, ScreenPoint, ScreenRect,
+};
 use floatpaste_core::platform::windows::window_control;
 use floatpaste_core::services::clip_display::format_file_size;
 use floatpaste_core::services::clip_service::ClipService;
+use floatpaste_core::services::picker_position_service::center_in_work_area;
 use floatpaste_core::services::tag_service::TagService;
 use floatpaste_core::services::time_format::format_relative_time_or_unused;
 
@@ -49,14 +52,16 @@ thread_local! {
     /// 全部标签缓存（name, item_count）：建议浮层的数据源
     static ALL_TAGS: RefCell<Vec<(String, u32)>> = const { RefCell::new(Vec::new()) };
     /// 编辑窗口本会话位置记忆（物理像素）。SLINT_DESTROY_WINDOW_ON_HIDE
-    /// 在 hide 时销毁 winit 窗口、位置随之丢失，须在 hide 前读取暂存；
-    /// None = 本会话尚未打开过，首开落在宿主窗口所在屏的中心
+    /// 在 hide 时销毁 winit 窗口、位置随之丢失，须在 hide 前读取暂存。
+    /// 仅在同屏唤起时生效——跨屏唤起跟宿主屏走，首开（None）落在宿主
+    /// 所在屏工作区中央，见 resolve_target_position
     static LAST_POSITION: Cell<Option<(i32, i32)>> = const { Cell::new(None) };
 }
 
 /// 宿主锚点：宿主窗口在停屏/隐藏**前**捕获的物理中心与 DPI。
 /// 速贴的「隐藏」是平移到 (-32000,-32000) 停屏，隐藏后取 rect 只会得到
-/// 屏外坐标——首开居中必须用停屏前的锚点
+/// 屏外坐标——定位必须用停屏前的锚点。中心用于定位宿主所在显示器，
+/// DPI 用于把 800×600 逻辑尺寸换算成该屏物理像素
 struct HostAnchor {
     center: (i32, i32),
     dpi: f32,
@@ -74,12 +79,30 @@ fn host_anchor(hwnd: isize) -> Option<HostAnchor> {
     })
 }
 
-/// 位置记忆有效性：点必须落在某显示器工作区内（拦截停屏坐标等屏外值，
-/// 避免一次异常位置让编辑器此后每次都开在屏外）
-fn position_is_visible((x, y): (i32, i32)) -> bool {
-    work_area_from_point(ScreenPoint { x, y })
-        .map(|area| x >= area.left && x < area.right && y >= area.top && y < area.bottom)
-        .unwrap_or(false)
+/// 编辑窗上屏位置决策：同屏记忆优先，否则宿主屏工作区居中。
+/// `memory_area` 是记忆点所在工作区——屏外点按最近屏也能查到工作区，
+/// 须再作区内判断才拦得下停屏坐标；`anchor` 为 (宿主屏工作区, 窗口
+/// 物理宽, 高)。记忆与宿主不同屏时弃用（跟注意力所在屏走，不让另一块
+/// 屏的历史位置绑架本次唤起）；宿主信息缺失时不做屏匹配，记忆保底；
+/// 两者皆无 → None（保持停屏）
+fn resolve_target_position(
+    memory: Option<(i32, i32)>,
+    memory_area: Option<ScreenRect>,
+    anchor: Option<(ScreenRect, i32, i32)>,
+) -> Option<(i32, i32)> {
+    let memory = memory.filter(|&(x, y)| {
+        let Some(area) = memory_area else {
+            return false;
+        };
+        let in_area = x >= area.left && x < area.right && y >= area.top && y < area.bottom;
+        in_area && anchor.map_or(true, |(a, _, _)| a == area)
+    });
+    memory.or_else(|| {
+        anchor.map(|(area, width, height)| {
+            let point = center_in_work_area(area, width, height);
+            (point.x, point.y)
+        })
+    })
 }
 
 // ── 打开入口 ──────────────────────────────────────────────
@@ -145,16 +168,17 @@ fn show_editor(app: &App, session: EditorSession, anchor: Option<HostAnchor>) {
     window_control::set_window_size_no_activate(hwnd, width_px, height_px);
     // 位置先只计算不上屏：上屏动作（移动到目标位置）必须放在内容就绪
     // 与暖帧之后——停屏窗口 Win32 可见，移动即显示
-    let target = LAST_POSITION
-        .get()
-        .filter(|pos| position_is_visible(*pos))
-        .or_else(|| {
-            anchor.map(|anchor| {
-                let width = (EDITOR_LOGICAL_WIDTH * anchor.dpi) as i32;
-                let height = (EDITOR_LOGICAL_HEIGHT * anchor.dpi) as i32;
-                (anchor.center.0 - width / 2, anchor.center.1 - height / 2)
-            })
-        });
+    let memory = LAST_POSITION.get();
+    let memory_area =
+        memory.and_then(|(x, y)| work_area_from_point(ScreenPoint { x, y }).ok());
+    let anchor = anchor.and_then(|anchor| {
+        let area =
+            work_area_from_point(ScreenPoint { x: anchor.center.0, y: anchor.center.1 }).ok()?;
+        let width = (EDITOR_LOGICAL_WIDTH * anchor.dpi) as i32;
+        let height = (EDITOR_LOGICAL_HEIGHT * anchor.dpi) as i32;
+        Some((area, width, height))
+    });
+    let target = resolve_target_position(memory, memory_area, anchor);
     // 数据就绪：停屏期属性更新不渲染，warm 时一次成帧
     load_session(app, &win, &session.item_id);
     info!("打开 Editor，item={}", session.item_id);
@@ -1006,7 +1030,17 @@ pub fn wire(app: &App) {
 
 #[cfg(test)]
 mod tests {
-    use super::cursor_line_col;
+    use super::{cursor_line_col, resolve_target_position};
+    use floatpaste_core::platform::windows::picker_position::ScreenRect;
+
+    fn rect(left: i32, top: i32, right: i32, bottom: i32) -> ScreenRect {
+        ScreenRect {
+            left,
+            top,
+            right,
+            bottom,
+        }
+    }
 
     #[test]
     fn cursor_line_col_counts_chars_and_clamps_offsets() {
@@ -1022,5 +1056,56 @@ mod tests {
         assert_eq!(cursor_line_col("中文", 4), (1, 2));
         // offset 越界：钳到文本末尾
         assert_eq!(cursor_line_col("ab", 99), (1, 3));
+    }
+
+    #[test]
+    fn resolve_target_prefers_same_screen_memory() {
+        let work = rect(0, 0, 1920, 1040);
+        assert_eq!(
+            resolve_target_position(Some((100, 90)), Some(work), Some((work, 800, 600))),
+            Some((100, 90))
+        );
+    }
+
+    #[test]
+    fn resolve_target_drops_cross_screen_memory() {
+        let main = rect(0, 0, 1920, 1040);
+        let second = rect(1920, 0, 3840, 1040);
+        // 记忆在另一块屏：弃记忆，落宿主屏工作区中央
+        assert_eq!(
+            resolve_target_position(Some((2000, 100)), Some(second), Some((main, 800, 600))),
+            Some(((1920 - 800) / 2, (1040 - 600) / 2))
+        );
+    }
+
+    #[test]
+    fn resolve_target_rejects_offscreen_memory() {
+        let work = rect(0, 0, 1920, 1040);
+        // 工作区查询失败（memory_area=None）：弃记忆
+        assert_eq!(
+            resolve_target_position(Some((5, 5)), None, Some((work, 800, 600))),
+            Some(((1920 - 800) / 2, (1040 - 600) / 2))
+        );
+        // 屏外点按最近屏也能查到工作区，须靠区内判断拦下停屏坐标
+        assert_eq!(
+            resolve_target_position(
+                Some((-32000, -32000)),
+                Some(work),
+                Some((work, 800, 600))
+            ),
+            Some(((1920 - 800) / 2, (1040 - 600) / 2))
+        );
+    }
+
+    #[test]
+    fn resolve_target_memory_survives_without_anchor() {
+        let work = rect(0, 0, 1920, 1040);
+        // 宿主信息缺失时不做屏匹配，记忆保底
+        assert_eq!(
+            resolve_target_position(Some((10, 20)), Some(work), None),
+            Some((10, 20))
+        );
+        // 全部缺失：无可用位置，保持停屏
+        assert_eq!(resolve_target_position(None, None, None), None);
     }
 }
