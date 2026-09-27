@@ -1,12 +1,8 @@
 //! 主题引擎：预设色板 + 强调色 + 明暗派生，输出全套语义 token。
 //!
-//! 与前端 `src/shared/theme/`（culori 实现）逐值对齐：
-//! - `palettes.ts` → [`PALETTE_SCALES`]
-//! - `accents.ts` → [`ACCENT_CHOICES`]
-//! - `contrast.ts` / `derive.ts` → [`ensure_contrast`] / [`mix_colors`] / [`derive_tokens`]
-//!
-//! 色彩数学（OKLab/OKLCH、WCAG 对比度）按公开规范公式移植，
-//! 与 culori 的差异仅在色域裁剪的搜索精度内（≤1/255 每通道）。
+//! 色板与强调色原值取自社区官方配色（出处见各常量注释）；色彩数学
+//! （OKLab/OKLCH、WCAG 对比度）按公开规范公式实现。旧壳的前端
+//! culori 管线已随旧壳删除，本文件是唯一的派生实现。
 
 use crate::domain::settings::ThemeMode;
 
@@ -565,6 +561,12 @@ pub struct ThemeTokens {
     pub accent_subtle_rgb: [u8; 3],
     pub accent_subtle_alpha: f32,
 
+    /// 选中行/选中项中性底（速贴与搜索的列表选中态）：canvas 向正文
+    /// 墨色 OKLab 混合，深 0.12/浅 0.06。选中感由亮度提升 + 左缘 3px
+    /// 强调条承载（PowerToys Run 语言），强调色不再铺选中大底——大底
+    /// 一铺，行内每个元素都得重对一遍对比度
+    pub selected_bg: String,
+
     /// 材质窗根底色：canvas 色带 alpha，铺在 DWM 材质（Mica/Acrylic）
     /// 之上作面板底。材质不可用（系统不支持/透明关闭）的窗口用
     /// canvas_default 不透明底回退
@@ -599,8 +601,10 @@ pub struct ThemeTokens {
     pub favorite: &'static str,
     pub shadow_color: [u8; 3],
 
-    /// 文本选区/IME 组合词高亮（旧版 ::selection：dark=canvas-default/
-    /// accent-hover，light=#ffffff/accent-emphasis）
+    /// 文本选区/IME 组合词高亮：深色 = canvas 向强调色混 0.32 的实底
+    /// 配正文墨字（对齐 VS Code「中饱和实底 + 浅字」的选区语言，旧
+    /// accent-hover 半透明底配深字仅 ~3.5:1）；浅色 = 压暗后的
+    /// emphasis 配白字
     pub selection_fg: String,
     pub selection_bg: String,
 
@@ -613,7 +617,6 @@ pub struct ThemeTokens {
 /// 门禁常量：正文 AA+ 余量、组件边界非文本线
 pub const CONTRAST_TARGETS: (f64, f64, f64) = (5.5, 4.5, 3.0);
 
-const DARK_INK_ON_EMPHASIS: &str = "#1F2328";
 const LIGHT_INK_ON_EMPHASIS: &str = "#FFFFFF";
 
 fn hex_to_rgb_channels(hex: &str) -> [u8; 3] {
@@ -626,34 +629,29 @@ fn hex_to_rgb_channels(hex: &str) -> [u8; 3] {
     })
 }
 
-/// 实底强调色：黑白前景都无法达到 4.5:1 时，向改动更小的方向推移底色亮度
-fn ensure_emphasis_background(accent: &str) -> (String, &'static str) {
-    let white = contrast_ratio(LIGHT_INK_ON_EMPHASIS, accent);
-    let black = contrast_ratio(DARK_INK_ON_EMPHASIS, accent);
-    let target = CONTRAST_TARGETS.1;
-    if white.max(black) >= target {
-        let fg_on_emphasis = if black >= white {
-            DARK_INK_ON_EMPHASIS
+/// 实底强调色：对齐 Windows「蓝底白字」惯例，fg-on-emphasis 恒为白色。
+/// 原色配白字不足 4.5:1 时向黑色 OKLab 混合压暗到刚好达标（色相不变
+/// 的物理变暗路径；OKLCH 只调亮度会在蓝紫段触发色域裁剪造成色相漂移）
+fn ensure_emphasis_background(accent: &str) -> String {
+    if contrast_ratio(LIGHT_INK_ON_EMPHASIS, accent) >= CONTRAST_TARGETS.1 {
+        return accent.to_ascii_uppercase();
+    }
+    let (mut lo, mut hi) = (0.0f64, 1.0f64);
+    let mut best = "#000000".to_string();
+    for _ in 0..24 {
+        let mid = (lo + hi) / 2.0;
+        let candidate = mix_colors(accent, "#000000", mid);
+        if contrast_ratio(&candidate, LIGHT_INK_ON_EMPHASIS) >= CONTRAST_TARGETS.1 {
+            best = candidate;
+            hi = mid;
         } else {
-            LIGHT_INK_ON_EMPHASIS
-        };
-        return (accent.to_ascii_uppercase(), fg_on_emphasis);
+            lo = mid;
+        }
     }
-
-    let darker_for_white = ensure_contrast(accent, LIGHT_INK_ON_EMPHASIS, target);
-    let lighter_for_dark = ensure_contrast(accent, DARK_INK_ON_EMPHASIS, target);
-    let accent_l = hex_to_oklch(accent).map_or(0.5, |value| value.l);
-    let darker_l = hex_to_oklch(&darker_for_white).map_or(0.0, |value| value.l);
-    let lighter_l = hex_to_oklch(&lighter_for_dark).map_or(1.0, |value| value.l);
-    let prefer_darker = (accent_l - darker_l).abs() <= (lighter_l - accent_l).abs();
-    if prefer_darker {
-        (darker_for_white, LIGHT_INK_ON_EMPHASIS)
-    } else {
-        (lighter_for_dark, DARK_INK_ON_EMPHASIS)
-    }
+    best
 }
 
-/// 从角色化色板 + 强调色派生全套语义 token（对齐 derive.ts 的 deriveSemanticTokens）
+/// 从角色化色板 + 强调色派生全套语义 token
 pub fn derive_tokens(preset_id: &str, theme_accent: &str, resolved: ResolvedTheme) -> ThemeTokens {
     let is_light = resolved == ResolvedTheme::Light;
     let scale = palette_scale(preset_id, resolved);
@@ -669,7 +667,10 @@ pub fn derive_tokens(preset_id: &str, theme_accent: &str, resolved: ResolvedThem
     let border = ensure_contrast(scale.border, scale.canvas, border_target);
 
     let accent_fg = ensure_contrast(&accent_hex, scale.canvas, subtle_target);
-    let (emphasis, fg_on_emphasis) = ensure_emphasis_background(&accent_hex);
+    let emphasis = ensure_emphasis_background(&accent_hex);
+    // 选中行中性底：亮度承载选中感（对 canvas 深 ≥1.2:1），行内元素
+    // 的对比关系不随选中变化；左缘 3px 强调条负责强调色存在感
+    let selected_bg = mix_colors(scale.canvas, &ink, if is_light { 0.06 } else { 0.12 });
     let accent_hover = mix_colors(
         &emphasis,
         if is_light { "#000000" } else { "#ffffff" },
@@ -694,13 +695,14 @@ pub fn derive_tokens(preset_id: &str, theme_accent: &str, resolved: ResolvedThem
         fg_default: ink.clone(),
         fg_muted: ink_muted,
         fg_subtle: ink_subtle,
-        fg_on_emphasis: fg_on_emphasis.to_string(),
+        fg_on_emphasis: LIGHT_INK_ON_EMPHASIS.to_string(),
 
         accent_fg: accent_fg.clone(),
         accent_emphasis: emphasis.clone(),
         accent_hover: accent_hover.clone(),
         accent_subtle_rgb: hex_to_rgb_channels(&accent_fg),
         accent_subtle_alpha: subtle_alpha as f32,
+        selected_bg,
 
         material_base_rgb: hex_to_rgb_channels(scale.canvas),
         // 深 0.85：内容面迁到 material-layer 后，这层膜只剩设置窗底/
@@ -749,9 +751,13 @@ pub fn derive_tokens(preset_id: &str, theme_accent: &str, resolved: ResolvedThem
         selection_fg: if is_light {
             LIGHT_INK_ON_EMPHASIS.to_string()
         } else {
-            scale.canvas.to_string()
+            ink.clone()
         },
-        selection_bg: if is_light { emphasis } else { accent_hover },
+        selection_bg: if is_light {
+            emphasis
+        } else {
+            mix_colors(scale.canvas, &accent_hex, 0.32)
+        },
         border_accent: accent_fg.clone(),
         warning_emphasis: scale.warning,
     }
@@ -761,17 +767,17 @@ pub fn derive_tokens(preset_id: &str, theme_accent: &str, resolved: ResolvedThem
 mod tests {
     use super::*;
 
-    /// 参考值由前端 culori 管线生成（node_modules/culori，同 palettes/derive 逻辑），
-    /// 锁定移植与前端逐值一致；调整公式前先在前端侧重新生成。
+    /// 参考值锁定关键派生档位的当前实现；调色规则变更时与下方的
+    /// 对比度门禁测试一起更新。
     #[test]
-    fn default_light_tokens_match_frontend_reference() {
+    fn default_light_tokens_reference() {
         let tokens = derive_tokens("default", "default", ResolvedTheme::Light);
         assert_eq!(tokens.canvas_default, "#f9f9fb");
         assert_eq!(tokens.fg_default, "#1C2024");
         assert_eq!(tokens.fg_muted, "#5C6168");
         assert_eq!(tokens.fg_subtle, "#6D727B");
         assert_eq!(tokens.accent_fg, "#0074D0");
-        assert_eq!(tokens.accent_emphasis, "#0090FF");
+        assert_eq!(tokens.accent_emphasis, "#0078D6");
         assert_eq!(tokens.border_default, "#8B8D98");
         assert_eq!(tokens.border_window, "#EAEBEF");
         assert_eq!(tokens.border_subtle, "#E7E7EC");
@@ -782,9 +788,9 @@ mod tests {
     }
 
     #[test]
-    fn default_dark_tokens_match_frontend_reference() {
+    fn default_dark_tokens_reference() {
         let tokens = derive_tokens("default", "default", ResolvedTheme::Dark);
-        // 色板直通字段保留 palettes.ts 原始大小写（CSS 颜色大小写不敏感）
+        // 色板直通字段保留原始大小写（下游 CSS 颜色大小写不敏感）
         assert_eq!(tokens.canvas_default, "#18191b");
         assert_eq!(tokens.fg_default, "#EDEEF0");
         assert_eq!(tokens.accent_fg, "#3B9EFF");
@@ -848,6 +854,47 @@ mod tests {
     fn unknown_preset_falls_back_to_default() {
         let tokens = derive_tokens("nope", "default", ResolvedTheme::Light);
         assert_eq!(tokens.canvas_default, "#f9f9fb");
+    }
+
+    /// 门禁：全预设 × 明暗 × 强调色安全列表（含迁移 hex 样本），
+    /// 实底强调白字、选中行墨字、文本选区三组对比逐项达标
+    #[test]
+    fn gate_derived_tokens_meet_contrast() {
+        let accents: Vec<&str> = ACCENT_CHOICES
+            .iter()
+            .map(|choice| choice.id)
+            .chain(["#8250df"])
+            .collect();
+        for preset_id in THEME_PRESET_IDS {
+            for resolved in [ResolvedTheme::Light, ResolvedTheme::Dark] {
+                for accent in &accents {
+                    let tokens = derive_tokens(preset_id, accent, resolved);
+                    let label = |role: &str| format!("{preset_id}/{resolved:?}/{accent} {role}");
+                    assert!(
+                        contrast_ratio(&tokens.fg_on_emphasis, &tokens.accent_emphasis) >= 4.5,
+                        "{}",
+                        label("emphasis")
+                    );
+                    assert!(
+                        contrast_ratio(&tokens.fg_default, &tokens.selected_bg) >= 4.5,
+                        "{}",
+                        label("selected")
+                    );
+                    // 选中底可见度下限只对深色：浅色是轻压暗档，选中感
+                    // 由强调条承载
+                    if resolved == ResolvedTheme::Dark {
+                        let visibility =
+                            contrast_ratio(&tokens.selected_bg, &tokens.canvas_default);
+                        assert!(visibility >= 1.2, "{}", label("selected-visibility"));
+                    }
+                    assert!(
+                        contrast_ratio(&tokens.selection_fg, &tokens.selection_bg) >= 4.5,
+                        "{}",
+                        label("selection")
+                    );
+                }
+            }
+        }
     }
 
     #[test]

@@ -26,6 +26,9 @@ export global Theme {
     in-out property <color> accent-emphasis;
     in-out property <color> accent-hover;
     in-out property <color> accent-subtle; // rgba 合成后的半透明色
+    // 选中行/选中项中性底：canvas 向正文墨色 OKLab 混合
+    // （深 0.12/浅 0.06），选中感由亮度提升 + 左缘 3px 强调条承载
+    in-out property <color> selected-bg;
 
     // 边框
     in-out property <color> border-default;

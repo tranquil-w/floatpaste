@@ -265,43 +265,21 @@ component SearchRowCard inherits Rectangle {
 
     border-radius: Metrics.radius-lg;
     // hover 底恒定半透明：材质时透 backdrop，无材质时叠窗底实色（观感
-    // 仅略淡，无害）——省去向行组件穿材质门控
-    background: root.selected ? Theme.accent-subtle
+    // 仅略淡，无害）——省去向行组件穿材质门控。底色不设动画：键盘导航
+    // 是高频交互，渐隐会让上一个选中项闪一拍强调色（Motion 频率纪律）
+    background: root.selected ? Theme.selected-bg
         : (root.hovered ? Theme.canvas-subtle.with-alpha(0.62) : transparent);
-    // 与速贴行同款选中/悬停底渐变（两窗键盘导航观感一致）
-    animate background { duration: Motion.dur-color; easing: Motion.ease; }
 
-    // 选中态左侧 2px 强调边（旧版 border-l-pg-accent-fg）。浏览器里
-    // border-left 沿圆角转折，Slint 的 clip 只按矩形裁：底层铺整卡
-    // 强调色作"边"，其上右移 2px 垫不透明底色再上半透明高亮，露出的
-    // 左缘即贴合圆角的 2px 边。accent-subtle 是半透明色，直接叠在
-    // 强调色上会透成亮蓝，必须先垫不透明的 canvas 底
-    Rectangle {
-        visible: root.selected;
+    // 选中条：独立 3px 竖条，定长 24px 垂直居中——行高随内容可变，
+    // 定长在多行行高下保持一致，且恒落在直线段内不碰上下圆角
+    // （与速贴行同款）
+    if (root.selected): Rectangle {
         x: 0;
-        y: 0;
-        width: root.width;
-        height: root.height;
-        border-radius: Metrics.radius-lg;
+        y: (root.height - self.height) / 2;
+        width: 3px;
+        height: 24px;
+        border-radius: 2px;
         background: Theme.accent-fg;
-    }
-    Rectangle {
-        visible: root.selected;
-        x: 2px;
-        y: 0;
-        width: root.width - 2px;
-        height: root.height;
-        border-radius: Metrics.radius-lg;
-        background: Theme.canvas-default;
-    }
-    Rectangle {
-        visible: root.selected;
-        x: 2px;
-        y: 0;
-        width: root.width - 2px;
-        height: root.height;
-        border-radius: Metrics.radius-lg;
-        background: Theme.accent-subtle;
     }
 
     // 整行命中（声明在前处于最上层内容之下）
@@ -398,7 +376,9 @@ component SearchRowCard inherits Rectangle {
                 Text {
                     width: parent.width;
                     text: data.meta;
-                    color: Theme.fg-subtle;
+                    // 中性选中底上 fg-subtle 仍偏弱（~3.8:1）：选中态
+                    // 切 fg-muted，与速贴窗元信息行同规
+                    color: root.selected ? Theme.fg-muted : Theme.fg-subtle;
                     font-size: Metrics.text-xs;
                     wrap: word-wrap;
                     vertical-alignment: top;

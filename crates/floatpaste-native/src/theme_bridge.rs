@@ -56,6 +56,7 @@ fn write_full_tokens(theme: &Theme, tokens: &ThemeTokens) {
         tokens.accent_subtle_rgb,
         tokens.accent_subtle_alpha,
     ));
+    theme.set_selected_bg(hex_color(&tokens.selected_bg));
     theme.set_border_default(hex_color(&tokens.border_default));
     theme.set_border_window(hex_color(&tokens.border_window));
     theme.set_border_muted(hex_color(tokens.border_muted));

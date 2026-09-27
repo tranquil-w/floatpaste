@@ -31,12 +31,13 @@ export global PanelGeometry {
     out property <length> list-pad-left: 14px;             // 原版 grid pl-[14px]
     out property <length> list-pad-right: Metrics.space-1; // 原版 grid pr-1
     out property <length> row-frame: 2px;                  // 行卡片描边双层（上下各 1px）
-    out property <length> row-pad-h: Metrics.space-1_5;    // 行内水平 padding（单侧）
+    out property <length> row-pad-left: 12px;              // 行内左 padding：含左缘选中条（3px）的呼吸空隙
+    out property <length> row-pad-right: Metrics.space-1_5; // 行内右 padding（单侧）
     out property <length> thumb-size: 72px;
     out property <length> thumb-gap: 10px;
     // 预览可用宽需从 flick 宽扣除的横向总量（Rust 首帧兜底同式）
     out property <length> preview-pad-h:
-        list-pad-left + list-pad-right + row-frame + 2 * row-pad-h;
+        list-pad-left + list-pad-right + row-frame + row-pad-left + row-pad-right;
 }
 
 // ── 拉伸手柄：八方向共用，direction 编码对齐 resize-started 回调 ──
@@ -157,52 +158,43 @@ component ClipRowCard inherits Rectangle {
         }
     }
 
-    // 选中态：外层双层填充模拟 1px 强调描边（accent 实色高对比，必须
-    // 走纯填充路径——渲染器对带边框圆角在弧线切点附近把外缘 AA 段与
-    // 内容 AA 段重叠混色，高对比描边色下呈孤立亮点），内层垫不透明
-    // canvas 底（accent-subtle 半透明高亮叠不透明底色值才可控）。
-    // 非选中态：材质模式下行底半透明（Acrylic 透出行卡与面板一致通透），
-    // 模拟外层的灰底会透进行底污染色值，故外层透明、描边由内层低对比
-    // border-width 承担（弱灰无切点亮点）
+    // 选中态：左缘 3px 强调条 + selected-bg 中性提亮底（PowerToys Run
+    // 语言：选中感由亮度承载，强调色只占条，不垫整行——垫层方案会在
+    // 行上下圆角处露出强调色弧角）。非选中态：材质模式行底半透明
+    // （Acrylic 透出行卡与面板一致通透），悬停反馈走半透明 inset 底
     border-radius: Metrics.radius-lg;
-    background: selected ? Theme.accent-fg : transparent;
-    animate background { duration: Motion.dur-color; easing: Motion.ease; }
 
     VerticalLayout {
         padding: 1px;
 
         inner-card := Rectangle {
-            border-radius: Metrics.radius-lg - 1px;
+            border-radius: Metrics.radius-lg;
             border-width: selected ? 0px : 1px;
             border-color: item-ta.has-hover ? Theme.border-default : Theme.border-subtle;
-            // 普通态无底色：与搜索窗行一致，条目透出窗底材质（常驻 0.62
-            // 叠加后 92% 实，是速贴「看不出透明」的根源）；hover 瞬时反馈
-            // 保留半透明 inset 底，选中态三层实色结构不变
+            // 普通态无底色：条目透出窗底材质（常驻 0.62 叠加后 92% 实，
+            // 是速贴「看不出透明」的根源）；hover 瞬时反馈保留半透明
+            // inset 底；选中态换中性提亮底。底色不设动画：键盘导航是
+            // 高频交互，渐隐会让上一个选中项闪一拍强调色（Motion 频率
+            // 纪律）
             background: selected
-                ? Theme.canvas-default
+                ? Theme.selected-bg
                 : (item-ta.has-hover
                     ? Theme.canvas-inset.with-alpha(material-active ? 0.62 : 1.0)
                     : transparent);
-            animate background { duration: Motion.dur-color; easing: Motion.ease; }
             // 兜底裁剪：字体度量与渲染器行高存在细微差异时，
             // 防止预览文本画穿条目边界（原版由 CSS overflow 保证）
             clip: true;
 
-            // 选中高亮：半透明强调色叠在不透明垫底上（浅色主题下
-            // 即淡雅的强调底，文字与白 chip 保持可读）
+            // 选中条：独立 3px 竖条，定长 24px 垂直居中——行高随内容
+            // 可变，定长在多行行高下保持一致，且恒落在直线段内不碰
+            // 上下圆角；声明在内容之前 = 垫底
             if (selected): Rectangle {
-                border-radius: Metrics.radius-lg - 1px;
-                background: Theme.accent-subtle;
-            }
-
-            // 收藏条目左侧 3px 强调边条
-            if (data.favorited && !selected): Rectangle {
                 x: 0;
-                y: 0;
+                y: (parent.height - self.height) / 2;
                 width: 3px;
-                height: parent.height;
-                background: Theme.accent-fg;
+                height: 24px;
                 border-radius: 2px;
+                background: Theme.accent-fg;
             }
 
             // 每行一把隐藏标尺：与预览 Text 同文本、同宽度，
@@ -224,8 +216,8 @@ component ClipRowCard inherits Rectangle {
             }
 
             VerticalLayout {
-                padding-left: PanelGeometry.row-pad-h;
-                padding-right: PanelGeometry.row-pad-h;
+                padding-left: PanelGeometry.row-pad-left;
+                padding-right: PanelGeometry.row-pad-right;
                 padding-top: Metrics.space-2;
                 padding-bottom: Metrics.space-2;
                 spacing: Metrics.space-1_5;
@@ -285,19 +277,21 @@ component ClipRowCard inherits Rectangle {
                             height: 18px;
                             min-width: 18px;
                             border-radius: Metrics.radius-sm;
+                            // 选中态不再铺实底强调（亮 accent 配低对比前景
+                            // 是强调色发糊的重灾区）：数字只是按键提示，
+                            // 与本行类型 chip 同款静默底，选择感由左缘
+                            // 强调条与中性提亮底承载
                             background: selected
-                                ? Theme.accent-fg
+                                ? Theme.canvas-default
                                 : (item-ta.has-hover ? Theme.canvas-inset : Theme.canvas-subtle);
                             HorizontalLayout {
                                 padding-left: Metrics.space-1;
                                 padding-right: Metrics.space-1;
                                 Text {
                                     text: data.digit;
-                                    // 文字恒 fg-muted：徽章底 canvas-subtle/inset 比 canvas
-                                    // 深，fg-subtle 落上去跌破 4.5 对比度门禁
-                                    color: selected
-                                        ? Theme.fg-on-emphasis
-                                        : Theme.fg-muted;
+                                    // 恒 fg-muted：徽章底是 canvas 系深底，
+                                    // fg-subtle 落上去跌破 4.5 对比度门禁
+                                    color: Theme.fg-muted;
                                     font-size: Metrics.text-micro;
                                     font-weight: Metrics.weight-bold;
                                     font-family: "Consolas";
