@@ -37,6 +37,7 @@ fn write_full_tokens(theme: &Theme, tokens: &ThemeTokens) {
     theme.set_canvas_default(hex_color(tokens.canvas_default));
     theme.set_canvas_subtle(hex_color(tokens.canvas_subtle));
     theme.set_canvas_inset(hex_color(tokens.canvas_inset));
+    theme.set_surface(hex_color(tokens.surface));
     theme.set_material_base(rgba_color(
         tokens.material_base_rgb,
         tokens.material_base_alpha,

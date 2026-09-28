@@ -539,15 +539,18 @@ component ToggleRow inherits Rectangle {
 }
 
 // 设置分区卡片组（旧版 ROW_GROUP_CLASS：rounded-xl border border-muted
-// bg-canvas-subtle，行间 divide-y 分隔线）
+// bg-canvas-subtle，行间 divide-y 分隔线）。卡片语言对齐 WinUI：surface
+// 卡 + 描边 + 柔和投影，浮在 canvas 层底上——浅色下 canvas-subtle 灰卡
+// 贴近实心白层被判「蒙灰」，层次改由亮度反转（层灰、卡白）+ 投影承担，
+// 勿改回灰卡填充
 component RowGroup inherits Rectangle {
     border-radius: 12px;
     border-width: 1px;
     border-color: Theme.border-muted;
-    // 分组卡填充（PowerToys 卡片三件套的 fill）：canvas-subtle 实色，
-    // 坐在近实心内容层上无叠加算术问题——第四轮的分组透明化针对
-    // 「半透明容器叠半透明底」的显形，不适用于实色填充
-    background: Theme.canvas-subtle;
+    drop-shadow-blur: 12px;
+    drop-shadow-offset-y: 2px;
+    drop-shadow-color: Theme.shadow-color.with-alpha(0.10);
+    background: Theme.surface;
     clip: true;
     height: group-col.preferred-height + 2px;
     // 内容整体内缩 1px：Slint 子元素画在父边框之上，行悬停底色若延伸
@@ -1269,17 +1272,23 @@ export component SettingsWindow inherits Window {
                 }
 
                 // 滚动内容宿主：显式几何占满导航右侧余宽与主体全高。
-                // 内容层卡（WinUI Layer 同构）：近实心底 + 1px 描边压住
-                // 材质渗出，前景坐实色上；侧栏留在材质底上形成层次
+                // 内容层卡（WinUI Layer 同构）：层底 = canvas-default，
+                // 比白卡深一档让卡片浮起（surface 层配白卡 = 双白，浅色
+                // 下分层消失；深色 canvas 与 material-layer 同值，观感不
+                // 变）；材质透出收敛到侧栏（窗根膜），层卡自身不透明 +
+                // 1px 描边 + 投影压住边界
                 Rectangle {
                     x: 216px;
                     y: root.save-banner-visible ? 0px : 14px;
                     width: parent.width - 216px - 20px;
                     height: parent.height - (root.save-banner-visible ? 0px : 14px) - 14px;
-                    background: root.material-active ? Theme.material-layer : Theme.canvas-default;
+                    background: Theme.canvas-default;
                     border-radius: Metrics.radius-lg;
                     border-width: 1px;
                     border-color: Theme.border-muted;
+                    drop-shadow-blur: 24px;
+                    drop-shadow-offset-y: 4px;
+                    drop-shadow-color: Theme.shadow-color.with-alpha(0.12);
                     clip: true;
                     // 自管滚动（对齐编辑窗 ADR-0003 惯用法）：Flickable 内建
                     // 滚轮平滑动画（180ms 恒定减速）在软件渲染下迟滞不跟手，
@@ -2076,25 +2085,17 @@ export component SettingsWindow inherits Window {
                                     color: Theme.fg-subtle;
                                     font-size: Metrics.text-sm;
                                 }
-                                if (root.tag-rows.length > 0): Rectangle {
-                                    height: tags-col.preferred-height;
-                                    border-radius: 12px;
-                                    border-width: 1px;
-                                    border-color: Theme.border-muted;
-                                    background: Theme.canvas-subtle;
-                                    clip: true;
-                                    tags-col := VerticalLayout {
-                                        for row[idx] in root.tag-rows: TagRow {
-                                            row-data: row;
-                                            row-index: idx;
-                                            rename-started => { root.tag-rename-start(idx); }
-                                            draft-changed(text) => { root.tag-rename-draft(idx, text); }
-                                            rename-committed(text) => { root.tag-rename-commit(idx, text); }
-                                            rename-cancelled => { root.tag-rename-cancel(); }
-                                            delete-requested => { root.tag-delete-request(idx); }
-                                            delete-confirmed => { root.tag-delete-confirm(idx); }
-                                            delete-cancelled => { root.tag-delete-cancel(); }
-                                        }
+                                if (root.tag-rows.length > 0): RowGroup {
+                                    for row[idx] in root.tag-rows: TagRow {
+                                        row-data: row;
+                                        row-index: idx;
+                                        rename-started => { root.tag-rename-start(idx); }
+                                        draft-changed(text) => { root.tag-rename-draft(idx, text); }
+                                        rename-committed(text) => { root.tag-rename-commit(idx, text); }
+                                        rename-cancelled => { root.tag-rename-cancel(); }
+                                        delete-requested => { root.tag-delete-request(idx); }
+                                        delete-confirmed => { root.tag-delete-confirm(idx); }
+                                        delete-cancelled => { root.tag-delete-cancel(); }
                                     }
                                 }
                             }

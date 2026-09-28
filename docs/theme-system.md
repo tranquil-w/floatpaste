@@ -48,8 +48,9 @@
 | `selected-bg` | 选中行/选中项中性底：canvas 向正文墨色 OKLab 混合，深 0.12 / 浅 0.06；选中感由亮度提升 + 左缘 3px 强调条承载（PowerToys Run 语言），强调色不铺选中大底，行内元素对比关系不随选中变化。深色下与 canvas ≥ 1.2:1，正文墨字 ≥ 4.5:1 |
 | `accent-subtle` / `*-subtle` | 由对应前景色 rgba 生成，明暗模式各一组 alpha |
 | `selection-fg` / `selection-bg` | 文本选区/IME 组合词高亮：深色 = canvas 向强调色混 0.32 的实底配正文墨字；浅色 = 压暗后的 emphasis 配白字 |
-| `material-base` | 材质窗根底：canvas 直通 rgb + alpha（深 0.85 / 浅 0.45），铺在 DWM 材质（Mica/Acrylic，见 adr-0005）之上，承担窗缘/底层的材质透出；材质未挂载的窗口回退 `canvas-default` 不透明底，半透明色禁止直接用在无材质的透明窗上（会透出桌面） |
-| `material-layer` | 材质窗内容层：rgb 深色=canvas、浅色=surface 纯白；alpha 深 0.90（近实心压噪点）/ 浅 0.62（对齐 WinUI Layer=50% 白，让浅色 Mica 的壁纸 tint 透出）。前景文字与卡片一律坐这层；消费点为速贴整面板、搜索整窗、编辑整窗、设置内容层卡。回退规则同 `material-base` |
+| `surface` | 卡片/浮起面实色（WinUI CardBackgroundFill 同构）：层级语言 = 层底 canvas 比卡片深一档，卡片靠亮度差 + 描边 + 投影浮起；禁止用 `canvas-subtle` 灰做卡片填充（浅色下贴近实心白层显「蒙灰」） |
+| `material-base` | 材质窗根底：canvas 直通 rgb + alpha（明暗同 0.85），铺在 DWM 材质（Mica/Acrylic，见 adr-0005）之上，承担窗缘/底层的材质透出；材质未挂载的窗口回退 `canvas-default` 不透明底，半透明色禁止直接用在无材质的透明窗上（会透出桌面） |
+| `material-layer` | 材质窗内容层：rgb 深色=canvas、浅色=surface 纯白；alpha 明暗同 0.90 近实心（深压噪点、浅压壁纸 tint——壁纸 tint 随壁纸任意染色，不可作为观感来源）。前景文字与卡片一律坐这层；消费点为速贴整面板、搜索整窗、编辑整窗（设置内容层底用 `canvas-default` 承托白卡，见 adr-0005）。回退规则同 `material-base` |
 | 阴影 | 阴影色随正文墨色派生，亮暗共享同一组 shadow token |
 
 ## 预设与强调色

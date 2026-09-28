@@ -171,7 +171,7 @@ component ClipRowCard inherits Rectangle {
             border-radius: Metrics.radius-lg;
             border-width: selected ? 0px : 1px;
             border-color: item-ta.has-hover ? Theme.border-default : Theme.border-subtle;
-            // 普通态无底色：条目透出窗底材质（常驻 0.62 叠加后 92% 实，
+            // 普通态无底色：条目透出窗底材质（内容层 0.90 近实心，
             // 是速贴「看不出透明」的根源）；hover 瞬时反馈保留半透明
             // inset 底；选中态换中性提亮底。底色不设动画：键盘导航是
             // 高频交互，渐隐会让上一个选中项闪一拍强调色（Motion 频率

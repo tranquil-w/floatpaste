@@ -97,10 +97,11 @@ pub fn system_transparency_enabled() -> bool {
 ///
 /// 合成机制（2026-09-26 实测）：挂 backdrop 后表面像素 alpha 参与合成，
 /// 材质透过率 = 1 - 底色 alpha。UI 侧分两层：前景脚下的内容面用
-/// theme.rs `material_layer`（深 0.90/浅 0.62），材质感留给
-/// 窗缘的 `material_base`（深 0.85/浅 0.45）；勿改用透明底直露
+/// theme.rs `material_layer`（明暗同 0.90），材质感留给
+/// 窗缘的 `material_base`（明暗同 0.85）；勿改用透明底直露
 /// （100% 材质，用户实测否决：亮背景下深色 UI 对比全乱）。浅色 Acrylic
-/// 系统 tint 白雾重，属系统形态（常驻窗浅色用 Mica，不受此限）。
+/// 系统 tint 白雾重、Mica 透壁纸 tint，均随背景不可控，浅色一并收实
+/// （2026-09-28）。
 ///
 /// **无焦点窗口（速贴）勿走本函数**：SystemBackdrop Acrylic 在窗口
 /// 非前台时自动降级为纯色（系统行为，无开关），速贴须用

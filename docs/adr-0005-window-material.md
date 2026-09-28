@@ -66,10 +66,16 @@ status: accepted
 - **设置窗内容区为层卡**（WinUI `LayerFillColorDefault` 同构）：近实心底 + 1px 描边 + 圆角，侧栏留在材质底上形成层次。
 - PowerToys 对无激活瞬态的解法（`DesktopAcrylicController` + `SystemBackdropConfiguration.IsInputActive` 恒 true）与速贴的 SWCA HOSTBACKDROP 同题同解，印证 WinAppSDK 不可用前提下 SWCA 是 inbox 等价物。`SetWindowCompositionAttribute` 为未文档化导出、SDK user32.lib 无符号，静态 `#[link]` 链接必失败（LNK2019），改 `GetProcAddress` 动态加载。
 
+## 浅色收敛为与深色同配比（2026-09-28）
+
+「材质分层」终版把浅色放开（base 0.45 / layer 0.62，对齐 WinUI Layer 让浅色 Mica 的壁纸 tint 透出）被实机推翻：壁纸 tint 不是可控的观感来源，而是随壁纸任意染色——绿壁纸下编辑/设置整窗泛橄榄绿、速贴发灰、搜索被浅色 Acrylic 白雾冲得发脏（内容层材质占比算术上 ~21%，深色同路径仅 ~1.5%）。浅色收实为与深色完全同配比（base 0.85 / layer 0.90），材质在明暗两档都退为窗缘的一丝气息，层次改由表面色阶（canvas 膜 ↔ 纯白内容层）承担。此前「浅色没有 PowerToys 材质配比」的判语以深色为参照；浅色的「材质感」在亮面下只能表现为白雾或 tint，两者实测均被判差，故浅色改为干净优先、不再追求材质存在感。
+
+同日第二轮（设置窗卡片语言）：收实后设置窗「太素像白板」且 canvas-subtle 灰分组卡贴白层被判「蒙灰」——对齐 WinUI 卡片语言做亮度反转：设置内容层底由 material-layer（白）改 `canvas-default`（层灰、卡白，深色两值同色观感不变），分组卡由 canvas-subtle 灰填充改 surface 白卡 + 描边 + 柔和投影（标签页同构卡并入 RowGroup），层次与质感由「层灰卡白」+ 投影承担，不再依赖材质透出。材质在设置窗收敛到侧栏（窗根膜）。
+
 ## Consequences
 
 - 材质实现按窗口生命周期分三条管线（`overlay::MaterialSurface`）：编辑/设置（Content）走 SystemBackdrop Mica，搜索（Transient）走 SystemBackdrop Acrylic，速贴（HostAcrylic）走 SWCA HOSTBACKDROP + Acrylic；每个窗口固定一条管线，show 路径幂等重挂。
-- 材质观感旋钮集中在 `theme.rs` 的 `material_layer_alpha`（内容层，深 0.90/浅 0.62）与 `material_base_alpha`（窗底膜，深 0.85/浅 0.45）；调参经验同向（0.70「幽灵窗」↔ 0.82「看不出」）。
+- 材质观感旋钮集中在 `theme.rs` 的 `material_layer_alpha` 与 `material_base_alpha`（2026-09-28 起明暗同 0.90/0.85，见上节；调参经验同向（0.70「幽灵窗」↔ 0.82「看不出」））。
 - SWCA 为未文档化 API（`GetProcAddress` 动态加载）：未来 Windows 版本若移除符号，`apply_window_host_backdrop_acrylic` 返回 false 走 canvas 回退；届时可评估回退到 SystemBackdrop（接受无焦点降级）。
 - 窗口装饰装配（`win32_ext`）增加 backdrop 装配点，show 路径每次执行；DWM 属性失败必须静默回退，不得阻塞窗口创建。
 - 全窗 alpha 化后，窗口首次显示前的过渡帧（表面未暖）从「白底」变「透出桌面/backdrop」，`warm_surface` 的暖场语义需复核。
