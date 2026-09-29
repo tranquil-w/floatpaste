@@ -78,6 +78,10 @@ export component WindowTitleBar inherits Rectangle {
             }
         }
         moved => { root.drag-moved(); }
+        // 双击标题栏空白处切换最大化/还原（原生标题栏惯例），与窗控
+        // 最大化键共用同一回调。双击两拍间的 down/up 只记录/清空手势
+        // 状态、无移动不动窗口，不与拖拽手势冲突
+        double-clicked => { root.max-toggle-requested(); }
     }
     // 最小化
     btn-min := Rectangle {
