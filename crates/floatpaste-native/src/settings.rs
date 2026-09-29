@@ -86,6 +86,9 @@ thread_local! {
     /// explorer 重启后延迟补注册 Win+V 的单发定时器（广播早于系统
     /// 释放热键完成，等一站再注册）
     static EXPLORER_RESYNC_TIMER: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
+    /// 退出快捷键录制后恢复全局热键的单发定时器（录制期间反注册的
+    /// 旧热键线程异步注销，立即重注册会撞 1409 重试卡 UI）
+    static HOTKEY_RESUME_TIMER: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
 }
 
 struct ScrollAnim {
@@ -114,6 +117,21 @@ fn arm_restart_button(app: &App) {
     RESTART_ARM_TIMER.with(|slot| *slot.borrow_mut() = Some(timer));
 }
 
+/// 退出快捷键录制后恢复全局热键：反注册是异步的（旧热键线程消息循环
+/// 退出才释放组合），延迟一站重注册避免同组合立即撞 1409 重试卡 UI。
+/// 之后的防抖保存仍会走 apply_side_effects 幂等重注册；等待期间重新
+/// 进入录制则由回调丢弃此定时器
+fn schedule_hotkey_resume(app: &App) {
+    let app_resume = app.clone();
+    let timer = slint::Timer::default();
+    timer.start(
+        slint::TimerMode::SingleShot,
+        Duration::from_millis(250),
+        move || crate::sync_global_hotkeys(&app_resume),
+    );
+    HOTKEY_RESUME_TIMER.with(|slot| *slot.borrow_mut() = Some(timer));
+}
+
 impl Clone for ScrollAnim {
     fn clone(&self) -> Self {
         Self {
@@ -133,6 +151,21 @@ pub fn wire(app: &App) {
     };
 
     // ── 快捷键字段 ──
+    // 录制期间反注册全部全局热键：RegisterHotKey 吞掉命中组合并触发
+    // 自家动作（Win+V 弹速贴、旧唤起组合开面板），随后弹窗抢走焦点
+    // 把录制取消——录制框必须先拿到原始按键（含想把主快捷键录成
+    // Win+V 的接管场景）
+    {
+        let app_cb = app.clone();
+        win.on_any_recording_changed(move |recording| {
+            if recording {
+                HOTKEY_RESUME_TIMER.with(|slot| *slot.borrow_mut() = None);
+                floatpaste_core::platform::windows::hotkey::stop_hotkeys();
+            } else {
+                schedule_hotkey_resume(&app_cb);
+            }
+        });
+    }
     {
         let app_cb = app.clone();
         win.on_shortcut_edited(move |value| {
@@ -707,6 +740,11 @@ fn park_settings_window(app: &App) {
     let hwnd = app.state.settings_hwnd.load(Ordering::SeqCst);
     win32_ext::set_window_visible(hwnd, false);
     if let Some(win) = app.settings.upgrade() {
+        // 录制中关窗：复位录制态，any-recording 联动恢复全局热键，
+        // 停屏后快捷键不停在反注册状态（false→false 赋值不触发联动）
+        win.set_main_recording(false);
+        win.set_search_recording(false);
+        win.set_session_recorder_id(0);
         win.window()
             .set_position(slint::PhysicalPosition::new(-32000, -32000));
     }
@@ -1158,9 +1196,11 @@ fn refresh_winv_status(app: &App, win: &SettingsWindow) {
         .iter()
         .find(|(id, _)| *id == crate::HOTKEY_ID_WINV)
     {
-        Some((_, crate::HOTKEY_ERROR_WINV_SELF_CONFLICT)) => {
-            "未接管：Win+V 与上方速贴唤起或搜索窗口的快捷键相同，请更换组合后重试。"
-        }
+        Some((_, crate::HOTKEY_ERROR_WINV_SELF_CONFLICT)) => winv_self_conflict_text(
+            &win.get_shortcut(),
+            &win.get_search_shortcut(),
+            failures.iter().any(|(id, _)| *id == crate::HOTKEY_ID_MAIN),
+        ),
         Some((_, crate::ERROR_HOTKEY_OCCUPIED)) => {
             "尚未生效：点击右侧「重启资源管理器生效」，重启后 Win+V 即唤起速贴面板；若重启后仍如此，说明组合被其他程序占用。"
         }
@@ -1170,6 +1210,62 @@ fn refresh_winv_status(app: &App, win: &SettingsWindow) {
         None => "已接管：Win+V 现在与速贴唤起快捷键一样打开速贴面板。",
     };
     win.set_winv_status_text(text.into());
+}
+
+/// Win+V 与自身快捷键重复时的状态文案决策（纯函数，供单测）。主快捷键
+/// 本身即 Win+V 时接管键跳过注册（同组合 RegisterHotKey 必失败），但该
+/// 组合已由主热键承担唤起——注册成功即等效接管，不该再劝用户换组合；
+/// 主键注册未生效时指引跟随主键行的失败提示；仅搜索快捷键占用时按下
+/// 打开的是搜索窗口，接管目的未达成
+fn winv_self_conflict_text(main: &str, search: &str, main_failed: bool) -> &'static str {
+    let parse = floatpaste_core::platform::windows::hotkey::parse_hotkey;
+    let winv_spec = parse("Win+V");
+    let is_winv = |text: &str| parse(text) == winv_spec;
+    if is_winv(main) {
+        if main_failed {
+            "尚未生效：Win+V 的注册跟随上方速贴唤起快捷键，请先按其失败提示重启资源管理器。"
+        } else {
+            "已接管：Win+V 已设为上方速贴唤起快捷键，按下即打开速贴面板。"
+        }
+    } else if is_winv(search) {
+        "未接管：Win+V 与搜索窗口快捷键相同，按下将打开搜索窗口而非速贴面板；如需唤起速贴请更换搜索组合。"
+    } else {
+        "未接管：Win+V 与上方速贴唤起或搜索窗口的快捷键相同，请更换组合后重试。"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::winv_self_conflict_text;
+
+    #[test]
+    fn main_shortcut_winv_reports_effective_takeover() {
+        assert_eq!(
+            winv_self_conflict_text("Win+V", "Ctrl+F", false),
+            "已接管：Win+V 已设为上方速贴唤起快捷键，按下即打开速贴面板。"
+        );
+        // Super 与 Win 为同义修饰键，归一后同样视为 Win+V
+        assert_eq!(
+            winv_self_conflict_text("Super+V", "Ctrl+F", false),
+            "已接管：Win+V 已设为上方速贴唤起快捷键，按下即打开速贴面板。"
+        );
+    }
+
+    #[test]
+    fn main_shortcut_winv_pending_registration_follows_main_row() {
+        assert_eq!(
+            winv_self_conflict_text("Win+V", "Ctrl+F", true),
+            "尚未生效：Win+V 的注册跟随上方速贴唤起快捷键，请先按其失败提示重启资源管理器。"
+        );
+    }
+
+    #[test]
+    fn search_shortcut_winv_keeps_takeover_unfulfilled() {
+        assert_eq!(
+            winv_self_conflict_text("Ctrl+Q", "Win+V", false),
+            "未接管：Win+V 与搜索窗口快捷键相同，按下将打开搜索窗口而非速贴面板；如需唤起速贴请更换搜索组合。"
+        );
+    }
 }
 
 /* ───────────────── 预览模型（主题预设卡 / 强调色） ───────────────── */

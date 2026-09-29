@@ -598,13 +598,15 @@ component SectionHeader inherits Rectangle {
 
 // 普通设置行（旧版 SettingRow：flex items-center gap-6 px-4 py-2.5，左
 // 标题+描述 flex-1，右控件 shrink-0——控件经 @children 进入行布局，行高
-// 由文本列与控件取大后加内边距自适应，与旧版一致）
+// 由文本列与控件取大后加内边距自适应，与旧版一致）。nested=嵌套子选项
+// 缩进，与 ToggleRow 的 nested 同一 36px 左缘
 component SettingRow inherits Rectangle {
     in property <string> title;
     in property <string> description;
+    in property <bool> nested: false;
     height: row-col.preferred-height;
     row-col := HorizontalLayout {
-        padding-left: 16px;
+        padding-left: root.nested ? 36px : 16px;
         padding-right: 16px;
         padding-top: 10px;
         padding-bottom: 10px;
@@ -974,6 +976,15 @@ export component SettingsWindow inherits Window {
     // session-recorder-id 记录录制中的行（0=无），供根 Esc 捕获让位
     in-out property <[SessionKeyRow]> session-key-rows;
     in-out property <int> session-recorder-id: 0;
+    // 录制态汇总：任一录制框激活即通知 Rust 反注册全局热键——
+    // RegisterHotKey 会吞掉按键并触发自家动作（如 Win+V 弹速贴、
+    // 抢走焦点取消录制），录制框必须先拿到原始按键
+    in-out property <bool> main-recording: false;
+    in-out property <bool> search-recording: false;
+    property <bool> any-recording: root.main-recording || root.search-recording
+        || root.session-recorder-id != 0;
+    callback any-recording-changed(bool);
+    changed any-recording => { root.any-recording-changed(self.any-recording); }
     callback session-key-captured(int, string);
     callback session-key-cancelled(int);
     callback position-mode-selected(int);
@@ -1024,8 +1035,7 @@ export component SettingsWindow inherits Window {
         // 录成键位，由 session-recorder-id 判断）
         capture-key-pressed(event) => {
             if (event.text == Key.Escape) {
-                if (shortcut-input.recording || search-shortcut-input.recording
-                    || root.session-recorder-id != 0) {
+                if (root.any-recording) {
                     return reject;
                 }
                 root.request-close();
@@ -1733,10 +1743,11 @@ export component SettingsWindow inherits Window {
                                                 width: 224px;
                                                 height: self.preferred-height;
                                                 spacing: 6px;
-                                                shortcut-input := ShortcutInput {
+                                                ShortcutInput {
                                                     width: 100%;
                                                     value-parts: root.shortcut-parts;
                                                     notice: root.shortcut-notice-text;
+                                                    recording <=> root.main-recording;
                                                     captured(value) => { root.shortcut-edited(value); }
                                                     cleared() => { root.shortcut-edited(""); }
                                                     cancelled() => { root.shortcut-cancelled(); }
@@ -1757,14 +1768,15 @@ export component SettingsWindow inherits Window {
                                         }
                                     }
                                     RowDivider { }
-                                    // Win+V 唤起速贴（ADR-0001）：紧随
-                                    // 「速贴唤起」——它是同一动作的第二个
-                                    // 入口；接管系统组合需写注册表并重启
-                                    // 资源管理器，关闭即回退
+                                    // Win+V 唤起速贴（ADR-0001）：作为
+                                    // 「速贴唤起」的嵌套子选项——它是同一
+                                    // 动作的第二个入口；接管系统组合需写
+                                    // 注册表并重启资源管理器，关闭即回退
                                     ToggleRow {
                                         title: "Win+V 唤起速贴";
                                         description: "接管系统 Win+V：开启后 Win+V 与上方快捷键一样唤起速贴面板，系统剪贴板历史同时失效。需重启资源管理器生效；关闭开关并重启资源管理器即恢复系统原状。";
                                         checked: root.winv-enabled;
+                                        nested: true;
                                         toggled(checked) => { root.winv-toggled(checked); }
                                     }
                                     if (root.winv-enabled || root.winv-pending-restore): VerticalLayout {
@@ -1772,6 +1784,7 @@ export component SettingsWindow inherits Window {
                                         RowDivider { }
                                         SettingRow {
                                             title: "生效状态";
+                                            nested: true;
                                             description: root.winv-status-text;
                                             Rectangle {
                                                 width: restart-btn.width;
@@ -1822,11 +1835,12 @@ export component SettingsWindow inherits Window {
                                                 width: 224px;
                                                 height: self.preferred-height;
                                                 spacing: 6px;
-                                                search-shortcut-input := ShortcutInput {
+                                                ShortcutInput {
                                                     width: 100%;
                                                     disabled: !root.search-shortcut-enabled;
                                                     value-parts: root.search-shortcut-parts;
                                                     notice: root.search-notice-text;
+                                                    recording <=> root.search-recording;
                                                     captured(value) => { root.search-shortcut-edited(value); }
                                                     cleared() => { root.search-shortcut-edited(""); }
                                                     cancelled() => { root.search-shortcut-cancelled(); }
