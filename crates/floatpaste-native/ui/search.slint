@@ -1033,9 +1033,10 @@ export component SearchWindow inherits Window {
                                 max(self.min-height, self.preferred-height);
 
                             if (root.loading): VerticalLayout {
+                                // 状态页高度下限须为常量：绑视口高会正反馈
+                                //（窗口高按列表内容自适应，内容高又绑窗口高，
+                                // 每帧爬升表现为窗口缓慢展开）
                                 min-height: 160px;
-                                padding-top: 48px;
-                                padding-bottom: 48px;
                                 alignment: center;
                                 Text {
                                     text: "加载中...";
@@ -1047,13 +1048,11 @@ export component SearchWindow inherits Window {
 
                             if (!root.loading && root.load-failed): VerticalLayout {
                                 min-height: 160px;
-                                padding-top: 48px;
-                                padding-bottom: 48px;
                                 alignment: center;
                                 spacing: Metrics.space-1;
                                 Text {
                                     text: "条目加载失败";
-                                    color: Theme.fg-subtle;
+                                    color: Theme.fg-muted;
                                     font-size: Metrics.text-sm;
                                     horizontal-alignment: center;
                                 }
@@ -1063,25 +1062,32 @@ export component SearchWindow inherits Window {
                                     font-size: Metrics.text-xs;
                                     horizontal-alignment: center;
                                 }
-                                Rectangle {
-                                    height: 26px;
-                                    border-radius: Metrics.radius-md;
-                                    border-width: 1px;
-                                    border-color: Theme.border-default;
-                                    opacity: retry-ta.pressed ? 0.85 : 1.0;
-                                    background: retry-ta.has-hover ? Theme.canvas-subtle : transparent;
-                                    animate background { duration: Motion.dur-color; easing: Motion.ease; }
-                                    retry-ta := TouchArea {
-                                        clicked => { root.retry-clicked(); }
-                                    }
-                                    HorizontalLayout {
-                                        padding-left: 10px;
-                                        padding-right: 10px;
-                                        Text {
-                                            text: "重试";
-                                            color: Theme.fg-muted;
-                                            font-size: Metrics.text-xs;
-                                            vertical-alignment: center;
+                                // 动作按钮水平居中 + 内容自适应宽
+                                //（直挂 VerticalLayout 会被交叉轴拉成通栏）
+                                HorizontalLayout {
+                                    padding-top: Metrics.space-2;
+                                    alignment: center;
+                                    Rectangle {
+                                        width: retry-text.preferred-width + 22px;
+                                        height: 26px;
+                                        border-radius: Metrics.radius-md;
+                                        border-width: 1px;
+                                        border-color: Theme.border-default;
+                                        opacity: retry-ta.pressed ? 0.85 : 1.0;
+                                        background: retry-ta.has-hover ? Theme.canvas-subtle : transparent;
+                                        animate background { duration: Motion.dur-color; easing: Motion.ease; }
+                                        retry-ta := TouchArea {
+                                            clicked => { root.retry-clicked(); }
+                                        }
+                                        HorizontalLayout {
+                                            padding-left: 10px;
+                                            padding-right: 10px;
+                                            retry-text := Text {
+                                                text: "重试";
+                                                color: Theme.fg-muted;
+                                                font-size: Metrics.text-xs;
+                                                vertical-alignment: center;
+                                            }
                                         }
                                     }
                                 }
@@ -1089,47 +1095,52 @@ export component SearchWindow inherits Window {
 
                             if (!root.loading && !root.load-failed && root.rows.length == 0): VerticalLayout {
                                 min-height: 160px;
-                                padding-top: 48px;
-                                padding-bottom: 48px;
                                 alignment: center;
                                 spacing: Metrics.space-1;
                                 Text {
                                     text: root.empty-title;
-                                    color: Theme.fg-subtle;
+                                    color: Theme.fg-muted;
                                     font-size: Metrics.text-sm;
                                     horizontal-alignment: center;
                                 }
                                 Text {
                                     text: root.empty-description;
                                     color: Theme.fg-subtle;
-                                    font-size: Metrics.text-sm;
+                                    font-size: Metrics.text-xs;
                                     horizontal-alignment: center;
                                 }
-                                if (root.empty-action != 0): Rectangle {
-                                    height: 26px;
-                                    border-radius: Metrics.radius-md;
-                                    border-width: 1px;
-                                    border-color: Theme.border-default;
-                                    opacity: empty-ta.pressed ? 0.85 : 1.0;
-                                    background: empty-ta.has-hover ? Theme.canvas-subtle : transparent;
-                                    animate background { duration: Motion.dur-color; easing: Motion.ease; }
-                                    empty-ta := TouchArea {
-                                        clicked => {
-                                            if (root.empty-action == 1) {
-                                                root.clear-keyword();
-                                            } else {
-                                                root.clear-filters();
+                                // 动作按钮水平居中 + 内容自适应宽
+                                //（直挂 VerticalLayout 会被交叉轴拉成通栏）
+                                HorizontalLayout {
+                                    padding-top: Metrics.space-2;
+                                    alignment: center;
+                                    Rectangle {
+                                        width: empty-btn-text.preferred-width + 22px;
+                                        height: 26px;
+                                        border-radius: Metrics.radius-md;
+                                        border-width: 1px;
+                                        border-color: Theme.border-default;
+                                        opacity: empty-ta.pressed ? 0.85 : 1.0;
+                                        background: empty-ta.has-hover ? Theme.canvas-subtle : transparent;
+                                        animate background { duration: Motion.dur-color; easing: Motion.ease; }
+                                        empty-ta := TouchArea {
+                                            clicked => {
+                                                if (root.empty-action == 1) {
+                                                    root.clear-keyword();
+                                                } else {
+                                                    root.clear-filters();
+                                                }
                                             }
                                         }
-                                    }
-                                    HorizontalLayout {
-                                        padding-left: 10px;
-                                        padding-right: 10px;
-                                        Text {
-                                            text: root.empty-action == 1 ? "清除关键词" : "清除筛选";
-                                            color: Theme.fg-muted;
-                                            font-size: Metrics.text-xs;
-                                            vertical-alignment: center;
+                                        HorizontalLayout {
+                                            padding-left: 10px;
+                                            padding-right: 10px;
+                                            empty-btn-text := Text {
+                                                text: root.empty-action == 1 ? "清除关键词" : "清除筛选";
+                                                color: Theme.fg-muted;
+                                                font-size: Metrics.text-xs;
+                                                vertical-alignment: center;
+                                            }
                                         }
                                     }
                                 }

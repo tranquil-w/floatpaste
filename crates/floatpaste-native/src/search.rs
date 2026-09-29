@@ -76,17 +76,21 @@ pub fn toggle_from_shortcut(app: &App) {
 }
 
 /// 全局「打开搜索」语义（托盘菜单，对齐旧壳 open_search_global）：
-/// 已活跃时仅聚回前台（保留关键词与列表状态，对齐 is_search_active 分支）；
-/// 否则速贴活跃先收起（不还原目标，焦点交给搜索窗口）再走完整打开流程。
+/// 已活跃且在前台时仅聚回焦点（保留关键词与列表状态，对齐 is_search_active
+/// 分支）；否则速贴活跃先收起（不还原目标，焦点交给搜索窗口）再走完整
+/// 打开流程
 pub fn open_global(app: &App) {
     if app.state.is_search_active() {
         let hwnd = app.state.search_hwnd.load(Ordering::SeqCst);
-        if hwnd != 0 {
+        // 已不在前台 = 失焦自动关闭正待焦点看门狗执行（120ms 轮询间隔），
+        // 中间态里打开语义应是新会话，落完整打开流程；否则旧会话（筛选
+        // 空态的收缩尺寸与激活筛选）会原样回来
+        if hwnd != 0 && ActiveAppResolver::current_foreground_hwnd() == Some(hwnd) {
             if let Err(error) = window_control::restore_window_and_focus(hwnd) {
                 warn!("搜索窗口获取焦点失败: {error}");
             }
+            return;
         }
-        return;
     }
     if app.state.is_picker_active() {
         picker::hide(app, false);
@@ -137,17 +141,18 @@ pub fn open(app: &App) {
     let scale = win.window().scale_factor();
     let geo = win.global::<SearchGeometry>();
     let width_px = (geo.get_window_width() * scale).round() as i32;
-    let last = LAST_HEIGHT.with(|value| value.get()) as i32;
+    let base = OPEN_BASE_HEIGHT.with(|value| value.get()) as i32;
     // 首开（无历史高度）直接用最大高度：内容加载后棘轮目标通常也是
     // max，避免开窗后再 resize 造成跳动/闪烁
-    let height_px = if last > 0 {
-        last
+    let height_px = if base > 0 {
+        base
     } else {
         (geo.get_window_max_height() * scale).round() as i32
     };
     // 高度基线对齐到本次实际应用值：加载态的中间高度（低于基线）在无
     // 收缩许可时被跳过，内容落定只发生一次尺寸变化
     LAST_HEIGHT.with(|value| value.set(height_px as f32));
+    tracing::debug!("开窗起步高度: {height_px} (基线 {base})");
     JUST_OPENED.with(|flag| flag.set(true));
     // 停屏窗口在屏外，几何变化在移回屏上前完成，无可见中间帧；一次
     // SetWindowPos 同步定尺寸与位置（窗口仍在屏外，不受「先长高后移位」
@@ -337,9 +342,10 @@ fn reset_session_state(app: &App) {
     SELECTED_ID.with(|slot| *slot.borrow_mut() = None);
     ARMED_DELETE.with(|slot| *slot.borrow_mut() = None);
     DELETE_TOKEN.with(|token| token.set(token.get() + 1));
-    // LAST_HEIGHT 不清零：开窗直接用上次内容高度（open 会把基线对齐到
-    // 实际应用的高度）。清零会让加载态的中间高度被视为「增长」而应用，
-    // 窗口先缩后长、两次跳动（闪烁 + 最终偏下）
+    // 高度基线（LAST_HEIGHT/OPEN_BASE_HEIGHT）跨会话保留不清零：open
+    // 直接用「默认视图」高度起步并把 LAST_HEIGHT 对齐到实际应用值。
+    // 清零会让加载态的中间高度被视为「增长」而应用，窗口先缩后长、
+    // 两次跳动（闪烁 + 最终偏下）
     ALLOW_SHRINK.with(|flag| flag.set(false));
 
     win.set_keyword("".into());
@@ -425,6 +431,11 @@ thread_local! {
     static ARMED_DELETE: RefCell<Option<String>> = const { RefCell::new(None) };
     static DELETE_TOKEN: Cell<u64> = const { Cell::new(0) };
     static LAST_HEIGHT: Cell<f32> = const { Cell::new(0.0) };
+    // 开窗起步基线：只记「默认视图」（无关键词/筛选/标签，会话重置后
+    // 必然回到的形态）落地后的高度。任何会话内收缩态——筛选空态、
+    // 少结果、关键词命中几条——都不代表下次开窗的终态，记入基线会让
+    // 重开先见矮窗、依赖落地后再涨一次
+    static OPEN_BASE_HEIGHT: Cell<f32> = const { Cell::new(0.0) };
     static ALLOW_SHRINK: Cell<bool> = const { Cell::new(false) };
 }
 
@@ -1208,14 +1219,33 @@ fn apply_height(app: &App) {
     // 加载态高度不应用：矮历史开窗会在旧位置分步长高、露出「已长高
     // 未居中」的偏下中间帧，等内容落地一次到位
     if JUST_OPENED.with(|flag| flag.get()) && win.get_loading() {
+        tracing::debug!("高度同步跳过（加载态中间高）: target={target} last={last}");
         return;
     }
     let allow = ALLOW_SHRINK.with(|flag| flag.get());
     ALLOW_SHRINK.with(|flag| flag.set(false));
     if !allow && target < last {
+        tracing::debug!("高度同步跳过（无收缩许可）: target={target} last={last}");
         return;
     }
+    tracing::debug!(
+        "高度应用: {last} -> {target} (loading={} rows={})",
+        win.get_loading(),
+        win.get_rows().row_count()
+    );
     LAST_HEIGHT.with(|value| value.set(target as f32));
+    // 开窗基线只记「默认视图」落地高度：筛选空态/少结果/关键词命中的
+    // 收缩态高度不作为下次开窗起步（会话重置后必然回到默认视图）。
+    // 判定读 QUERY（防抖后生效的查询词）——落地必发生在查询生效后，
+    // 与本次结果行同源
+    let default_view = QUERY.with(|state| {
+        let state = state.borrow();
+        state.keyword.trim().is_empty() && state.filter == 0 && state.tags.is_empty()
+    });
+    if default_view && !win.get_loading() && win.get_rows().row_count() > 0 {
+        OPEN_BASE_HEIGHT.with(|value| value.set(target as f32));
+        tracing::debug!("开窗基线更新: {target}");
+    }
     let width_px = (geo.get_window_width() * scale).round() as i32;
     // 打开后首次高度落定：以新尺寸重新居中（左上角锚定的增长会让
     // 窗口偏离打开时的居中位置）。一次 SetWindowPos 原子完成缩放+
