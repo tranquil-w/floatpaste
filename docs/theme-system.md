@@ -45,12 +45,12 @@
 | `border-window` | 浮动窗口最外层描边专用，canvas 与 border-muted 的弱混合；窗口边界主要靠阴影与圆角，描边刻意弱化以免框感过重 |
 | `accent-fg` | canvas 上的强调文字/图标，≥ 4.5:1，不足则亮度校正 |
 | `accent-emphasis` | 实底按钮底，对齐 Windows「蓝底白字」惯例：`fg-on-emphasis` 恒白，原色白字不足 4.5:1 时向黑色 OKLab 混合压暗到刚好达标（色相不变的物理变暗路径；OKLCH 只调亮度在蓝紫段会触发色域裁剪造成色相漂移，故不用） |
-| `selected-bg` | 选中行/选中项中性底：canvas 向正文墨色 OKLab 混合，深 0.12 / 浅 0.06；选中感由亮度提升 + 左缘 3px 强调条承载（PowerToys Run 语言），强调色不铺选中大底，行内元素对比关系不随选中变化。深色下与 canvas ≥ 1.2:1，正文墨字 ≥ 4.5:1 |
+| `selected-bg` | 选中项中性底：canvas 向正文墨色 OKLab 混合，深 0.12 / 浅 0.06；选中感由亮度提升 + 左缘 3px 强调条承载（PowerToys Run 语言），强调色不铺选中大底，行内元素对比关系不随选中变化。深色下与 canvas ≥ 1.2:1，正文墨字 ≥ 4.5:1。消费点为搜索窗列表；速贴选中（层灰卡白结构）不压暗填充——白卡群中的深色选中卡有「塌下去」的凹陷感，改为 accent 1px 描边 + 左缘强调条（Win11 资源管理器选中项语言） |
 | `accent-subtle` / `*-subtle` | 由对应前景色 rgba 生成，明暗模式各一组 alpha |
 | `selection-fg` / `selection-bg` | 文本选区/IME 组合词高亮：深色 = canvas 向强调色混 0.32 的实底配正文墨字；浅色 = 压暗后的 emphasis 配白字 |
-| `surface` | 卡片/浮起面实色（WinUI CardBackgroundFill 同构）：层级语言 = 层底 canvas 比卡片深一档，卡片靠亮度差 + 描边 + 投影浮起；禁止用 `canvas-subtle` 灰做卡片填充（浅色下贴近实心白层显「蒙灰」） |
-| `material-base` | 材质窗根底：canvas 直通 rgb + alpha（明暗同 0.85），铺在 DWM 材质（Mica/Acrylic，见 adr-0005）之上，承担窗缘/底层的材质透出；材质未挂载的窗口回退 `canvas-default` 不透明底，半透明色禁止直接用在无材质的透明窗上（会透出桌面） |
-| `material-layer` | 材质窗内容层：rgb 深色=canvas、浅色=surface 纯白；alpha 明暗同 0.90 近实心（深压噪点、浅压壁纸 tint——壁纸 tint 随壁纸任意染色，不可作为观感来源）。前景文字与卡片一律坐这层；消费点为速贴整面板、搜索整窗、编辑整窗（设置内容层底用 `canvas-default` 承托白卡，见 adr-0005）。回退规则同 `material-base` |
+| `surface` | 卡片/浮起面实色（WinUI CardBackgroundFill 同构）：层级语言 = 层底 canvas 比卡片深一档，卡片靠亮度差 + 描边 + 投影浮起；禁止用 `canvas-subtle` 灰做浅色卡片填充（浅色下贴近实心白层显「蒙灰」）。速贴行卡与设置分组卡的卡面统一走 `card-face`（浅=surface 纯白、深=canvas-subtle 微亮——深色 surface 亮灰卡实测发灰被否），两窗卡片观感保持一致；速贴选中强调 = 2px `fg-default.with-alpha(0.70)` 墨色边框（与文字同源、随明暗反色：浅加深框/深加浅框，加粗配减淡）+ semibold 字重，无底色变化——选中底色（灰墨填充/accent 染底）多轮实测否决，彩色描边两轮否，均实测结论；边框几何经 `PanelGeometry.row-frame`（4px 双侧）参与 Rust 裁排 |
+| `material-base` | 材质窗根底：canvas 直通 rgb + alpha（明暗同 0.70，2026-09-30 用户两轮拍板 0.85→0.80→0.70 持续增强材质感），铺在 DWM 材质（Mica/Acrylic，见 adr-0005）之上，承担窗缘/底层的材质透出；材质未挂载的窗口回退 `canvas-default` 不透明底，半透明色禁止直接用在无材质的透明窗上（会透出桌面） |
+| `material-layer` | 材质窗内容层：rgb 深色=canvas、浅色=surface 纯白；alpha 明暗同 0.70（2026-09-30 用户两轮拍板 0.90→0.80→0.70 持续增强材质感；搜索窗同 token 一并放宽；历史上 0.62 透 tint 曾因壁纸染色被否，0.70 为新平衡点）。前景文字与卡片一律坐这层；消费点为搜索整窗、编辑整窗（速贴是无焦点窗，材质系统性不生效，已退出材质消费改实底自绘——层底 `card-layer` + 行卡 `card-face`，见 no-focus-picker.md 坑十一；设置内容层底用 `canvas-default` 承托白卡，见 adr-0005）。回退规则同 `material-base` |
 | 阴影 | 阴影色随正文墨色派生，亮暗共享同一组 shadow token |
 
 ## 预设与强调色

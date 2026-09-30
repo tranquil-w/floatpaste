@@ -178,3 +178,10 @@ sequenceDiagram
 - **原因**：任务栏（Win11）在窗口**首次可见的瞬间**按当时的扩展样式做「上/不上任务栏」一次性分类，之后对常驻可见窗口翻样式位的重分类不可靠。首秀瞬间带 TOOLWINDOW → 被归入「跳过任务栏」且长期不修正（永远无按钮）；首秀瞬间裸样式 → 分类为上任务栏，但按钮创建被随即到达的 TOOLWINDOW 中止，模型带伤（首开无按钮，首次激活后才修复）。另注：winit 会在 `set_visible` 等路径全量重写样式位（`apply_diff` 的 `SetWindowLongW(GWL_EXSTYLE)`），show 前手工挂的样式随时可能被冲掉。
 - **解决方案**：弃样式翻转，按钮生灭由真实可见性驱动（`win32_ext::set_window_visible` 的 `SW_SHOWNOACTIVATE`/`SW_HIDE`）：扩展样式从创建起恒为普通 `APPWINDOW`；装配时 show 前写图标并移屏外（首次可见发生在屏外、形态已终），show 后立即隐藏进入停屏；打开/关闭走真实显隐。隐藏对 Slint 不可见（Slint 保持「已显示」，表面存活；winit 的 wndproc 不处理 `WM_SHOWWINDOW`，外部 SW_HIDE 无副作用）。
 - **教训**：让窗口的**首次可见即最终形态**（样式、图标、位置），运行期只动可见性不动样式；「第一次坏、第二次好」的时序差异优先怀疑 shell 侧首次分类/缓存，而非窗口侧状态。症状描述需先核对到「按钮存在与否」还是「按钮内容对错」，两者是不同链路（本案四轮排查有三轮花在了误读症状上）。
+
+### 坑十一：无焦点窗口上 DWM 材质系统性不生效，HOSTBACKDROP 也绕不过（近期最重要）
+
+- **现象**：速贴挂 `DWMWA_SYSTEMBACKDROP_TYPE=Acrylic` + SWCA `ACCENT_STATE_ENABLE_HOSTBACKDROP`（未文档化 accent 状态，据 Windhawk 逆向资料可在非前台窗口渲染 host backdrop）后，面板材质感始终出不来——SWCA 调用成功（返回非 0），但视觉上就是没有 Acrylic。这不是个别环境问题，是无焦点窗口的系统性行为。
+- **原因**：无焦点窗的材质管线不可依赖。SystemBackdrop 单独用会在非前台自动降级纯色（系统行为）；HOSTBACKDROP 组合据称绕过降级，但实测无焦点窗上照样不出材质——该未文档化路径对「从未被激活过的窗口」不可用。
+- **解决方案**：速贴弃材质，面板实底自绘（`card-layer` 层底 + `card-face` 浮起行卡，明暗同构），`overlay::MaterialSurface` 不再有速贴分支，`apply_window_host_backdrop_acrylic` 已删除。可激活窗口（搜索/编辑/设置）材质管线不变。
+- **教训**：未文档化 API 的行为声明要按「实测出效果」验收，调用成功 ≠ 视觉生效；无焦点窗上的观感设计一律先按实底最坏情况做，材质只当锦上添花。

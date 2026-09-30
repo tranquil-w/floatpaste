@@ -1,6 +1,9 @@
 // 语义主题 token：由 Rust 侧（floatpaste-core::theme 派生结果）写入。
 // 键集与前端 --pg-* CSS 变量一一对应，组件只消费这一层。
 export global Theme {
+    // 解析后的明暗模式：UI 结构按模式分叉的判定信号
+    // （速贴：浅色层灰卡白 / 深色近黑面板+透明行）
+    in-out property <bool> is-dark;
     // 画布
     in-out property <color> canvas-default;
     in-out property <color> canvas-subtle;
@@ -8,13 +11,21 @@ export global Theme {
     // 卡片/浮起面实色（WinUI CardBackgroundFill 同构）：层级语言 =
     // 层底（canvas）比卡片深一档，卡片靠亮度差 + 描边 + 投影浮起
     in-out property <color> surface;
+    // 承托卡片的层底（速贴面板）：浅取 canvas-subtle 灰、深取
+    // canvas 近黑（深色层底变亮整体发灰）；浮起卡浮在这层上
+    in-out property <color> card-layer;
+    // 浮起卡面（速贴行卡 / 设置分组卡共用）：浅取 surface 纯白、
+    // 深取 canvas-subtle 微亮（深色 surface 亮灰卡发灰被否）——
+    // 两窗卡片观感由此保持一致
+    in-out property <color> card-face;
     // 材质窗根底：canvas 带 alpha，铺在 DWM 材质（Mica/Acrylic）之上；
     // 材质不可用的窗口回退 canvas-default 不透明底
     in-out property <color> material-base;
     // 材质窗内容层：明暗同 0.90 近实心（深压噪点、浅压壁纸 tint），
     // 取 surface 纯白（浅）/canvas（深）。前景文字与卡片一律坐这层。
-    // 速贴整面板、搜索整窗、编辑整窗消费它（设置内容层底改用
-    // canvas-default：白卡需要灰层底承托，见 settings.slint）
+    // 搜索整窗、编辑整窗消费它（设置内容层底改用 canvas-default：
+    // 白卡需要灰层底承托，见 settings.slint；速贴已退出材质消费，
+    // 面板走 card-layer 实底，见 no-focus-picker.md 坑十一）
     in-out property <color> material-layer;
 
 

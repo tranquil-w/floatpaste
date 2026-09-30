@@ -155,15 +155,14 @@ pub fn schedule_caption_strip(hwnd: isize) {
 }
 
 /// 材质管线按窗口生命周期分流（对齐 PowerToys 选型：常驻内容窗
-/// Mica、可激活瞬态浮层 Acrylic、无焦点窗专项管线）
+/// Mica、可激活瞬态浮层 Acrylic）。速贴是无焦点窗：DWM 材质在无焦点
+/// 窗口上系统性不生效（SWCA HOSTBACKDROP 绕过降级的假设实测不成立），
+/// 走实底自绘，不在此分流
 pub enum MaterialSurface {
     /// 编辑/设置：常驻内容窗 → SystemBackdrop Mica
     Content,
     /// 搜索：有焦点瞬态浮层 → SystemBackdrop Acrylic
     Transient,
-    /// 速贴：无焦点窗，SystemBackdrop 非前台自动降级纯色 →
-    /// SWCA HOSTBACKDROP + Acrylic 绕过降级
-    HostAcrylic,
 }
 
 /// 全应用统一材质挂载（明暗/回退门控在此收口）。
@@ -177,7 +176,6 @@ pub fn apply_material(app: &App, hwnd: isize, surface: MaterialSurface) -> bool 
     match surface {
         MaterialSurface::Content => win32_ext::apply_window_backdrop(hwnd, false, dark),
         MaterialSurface::Transient => win32_ext::apply_window_backdrop(hwnd, true, dark),
-        MaterialSurface::HostAcrylic => win32_ext::apply_window_host_backdrop_acrylic(hwnd, dark),
     }
 }
 

@@ -192,12 +192,9 @@ pub fn activate(app: &App) {
         &tokens,
     );
 
-    // 速贴无焦点窗：SWCA HOSTBACKDROP + SystemBackdrop Acrylic（非前台
-    // 不降级，材质与搜索窗同源）；面板底用 material-layer 近实心压住
-    // 渗出，材质感以 ~10% 保留
-    let material_active = overlay::apply_material(app, hwnd, overlay::MaterialSurface::HostAcrylic);
-    info!("速贴材质挂载: active={material_active}");
-    win.set_material_active(material_active);
+    // 速贴面板走实底自绘（层灰卡白）：无焦点窗口上 DWM 材质系统性
+    // 不生效——SWCA HOSTBACKDROP 组合实测也拿不到 Acrylic（非环境
+    // 差异），速贴不再依赖材质，原 HOSTBACKDROP 装配已整体移除
 
     app.state.begin_picker_activation();
 

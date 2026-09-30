@@ -34,10 +34,13 @@ fn rgba_color(rgb: [u8; 3], alpha: f32) -> Color {
 
 /// 完整 token 集：速贴 / 搜索 / 编辑窗口共用同一键集
 fn write_full_tokens(theme: &Theme, tokens: &ThemeTokens) {
+    theme.set_is_dark(tokens.is_dark);
     theme.set_canvas_default(hex_color(tokens.canvas_default));
     theme.set_canvas_subtle(hex_color(tokens.canvas_subtle));
     theme.set_canvas_inset(hex_color(tokens.canvas_inset));
     theme.set_surface(hex_color(tokens.surface));
+    theme.set_card_layer(hex_color(tokens.card_layer));
+    theme.set_card_face(hex_color(tokens.card_face));
     theme.set_material_base(rgba_color(
         tokens.material_base_rgb,
         tokens.material_base_alpha,

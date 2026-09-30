@@ -539,16 +539,17 @@ component ToggleRow inherits Rectangle {
 }
 
 // 设置分区卡片组（旧版 ROW_GROUP_CLASS：rounded-xl border border-muted
-// bg-canvas-subtle，行间 divide-y 分隔线）。卡片语言对齐 WinUI：surface
-// 卡 + 描边 + 柔和投影，浮在 canvas 层底上——浅色下 canvas-subtle 灰卡
-// 贴近实心白层被判「蒙灰」，层次改由亮度反转（层灰、卡白）+ 投影承担，
-// 勿改回灰卡填充
+// bg-canvas-subtle，行间 divide-y 分隔线）。卡片语言对齐 WinUI：卡面
+// （card-face，与速贴行卡共用同一 token）+ 描边 + 柔和投影，浮在
+// canvas 层底上——浅色下 canvas-subtle 灰卡贴近实心白层被判「蒙灰」，
+// 层次改由亮度反转（层灰、卡白）+ 投影承担，勿改回灰卡填充；深色
+// 卡面取 canvas-subtle 微亮（surface 亮灰卡发灰被否，与速贴同源）
 component RowGroup inherits Rectangle {
     border-radius: 12px;
     drop-shadow-blur: 12px;
     drop-shadow-offset-y: 2px;
     drop-shadow-color: Theme.shadow-color.with-alpha(0.10);
-    background: Theme.surface;
+    background: Theme.card-face;
     clip: true;
     height: group-col.preferred-height + 2px;
     // 内容整体内缩 1px：Slint 子元素画在父边框之上，行悬停底色若延伸

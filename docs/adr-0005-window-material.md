@@ -1,5 +1,6 @@
 ---
 status: accepted
+note: 速贴（无焦点窗）的材质消费已于 2026-09-30 退出——无焦点窗上 DWM 材质系统性不生效（HOSTBACKDROP 组合也不行），spike 第 3 条结论被长期实测推翻，见 no-focus-picker.md 坑十一；可激活窗（搜索/编辑/设置）管线不变
 ---
 
 # 窗口材质：DWM backdrop 优先

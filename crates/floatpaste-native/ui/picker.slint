@@ -4,7 +4,7 @@
 // - 顶栏（PowerToys 高级粘贴式）：软件图标 + 居中拖拽横条 + 关闭按钮，
 //   整条背景可拖拽移动窗口；操作失败提示走托盘系统通知，不占面板 UI
 // - 列表：多行预览（最多 4 行）、72px 缩略图、数字徽章、类型徽章、来源、
-//   相对时间、收藏星标与左侧强调边条、标签行（常显，行高不随选中变化）
+//   相对时间、收藏星标、标签行（常显，行高不随选中变化）
 // - 交互：单击选中 / 双击上屏 / 悬停 400ms 预览（Rust 调度）
 // - 键盘全程不经窗口焦点（LL 键盘钩子会话），窗口本身不抢焦点
 import { Theme, Metrics, Motion } from "theme.slint";
@@ -30,8 +30,8 @@ export global PanelGeometry {
     out property <length> scroll-slot: 10px;               // 列表右侧滚动槽
     out property <length> list-pad-left: 14px;             // 原版 grid pl-[14px]
     out property <length> list-pad-right: Metrics.space-1; // 原版 grid pr-1
-    out property <length> row-frame: 2px;                  // 行卡片描边双层（上下各 1px）
-    out property <length> row-pad-left: 12px;              // 行内左 padding：含左缘选中条（3px）的呼吸空隙
+    out property <length> row-frame: 4px;                  // 行卡片描边双层（上下各 2px，含 padding）
+    out property <length> row-pad-left: 12px;              // 行内左 padding
     out property <length> row-pad-right: Metrics.space-1_5; // 行内右 padding（单侧）
     out property <length> thumb-size: 72px;
     out property <length> thumb-gap: 10px;
@@ -142,8 +142,6 @@ export component ListScrollBar inherits Rectangle {
 component ClipRowCard inherits Rectangle {
     in property <ClipRow> data;
     in property <bool> selected;
-    // 材质门控：材质活跃时非选中行底走半透明（Acrylic 透出行卡）
-    in property <bool> material-active: false;
     in property <length> text-width;
     callback clicked();
     callback double-clicked();
@@ -158,44 +156,40 @@ component ClipRowCard inherits Rectangle {
         }
     }
 
-    // 选中态：左缘 3px 强调条 + selected-bg 中性提亮底（PowerToys Run
-    // 语言：选中感由亮度承载，强调色只占条，不垫整行——垫层方案会在
-    // 行上下圆角处露出强调色弧角）。非选中态：材质模式行底半透明
-    // （Acrylic 透出行卡与面板一致通透），悬停反馈走半透明 inset 底
+    // 选中态强调 = 2px 墨色边框（fg-default @0.70，浅色=深墨/深色=
+    // 白墨，与文字同源、随明暗反色；加粗配减淡平衡存在感）+ 选中
+    // 字重（semibold），无底色变化。边框画在本层（inner-card 的
+    // clip 按直角裁剪会裁掉圆角弧段，slint#4176）；VerticalLayout
+    // 的 2px padding = 边框预留几何，与 PanelGeometry.row-frame
+    // 双侧合计同步（Rust 裁排经 preview-pad-h 读到）
     border-radius: Metrics.radius-lg;
+    border-width: selected ? 2px : 0px;
+    border-color: Theme.fg-default.with-alpha(0.70);
 
     VerticalLayout {
-        padding: 1px;
+        // 选中边框 2px 的预留几何（恒定，不随选中切换——行高稳定性
+        // 不变量），与 row-frame 双侧合计同步
+        padding: 2px;
 
         inner-card := Rectangle {
             border-radius: Metrics.radius-lg;
-            border-width: selected ? 0px : 1px;
-            border-color: item-ta.has-hover ? Theme.border-default : Theme.border-subtle;
-            // 普通态无底色：条目透出窗底材质（内容层 0.90 近实心，
-            // 是速贴「看不出透明」的根源）；hover 瞬时反馈保留半透明
-            // inset 底；选中态换中性提亮底。底色不设动画：键盘导航是
-            // 高频交互，渐隐会让上一个选中项闪一拍强调色（Motion 频率
-            // 纪律）
-            background: selected
-                ? Theme.selected-bg
-                : (item-ta.has-hover
-                    ? Theme.canvas-inset.with-alpha(material-active ? 0.62 : 1.0)
-                    : transparent);
+            // 行结构明暗同构：层底（card-layer）+ 浮起行卡（card-face，
+            // 与设置窗分组卡共用同一 token），行区分靠亮度差 + 圆角 +
+            // 卡缝。底色不设动画：键盘导航是高频交互，渐隐会让上一个
+            // 选中项闪一拍强调色（Motion 频率纪律）
+            background: Theme.card-face;
+
+            // 悬停覆盖层：声明在内容之前垫底（选中无底色变化，
+            // 强调全部由外层墨色边框 + 字重承载）；悬停 = 墨色微叠层
+            Rectangle {
+                border-radius: Metrics.radius-lg;
+                background: item-ta.has-hover && !selected
+                    ? Theme.fg-default.with-alpha(Theme.is-dark ? 0.06 : 0.04)
+                    : transparent;
+            }
             // 兜底裁剪：字体度量与渲染器行高存在细微差异时，
             // 防止预览文本画穿条目边界（原版由 CSS overflow 保证）
             clip: true;
-
-            // 选中条：独立 3px 竖条，定长 24px 垂直居中——行高随内容
-            // 可变，定长在多行行高下保持一致，且恒落在直线段内不碰
-            // 上下圆角；声明在内容之前 = 垫底
-            if (selected): Rectangle {
-                x: 0;
-                y: (parent.height - self.height) / 2;
-                width: 3px;
-                height: 24px;
-                border-radius: 2px;
-                background: Theme.accent-fg;
-            }
 
             // 每行一把隐藏标尺：与预览 Text 同文本、同宽度，
             // 高度喂回预览 Text。布局引擎对换行文本的
@@ -245,9 +239,10 @@ component ClipRowCard inherits Rectangle {
 
                     preview-text := Text {
                         text: data.preview;
-                        color: selected
-                            ? Theme.fg-default
-                            : (data.favorited ? Theme.fg-default : Theme.fg-muted);
+                        // 正文恒 fg-default（微软列表正文 primary 档）：
+                        // 大面积 secondary 灰在浅色下偏淡失神；收藏区分
+                        // 由 ★ 星标承载，不再吃文字色档位
+                        color: Theme.fg-default;
                         font-size: Metrics.text-body;
                         // 原版 line-clamp-4：预览串由 Rust 用度量标尺
                         // 按当前宽度裁到 4 行并加省略号
@@ -419,9 +414,6 @@ export component QuickPasteWindow inherits Window {
     in-out property <bool> load-failed: false;
     // 加载失败的具体原因（旧版 getErrorMessage 展示）
     in-out property <string> load-error-text;
-    // DWM 材质（Acrylic）是否挂载成功：false 时面板用不透明底回退
-    // （窗口 background 透明会把桌面透进来，不能作为回退态）
-    in property <bool> material-active: false;
 
 
     // ── 回调（Rust 接管）──
@@ -470,11 +462,12 @@ export component QuickPasteWindow inherits Window {
     in-out property <bool> enter-animated: true;
 
     card := Rectangle {
-        // 材质挂载成功 → material-layer 近实心底叠在系统 Acrylic 上
-        // （速贴走 HOSTBACKDROP 组合：无焦点不降级，材质与搜索窗同源，
-        // 透出压到 ~10%）；未挂载 → 不透明 canvas 回退（透明窗底会
-        // 直接透出桌面）
-        background: root.material-active ? Theme.material-layer : Theme.canvas-default;
+        // 面板底 = card-layer 层灰（速贴「层灰卡白」的层底）：浅
+        // canvas-subtle 灰 / 深 canvas 近黑，行卡 surface 白卡浮在
+        // 这层上。速贴是无焦点窗，DWM 材质在无焦点窗口上系统性
+        // 不生效（HOSTBACKDROP 组合实测也拿不到，2026-09-30 移除
+        // 装配），面板走实底自绘；透明窗底不能裸透，必须实色
+        background: Theme.card-layer;
         border-radius: Metrics.radius-lg;
         border-width: PanelGeometry.card-border;
         border-color: Theme.border-window;
@@ -552,8 +545,7 @@ export component QuickPasteWindow inherits Window {
 
             // ── 列表区 ──
             Rectangle {
-                // 透出面板材质底：行卡片保持不透明浮卡，间隙与空态处
-                // 见 Acrylic
+                // 透出面板灰底：行卡白卡之间的缝隙与空态处见层灰
                 background: transparent;
                 border-radius: 8px;
 
@@ -657,7 +649,6 @@ export component QuickPasteWindow inherits Window {
                             for row[i] in root.rows: ClipRowCard {
                                 data: row;
                                 selected: i == root.selected;
-                                material-active: root.material-active;
                                 text-width: row.has-thumb
                                     ? root.preview-width-thumb
                                     : root.preview-width-no-thumb;

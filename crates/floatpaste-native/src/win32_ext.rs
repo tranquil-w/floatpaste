@@ -104,11 +104,12 @@ pub fn system_transparency_enabled() -> bool {
 /// （2026-09-28）。
 ///
 /// **无焦点窗口（速贴）勿走本函数**：SystemBackdrop Acrylic 在窗口
-/// 非前台时自动降级为纯色（系统行为，无开关），速贴须用
-/// [`apply_window_host_backdrop_acrylic`]。
+/// 非前台时自动降级为纯色（系统行为，无开关）；曾试过 SWCA
+/// HOSTBACKDROP 组合绕过降级，实测无焦点窗口上材质依然不出
+/// （2026-09-30 移除），速贴走实底自绘。
 ///
 /// DWM 属性挂在 HWND 上、不受 winit 样式重排影响，停屏方案窗口
-/// （速贴/搜索/tooltip）每次显示前挂载即可；走 hide 销毁重建的窗口
+/// （搜索/tooltip）每次显示前挂载即可；走 hide 销毁重建的窗口
 /// （编辑/设置）须在重新 show 后重挂。`transient=true` 用 Acrylic
 /// （瞬态浮层），false 用 Mica（常驻内容窗）。extend frame 会覆盖
 /// [`apply_dwm_shadow`] 的 1px 底边——backdrop 窗口由 DWM 按窗口轮廓
@@ -155,99 +156,6 @@ pub fn apply_window_backdrop(hwnd: isize, transient: bool, prefers_dark: bool) -
     }
 }
 
-
-/// 无焦点窗口的系统 Acrylic：SWCA `ACCENT_STATE_ENABLE_HOSTBACKDROP`
-/// （Windows 11 新增的 accent 状态，未文档化，由 Windhawk Translucent
-/// Windows mod 逆向证实）声明「窗口表面之下由 DWM 渲染 host backdrop」，
-/// 配合 `DWMWA_SYSTEMBACKDROP_TYPE`（Acrylic）即可在**非前台窗口**上
-/// 获得与前台一致的系统材质——SystemBackdrop 单独使用时非前台自动降级
-/// 纯色（系统行为），HOSTBACKDROP 组合绕过该降级。
-///
-/// 材质态面板底用 material-base 半透明色（与搜索窗同构，系统 Acrylic
-/// 自带 tint 与噪点，无需应用侧补）。已知取舍：API 未文档化，未来
-/// Windows 版本存在变更风险（SetWindowCompositionAttribute 失败即
-/// 返回 false 走 canvas 回退）。
-pub fn apply_window_host_backdrop_acrylic(hwnd: isize, prefers_dark: bool) -> bool {
-    #[repr(C)]
-    struct AccentPolicy {
-        accent_state: i32,
-        accent_flags: i32,
-        gradient_color: u32,
-        animation_id: i32,
-    }
-    #[repr(C)]
-    struct WindowCompositionAttribData {
-        attrib: u32,
-        data: *mut AccentPolicy,
-        size_of_data: usize,
-    }
-    type SetWindowCompositionAttributeFn =
-        unsafe extern "system" fn(HWND, *const WindowCompositionAttribData) -> i32;
-
-    if !system_transparency_enabled() {
-        return false;
-    }
-    let hwnd = HWND(hwnd as *mut _);
-    unsafe {
-        // user32.dll 未文档化导出，SDK user32.lib 无符号 → 运行时动态
-        // 加载；符号缺失（未来系统移除）即返回 false 走 canvas 回退
-        use windows::core::{w, PCSTR};
-        use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
-        let set_window_composition_attribute =
-            LoadLibraryW(w!("user32.dll")).ok().and_then(|module| {
-                std::mem::transmute::<_, Option<SetWindowCompositionAttributeFn>>(
-                    GetProcAddress(module, PCSTR(b"SetWindowCompositionAttribute\0".as_ptr())),
-                )
-            });
-        let Some(set_window_composition_attribute) = set_window_composition_attribute else {
-            return false;
-        };
-        let dark = u32::from(prefers_dark);
-        if DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_USE_IMMERSIVE_DARK_MODE,
-            &dark as *const u32 as *const _,
-            std::mem::size_of::<u32>() as u32,
-        )
-        .is_err()
-        {
-            return false;
-        }
-        let acrylic = 3; // DWMSBT_TRANSIENTWINDOW
-        if DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_SYSTEMBACKDROP_TYPE,
-            &acrylic as *const i32 as *const _,
-            std::mem::size_of::<i32>() as u32,
-        )
-        .is_err()
-        {
-            return false;
-        }
-        // ACCENT_STATE_ENABLE_HOSTBACKDROP(5):DWM 在窗口表面之下渲染
-        // SystemBackdrop 材质,不随焦点降级
-        let mut policy = AccentPolicy {
-            accent_state: 5,
-            accent_flags: 0,
-            gradient_color: 0,
-            animation_id: 0,
-        };
-        let data = WindowCompositionAttribData {
-            attrib: 19, // WCA_ACCENT_POLICY
-            data: &mut policy as *mut AccentPolicy,
-            size_of_data: std::mem::size_of::<AccentPolicy>(),
-        };
-        let applied = set_window_composition_attribute(hwnd, &data) != 0;
-        let margins = MARGINS {
-            cxLeftWidth: -1,
-            cxRightWidth: -1,
-            cyTopHeight: -1,
-            cyBottomHeight: -1,
-        };
-        let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
-        applied
-    }
-}
 
 /// 窗口物理 DPI（100%=96）
 pub fn window_dpi(hwnd: isize) -> u32 {
