@@ -8,6 +8,7 @@
 //! - `platform`：Win32 原生集成（剪贴板、监听、快捷键、单实例等），
 //!   通过回调向 UI 层暴露事件，不反向依赖任何窗口框架。
 
+pub mod backdrop;
 pub mod domain;
 pub mod launch_mode;
 pub mod platform;
