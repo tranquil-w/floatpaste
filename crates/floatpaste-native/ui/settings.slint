@@ -1319,7 +1319,7 @@ export component SettingsWindow inherits Window {
                     background: transparent;
                     border-radius: Metrics.radius-lg;
                     clip: true;
-                    // 自管滚动（对齐编辑窗 ADR-0003 惯用法）：Flickable 内建
+                    // 自管滚动（对齐编辑窗惯用法，docs/editor-window.md）：Flickable 内建
                     // 滚轮平滑动画（180ms 恒定减速）在软件渲染下迟滞不跟手，
                     // 改为滚轮事件直接驱动内容偏移。TouchArea 须为全部内容
                     // 的祖先——子元素未消费的滚轮沿父链冒泡，兄弟层收不到。

@@ -544,7 +544,7 @@ export component EditorWindow inherits Window {
 
                         // 自管滚动（弃用 Flickable：可滚状态在 pressed
                         // 阶段吞子元素点击、滚轮链路不可控，见
-                        // docs/adr-0003）。滚动 = 内容层 y 偏移 + 滚轮事件
+                        // docs/editor-window.md）。滚动 = 内容层 y 偏移 + 滚轮事件
                         // 驱动，全部显式
                         edit-scroll := Rectangle {
                             x: 0;
@@ -603,7 +603,7 @@ export component EditorWindow inherits Window {
                                     // 元素几何 1-2px（parley 行盒顶高于元素顶），增量
                                     // 重绘的脏区只认元素几何——越界段「画得上、擦不
                                     // 掉」，在首行文字上方残留孤立白点（离屏复现实验
-                                    // 证实，见 docs/adr-0003；旧修复是同色遮罩条盖
+                                    // 证实，见 docs/editor-window.md；旧修复是同色遮罩条盖
                                     // 住，与透明底不兼容已退役）。裁剪层顶与 TextInput
                                     // 顶重合，越界段在绘制管线直接被裁，不依赖底色
                                     Rectangle {
