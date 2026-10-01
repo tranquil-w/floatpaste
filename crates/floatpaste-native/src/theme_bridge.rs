@@ -41,10 +41,6 @@ fn write_full_tokens(theme: &Theme, tokens: &ThemeTokens) {
     theme.set_surface(hex_color(tokens.surface));
     theme.set_card_layer(hex_color(tokens.card_layer));
     theme.set_card_face(hex_color(tokens.card_face));
-    theme.set_material_base(rgba_color(
-        tokens.material_base_rgb,
-        tokens.material_base_alpha,
-    ));
     theme.set_material_layer(rgba_color(
         tokens.material_layer_rgb,
         tokens.material_layer_alpha,
@@ -60,7 +56,7 @@ fn write_full_tokens(theme: &Theme, tokens: &ThemeTokens) {
         tokens.accent_subtle_rgb,
         tokens.accent_subtle_alpha,
     ));
-    theme.set_selected_bg(hex_color(&tokens.selected_bg));
+    theme.set_selected_bg(rgba_color(tokens.selected_bg_rgb, tokens.selected_bg_alpha));
     theme.set_border_default(hex_color(&tokens.border_default));
     theme.set_border_window(hex_color(&tokens.border_window));
     theme.set_border_muted(hex_color(tokens.border_muted));

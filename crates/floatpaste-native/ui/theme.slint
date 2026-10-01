@@ -8,25 +8,27 @@ export global Theme {
     in-out property <color> canvas-default;
     in-out property <color> canvas-subtle;
     in-out property <color> canvas-inset;
-    // 卡片/浮起面实色（WinUI CardBackgroundFill 同构）：层级语言 =
+    // 卡片/浮起面实色：层级语言 =
     // 层底（canvas）比卡片深一档，卡片靠亮度差 + 描边 + 投影浮起
     in-out property <color> surface;
     // 承托卡片的层底（速贴面板）：浅取 canvas-subtle 灰、深取
     // canvas 近黑（深色层底变亮整体发灰）；浮起卡浮在这层上
     in-out property <color> card-layer;
-    // 浮起卡面（速贴行卡 / 设置分组卡共用）：浅取 surface 纯白、
-    // 深取 canvas-subtle 微亮（深色 surface 亮灰卡发灰被否）——
-    // 两窗卡片观感由此保持一致
+    // 浮起卡面（速贴行卡）：浅取 surface 纯白、深取 canvas-subtle
+    // 微亮（深色 surface 亮灰卡发灰被否）
     in-out property <color> card-face;
-    // 材质窗根底：canvas 带 alpha，铺在 DWM 材质（Mica/Acrylic）之上；
-    // 材质不可用的窗口回退 canvas-default 不透明底
-    in-out property <color> material-base;
-    // 材质窗内容层：明暗同 0.90 近实心（深压噪点、浅压壁纸 tint），
-    // 取 surface 纯白（浅）/canvas（深）。前景文字与卡片一律坐这层。
-    // 搜索整窗、编辑整窗消费它（设置内容层底改用 canvas-default：
-    // 白卡需要灰层底承托，见 settings.slint；速贴已退出材质消费，
-    // 面板走 card-layer 实底，见 no-focus-picker.md 坑十一）
+    // 材质窗统一玻璃层：可激活窗（搜索/编辑/设置）的窗根直铺这层
+    // （单层，各窗一致），明暗同 alpha（深压噪点、浅压白雾），rgb 取
+    // surface 纯白（浅）/canvas（深）。前景文字与卡片坐其上。材质不可
+    // 用的窗口回退 canvas-default 不透明底；速贴不走材质（无焦点窗拿
+    // 不到 Acrylic 模糊，面板底自绘烘焙，见 no-focus-picker.md 坑十一）
     in-out property <color> material-layer;
+    // 设置层填充（WinUI Layer 同构）：白墨半透明叠在玻璃面上，
+    // 设置卡与目录选中项共用。亮度增量恒定、材质随玻璃透底；与预设
+    // 无关的固定白叠层（同 Motion 常量性质），不经 Rust token 派生
+    out property <color> layer-fill: is-dark
+        ? #FFFFFF.with-alpha(0.05)
+        : #FFFFFF.with-alpha(0.70);
 
 
     // 前景
@@ -113,4 +115,33 @@ export global Motion {
     out property <duration> dur-enter: 150ms;
     // 曲线统一 ease-out：快起缓收，反馈即时；状态切换颜色过渡亦用之
     out property <easing> ease: ease-out;
+}
+
+// 自绘柔影：软件渲染器的 draw_box_shadow 是空实现（slint 1.18.1 内
+// // TODO），drop-shadow-* 声明被静默忽略——一切投影需求统一改用本
+// 组件。同心外扩的实心圆角层堆叠出线性衰减羽化（近似高斯轮廓）：
+// 层 k 覆盖轮廓外 0..k×step，距边缘 d 处的叠加层数 ∝ extent-d，近
+// 边浓、向外线性变淡。层必须用实心填充（描边环各盖一圈，叠不出
+// 衰减梯度）；因此**只能安放在不透明卡面的下层**——卡中心区域
+// layers 层全叠（≈alpha 的墨色），透明卡面挡不住它，会变成盖满
+// 整卡的均匀染色而非投影（安放形态：不透明卡的前置兄弟，或透明包
+// 裹层内先声明的元素；卡片自身带 clip:true 时不可作卡内子元素，外
+// 扩环带会被裁掉）。offset-y 把各层轮廓整体下移：上缘羽化范围
+// extent-offset-y、下缘 extent+offset-y（超出 extent 的上缘不出影）
+export component SoftShadow inherits Rectangle {
+    in property <int> layers: 8;        // 层数；总羽化范围 extent = layers × step
+    in property <length> step: 1px;     // 层距（羽化粒度）
+    in property <length> offset-y: 2px;
+    in property <length> radius: 12px;  // 对齐卡片圆角，各层同心长大
+    in property <float> alpha: 0.12;    // 轮廓边缘处的合成峰值
+    background: transparent;
+    for layer[i] in root.layers: Rectangle {
+        property <length> e: (i + 1) * root.step;
+        x: -e;
+        y: -e + root.offset-y;
+        width: parent.width + 2 * e;
+        height: parent.height + 2 * e;
+        border-radius: root.radius + e;
+        background: Theme.shadow-color.with-alpha(root.alpha / root.layers);
+    }
 }

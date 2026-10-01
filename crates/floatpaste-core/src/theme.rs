@@ -552,7 +552,7 @@ pub struct ThemeTokens {
     pub canvas_default: &'static str,
     pub canvas_subtle: &'static str,
     pub canvas_inset: &'static str,
-    /// 卡片/浮起面实色（WinUI CardBackgroundFill 同构）：设置分组卡
+    /// 卡片/浮起面实色：设置分组卡
     /// 填充。层级语言 = 层底（canvas）比卡片深一档，白卡靠亮度差 +
     /// 描边 + 投影浮起，勿用 canvas-subtle 灰做卡片填充（浅色下贴
     /// 近实心白层显「蒙灰」）
@@ -562,9 +562,9 @@ pub struct ThemeTokens {
     /// 拉开亮度差），深色取 canvas_default（近黑，层底变亮会整体发灰）
     pub card_layer: &'static str,
 
-    /// 浮起卡面（速贴行卡 / 设置分组卡共用）：浅色取 surface 纯白，
-    /// 深色取 canvas_subtle 微亮——深色 surface 亮灰卡实测发灰发闷，
-    /// 用户否决。两窗卡片观感由此保证一致
+    /// 浮起卡面（速贴行卡）：浅色取 surface 纯白，深色取 canvas_subtle
+    /// 微亮——深色 surface 亮灰卡实测发灰发闷，用户否决。卡亮于底一档
+    /// 才浮得起；设置窗卡片不走本 token（半透明层填充，见 settings.slint）
     pub card_face: &'static str,
 
     pub fg_default: String,
@@ -578,22 +578,18 @@ pub struct ThemeTokens {
     pub accent_subtle_rgb: [u8; 3],
     pub accent_subtle_alpha: f32,
 
-    /// 选中行/选中项中性底（速贴与搜索的列表选中态）：canvas 向正文
-    /// 墨色 OKLab 混合，深 0.12/浅 0.06。选中感由亮度提升 + 左缘 3px
-    /// 强调条承载（PowerToys Run 语言），强调色不再铺选中大底——大底
-    /// 一铺，行内每个元素都得重对一遍对比度
-    pub selected_bg: String,
+    /// 选中行/选中项中性底（搜索列表选中态）：纯墨色低 alpha 的**半透明
+    /// 叠层**，叠在玻璃/窗底上——亮度增量恒定（浅色乘性压暗、深色加性
+    /// 提亮），不随桌面亮度漂移（不透明固定灰在亮桌面玻璃上会与底趋零
+    /// 乃至反转）。选中感 = 恒定亮度偏移 + 左缘 3px 强调条 + 标题加粗
+    /// （速贴同款前景通道），强调色不铺选中大底
+    pub selected_bg_rgb: [u8; 3],
+    pub selected_bg_alpha: f32,
 
-    /// 材质窗根底色：canvas 色带 alpha，铺在 DWM 材质（Mica/Acrylic）
-    /// 之上作面板底。材质不可用（系统不支持/透明关闭）的窗口用
-    /// canvas_default 不透明底回退
-    pub material_base_rgb: [u8; 3],
-    pub material_base_alpha: f32,
-
-    /// 材质窗内容层：内容区/面板的近实心底，前景（文字/卡片）一律坐
-    /// 这层上，材质渗出压到 ~10%，材质感留给窗缘与 material-base 底。
-    /// 取值方向对齐 PowerToys 自定义 acrylic 的「往实里调」（luminosity
-    /// opacity 0.96）——宁可实不可透
+    /// 材质窗统一玻璃层：可激活窗（搜索/编辑/设置）的窗根直铺这层
+    /// （单层，各窗观感一致），前景（文字/卡片）坐其上；材质不可用
+    /// （系统不支持/透明关闭）的窗口用 canvas_default 不透明底回退。
+    /// 材质规划：「无 / Mica / Acrylic」三档设置项，每窗一致
     pub material_layer_rgb: [u8; 3],
     pub material_layer_alpha: f32,
 
@@ -685,11 +681,10 @@ pub fn derive_tokens(preset_id: &str, theme_accent: &str, resolved: ResolvedThem
 
     let accent_fg = ensure_contrast(&accent_hex, scale.canvas, subtle_target);
     let emphasis = ensure_emphasis_background(&accent_hex);
-    // 选中行中性底：亮度承载选中感，行内元素的对比关系不随选中变化；
-    // 左缘 3px 强调条负责强调色存在感。搜索窗列表消费；速贴选中
-    // （层灰卡白结构）不压暗填充——白卡群中的深色选中卡有塌陷感，
-    // 改 accent 描边 + 强调条
-    let selected_bg = mix_colors(scale.canvas, &ink, if is_light { 0.06 } else { 0.12 });
+    // 选中行中性底 = 纯墨色半透明叠层（浅压暗/深提亮，见 struct 注释）；
+    // alpha 即增量档位：浅 0.12 ≈ 恒定 -12% 亮度，深 0.16 ≈ 恒定 +30（0-255）
+    let selected_bg_rgb = hex_to_rgb_channels(&ink);
+    let selected_bg_alpha = if is_light { 0.12 } else { 0.16 };
     let accent_hover = mix_colors(
         &emphasis,
         if is_light { "#000000" } else { "#ffffff" },
@@ -712,7 +707,11 @@ pub fn derive_tokens(preset_id: &str, theme_accent: &str, resolved: ResolvedThem
         canvas_subtle: scale.canvas_subtle,
         canvas_inset: scale.inset,
         surface: scale.surface,
-        card_layer: if is_light { scale.canvas_subtle } else { scale.canvas },
+        card_layer: if is_light {
+            scale.canvas_subtle
+        } else {
+            scale.canvas
+        },
         card_face: if is_light { scale.surface } else { scale.canvas_subtle },
 
         fg_default: ink.clone(),
@@ -725,22 +724,16 @@ pub fn derive_tokens(preset_id: &str, theme_accent: &str, resolved: ResolvedThem
         accent_hover: accent_hover.clone(),
         accent_subtle_rgb: hex_to_rgb_channels(&accent_fg),
         accent_subtle_alpha: subtle_alpha as f32,
-        selected_bg,
-
-        material_base_rgb: hex_to_rgb_channels(scale.canvas),
-        // 明暗同 0.70：设置窗底/侧栏的窗缘层。2026-09-30 用户两轮拍板
-        // 0.80→0.70（持续增强材质感）
-        material_base_alpha: 0.70,
+        selected_bg_rgb,
+        selected_bg_alpha,
 
         material_layer_rgb: hex_to_rgb_channels(if is_light {
             scale.surface
         } else {
             scale.canvas
         }),
-        // 明暗同 0.70：2026-09-30 用户两轮拍板 0.90→0.80→0.70（持续
-        // 增强设置/编辑窗材质感；搜索窗同 token 一并放宽）。历史：曾
-        // 对齐 WinUI Layer（50% 白）放开 0.62 透 Mica tint，实测壁纸
-        // 一染色整窗泛色被否；0.70 为用户主动选择的新平衡点
+        // 明暗同 0.70：玻璃感与前景可读的平衡点。透得更多（如 0.62）
+        // 会被壁纸染色整窗泛色，勿放开
         material_layer_alpha: 0.70,
 
         border_default: border,
@@ -837,22 +830,8 @@ mod tests {
     }
 
     #[test]
-    fn material_base_follows_canvas() {
-        // 材质底 = canvas 直通色；rgb 通道与 canvas 逐值一致是
-        // 「回退不透明底观感连续」的前提。alpha 明暗同 0.70
-        // （2026-09-30 用户两轮拍板放宽增强材质感）
-        let light = derive_tokens("default", "default", ResolvedTheme::Light);
-        assert_eq!(light.material_base_rgb, [249, 249, 251]);
-        assert!((light.material_base_alpha - 0.70).abs() < f32::EPSILON);
-        let dark = derive_tokens("default", "default", ResolvedTheme::Dark);
-        assert_eq!(dark.material_base_rgb, [24, 25, 27]);
-        assert!((dark.material_base_alpha - 0.70).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn material_layer_is_near_opaque_canvas() {
-        // 内容层（明暗同 0.70，2026-09-30 用户两轮拍板自 0.90 放宽
-        // 增强材质感）：rgb 深色=canvas、浅色=surface 纯白，靠表面色阶分层
+    fn material_layer_rgb_follows_theme_and_alpha_is_stable() {
+        // 玻璃层（明暗同 0.70）：rgb 深色=canvas、浅色=surface 纯白，靠表面色阶分层
         let light = derive_tokens("default", "default", ResolvedTheme::Light);
         assert_eq!(light.material_layer_rgb, [255, 255, 255]);
         assert!((light.material_layer_alpha - 0.70).abs() < f32::EPSILON);
@@ -883,6 +862,19 @@ mod tests {
         assert_eq!(tokens.canvas_default, "#f9f9fb");
     }
 
+    /// 半透明 rgb 叠到 base（hex）上的合成色，转回 hex 供对比计算
+    fn over_hex(rgb: [u8; 3], alpha: f32, base: &str) -> String {
+        let b = parse_hex(base).expect("base 应为合法 hex");
+        let a = alpha as f64;
+        let mix = |fg: u8, bg: f64| (fg as f64 * a + bg * 255.0 * (1.0 - a)).round() as u8;
+        format!(
+            "#{:02x}{:02x}{:02x}",
+            mix(rgb[0], b.r),
+            mix(rgb[1], b.g),
+            mix(rgb[2], b.b)
+        )
+    }
+
     /// 门禁：全预设 × 明暗 × 强调色安全列表（含迁移 hex 样本），
     /// 实底强调白字、选中行墨字、文本选区三组对比逐项达标
     #[test]
@@ -902,16 +894,23 @@ mod tests {
                         "{}",
                         label("emphasis")
                     );
+                    // 选中底是半透明叠层（ink@α over 玻璃/窗底）：文字对比
+                    // 与可见度都按合成到 canvas 后的实际色算——渲染时
+                    // 行底就是这层合成结果
+                    let selected = over_hex(
+                        tokens.selected_bg_rgb,
+                        tokens.selected_bg_alpha,
+                        &tokens.canvas_default,
+                    );
                     assert!(
-                        contrast_ratio(&tokens.fg_default, &tokens.selected_bg) >= 4.5,
+                        contrast_ratio(&tokens.fg_default, &selected) >= 4.5,
                         "{}",
                         label("selected")
                     );
                     // 选中底可见度下限只对深色：浅色是轻压暗档，选中感
                     // 由强调条承载
                     if resolved == ResolvedTheme::Dark {
-                        let visibility =
-                            contrast_ratio(&tokens.selected_bg, &tokens.canvas_default);
+                        let visibility = contrast_ratio(&selected, &tokens.canvas_default);
                         assert!(visibility >= 1.2, "{}", label("selected-visibility"));
                     }
                     assert!(
