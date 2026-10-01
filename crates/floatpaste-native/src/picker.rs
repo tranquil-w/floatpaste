@@ -14,9 +14,12 @@ use std::sync::Arc;
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use tracing::{info, warn};
 
+use floatpaste_core::backdrop;
 use floatpaste_core::domain::clip_item::{ClipItemSummary, PasteOption};
 use floatpaste_core::domain::settings::{PasteTrigger, PickerPositionMode, UserSetting};
 use floatpaste_core::platform::windows::active_app::ActiveAppResolver;
+use floatpaste_core::platform::windows::picker_position::ScreenPoint;
+use floatpaste_core::platform::windows::screen_capture;
 use floatpaste_core::platform::windows::window_control::{self, GestureMode, ResizeDirection};
 use floatpaste_core::platform::windows::{mouse_monitor, session_keyboard};
 use floatpaste_core::services::clip_display::clip_type_label;
@@ -43,6 +46,9 @@ use crate::{ClipRow, PanelGeometry, QuickPasteWindow, SearchWindow, TooltipWindo
 const PREVIEW_MAX_LINES: usize = 4;
 /// 入库预览的字符截断上限（normalize_service 同值）：达到即认为原文更长
 const PREVIEW_SOURCE_LIMIT: usize = 120;
+/// 自绘模糊半径（逻辑 px，物理半径 = 该值 × 缩放因子）。等效观感目标
+/// Acrylic 面板底（三遍 box 近似高斯）
+const BLUR_RADIUS_LOGICAL: f32 = 12.0;
 
 /// 事件循环线程上的应用上下文（克隆廉价，闭包捕获后经 invoke 回到事件循环）
 #[derive(Clone)]
@@ -140,7 +146,16 @@ pub fn activate(app: &App) {
         if window_control::is_window_visible(hwnd) {
             // 尺寸不动：用窗口当前实测尺寸（Slint 的 size() 即物理像素，
             // 不要再乘缩放因子，乘了约束用的尺寸会虚大）
-            apply_window_position(app, &settings, win.window().size(), hwnd, None);
+            let size = win.window().size();
+            if let Some(point) = resolve_window_position(app, &settings, size, None) {
+                window_control::set_window_bounds(
+                    hwnd,
+                    point.x,
+                    point.y,
+                    size.width as i32,
+                    size.height as i32,
+                );
+            }
             // 该路径绕过 after_show：置顶与守护需自行保证
             window_control::set_window_topmost_no_activate(hwnd);
             start_topmost_guard(app);
@@ -192,9 +207,8 @@ pub fn activate(app: &App) {
         &tokens,
     );
 
-    // 速贴面板走实底自绘（层灰卡白）：无焦点窗口上 DWM 材质系统性
-    // 不生效——SWCA HOSTBACKDROP 组合实测也拿不到 Acrylic（非环境
-    // 差异），速贴不再依赖材质，原 HOSTBACKDROP 装配已整体移除
+    // 材质底图：自绘模糊（DWM 管线在无焦点窗上拿不到玻璃感），
+    // 每次唤起在移回屏内前重新烘焙（见 prepare_blur_backdrop）
 
     app.state.begin_picker_activation();
 
@@ -213,12 +227,30 @@ pub fn activate(app: &App) {
     // 列表重活（查询 + 逐行裁排）跑在停屏期间，上屏即最新内容
     refresh_list_reset(app, &settings);
 
-    // 上屏前先暖表面：停屏窗口收不到自发 WM_PAINT，同步泵一次呈现，
-    // 让数据就绪后的首帧在屏外落盘——移回屏上的第一帧即完整内容，
-    // 既不透明也不闪旧列表
-    win32_ext::warm_surface(hwnd);
-    apply_window_position(app, &settings, size, hwnd, session.target_window_hwnd);
-    win32_ext::force_full_repaint(hwnd);
+    // 定位解析先行：抓屏烘焙模糊底图要在移回屏内之前完成（窗口尚在
+    // 屏外，背后区域抓不到面板自己）；定位失败保持停屏位并回实底
+    let position = resolve_window_position(app, &settings, size, session.target_window_hwnd);
+    match position {
+        Some(point) => {
+            prepare_blur_backdrop(&win, point, size, &tokens);
+            // 上屏前先暖表面：停屏窗口收不到自发 WM_PAINT，同步泵一次
+            // 呈现，让底图与最新列表的首帧在屏外落盘——移回屏上的第
+            // 一帧即完整内容，既不透明也不闪旧列表
+            win32_ext::warm_surface(hwnd);
+            window_control::set_window_bounds(
+                hwnd,
+                point.x,
+                point.y,
+                size.width as i32,
+                size.height as i32,
+            );
+            win32_ext::force_full_repaint(hwnd);
+        }
+        None => {
+            warn!("速贴定位失败：光标位置与工作区均不可得，窗口保持停屏位");
+            win.set_blur_active(false);
+        }
+    }
 
     // 上屏即滑入：解锁动画归零，内容从 4px 滑到位（窗底不动，不露窗外）
     win.set_enter_animated(true);
@@ -398,9 +430,32 @@ pub fn restore_after_editor(app: &App, target: TargetSession) {
     // 出现滑入准备：同 activate，停屏期无动画重置内容偏移，暖首帧即起步态
     win.set_enter_animated(false);
     win.set_enter_offset(4.0);
-    // 上屏前先暖表面（同步泵一次 WM_PAINT 呈现），移回即有内容
-    win32_ext::warm_surface(hwnd);
-    restore_parked_position(app, size, hwnd);
+
+    // 主题 token 先算（tint 烘焙与后段 apply_theme 共用）
+    let resolved = theme::resolve_theme(settings.theme_mode.clone(), theme::system_prefers_dark());
+    let tokens = theme::derive_tokens(&settings.theme_preset, &settings.theme_accent, resolved);
+
+    // 归位记忆位置 + 烘焙模糊底图（同 activate：移回屏内前完成，背后
+    // 区域抓不到面板自己），再暖表面让首帧在屏外落盘
+    let point = resolve_parked_position(app, size);
+    match point {
+        Some(p) => {
+            prepare_blur_backdrop(&win, p, size, &tokens);
+            win32_ext::warm_surface(hwnd);
+            window_control::set_window_bounds(
+                hwnd,
+                p.x,
+                p.y,
+                size.width as i32,
+                size.height as i32,
+            );
+        }
+        None => {
+            warn!("速贴归位失败：记忆位置与光标锚点均不可得，窗口留在停屏位");
+            win.set_blur_active(false);
+            win32_ext::warm_surface(hwnd);
+        }
+    }
 
     app.state.begin_picker_activation();
 
@@ -413,8 +468,6 @@ pub fn restore_after_editor(app: &App, target: TargetSession) {
     win.set_enter_offset(0.0);
 
     // 主题随设置刷新（编辑期间设置可能已被外部修改）
-    let resolved = theme::resolve_theme(settings.theme_mode.clone(), theme::system_prefers_dark());
-    let tokens = theme::derive_tokens(&settings.theme_preset, &settings.theme_accent, resolved);
     theme_bridge::apply_theme(
         Some(&win),
         app.tooltip.upgrade().as_ref(),
@@ -896,20 +949,19 @@ fn resolve_physical_size(app: &App, scale_factor: f32) -> slint::PhysicalSize {
 /// 都要拿它与工作区边界一起约束，保证无论光标贴在屏幕哪一侧，窗口都
 /// 整块落在光标所在显示器的工作区内，且优先贴近光标。`physical_size`
 /// 必须是窗口**真实**的物理尺寸（传小了约束即失效）
-fn apply_window_position(
+/// 定位解析（纯计算，不动窗口）：定位模式解析 + 光标兜底。
+/// 返回 None 表示模式解析与光标兜底均不可得
+fn resolve_window_position(
     app: &App,
-    settings: &floatpaste_core::domain::settings::UserSetting,
+    settings: &UserSetting,
     physical_size: slint::PhysicalSize,
-    hwnd: isize,
     target_window_hwnd: Option<isize>,
-) {
+) -> Option<ScreenPoint> {
     let width = physical_size.width.max(1) as i32;
     let height = physical_size.height.max(1) as i32;
     let mode = settings.picker_position_mode.clone();
-
-    // 解析失败（仓储报错 / 工作区不可得）回退到贴光标：直接放弃会把窗口
-    // 留在屏外停屏位，用户按快捷键却什么都看不到
-    let Some(point) = PickerPositionService::resolve_window_position(
+    // 解析失败（仓储报错 / 工作区不可得）回退到贴光标
+    PickerPositionService::resolve_window_position(
         &app.core().repository,
         &mode,
         width,
@@ -918,25 +970,66 @@ fn apply_window_position(
     )
     .ok()
     .flatten()
-    .or_else(|| resolve_near_cursor(width, height)) else {
-        warn!("速贴定位失败：光标位置与工作区均不可得，窗口保持原位");
-        return;
-    };
-
-    // 尺寸与位置一次 SetWindowPos 落地：定位用的尺寸必须与真正生效的
-    // 尺寸一致，分开调用还会露出「先长高后移位」的中间帧
-    window_control::set_window_bounds(hwnd, point.x, point.y, width, height);
+    .or_else(|| resolve_near_cursor(width, height))
 }
 
-/// 从编辑器返回的归位：不重跑定位模式——鼠标/插入符锚点在编辑往返后
+/// 自绘模糊底图烘焙：抓取目标位屏幕区域（窗口尚在屏外，抓不到面板
+/// 自己）→ 三遍 box 模糊 → 主题 tint（material-layer 同源 token，观感
+/// 与真 Acrylic 面板底一致）→ 圆角烘焙进图 alpha，写入 blur-backdrop。
+/// 抓屏失败（锁屏/会话切换等）回实底（blur-active=false）
+fn prepare_blur_backdrop(
+    win: &QuickPasteWindow,
+    point: ScreenPoint,
+    size: slint::PhysicalSize,
+    tokens: &theme::ThemeTokens,
+) {
+    let started = std::time::Instant::now();
+    let w = size.width.max(1) as i32;
+    let h = size.height.max(1) as i32;
+    let Some(mut rgba) = screen_capture::capture_region_rgba(point.x, point.y, w, h) else {
+        tracing::warn!(
+            "模糊底图抓屏失败: pos=({},{}) size={}x{}",
+            point.x,
+            point.y,
+            w,
+            h
+        );
+        win.set_blur_active(false);
+        return;
+    };
+    let scale = win.window().scale_factor();
+    let blur_radius = (BLUR_RADIUS_LOGICAL * scale).round().max(1.0) as usize;
+    backdrop::blur_rgba(&mut rgba, w as usize, h as usize, blur_radius);
+    backdrop::tint_opaque(
+        &mut rgba,
+        tokens.material_layer_rgb,
+        tokens.material_layer_alpha,
+    );
+    let corner = (win.global::<PanelGeometry>().get_card_radius() * scale).round() as usize;
+    backdrop::bake_round_corners(&mut rgba, w as usize, h as usize, corner);
+    let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(w as u32, h as u32);
+    buf.make_mut_bytes().copy_from_slice(&rgba);
+    win.set_blur_backdrop(slint::Image::from_rgba8(buf));
+    win.set_blur_active(true);
+    // 烘焙成本监控：唤起关键路径上的新增 CPU 开销，一眼可见
+    tracing::info!(
+        "模糊底图烘焙: {}x{}px 半径{} 用时{}ms",
+        w,
+        h,
+        blur_radius,
+        started.elapsed().as_millis()
+    );
+}
+
+/// 归位解析（纯计算）：不重跑定位模式——鼠标/插入符锚点在编辑往返后
 /// 已漂移，重算必然换位。hide_for_editor 停屏前已把当时的几何落盘，
 /// 按「上次位置」读回并钳进工作区即原位重现（尺寸同源：上面的
 /// resolve_physical_size 读的也是这份落盘几何）。读不到记忆时兜底贴
 /// 光标，不把窗口留在屏外停屏位
-fn restore_parked_position(app: &App, physical_size: slint::PhysicalSize, hwnd: isize) {
+fn resolve_parked_position(app: &App, physical_size: slint::PhysicalSize) -> Option<ScreenPoint> {
     let width = physical_size.width.max(1) as i32;
     let height = physical_size.height.max(1) as i32;
-    let point = PickerPositionService::resolve_window_position(
+    PickerPositionService::resolve_window_position(
         &app.core().repository,
         &PickerPositionMode::LastPosition,
         width,
@@ -945,12 +1038,7 @@ fn restore_parked_position(app: &App, physical_size: slint::PhysicalSize, hwnd: 
     )
     .ok()
     .flatten()
-    .or_else(|| resolve_near_cursor(width, height));
-    let Some(point) = point else {
-        warn!("速贴归位失败：记忆位置与光标锚点均不可得，窗口留在停屏位");
-        return;
-    };
-    window_control::set_window_bounds(hwnd, point.x, point.y, width, height);
+    .or_else(|| resolve_near_cursor(width, height))
 }
 
 // 类型徽章文案（对齐旧版 getClipTypeLabel）见 core::clip_display::clip_type_label

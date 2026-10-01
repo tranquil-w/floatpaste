@@ -43,7 +43,7 @@ native 壳内约定：
 | `cargo run -p floatpaste-native` | 启动桌面应用（debug） |
 | `cargo test` | 运行全部 Rust 测试（覆盖 `floatpaste-core` 与 `floatpaste-native`） |
 | `cargo build --release -p floatpaste-native` | 发布构建 |
-| `cargo run -p floatpaste-native --bin picker-snapshot -- <light\|dark> <tag> [hover-y]` | 无头渲染速贴观感快照到 `.artifacts/snapshot/`（诊断工具，不模拟桌面输入） |
+| `cargo run -p floatpaste-native --bin picker-snapshot -- <light\|dark> <tag> [hover-y] [blur]` | 无头渲染速贴观感快照到 `.artifacts/snapshot/`（诊断工具，不模拟桌面输入）；`blur` 合成彩底走烘焙管线，预览玻璃底图与行卡半透 |
 | `node scripts/bump-version.mjs <版本>` | 同步升级 package.json / native Cargo.toml / Cargo.lock |
 
 `package.json` 仅保留版本号（发版 tag 校验用）与 `test:rust` 等价入口，不含任何依赖。

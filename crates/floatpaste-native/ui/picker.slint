@@ -1,7 +1,7 @@
 // 速贴面板：对齐原版 PickerShell.tsx 的完整复刻。
 // - 无边框透明窗 + 8px 圆角卡片 + 1px 窗口边框（DWM 阴影与系统圆角
 //   由 Rust 侧处理，见 win32_ext::apply_dwm_*）
-// - 顶栏（PowerToys 高级粘贴式）：软件图标 + 居中拖拽横条 + 关闭按钮，
+// - 顶栏：软件图标 + 居中拖拽横条 + 关闭按钮，
 //   整条背景可拖拽移动窗口；操作失败提示走托盘系统通知，不占面板 UI
 // - 列表：多行预览（最多 4 行）、72px 缩略图、数字徽章、类型徽章、来源、
 //   相对时间、收藏星标、标签行（常显，行高不随选中变化）
@@ -36,6 +36,8 @@ export global PanelGeometry {
     out property <length> row-pad-right: Metrics.space-1_5; // 行内右 padding（单侧）
     out property <length> thumb-size: 72px;
     out property <length> thumb-gap: 10px;
+    // 窗口卡片圆角（Rust 侧模糊底图按此烘焙圆角 alpha，见 core::backdrop）
+    out property <length> card-radius: Metrics.radius-lg;
     // 预览可用宽需从 flick 宽扣除的横向总量（Rust 首帧兜底同式）
     out property <length> preview-pad-h:
         list-pad-left + list-pad-right + row-frame + row-pad-left + row-pad-right;
@@ -144,6 +146,9 @@ component ClipRowCard inherits Rectangle {
     in property <ClipRow> data;
     in property <bool> selected;
     in property <length> text-width;
+    // 面板处于自绘模糊底图形态时行卡半透（玻璃卡透底）；实底形态保持
+    // 不透明——底下是平色层灰，透它没有意义
+    in property <bool> blur-active: false;
     callback clicked();
     callback double-clicked();
     callback hover(length, length);
@@ -165,6 +170,36 @@ component ClipRowCard inherits Rectangle {
     // PanelGeometry.row-frame
     border-radius: Metrics.radius-lg;
 
+    // 浮起下投影（自绘）：软件渲染的 draw_box_shadow 是空实现（slint
+    // 1.18.1 内 // TODO，通用柔影见 theme.slint SoftShadow）。行卡是
+    // 半透玻璃卡，SoftShadow 的实心层不能垫在卡下（透射会把卡面压暗
+    // 一档），改用「卡底以下 2px 裁剪窗 + 两个整卡形状向下错位 1px/
+    // 2px 的圆角垫底」：与卡重叠的上侧被窗裁掉（半透卡零透射），
+    // 露出的暗带端点随卡片圆角自然内收——直角底带会在圆角处冒线头
+    Rectangle {
+        x: PanelGeometry.row-inset;
+        y: root.height - PanelGeometry.row-inset;
+        width: root.width - 2 * PanelGeometry.row-inset;
+        height: 2px;
+        clip: true;
+        Rectangle {
+            x: 0;
+            y: 2 * PanelGeometry.row-inset + 1px - root.height;
+            width: parent.width;
+            height: root.height - 2 * PanelGeometry.row-inset;
+            border-radius: Metrics.radius-lg;
+            background: Theme.shadow-color.with-alpha(0.14);
+        }
+        Rectangle {
+            x: 0;
+            y: 2 * PanelGeometry.row-inset + 2px - root.height;
+            width: parent.width;
+            height: root.height - 2 * PanelGeometry.row-inset;
+            border-radius: Metrics.radius-lg;
+            background: Theme.shadow-color.with-alpha(0.08);
+        }
+    }
+
     VerticalLayout {
         // 卡片内容边距：固定几何，不随选中切换（行高稳定性
         // 不变量），与描边宽度无关；值计入 PanelGeometry.row-frame
@@ -176,8 +211,16 @@ component ClipRowCard inherits Rectangle {
             // 行结构明暗同构：层底（card-layer）+ 浮起行卡（card-face，
             // 与设置窗分组卡共用同一 token），行区分靠亮度差 + 圆角 +
             // 卡缝。底色不设动画：键盘导航是高频交互，渐隐会让上一个
-            // 选中项闪一拍强调色（Motion 频率纪律）
-            background: Theme.card-face;
+            // 选中项闪一拍强调色（Motion 频率纪律）。
+            // 模糊形态玻璃卡（浮起层语言）：
+            // 浅色白 70% / 深色白墨 5%，两态都是「比底更浅」的浮起层
+            // （fg-default 随明暗反色，深色态即白墨）；实底形态保持
+            // card-face 不透明
+            background: blur-active
+                ? (Theme.is-dark
+                    ? Theme.fg-default.with-alpha(0.05)
+                    : Theme.card-face.with-alpha(0.70))
+                : Theme.card-face;
 
             // 悬停覆盖层：声明在内容之前垫底（选中无底色变化，
             // 强调全部由外层墨色边框 + 字重承载）；悬停 = 墨色微叠层
@@ -426,6 +469,11 @@ export component QuickPasteWindow inherits Window {
     in-out property <bool> digit-shortcuts-enabled: true;
     in-out property <bool> loading: false;
     in-out property <bool> load-failed: false;
+    // 自绘模糊底图：DWM SystemBackdrop 的 Acrylic 模糊是激活态特权
+    // （失活只剩半透明无模糊），速贴常态失活拿不到玻璃感；唤起时抓
+    // 背后屏幕区域 CPU 模糊烘焙（core::backdrop），每次唤起重生成
+    in property <image> blur-backdrop;
+    in property <bool> blur-active: false;
     // 加载失败的具体原因（旧版 getErrorMessage 展示）
     in-out property <string> load-error-text;
 
@@ -476,22 +524,30 @@ export component QuickPasteWindow inherits Window {
     in-out property <bool> enter-animated: true;
 
     card := Rectangle {
-        // 面板底 = card-layer 层灰（速贴「层灰卡白」的层底）：浅
-        // canvas-subtle 灰 / 深 canvas 近黑，行卡 surface 白卡浮在
-        // 这层上。速贴是无焦点窗，DWM 材质在无焦点窗口上系统性
-        // 不生效（HOSTBACKDROP 组合实测也拿不到，2026-09-30 移除
-        // 装配），面板走实底自绘；透明窗底不能裸透，必须实色
-        background: Theme.card-layer;
+        // 面板底双态：自绘模糊底图（blur-active，唤起时烘焙的不透明
+        // 模糊+tint 图，圆角已烘焙进图 alpha——软渲 clip 不按圆角裁剪
+        // slint#4176，靠图自身圆角规避）；抓屏失败/不支持回 card-layer
+        // 层灰实底（浅 canvas-subtle 灰 / 深 canvas 近黑）。透明窗底不能
+        // 裸透，两种形态都必须有底
+        background: root.blur-active ? transparent : Theme.card-layer;
         border-radius: Metrics.radius-lg;
         border-width: PanelGeometry.card-border;
         border-color: Theme.border-window;
         clip: true;
 
+        // 模糊底图铺底（z 序最底，画在内容之下）
+        if root.blur-active : Image {
+            source: root.blur-backdrop;
+            width: 100%;
+            height: 100%;
+            image-fit: fill;
+        }
+
         VerticalLayout {
             y: root.enter-offset;
             animate y { duration: root.enter-animated ? Motion.dur-enter : 0ms; easing: Motion.ease; }
 
-            // ── 顶栏（PowerToys 高级粘贴式：图标 + 居中横条 + 关闭，可拖拽）──
+            // ── 顶栏（图标 + 居中横条 + 关闭，可拖拽）──
             Rectangle {
                 height: 30px;
                 background: transparent;
@@ -663,6 +719,7 @@ export component QuickPasteWindow inherits Window {
                             for row[i] in root.rows: ClipRowCard {
                                 data: row;
                                 selected: i == root.selected;
+                                blur-active: root.blur-active;
                                 text-width: row.has-thumb
                                     ? root.preview-width-thumb
                                     : root.preview-width-no-thumb;
