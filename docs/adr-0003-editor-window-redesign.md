@@ -65,7 +65,7 @@ status: accepted
 
 本版补强（内置之外的差距项）：
 
-- **标题栏脏标记**：`title` 动态绑定 `●`（VS Code 惯例），与底栏「未保存」点、保存按钮禁用态构成三重提示。
+- **标题栏脏标记**：`title` 动态绑定 `●`（编辑器通用惯例），与底栏「未保存」点、保存按钮禁用态构成三重提示。
 - **行列状态**：底栏显示「第 x 行 · 第 y 列」（1 起、列按字符数中英文同权）。Slint 层读 TextInput 内部 out property `cursor-position_byte-offset`（UTF-8 byte，undocumented、升级有脆弱风险）回调 Rust，按 draft 文本换算；`set-selection-offsets` 以 TriggerCallbacks 触发光标回调，载入置尾时行列与视口滚动自动同步。
 - **图片/文件打开**：图片预览是 contain 缩略，右下角「打开」胶囊按钮交系统查看器细看（对齐 Ditto 类剪贴板管理器的预览边界）；文件条目路径行点击用系统默认程序打开，hover 描边 + 文字提亮 + pointer 光标提示可点。ShellExecuteW "open" 封装落 `core::platform::windows::shell_open`。
 
