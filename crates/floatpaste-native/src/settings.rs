@@ -1079,7 +1079,25 @@ pub fn apply_side_effects(app: &App) {
     crate::sync_global_hotkeys(app);
     // 自启任务同步（后台线程，串行锁防并发重建；失败异步回滚开关）
     spawn_autostart_sync(app, true);
-    let resolved = theme::resolve_theme(settings.theme_mode.clone(), theme::system_prefers_dark());
+    let resolved = reapply_theme_and_material(app);
+    if let Some(win) = app.settings.upgrade() {
+        rebuild_preview_models(&win, &settings, resolved);
+        // 保存路径可能改变快捷键（含 Win+V 接管），注册结果即时呈现
+        let failures = app.state.hotkey_failures();
+        win.set_winv_pending_restore(app.state.winv_pending_restore());
+        refresh_hotkey_status_hints(&win, &failures);
+        refresh_winv_status(app, &win);
+    }
+}
+
+/// 主题（设置或系统明暗）变化后的全窗重应用：token 写入 + 补挂常驻
+/// 设置/编辑窗的材质，并刷新「最近应用的系统明暗」快照（供
+/// [`on_system_theme_changed`] 对通知去重）。主线程调用，设置保存路径
+/// 与系统明暗监听共用。
+fn reapply_theme_and_material(app: &App) -> theme::ResolvedTheme {
+    let settings = app.state.current_settings();
+    let system_dark = theme::system_prefers_dark();
+    let resolved = theme::resolve_theme(settings.theme_mode.clone(), system_dark);
     let tokens = theme::derive_tokens(&settings.theme_preset, &settings.theme_accent, resolved);
     theme_bridge::reapply_theme(app, &tokens);
     // 明暗切换后可见窗的 DWM 材质按新明暗重挂：Mica/Acrylic 的 tint
@@ -1098,13 +1116,32 @@ pub fn apply_side_effects(app: &App) {
             win.set_material_active(overlay::apply_material(app, hwnd));
         }
     }
+    LAST_SYSTEM_DARK.with(|slot| *slot.borrow_mut() = Some(system_dark));
+    resolved
+}
+
+// 最近一次主题应用时读到的系统明暗快照（与设置窗同主线程）：系统切
+// 明暗时监听通知连发多轮，按快照去重，未变的翻转不重挂可见窗材质
+thread_local! {
+    static LAST_SYSTEM_DARK: std::cell::RefCell<Option<bool>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// 系统明暗变化通知抵达主线程（监听器见
+/// `platform::windows::theme_change`）：仅在跟随系统模式下行动；
+/// 设置窗可见时预览同步刷新
+pub(crate) fn on_system_theme_changed(app: &App) {
+    let settings = app.state.current_settings();
+    if !matches!(settings.theme_mode, ThemeMode::System) {
+        return;
+    }
+    let system_dark = theme::system_prefers_dark();
+    if LAST_SYSTEM_DARK.with(|slot| *slot.borrow() == Some(system_dark)) {
+        return;
+    }
+    let resolved = reapply_theme_and_material(app);
     if let Some(win) = app.settings.upgrade() {
         rebuild_preview_models(&win, &settings, resolved);
-        // 保存路径可能改变快捷键（含 Win+V 接管），注册结果即时呈现
-        let failures = app.state.hotkey_failures();
-        win.set_winv_pending_restore(app.state.winv_pending_restore());
-        refresh_hotkey_status_hints(&win, &failures);
-        refresh_winv_status(app, &win);
     }
 }
 

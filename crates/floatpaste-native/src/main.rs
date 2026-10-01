@@ -174,6 +174,21 @@ fn main() {
         }
     }
 
+    // ── 系统明暗变化：跟随系统模式下即时重应用全窗主题 ──
+    {
+        let app_for_theme = app.clone();
+        if let Err(error) =
+            floatpaste_core::platform::windows::theme_change::listen_system_theme_change(move || {
+                let app = app_for_theme.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    settings::on_system_theme_changed(&app);
+                });
+            })
+        {
+            tracing::warn!("装载系统明暗监听失败，跟随系统模式回落为开窗/保存时重读: {error}");
+        }
+    }
+
     picker::wire(&app);
     search::wire(&app);
     editor::wire(&app);
@@ -558,7 +573,7 @@ pub(crate) fn sync_global_hotkeys(app: &App) {
 
 #[cfg(test)]
 mod settings_scroll_tests {
-    //! 设置窗自管滚动（弃 Flickable，编辑窗 ADR-0003 同款方案）的行为契约：
+    //! 设置窗自管滚动（弃 Flickable，编辑窗同款方案，docs/editor-window.md）的行为契约：
     //! 滚轮事件即时驱动 content-y，触底 clamp，不依赖内建平滑动画。
     //! 单测试函数串行三段：winit 事件循环全局单例，多测试并行实例化会
     //! 抢建失败（"EventLoop can't be recreated"）
