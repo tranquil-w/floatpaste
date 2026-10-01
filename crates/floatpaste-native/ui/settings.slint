@@ -9,6 +9,7 @@
 import { Theme, Metrics, Motion } from "theme.slint";
 import { WindowTitleBar } from "common.slint";
 import { ListScrollBar } from "picker.slint";
+import { SearchGeometry } from "search.slint";
 
 // 主题预设卡（所见即所得迷你预览，颜色由 Rust 用 core derive_tokens 派生）
 export struct PresetCard {
@@ -105,7 +106,7 @@ component NumberInput inherits Rectangle {
     width: 96px;
     horizontal-stretch: 0;
     opacity: root.disabled ? 0.6 : 1.0;
-    border-radius: 12px;
+    border-radius: 6px;
     border-width: num.has-focus ? 2px : 1px;
     border-color: num.has-focus ? Theme.accent-fg
         : (root.disabled ? Theme.border-subtle : Theme.border-default);
@@ -138,7 +139,7 @@ component ShortcutInput inherits Rectangle {
     callback cancelled();
 
     height: 34px;
-    border-radius: 12px;
+    border-radius: 6px;
     // 录制态 2px 强调框；非录制悬停边框转强调色（旧版 hover:border-pg-accent-fg）
     // 边框以 recording 为真值来源而非 rec.has-focus：退出录制时 FocusScope
     // 被禁用，has-focus 不回落会卡住高亮
@@ -309,7 +310,7 @@ component SessionKeyInput inherits Rectangle {
     }
 
     height: 34px;
-    border-radius: 12px;
+    border-radius: 6px;
     border-width: root.recording ? 2px : 1px;
     border-color: root.recording || ta.has-hover ? Theme.accent-fg : Theme.border-default;
     background: Theme.canvas-default;
@@ -468,10 +469,10 @@ component Segmented inherits Rectangle {
     }
 }
 
-// 开关行（旧版 ToggleRow：px-4 py-2，右侧 16px 复选框，嵌套行 pl-9，
-// 禁用整行 60% 透明度 + 悬停 canvas-default。
-// 注意：布局交叉轴对固定高子元素是顶对齐——复选框包一层拉伸 Rectangle
-// 再显式 y 居中；勾号用 Path（默认字体缺 U+2713，Text 勾号不渲染）
+// 开关行（旧版 ToggleRow 演化：右侧胶囊开关，嵌套行缩进 36px，
+// 禁用整行 60% 透明度）。
+// 注意：布局交叉轴对固定高子元素是顶对齐——开关包一层拉伸 Rectangle
+// 再显式 y 居中
 component ToggleRow inherits Rectangle {
     in property <string> title;
     in property <string> description;
@@ -479,10 +480,14 @@ component ToggleRow inherits Rectangle {
     in property <bool> disabled: false;
     in property <bool> nested: false;
     callback toggled(bool);
-    height: max(44px, text-col.preferred-height + 16px);
+    height: max(54px, text-col.preferred-height + 16px);
     opacity: root.disabled ? 0.6 : 1.0;
-    // 悬停底色对齐旧版 ToggleRow 的 hover:bg-pg-canvas-default
-    background: ta.has-hover && !root.disabled ? Theme.canvas-default : transparent;
+    // 悬停 = 墨色微叠层（速贴行同语言）：深色提亮、浅色压暗，方向恒
+    // 定；勿换回 canvas-default 固定色——半透卡面上深色悬停变凹陷。
+    // 圆角对齐卡圆角（首末行贴卡缘，悬停底即卡角）
+    border-radius: Metrics.radius-sm;
+    background: ta.has-hover && !root.disabled
+        ? Theme.fg-default.with-alpha(Theme.is-dark ? 0.06 : 0.04) : transparent;
     animate background { duration: Motion.dur-color; easing: Motion.ease; }
     ta := TouchArea {
         enabled: !root.disabled;
@@ -512,69 +517,65 @@ component ToggleRow inherits Rectangle {
                 horizontal-alignment: left;
             }
         }
+        // 状态文字 + 胶囊开关（开关行语言：开/关 文字紧贴开关）。
+        // 胶囊为 Win11 ToggleSwitch 形态：40x20 轨道 + 12px 圆点，on =
+        // accent 轨道 + 白点在右；off = 灰轨 + 墨点在左。按压时圆点回缩
+        // （按压反馈在固定轨道内变化，不影响布局尺寸）
         Rectangle {
-            width: 16px;
-            check-box := Rectangle {
-                y: (parent.height - 16px) / 2;
-                width: 16px;
-                height: 16px;
-                border-radius: Metrics.radius-sm;
-                border-width: 1px;
-                border-color: root.checked ? Theme.accent-fg : Theme.border-default;
-                // 未选态填充用 border-subtle：canvas-default 会与悬停行
-                // 背景同色导致复选框隐形（对齐浏览器深色原生复选框的灰底）
-                background: root.checked ? Theme.accent-fg : Theme.border-subtle;
-                if (root.checked): Path {
-                    width: 16px;
-                    height: 16px;
-                    viewbox-width: 16;
-                    viewbox-height: 16;
-                    stroke: #FFFFFF;
-                    stroke-width: 2px;
-                    commands: "M 3.8 8.6 L 6.6 11.3 L 12.4 4.6";
+            width: state-text.preferred-width + 8px + 40px;
+            state-text := Text {
+                x: 0;
+                y: (parent.height - self.preferred-height) / 2;
+                text: root.checked ? "开" : "关";
+                color: Theme.fg-subtle;
+                font-size: Metrics.text-xs;
+                vertical-alignment: center;
+            }
+            Rectangle {
+                x: state-text.preferred-width + 8px;
+                width: 40px;
+                switch-track := Rectangle {
+                    y: (parent.height - 20px) / 2;
+                    width: 40px;
+                    height: 20px;
+                    border-radius: Metrics.radius-pill;
+                    border-width: 1px;
+                    border-color: root.checked ? Theme.accent-fg : Theme.border-default;
+                    background: root.checked ? Theme.accent-fg : transparent;
+                    animate background { duration: Motion.dur-color; easing: Motion.ease; }
+                    switch-dot := Rectangle {
+                        y: (parent.height - self.height) / 2;
+                        x: root.checked ? parent.width - self.width - 4px : 4px;
+                        width: ta.pressed ? 14px : 12px;
+                        height: self.width;
+                        border-radius: Metrics.radius-pill;
+                        background: root.checked ? #FFFFFF : Theme.fg-default;
+                        animate x { duration: Motion.dur-color; easing: Motion.ease; }
+                        animate width { duration: Motion.dur-color; easing: Motion.ease; }
+                        animate background { duration: Motion.dur-color; easing: Motion.ease; }
+                    }
                 }
             }
         }
     }
 }
 
-// 设置分区卡片组（旧版 ROW_GROUP_CLASS：rounded-xl border border-muted
-// bg-canvas-subtle，行间 divide-y 分隔线）。卡片语言对齐 WinUI：卡面
-// （card-face，与速贴行卡共用同一 token）+ 描边 + 柔和投影，浮在
-// canvas 层底上——浅色下 canvas-subtle 灰卡贴近实心白层被判「蒙灰」，
-// 层次改由亮度反转（层灰、卡白）+ 投影承担，勿改回灰卡填充；深色
-// 卡面取 canvas-subtle 微亮（surface 亮灰卡发灰被否，与速贴同源）
+// 设置卡（WinUI Layer 同构）：白墨半透明偏灰填充（Theme.layer-fill）
+// 叠在玻璃面上，靠亮度差分层，无描边、无投影，小圆角。相关行合并进
+// 同一卡（行间以 1px RowDivider 区隔、组内零间距），行悬停底圆角对齐
+// 卡圆角，无描边即无弧段被盖问题。半透明卡面不能垫 SoftShadow
+// ——同心实心层会透过卡面显成均匀墨膜（见 theme.slint SoftShadow 注释）
 component RowGroup inherits Rectangle {
-    border-radius: 12px;
-    drop-shadow-blur: 12px;
-    drop-shadow-offset-y: 2px;
-    drop-shadow-color: Theme.shadow-color.with-alpha(0.10);
-    background: Theme.card-face;
+    border-radius: Metrics.radius-sm;
+    background: Theme.layer-fill;
     clip: true;
-    height: group-col.preferred-height + 2px;
-    // 内容整体内缩 1px：Slint 子元素画在父边框之上，行悬停底色若延伸
-    // 进边框带会把组左右边框盖掉；浏览器盒模型内容区天然不含边框，
-    // 这里显式对齐该语义
+    height: group-col.preferred-height;
     group-col := VerticalLayout {
-        x: 1px;
-        y: 1px;
-        width: parent.width - 2px;
-        height: parent.height - 2px;
         @children
-    }
-    // 边框顶层重画：行悬停底色是直角且软件渲染器的 clip 不按圆角
-    // 裁剪（slint#4176），底色在四角伸出弧带把圆角边框盖掉——内缩
-    // 1px 只保得住直线段，弧段必须靠把边框画到内容之上保住
-    Rectangle {
-        width: 100%;
-        height: 100%;
-        border-radius: parent.border-radius;
-        border-width: 1px;
-        border-color: Theme.border-muted;
     }
 }
 
-// 组内分隔线（divide-pg-border-subtle）
+// 卡内行分隔线（子行分隔，divide-subtle）
 component RowDivider inherits Rectangle {
     height: 1px;
     background: Theme.border-subtle;
@@ -617,8 +618,8 @@ component SettingRow inherits Rectangle {
     row-col := HorizontalLayout {
         padding-left: root.nested ? 36px : 16px;
         padding-right: 16px;
-        padding-top: 10px;
-        padding-bottom: 10px;
+        padding-top: 14px;
+        padding-bottom: 14px;
         spacing: 24px;
         VerticalLayout {
             horizontal-stretch: 1;
@@ -695,7 +696,8 @@ component TagRow inherits Rectangle {
             border-width: 1px;
             border-color: Theme.border-default;
             opacity: rename-ta.pressed ? 0.85 : 1.0;
-            background: rename-ta.has-hover ? Theme.canvas-default : transparent;
+            background: rename-ta.has-hover
+                ? Theme.fg-default.with-alpha(Theme.is-dark ? 0.06 : 0.04) : transparent;
             animate background { duration: Motion.dur-color; easing: Motion.ease; }
             Text {
                 text: "重命名";
@@ -718,7 +720,8 @@ component TagRow inherits Rectangle {
             border-width: 1px;
             border-color: Theme.border-default;
             opacity: del-ta.pressed ? 0.85 : 1.0;
-            background: del-ta.has-hover ? Theme.canvas-default : transparent;
+            background: del-ta.has-hover
+                ? Theme.fg-default.with-alpha(Theme.is-dark ? 0.06 : 0.04) : transparent;
             animate background { duration: Motion.dur-color; easing: Motion.ease; }
             Text {
                 text: "删除";
@@ -735,7 +738,7 @@ component TagRow inherits Rectangle {
         if (root.row-data.state == 1): Rectangle {
             horizontal-stretch: 1;
             height: 32px;
-            border-radius: 12px;
+            border-radius: 6px;
             border-width: 1px;
             border-color: Theme.border-default;
             background: Theme.canvas-default;
@@ -794,7 +797,8 @@ component TagRow inherits Rectangle {
             border-width: 1px;
             border-color: Theme.border-default;
             opacity: cancel-rename-ta.pressed ? 0.85 : 1.0;
-            background: cancel-rename-ta.has-hover ? Theme.canvas-default : transparent;
+            background: cancel-rename-ta.has-hover
+                ? Theme.fg-default.with-alpha(Theme.is-dark ? 0.06 : 0.04) : transparent;
             animate background { duration: Motion.dur-color; easing: Motion.ease; }
             Text {
                 text: "取消";
@@ -844,7 +848,8 @@ component TagRow inherits Rectangle {
             border-width: 1px;
             border-color: Theme.border-default;
             opacity: cancel-del-ta.pressed ? 0.85 : 1.0;
-            background: cancel-del-ta.has-hover ? Theme.canvas-default : transparent;
+            background: cancel-del-ta.has-hover
+                ? Theme.fg-default.with-alpha(Theme.is-dark ? 0.06 : 0.04) : transparent;
             animate background { duration: Motion.dur-color; easing: Motion.ease; }
             Text {
                 text: "取消";
@@ -1028,12 +1033,18 @@ export component SettingsWindow inherits Window {
         root-scope.focus();
     }
 
-    // 圆角面板：no-frame 窗的可见形态（DWM 圆角 + 阴影由装配挂载）
+    // 圆角面板：no-frame 窗的可见形态（DWM 圆角 + 阴影由装配挂载）。
+    // 窗根直铺统一玻璃层（与搜索/编辑窗完全同款）：Acrylic 模糊由 DWM
+    // SystemBackdrop 提供（Rust 侧 apply_material 统一挂载），半透明
+    // tint 透出材质，各可激活窗观感一致；材质不可用（挂载失败/系统
+    // 透明关闭）时 material-active 为 false，回退同色不透明实底
     panel := Rectangle {
         width: 100%;
         height: 100%;
         border-radius: 8px;
-        background: root.material-active ? Theme.material-base : Theme.canvas-default;
+        border-width: SearchGeometry.window-border;
+        border-color: Theme.border-window;
+        background: root.material-active ? Theme.material-layer : Theme.canvas-default;
         clip: true;
 
     root-scope := FocusScope {
@@ -1180,7 +1191,7 @@ export component SettingsWindow inherits Window {
                     y: 0;
                     width: parent.width - 40px;
                     height: parent.height - 14px;
-                    border-radius: 12px;
+                    border-radius: 6px;
                     border-width: 1px;
                     border-color: Theme.danger-fg.with-alpha(0.4);
                     background: Theme.danger-subtle;
@@ -1256,16 +1267,21 @@ export component SettingsWindow inherits Window {
                             "通用", "行为", "外观", "快捷键", "排除应用", "标签", "关于",
                         ]: Rectangle {
                             height: 30px;
-                            border-radius: Metrics.radius-md;
+                            // 目录项（WinUI NavView 同构）：默认透明，hover 墨色
+                            // 微叠，选中 = 与设置卡同款半透偏灰层（layer-fill）
+                            // + 左缘 3px accent 竖条 + 文字着色（fg-default
+                            // + medium）
+                            border-radius: Metrics.radius-sm;
                             background: root.active-section == idx
-                                ? Theme.accent-subtle
+                                ? Theme.layer-fill
                                 : (nav-ta.has-hover
-                                    ? Theme.canvas-subtle.with-alpha(0.62)
+                                    ? Theme.fg-default.with-alpha(Theme.is-dark ? 0.05 : 0.03)
                                     : transparent);
                             animate background { duration: Motion.dur-color; easing: Motion.ease; }
                             nav-ta := TouchArea {
                                 clicked() => { root.nav-selected(idx); }
                             }
+                            // 选中高亮竖条（左侧 3px accent）
                             if (root.active-section == idx): Rectangle {
                                 x: 0;
                                 y: (parent.height - 16px) / 2;
@@ -1291,23 +1307,17 @@ export component SettingsWindow inherits Window {
                 }
 
                 // 滚动内容宿主：显式几何占满导航右侧余宽与主体全高。
-                // 内容层卡（WinUI Layer 同构）：层底 = canvas-default，
-                // 比白卡深一档让卡片浮起（surface 层配白卡 = 双白，浅色
-                // 下分层消失；深色 canvas 与 material-layer 同值，观感不
-                // 变）；材质透出收敛到侧栏（窗根膜），层卡自身不透明 +
-                // 1px 描边 + 投影压住边界
+                // 填充透明（玻璃直透），无容器框（内容区不设「卡中卡」
+                // 轮廓），只承担几何、clip 与滚动宿主职责。勿在此垫
+                // SoftShadow——透明卡面下同心实心层在卡中心全叠成均匀
+                // 墨膜（染色而非投影）；实心层堆叠只能垫在不透明卡面之下
                 Rectangle {
                     x: 216px;
                     y: root.save-banner-visible ? 0px : 14px;
                     width: parent.width - 216px - 20px;
                     height: parent.height - (root.save-banner-visible ? 0px : 14px) - 14px;
-                    background: Theme.canvas-default;
+                    background: transparent;
                     border-radius: Metrics.radius-lg;
-                    border-width: 1px;
-                    border-color: Theme.border-muted;
-                    drop-shadow-blur: 24px;
-                    drop-shadow-offset-y: 4px;
-                    drop-shadow-color: Theme.shadow-color.with-alpha(0.12);
                     clip: true;
                     // 自管滚动（对齐编辑窗 ADR-0003 惯用法）：Flickable 内建
                     // 滚轮平滑动画（180ms 恒定减速）在软件渲染下迟滞不跟手，
@@ -1349,7 +1359,7 @@ export component SettingsWindow inherits Window {
                                 return accept;
                             }
                         content-col := VerticalLayout {
-                            spacing: 16px;
+                            spacing: 24px;
                             // 锚点可达性：底部补足视口余量，让末区顶能
                             // 滚到 spy 锚定线。缺这段余量时末两区总高不
                             // 足一屏，滚到底也过不了线，目录高亮永远停
@@ -1361,7 +1371,7 @@ export component SettingsWindow inherits Window {
                         sec0 := Rectangle {
                             height: sec0-col.preferred-height;
                             sec0-col := VerticalLayout {
-                                spacing: 6px;
+                                spacing: 8px;
                                 SectionHeader {
                                     title: "通用";
                                     description: "调整历史容量与速贴列表承载范围，平衡性能和浏览密度。";
@@ -1380,7 +1390,8 @@ export component SettingsWindow inherits Window {
                                             }
                                         }
                                     }
-                                    RowDivider { }
+                                }
+                                RowGroup {
                                     SettingRow {
                                         title: "速贴窗口条目数";
                                         description: "速贴面板一次可滚动浏览的条目数，数字快捷键只覆盖前 9 条。";
@@ -1402,7 +1413,7 @@ export component SettingsWindow inherits Window {
                         sec1 := Rectangle {
                             height: sec1-col.preferred-height;
                             sec1-col := VerticalLayout {
-                                spacing: 6px;
+                                spacing: 8px;
                                 SectionHeader {
                                     title: "行为";
                                     description: "控制开机启动、监听状态、上屏与速贴窗口显示位置，明确主次关系。";
@@ -1415,7 +1426,17 @@ export component SettingsWindow inherits Window {
                                         toggled(checked) => { root.launch-on-startup-toggled(checked); }
                                     }
                                     RowDivider { }
-                                    // 以管理员身份运行（对齐 PowerToys：提权是
+                                    ToggleRow {
+                                        title: "开机时静默启动";
+                                        description: "启动后不主动打断当前工作流。";
+                                        checked: root.silent-on-startup;
+                                        disabled: !root.launch-on-startup;
+                                        nested: true;
+                                        toggled(checked) => { root.silent-on-startup-toggled(checked); }
+                                    }
+                                }
+                                RowGroup {
+                                    // 以管理员身份运行（提权是
                                     // 一次性动作，「始终」约束所有启动路径——
                                     // 自启走最高权限任务，手动启动靠启动期自检）
                                     SettingRow {
@@ -1467,8 +1488,14 @@ export component SettingsWindow inherits Window {
                                         nested: true;
                                         toggled(checked) => { root.always-run-elevated-toggled(checked); }
                                     }
+                                    // 任务计划操作结果（失败回滚提示）：卡内子行，
+                                    // 缩进对齐 nested 行
+                                    if (root.elevated-status-text != ""): RowDivider { }
                                     if (root.elevated-status-text != ""): VerticalLayout {
-                                        RowDivider { }
+                                        padding-left: 36px;
+                                        padding-right: 16px;
+                                        padding-top: 10px;
+                                        padding-bottom: 10px;
                                         Text {
                                             text: root.elevated-status-text;
                                             color: Theme.danger-fg;
@@ -1476,30 +1503,24 @@ export component SettingsWindow inherits Window {
                                             wrap: word-wrap;
                                         }
                                     }
-                                    RowDivider { }
-                                    ToggleRow {
-                                        title: "开机时静默启动";
-                                        description: "启动后不主动打断当前工作流。";
-                                        checked: root.silent-on-startup;
-                                        disabled: !root.launch-on-startup;
-                                        nested: true;
-                                        toggled(checked) => { root.silent-on-startup-toggled(checked); }
-                                    }
-                                    RowDivider { }
+                                }
+                                RowGroup {
                                     ToggleRow {
                                         title: "上屏后恢复剪贴板";
                                         description: "上屏完成后恢复原有剪贴板内容，减少对当前工作流的干扰。";
                                         checked: root.restore-clipboard;
                                         toggled(checked) => { root.restore-clipboard-toggled(checked); }
                                     }
-                                    RowDivider { }
+                                }
+                                RowGroup {
                                     ToggleRow {
                                         title: "暂停监听";
                                         description: "暂停后不会继续采集新的剪贴板条目。";
                                         checked: root.pause-monitoring;
                                         toggled(checked) => { root.pause-monitoring-toggled(checked); }
                                     }
-                                    RowDivider { }
+                                }
+                                RowGroup {
                                     // 鼠标上屏触发方式
                                     SettingRow {
                                         title: "粘贴触发方式";
@@ -1516,7 +1537,8 @@ export component SettingsWindow inherits Window {
                                             }
                                         }
                                     }
-                                    RowDivider { }
+                                }
+                                RowGroup {
                                     // 速贴窗口显示位置
                                     SettingRow {
                                         title: "速贴窗口显示位置";
@@ -1542,7 +1564,7 @@ export component SettingsWindow inherits Window {
                         sec2 := Rectangle {
                             height: sec2-col.preferred-height;
                             sec2-col := VerticalLayout {
-                                spacing: 6px;
+                                spacing: 8px;
                                 SectionHeader {
                                     title: "外观";
                                     description: "管理界面主题，保证日常使用观感一致。";
@@ -1565,7 +1587,8 @@ export component SettingsWindow inherits Window {
                                             }
                                         }
                                     }
-                                    RowDivider { }
+                                }
+                                RowGroup {
                                     // 主题预设（wide 行：标题描述在上，网格在下）
                                     Rectangle {
                                         height: ap2-col.preferred-height + 24px;
@@ -1600,7 +1623,7 @@ export component SettingsWindow inherits Window {
                                                         preferred-width: 0px;
                                                         horizontal-stretch: 1;
                                                         height: card-col.preferred-height;
-                                                        border-radius: 12px;
+                                                        border-radius: 6px;
                                                         border-width: 1px;
                                                         border-color: card.selected ? Theme.accent-fg
                                                             : (preset-ta.has-hover
@@ -1678,7 +1701,8 @@ export component SettingsWindow inherits Window {
                                             }
                                         }
                                     }
-                                    RowDivider { }
+                                }
+                                RowGroup {
                                     // 强调色（旧版 h-7 色点 gap-1.5；内圆在 28px
                                     // 圆内居中 = 4px 偏移，对齐旧版 items-center）
                                     SettingRow {
@@ -1734,7 +1758,7 @@ export component SettingsWindow inherits Window {
                         sec3 := Rectangle {
                             height: sec3-col.preferred-height;
                             sec3-col := VerticalLayout {
-                                spacing: 6px;
+                                spacing: 8px;
                                 SectionHeader {
                                     title: "快捷键";
                                     description: "全局唤起与会话动作键位均可自定义；此处展示全部键位，冲突时不会保存。";
@@ -1777,10 +1801,6 @@ export component SettingsWindow inherits Window {
                                         }
                                     }
                                     RowDivider { }
-                                    // Win+V 唤起速贴（ADR-0001）：作为
-                                    // 「速贴唤起」的嵌套子选项——它是同一
-                                    // 动作的第二个入口；接管系统组合需写
-                                    // 注册表并重启资源管理器，关闭即回退
                                     ToggleRow {
                                         title: "Win+V 唤起速贴";
                                         description: "接管系统 Win+V：开启后 Win+V 与上方快捷键一样唤起速贴面板，系统剪贴板历史同时失效。需重启资源管理器生效；关闭开关并重启资源管理器即恢复系统原状。";
@@ -1788,48 +1808,48 @@ export component SettingsWindow inherits Window {
                                         nested: true;
                                         toggled(checked) => { root.winv-toggled(checked); }
                                     }
-                                    if (root.winv-enabled || root.winv-pending-restore): VerticalLayout {
-                                        spacing: 6px;
-                                        RowDivider { }
-                                        SettingRow {
-                                            title: "生效状态";
-                                            nested: true;
-                                            description: root.winv-status-text;
-                                            Rectangle {
-                                                width: restart-btn.width;
-                                                restart-btn := Rectangle {
-                                                    x: 0;
-                                                    y: (parent.height - self.height) / 2;
-                                                    width: restart-btn-text.preferred-width + 24px;
-                                                    height: 30px;
-                                                    border-radius: 8px;
-                                                    border-width: 1px;
-                                                    border-color: root.winv-restart-armed
-                                                        ? Theme.accent-fg : Theme.border-default;
-                                                    background: root.winv-restart-armed
-                                                        ? Theme.accent-subtle : Theme.canvas-default;
-                                                    animate background { duration: Motion.dur-color; easing: Motion.ease; }
-                                                    opacity: winv-restart-ta.pressed ? 0.85 : 1.0;
-                                                    winv-restart-ta := TouchArea {
-                                                        clicked() => { root.winv-restart-explorer(); }
-                                                    }
-                                                    restart-btn-text := Text {
-                                                        text: root.winv-restart-armed
-                                                            ? "确认重启？任务栏会短暂消失"
-                                                            : (root.winv-enabled
-                                                                ? "重启资源管理器生效"
-                                                                : "重启资源管理器恢复系统");
-                                                        color: root.winv-restart-armed
-                                                            ? Theme.accent-fg : Theme.fg-default;
-                                                        font-size: Metrics.text-xs;
-                                                        vertical-alignment: center;
-                                                        horizontal-alignment: center;
-                                                    }
+                                    // 生效状态：卡内子行（缩进对齐 nested 行），
+                                    // 接管开启或待重启恢复时出现
+                                    if (root.winv-enabled || root.winv-pending-restore): RowDivider { }
+                                    if (root.winv-enabled || root.winv-pending-restore): SettingRow {
+                                        title: "生效状态";
+                                        nested: true;
+                                        description: root.winv-status-text;
+                                        Rectangle {
+                                            width: restart-btn.width;
+                                            restart-btn := Rectangle {
+                                                x: 0;
+                                                y: (parent.height - self.height) / 2;
+                                                width: restart-btn-text.preferred-width + 24px;
+                                                height: 30px;
+                                                border-radius: 8px;
+                                                border-width: 1px;
+                                                border-color: root.winv-restart-armed
+                                                    ? Theme.accent-fg : Theme.border-default;
+                                                background: root.winv-restart-armed
+                                                    ? Theme.accent-subtle : Theme.canvas-default;
+                                                animate background { duration: Motion.dur-color; easing: Motion.ease; }
+                                                opacity: winv-restart-ta.pressed ? 0.85 : 1.0;
+                                                winv-restart-ta := TouchArea {
+                                                    clicked() => { root.winv-restart-explorer(); }
+                                                }
+                                                restart-btn-text := Text {
+                                                    text: root.winv-restart-armed
+                                                        ? "确认重启？任务栏会短暂消失"
+                                                        : (root.winv-enabled
+                                                            ? "重启资源管理器生效"
+                                                            : "重启资源管理器恢复系统");
+                                                    color: root.winv-restart-armed
+                                                        ? Theme.accent-fg : Theme.fg-default;
+                                                    font-size: Metrics.text-xs;
+                                                    vertical-alignment: center;
+                                                    horizontal-alignment: center;
                                                 }
                                             }
                                         }
                                     }
-                                    RowDivider { }
+                                }
+                                RowGroup {
                                     // 搜索窗口：启用复选 + 录制框同行并排（旧版
                                     // flex items-center gap-4），「启用」与录制框垂直
                                     // 对齐；冲突提示在框下
@@ -1920,42 +1940,37 @@ export component SettingsWindow inherits Window {
 
                                 // ── 会话动作键位（速贴面板与搜索窗口共用，
                                 //    数字 1-9 直达保留，见下方开关）──
-                                // for 实例显式高度（= 行间分隔线 + 行首选高）：
-                                // 布局聚合依赖子元素的可确定尺寸
-                                RowGroup {
-                                    for row[idx] in root.session-key-rows: VerticalLayout {
-                                        height: (idx > 0 ? 1px : 0px) + sk-row.preferred-height;
-                                        RowDivider { visible: idx > 0; }
-                                        sk-row := SettingRow {
-                                            title: row.title;
-                                            description: row.description;
-                                            Rectangle {
+                                // for 每实例一张行卡（外层 spacing 承担卡距）
+                                for row[idx] in root.session-key-rows: RowGroup {
+                                    sk-row := SettingRow {
+                                        title: row.title;
+                                        description: row.description;
+                                        Rectangle {
+                                            width: 224px;
+                                            VerticalLayout {
+                                                x: 0;
+                                                y: (parent.height - self.preferred-height) / 2;
                                                 width: 224px;
-                                                VerticalLayout {
-                                                    x: 0;
-                                                    y: (parent.height - self.preferred-height) / 2;
-                                                    width: 224px;
-                                                    height: self.preferred-height;
-                                                    spacing: 6px;
-                                                    SessionKeyInput {
-                                                        width: 100%;
-                                                        instance-id: idx;
-                                                        recorder-id <=> root.session-recorder-id;
-                                                        value-parts: row.parts;
-                                                        notice: row.notice;
-                                                        captured(value) => {
-                                                            root.session-key-captured(row.action, value);
-                                                        }
-                                                        cancelled() => {
-                                                            root.session-key-cancelled(row.action);
-                                                        }
+                                                height: self.preferred-height;
+                                                spacing: 6px;
+                                                SessionKeyInput {
+                                                    width: 100%;
+                                                    instance-id: idx;
+                                                    recorder-id <=> root.session-recorder-id;
+                                                    value-parts: row.parts;
+                                                    notice: row.notice;
+                                                    captured(value) => {
+                                                        root.session-key-captured(row.action, value);
                                                     }
-                                                    if (row.notice != ""): Text {
-                                                        text: row.notice;
-                                                        color: Theme.danger-fg;
-                                                        font-size: Metrics.text-xs;
-                                                        wrap: word-wrap;
+                                                    cancelled() => {
+                                                        root.session-key-cancelled(row.action);
                                                     }
+                                                }
+                                                if (row.notice != ""): Text {
+                                                    text: row.notice;
+                                                    color: Theme.danger-fg;
+                                                    font-size: Metrics.text-xs;
+                                                    wrap: word-wrap;
                                                 }
                                             }
                                         }
@@ -1970,7 +1985,8 @@ export component SettingsWindow inherits Window {
                                         checked: root.picker-digit-enabled;
                                         toggled(checked) => { root.picker-digit-toggled(checked); }
                                     }
-                                    RowDivider { }
+                                }
+                                RowGroup {
                                     // 编辑窗口固定键位（只读展示，重设计在
                                     // 编辑窗口迭代中一并处理）
                                     SettingRow {
@@ -1989,7 +2005,8 @@ export component SettingsWindow inherits Window {
                                             }
                                         }
                                     }
-                                    RowDivider { }
+                                }
+                                RowGroup {
                                     SettingRow {
                                         title: "编辑窗口关闭";
                                         description: "关闭编辑窗口返回原面板。";
@@ -2013,7 +2030,7 @@ export component SettingsWindow inherits Window {
                         sec4 := Rectangle {
                             height: sec4-col.preferred-height;
                             sec4-col := VerticalLayout {
-                                spacing: 6px;
+                                spacing: 8px;
                                 SectionHeader {
                                     title: "排除应用";
                                     description: "按进程名忽略特定应用，避免敏感内容被采集入库。";
@@ -2041,7 +2058,7 @@ export component SettingsWindow inherits Window {
                                             padding-top: 10px;
                                             Rectangle {
                                                 height: 104px;
-                                                border-radius: 12px;
+                                                border-radius: 6px;
                                                 border-width: ex-input.has-focus ? 2px : 1px;
                                                 border-color: ex-input.has-focus
                                                     ? Theme.accent-fg : Theme.border-default;
@@ -2082,14 +2099,14 @@ export component SettingsWindow inherits Window {
                         sec5 := Rectangle {
                             height: sec5-col.preferred-height;
                             sec5-col := VerticalLayout {
-                                spacing: 6px;
+                                spacing: 8px;
                                 SectionHeader {
                                     title: "标签";
                                     description: "管理条目标签：重命名、合并与删除。";
                                 }
                                 if (root.tag-error-text != ""): Rectangle {
                                     height: 44px;
-                                    border-radius: 12px;
+                                    border-radius: 6px;
                                     border-width: 1px;
                                     border-color: Theme.danger-fg.with-alpha(0.4);
                                     background: Theme.danger-subtle;
@@ -2109,6 +2126,8 @@ export component SettingsWindow inherits Window {
                                     font-size: Metrics.text-sm;
                                 }
                                 if (root.tag-rows.length > 0): RowGroup {
+                                    // 全部标签一张卡：TagRow 自带行间分隔线
+                                    //（row-index > 0 画顶线）
                                     for row[idx] in root.tag-rows: TagRow {
                                         row-data: row;
                                         row-index: idx;
@@ -2118,7 +2137,6 @@ export component SettingsWindow inherits Window {
                                         rename-cancelled => { root.tag-rename-cancel(); }
                                         delete-requested => { root.tag-delete-request(idx); }
                                         delete-confirmed => { root.tag-delete-confirm(idx); }
-                                        delete-cancelled => { root.tag-delete-cancel(); }
                                     }
                                 }
                             }
@@ -2128,7 +2146,7 @@ export component SettingsWindow inherits Window {
                         sec6 := Rectangle {
                             height: sec6-col.preferred-height;
                             sec6-col := VerticalLayout {
-                                spacing: 6px;
+                                spacing: 8px;
                                 SectionHeader {
                                     title: "关于";
                                     description: "查看应用版本与项目信息。";
@@ -2173,7 +2191,8 @@ export component SettingsWindow inherits Window {
                                             }
                                         }
                                     }
-                                    RowDivider { }
+                                }
+                                RowGroup {
                                     SettingRow {
                                         title: "项目主页";
                                         description: "查看源码、提交问题与发版说明。";
