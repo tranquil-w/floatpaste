@@ -1,12 +1,13 @@
 //! 自启任务：Windows 任务计划程序（COM ITaskService）。
 //!
-//! 「开机自启」与「以管理员权限启动」共用的唯一载体（对齐 PowerToys 的
-//! 行为逻辑）：任务存在 = 开机自启开启；任务 RunLevel = 是否提权。任务
+//! 「开机自启」与「以管理员权限启动」共用的唯一载体：
+//! 任务存在 = 开机自启开启；任务 RunLevel = 是否提权。任务
 //! ACL 仅授予 SYSTEM/Administrators/任务所属用户完全控制——非提权的本
 //! 进程也能查询/删除/重建自己的任务，只有注册 HIGHEST 任务需要提权
 //! （由壳层经 UAC 重入自身完成）。
 
-use windows::core::{BSTR, Interface};
+use crate::domain::error::AppError;
+use windows::core::{Interface, BSTR};
 use windows::Win32::Foundation::{CloseHandle, HANDLE, VARIANT_BOOL};
 use windows::Win32::Security::Authorization::ConvertSidToStringSidW;
 use windows::Win32::Security::{
@@ -16,12 +17,11 @@ use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED,
 };
 use windows::Win32::System::TaskScheduler::{
-    IExecAction, ILogonTrigger, ITaskDefinition, ITaskService, TASK_ACTION_EXEC,
+    IExecAction, ILogonTrigger, ITaskDefinition, ITaskService, TaskScheduler, TASK_ACTION_EXEC,
     TASK_CREATE_OR_UPDATE, TASK_INSTANCES_IGNORE_NEW, TASK_LOGON_INTERACTIVE_TOKEN,
-    TASK_RUNLEVEL_HIGHEST, TASK_RUNLEVEL_LUA, TASK_RUNLEVEL_TYPE, TASK_TRIGGER_LOGON, TaskScheduler,
+    TASK_RUNLEVEL_HIGHEST, TASK_RUNLEVEL_LUA, TASK_RUNLEVEL_TYPE, TASK_TRIGGER_LOGON,
 };
 use windows::Win32::System::Variant::VARIANT;
-use crate::domain::error::AppError;
 
 /// 登录延迟：等 Explorer 就绪再启动（托盘/剪贴板监听依赖桌面就绪）
 const LOGON_TRIGGER_DELAY: &str = "PT03S";
@@ -136,7 +136,10 @@ pub fn uninstall() -> Result<(), AppError> {
 
 /// 任务名带用户名：多用户各自注册互不覆盖
 fn task_name() -> String {
-    format!("FloatPaste for {}", std::env::var("USERNAME").unwrap_or_default())
+    format!(
+        "FloatPaste for {}",
+        std::env::var("USERNAME").unwrap_or_default()
+    )
 }
 
 fn current_user_id() -> String {
@@ -150,7 +153,7 @@ fn current_user_id() -> String {
 /// 当前用户 SID 的 SDDL DACL：SYSTEM 与 Administrators 永远完全控制，
 /// 追加任务所属用户；绝不授予 Everyone 写权限（本地提权风险）
 fn task_sddl() -> Result<String, AppError> {
-    use windows::Win32::Foundation::{HLOCAL, LocalFree};
+    use windows::Win32::Foundation::{LocalFree, HLOCAL};
     use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
     unsafe {
@@ -228,7 +231,8 @@ mod tests {
     #[test]
     fn sched_e_task_not_found_is_recognized() {
         // SCHED_E_TASK_NOT_FOUND = 0x80041308
-        let error = windows::core::Error::from_hresult(windows::core::HRESULT(0x80041308u32 as i32));
+        let error =
+            windows::core::Error::from_hresult(windows::core::HRESULT(0x80041308u32 as i32));
         assert!(is_task_not_found(&error));
         assert!(!is_task_not_found(&windows::core::Error::from_hresult(
             windows::core::HRESULT(0x80070005u32 as i32)

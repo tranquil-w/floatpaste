@@ -16,12 +16,12 @@ use windows::core::PCWSTR;
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Shell::{
-    Shell_NotifyIconW, NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY,
-    NIIF_WARNING, NOTIFYICONDATAW,
+    Shell_NotifyIconW, NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIIF_WARNING, NIM_ADD, NIM_DELETE,
+    NIM_MODIFY, NOTIFYICONDATAW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DispatchMessageW, DestroyMenu,
-    GetMessageW, GetCursorPos, PostMessageW, PostQuitMessage, RegisterClassW,
+    AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DispatchMessageW,
+    GetCursorPos, GetMessageW, PostMessageW, PostQuitMessage, RegisterClassW,
     RegisterWindowMessageW, SetForegroundWindow, TrackPopupMenu, HICON, MF_STRING, MSG,
     TPM_BOTTOMALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON, WINDOW_EX_STYLE, WM_APP, WM_DESTROY,
     WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP, WNDCLASSW, WS_OVERLAPPED,
@@ -49,7 +49,10 @@ pub fn start(app: App) {
     if TRAY_APP.set(Mutex::new(Some(app))).is_err() {
         return;
     }
-    if let Err(error) = std::thread::Builder::new().name("tray".into()).spawn(|| unsafe { run() }) {
+    if let Err(error) = std::thread::Builder::new()
+        .name("tray".into())
+        .spawn(|| unsafe { run() })
+    {
         warn!("托盘线程启动失败: {error}");
     }
 }
@@ -198,7 +201,11 @@ unsafe fn show_menu(hwnd: HWND) {
     let paused = TRAY_APP
         .get()
         .and_then(|lock| lock.lock().ok())
-        .and_then(|guard| guard.as_ref().map(|app| app.state.current_settings().pause_monitoring))
+        .and_then(|guard| {
+            guard
+                .as_ref()
+                .map(|app| app.state.current_settings().pause_monitoring)
+        })
         .unwrap_or(false);
 
     let Ok(menu) = CreatePopupMenu() else {

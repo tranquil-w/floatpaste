@@ -111,11 +111,7 @@ fn decode(core: &CoreState, image_path: &str, max_size: Option<(u32, u32)>) -> O
     let file = std::fs::File::open(&path).ok()?;
     let mut reader = image::ImageReader::new(std::io::BufReader::new(file));
     reader.limits(decode_limits());
-    let mut image = reader
-        .with_guessed_format()
-        .ok()?
-        .decode()
-        .ok()?;
+    let mut image = reader.with_guessed_format().ok()?.decode().ok()?;
     if let Some((max_width, max_height)) = max_size {
         image = image.thumbnail(max_width, max_height);
     }
@@ -163,7 +159,11 @@ pub fn image_from_rgba(raw: RawImage) -> slint::Image {
 /// 异步补齐列表缺失的图片缩略图（速贴 / 搜索共用）：
 /// 工作线程解码缺失项，回到事件循环后校验列表版本未变再写缓存，
 /// 最后由 `rebuild` 重建各自窗口的行模型。
-pub(crate) fn ensure(app: &App, items: &[ClipItemSummary], rebuild: impl FnOnce(&App) + Send + 'static) {
+pub(crate) fn ensure(
+    app: &App,
+    items: &[ClipItemSummary],
+    rebuild: impl FnOnce(&App) + Send + 'static,
+) {
     let missing: Vec<(String, String)> = items
         .iter()
         .filter(|item| item.r#type == "image" && item.image_path.is_some())

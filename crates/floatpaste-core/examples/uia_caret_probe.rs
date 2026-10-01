@@ -19,20 +19,18 @@ use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, RECT};
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED,
 };
-use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::System::Threading::{
-    OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
-    PROCESS_QUERY_LIMITED_INFORMATION,
+    OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
 };
+use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Accessibility::{
-    CUIAutomation8, IUIAutomation, IUIAutomation2, IUIAutomationCacheRequest,
-    IUIAutomationElement, IUIAutomationTextPattern, IUIAutomationTextPattern2,
-    IUIAutomationTextRange, IUIAutomationValuePattern, TextPatternRangeEndpoint,
-    TextPatternRangeEndpoint_End, TextPatternRangeEndpoint_Start, TextUnit, TextUnit_Character,
-    TextUnit_Line, TextUnit_Paragraph, TextUnit_Word, TreeScope_Descendants,
-    UIA_BoundingRectanglePropertyId, UIA_ClassNamePropertyId, UIA_HasKeyboardFocusPropertyId,
-    UIA_IsTextPatternAvailablePropertyId, UIA_NamePropertyId, UIA_TextPattern2Id,
-    UIA_TextPatternId, UIA_ValuePatternId,
+    CUIAutomation8, IUIAutomation, IUIAutomation2, IUIAutomationCacheRequest, IUIAutomationElement,
+    IUIAutomationTextPattern, IUIAutomationTextPattern2, IUIAutomationTextRange,
+    IUIAutomationValuePattern, TextPatternRangeEndpoint, TextPatternRangeEndpoint_End,
+    TextPatternRangeEndpoint_Start, TextUnit, TextUnit_Character, TextUnit_Line,
+    TextUnit_Paragraph, TextUnit_Word, TreeScope_Descendants, UIA_BoundingRectanglePropertyId,
+    UIA_ClassNamePropertyId, UIA_HasKeyboardFocusPropertyId, UIA_IsTextPatternAvailablePropertyId,
+    UIA_NamePropertyId, UIA_TextPattern2Id, UIA_TextPatternId, UIA_ValuePatternId,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible,
@@ -77,7 +75,11 @@ fn main() {
         println!(
             "\n=== 窗口 hwnd={}{} ===",
             hwnd.0 as isize,
-            if foreground == hwnd { "（前台）" } else { "" }
+            if foreground == hwnd {
+                "（前台）"
+            } else {
+                ""
+            }
         );
         dump_window(&client, hwnd);
     }
@@ -141,12 +143,17 @@ fn process_name(hwnd: HWND) -> String {
             let _ = CloseHandle(handle);
         }
     }
-    image.rsplit(['\\', '/']).next().unwrap_or_default().to_string()
+    image
+        .rsplit(['\\', '/'])
+        .next()
+        .unwrap_or_default()
+        .to_string()
 }
 
 fn create_uia_client() -> IUIAutomation {
-    let client: IUIAutomation = unsafe { CoCreateInstance(&CUIAutomation8, None, CLSCTX_INPROC_SERVER) }
-        .expect("UIA 客户端创建失败");
+    let client: IUIAutomation =
+        unsafe { CoCreateInstance(&CUIAutomation8, None, CLSCTX_INPROC_SERVER) }
+            .expect("UIA 客户端创建失败");
     // 与生产一致的超时收紧，探针不因 provider 卡死而挂住
     if let Ok(client2) = client.cast::<IUIAutomation2>() {
         unsafe {
@@ -192,9 +199,7 @@ fn dump_window(client: &IUIAutomation, hwnd: HWND) {
                     .unwrap_or_else(|error| format!("<读取失败 {error}>")),
                 Err(_) => "<无 ValuePattern>".to_string(),
             };
-            println!(
-                "焦点元素 pattern: TextPattern2={text2} TextPattern={text} Value='{value}'"
-            );
+            println!("焦点元素 pattern: TextPattern2={text2} TextPattern={text} Value='{value}'");
         }
         Err(error) => println!("焦点元素读取失败: {error}"),
     }
@@ -227,7 +232,9 @@ fn element_summary(element: &IUIAutomationElement) -> String {
     let control_type = unsafe { element.CurrentControlType() }
         .map(|value| value.0)
         .unwrap_or(0);
-    format!("ClassName='{class}' ControlType={control_type} Name='{name}' 焦点={focused} 矩形={rect}")
+    format!(
+        "ClassName='{class}' ControlType={control_type} Name='{name}' 焦点={focused} 矩形={rect}"
+    )
 }
 
 fn build_cache(client: &IUIAutomation) -> Option<IUIAutomationCacheRequest> {
@@ -260,7 +267,9 @@ fn find_text_elements(
     // FindAllBuildCache 无匹配时 windows crate 返回 Err，与「找不到」同义
     unsafe { root.FindAllBuildCache(TreeScope_Descendants, &condition, &cache) }
         .map(|elements| {
-            let count = unsafe { elements.Length() }.unwrap_or(0).min(MAX_TEXT_ELEMENTS);
+            let count = unsafe { elements.Length() }
+                .unwrap_or(0)
+                .min(MAX_TEXT_ELEMENTS);
             (0..count)
                 .filter_map(|index| unsafe { elements.GetElement(index) }.ok())
                 .collect()
@@ -331,7 +340,11 @@ fn dump_text_element(element: &IUIAutomationElement) {
 /// 一个范围的完整画像：折叠性 + 直接几何 + 各粒度展开的几何与端点比较
 fn dump_range(range: &IUIAutomationTextRange, indent: &str) {
     let collapsed = unsafe {
-        range.CompareEndpoints(TextPatternRangeEndpoint_Start, range, TextPatternRangeEndpoint_End)
+        range.CompareEndpoints(
+            TextPatternRangeEndpoint_Start,
+            range,
+            TextPatternRangeEndpoint_End,
+        )
     }
     .map(|value| value == 0)
     .unwrap_or(false);
@@ -374,13 +387,21 @@ fn compare(
 }
 
 fn format_rect(rect: &RECT) -> String {
-    format!("({},{},{},{})", rect.left, rect.top, rect.right, rect.bottom)
+    format!(
+        "({},{},{},{})",
+        rect.left, rect.top, rect.right, rect.bottom
+    )
 }
 
 fn fmt_rects(rects: &[f64]) -> String {
     let blocks: Vec<String> = rects
         .chunks_exact(4)
-        .map(|rect| format!("[{:.0},{:.0},{:.0},{:.0}]", rect[0], rect[1], rect[2], rect[3]))
+        .map(|rect| {
+            format!(
+                "[{:.0},{:.0},{:.0},{:.0}]",
+                rect[0], rect[1], rect[2], rect[3]
+            )
+        })
         .collect();
     if blocks.is_empty() {
         "空".to_string()

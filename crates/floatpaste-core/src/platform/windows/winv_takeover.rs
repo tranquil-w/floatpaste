@@ -10,8 +10,7 @@ use windows::{
     Win32::Foundation::WIN32_ERROR,
     Win32::System::Registry::{
         RegCloseKey, RegDeleteValueW, RegGetValueW, RegOpenKeyExW, RegSetValueExW, HKEY,
-        HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE, REG_VALUE_TYPE, REG_SZ,
-        RRF_RT_REG_SZ,
+        HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE, REG_SZ, REG_VALUE_TYPE, RRF_RT_REG_SZ,
     },
 };
 
@@ -127,9 +126,15 @@ fn write_disabled_hotkeys(value: &str) -> Result<(), AppError> {
         )
     };
     let result = unsafe {
-        RegSetValueExW(key, PCWSTR::from_raw(name.as_ptr()), Some(0), REG_SZ, Some(bytes))
-            .ok()
-            .map_err(AppError::from)
+        RegSetValueExW(
+            key,
+            PCWSTR::from_raw(name.as_ptr()),
+            Some(0),
+            REG_SZ,
+            Some(bytes),
+        )
+        .ok()
+        .map_err(AppError::from)
     };
     let _ = unsafe { RegCloseKey(key) };
     result

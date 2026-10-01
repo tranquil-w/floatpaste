@@ -35,8 +35,7 @@ pub fn paste_target_requires_elevation(target_window_hwnd: Option<isize>) -> boo
     let Some(target_hwnd) = target_window_hwnd else {
         return false;
     };
-    !elevation::is_current_process_elevated()
-        && elevation::is_window_process_elevated(target_hwnd)
+    !elevation::is_current_process_elevated() && elevation::is_window_process_elevated(target_hwnd)
 }
 
 /// 管理员目标提示节流：托盘气泡每进程只发一次，不重复打扰

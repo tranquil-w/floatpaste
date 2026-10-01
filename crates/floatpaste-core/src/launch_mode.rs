@@ -22,9 +22,7 @@ pub fn needs_elevated_relaunch(
     is_elevated: bool,
     args: &[String],
 ) -> bool {
-    always_run_elevated
-        && !is_elevated
-        && !args.iter().any(|arg| arg == ELEVATED_RELAUNCH_ARG)
+    always_run_elevated && !is_elevated && !args.iter().any(|arg| arg == ELEVATED_RELAUNCH_ARG)
 }
 
 impl LaunchMode {
@@ -44,7 +42,7 @@ impl LaunchMode {
 
 #[cfg(test)]
 mod tests {
-    use super::{LaunchMode, ELEVATED_RELAUNCH_ARG, needs_elevated_relaunch};
+    use super::{needs_elevated_relaunch, LaunchMode, ELEVATED_RELAUNCH_ARG};
 
     fn parse(args: &[&str]) -> LaunchMode {
         if args.iter().any(|arg| *arg == "--silent") {
@@ -80,6 +78,10 @@ mod tests {
 
     #[test]
     fn relaunch_marker_breaks_elevation_loop() {
-        assert!(!needs_elevated_relaunch(true, false, &args(&[ELEVATED_RELAUNCH_ARG])));
+        assert!(!needs_elevated_relaunch(
+            true,
+            false,
+            &args(&[ELEVATED_RELAUNCH_ARG])
+        ));
     }
 }

@@ -26,7 +26,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     MOD_SHIFT, MOD_WIN,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    DispatchMessageW, GetMessageW, MSG, PostThreadMessageW, TranslateMessage, WM_HOTKEY, WM_QUIT,
+    DispatchMessageW, GetMessageW, PostThreadMessageW, TranslateMessage, MSG, WM_HOTKEY, WM_QUIT,
 };
 
 use tracing::{info, warn};
@@ -215,7 +215,10 @@ pub fn begin_session(config: SessionKeyConfig, callback: SessionKeyCallback) {
             continue;
         };
         let mut modifiers = modifiers_mask(combo);
-        if !matches!(action, SessionAction::NavigateUp | SessionAction::NavigateDown) {
+        if !matches!(
+            action,
+            SessionAction::NavigateUp | SessionAction::NavigateDown
+        ) {
             modifiers |= MOD_NOREPEAT;
         }
         hotkeys.push((

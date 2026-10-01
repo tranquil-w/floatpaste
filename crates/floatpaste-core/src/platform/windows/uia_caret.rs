@@ -128,7 +128,7 @@ use windows::Win32::UI::WindowsAndMessaging::GetClientRect;
 use crate::domain::error::AppError;
 
 use super::active_app::ActiveAppResolver;
-use super::picker_position::{Anchor, MAX_CARET_LINE_HEIGHT, ScreenPoint};
+use super::picker_position::{Anchor, ScreenPoint, MAX_CARET_LINE_HEIGHT};
 
 /// 连接超时：UIA 要跨进程连 provider，目标卡死时不设上限就会拖住事件循环
 /// （定位在开窗路径上同步执行）。连接建立后被客户端缓存，后续调用不再受限
@@ -179,18 +179,12 @@ pub fn caret_point_via_uia(target_hwnd: isize) -> Result<Anchor, AppError> {
     // 长文档整条 UIA 路径判死
     if is_ime_capture_window(&element) {
         tracing::debug!("焦点元素是 IME 输入捕获窗，插入符归属失真，回退鼠标");
-        return Err(AppError::Message(
-            "焦点元素是 IME 输入捕获窗".to_string(),
-        ));
+        return Err(AppError::Message("焦点元素是 IME 输入捕获窗".to_string()));
     }
 
     // 窗口根元素：焦点条带（VS Code 的 EditContext 宿主）自身无 TextPattern
     // 且无文本后代时，从窗口根搜文本元素——根文档的选区几何是实时光标行
-    let window_root = unsafe {
-        uia_client()?
-            .ElementFromHandle(HWND(target_hwnd as *mut _))
-    }
-    .ok();
+    let window_root = unsafe { uia_client()?.ElementFromHandle(HWND(target_hwnd as *mut _)) }.ok();
 
     let client = window_client_rect(target_hwnd);
     let attempt = caret_anchor(&element, client, window_root.as_ref());
@@ -349,8 +343,8 @@ fn element_caret_anchor(
         // 仍搜不到才用焦点元素框兜底
         if allow_drilldown {
             drilldown.attempted = true;
-            if let Some(anchor) = descendant_caret_anchor(element, window_rect, drilldown)
-                .or_else(|| {
+            if let Some(anchor) =
+                descendant_caret_anchor(element, window_rect, drilldown).or_else(|| {
                     window_root.and_then(|root| {
                         drilldown.from_window_root = true;
                         descendant_caret_anchor(root, window_rect, drilldown)
@@ -543,10 +537,7 @@ fn anchor_from_range(range: &IUIAutomationTextRange, element_rect: Option<RECT>)
         let needs_previous_line = match attachment {
             Attachment::AfterCaret => true,
             Attachment::AtStart => is_soft_wrap(
-                &blocks_within_element(
-                    &expanded_rects(range, TextUnit_Paragraph),
-                    element_rect,
-                ),
+                &blocks_within_element(&expanded_rects(range, TextUnit_Paragraph), element_rect),
                 &forward_rects,
             ),
             Attachment::AtEnd => false,
@@ -782,12 +773,18 @@ fn caret_bar_with_line(rects: &[f64]) -> Option<([f64; 4], [f64; 4])> {
     if row.is_empty() {
         return None;
     }
-    let top = row.iter().map(|block| block[1]).fold(f64::INFINITY, f64::min);
+    let top = row
+        .iter()
+        .map(|block| block[1])
+        .fold(f64::INFINITY, f64::min);
     let bottom = row
         .iter()
         .map(|block| block[1] + block[3])
         .fold(f64::NEG_INFINITY, f64::max);
-    let left = row.iter().map(|block| block[0]).fold(f64::INFINITY, f64::min);
+    let left = row
+        .iter()
+        .map(|block| block[0])
+        .fold(f64::INFINITY, f64::min);
     let right = row
         .iter()
         .map(|block| block[0] + block[2])
@@ -891,9 +888,9 @@ fn field_rect_anchor(
 /// VS Code 的 EditContext 行带）或读取失败都按非空处理，别让判据本身成为
 /// 新的失败源
 fn element_text_empty(element: &IUIAutomationElement) -> bool {
-    let Ok(pattern) = (unsafe {
-        element.GetCurrentPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId)
-    }) else {
+    let Ok(pattern) =
+        (unsafe { element.GetCurrentPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId) })
+    else {
         return false;
     };
     unsafe { pattern.CurrentValue() }
@@ -1069,7 +1066,7 @@ mod tests {
     use super::{
         anchor_from_rect, attachment, blocks_within_element, caret_bar_with_line, caret_rect,
         covers_element, field_rect_anchor, is_soft_wrap, log_label, probe_anchor, single_rect,
-        trusted, Attachment, DrilldownRecord, MAX_CARET_LINE_HEIGHT, LOG_FIELD_CHARS,
+        trusted, Attachment, DrilldownRecord, LOG_FIELD_CHARS, MAX_CARET_LINE_HEIGHT,
     };
     use crate::platform::windows::picker_position::{Anchor, ScreenPoint};
     use windows::Win32::Foundation::RECT;
@@ -1142,8 +1139,8 @@ mod tests {
     #[test]
     fn element_filter_guards_soft_wrap_check() {
         let paragraph = [
-            1193.0, 385.0, 16.0, 16.0, 826.0, 407.0, 1.0, 34.0, 836.0, 414.0, 331.0, 20.0,
-            836.0, 415.0, 1.0, 17.0,
+            1193.0, 385.0, 16.0, 16.0, 826.0, 407.0, 1.0, 34.0, 836.0, 414.0, 331.0, 20.0, 836.0,
+            415.0, 1.0, 17.0,
         ];
         let element = RECT {
             left: 836,
@@ -1170,9 +1167,7 @@ mod tests {
             &[896.0, 696.0, 1449.0, 23.0]
         ));
         // 3 个行高内仍是软换行（多行段落）
-        let wrapped = [
-            1541.0, 1134.0, 667.0, 21.0, 1545.0, 1158.0, 81.0, 21.0,
-        ];
+        let wrapped = [1541.0, 1134.0, 667.0, 21.0, 1545.0, 1158.0, 81.0, 21.0];
         let probe = [1545.0, 1158.0, 17.0, 21.0];
         assert!(is_soft_wrap(&wrapped, &probe));
     }

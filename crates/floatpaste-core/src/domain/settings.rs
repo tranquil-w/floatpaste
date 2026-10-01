@@ -486,7 +486,7 @@ mod tests {
     fn always_run_elevated_defaults_to_false() {
         assert!(!UserSetting::default().always_run_elevated);
 
-        // 两开关独立（对齐 PowerToys 行为逻辑）：管理员启动不牵动开机自启
+        // 两开关独立：管理员启动不牵动开机自启
         let settings = UserSetting {
             always_run_elevated: true,
             launch_on_startup: true,
