@@ -30,7 +30,8 @@ export global PanelGeometry {
     out property <length> scroll-slot: 10px;               // 列表右侧滚动槽
     out property <length> list-pad-left: 14px;             // 原版 grid pl-[14px]
     out property <length> list-pad-right: Metrics.space-1; // 原版 grid pr-1
-    out property <length> row-frame: 4px;                  // 行卡片描边双层（上下各 2px，含 padding）
+    out property <length> row-inset: 2px;                 // 行卡片内容边距（单侧）；选中描边向内画在卡片边缘内侧
+    out property <length> row-frame: 2 * row-inset;       // 行卡片内容边距双层（Rust 裁排经 preview-pad-h 扣除）
     out property <length> row-pad-left: 12px;              // 行内左 padding
     out property <length> row-pad-right: Metrics.space-1_5; // 行内右 padding（单侧）
     out property <length> thumb-size: 72px;
@@ -156,20 +157,19 @@ component ClipRowCard inherits Rectangle {
         }
     }
 
-    // 选中态强调 = 2px 墨色边框（fg-default @0.70，浅色=深墨/深色=
+    // 选中态强调 = 2px 墨色描边（fg-default @0.70，浅色=深墨/深色=
     // 白墨，与文字同源、随明暗反色；加粗配减淡平衡存在感）+ 选中
-    // 字重（semibold），无底色变化。边框画在本层（inner-card 的
-    // clip 按直角裁剪会裁掉圆角弧段，slint#4176）；VerticalLayout
-    // 的 2px padding = 边框预留几何，与 PanelGeometry.row-frame
-    // 双侧合计同步（Rust 裁排经 preview-pad-h 读到）
+    // 字重（semibold），无底色变化。描边由组件末尾的顶层环向内
+    // 重画——画在卡片（card-face）边缘内侧，卡片外轮廓不随选中
+    // 变化；宽度只在那一处声明，改宽不动 padding 与
+    // PanelGeometry.row-frame
     border-radius: Metrics.radius-lg;
-    border-width: selected ? 2px : 0px;
-    border-color: Theme.fg-default.with-alpha(0.70);
 
     VerticalLayout {
-        // 选中边框 2px 的预留几何（恒定，不随选中切换——行高稳定性
-        // 不变量），与 row-frame 双侧合计同步
-        padding: 2px;
+        // 卡片内容边距：固定几何，不随选中切换（行高稳定性
+        // 不变量），与描边宽度无关；值计入 PanelGeometry.row-frame
+        // （Rust 裁排经 preview-pad-h 读到）
+        padding: PanelGeometry.row-inset;
 
         inner-card := Rectangle {
             border-radius: Metrics.radius-lg;
@@ -272,10 +272,9 @@ component ClipRowCard inherits Rectangle {
                             height: 18px;
                             min-width: 18px;
                             border-radius: Metrics.radius-sm;
-                            // 选中态不再铺实底强调（亮 accent 配低对比前景
-                            // 是强调色发糊的重灾区）：数字只是按键提示，
-                            // 与本行类型 chip 同款静默底，选择感由左缘
-                            // 强调条与中性提亮底承载
+                            // 数字只是按键提示，不承载选择感（选择感由
+                            // 外层墨色描边 + 选中字重承载）；底色与本行
+                            // 类型 chip 同款静默档，选中仅提亮一档
                             background: selected
                                 ? Theme.canvas-default
                                 : (item-ta.has-hover ? Theme.canvas-inset : Theme.canvas-subtle);
@@ -371,6 +370,21 @@ component ClipRowCard inherits Rectangle {
                 }
             }
         }
+    }
+
+    // 选中描边：顶层向内重画，几何对齐 inner-card（外层减 padding
+    // 双侧），画在内容之上、命中区之下，不参与布局——描边吃进
+    // card-face 边缘内侧，卡片肉眼尺寸不随选中变化；圆角弧段
+    // 不被 inner-card 的直角 clip 裁掉（slint#4176）。描边宽度的
+    // 唯一声明处，改宽不动任何几何
+    Rectangle {
+        x: PanelGeometry.row-inset;
+        y: PanelGeometry.row-inset;
+        width: parent.width - 2 * PanelGeometry.row-inset;
+        height: parent.height - 2 * PanelGeometry.row-inset;
+        border-radius: Metrics.radius-lg;
+        border-width: selected ? 2px : 0px;
+        border-color: Theme.fg-default.with-alpha(0.70);
     }
 
     // 整行命中（含边框圈）：声明在内容之后以处于最上层，
@@ -626,9 +640,9 @@ export component QuickPasteWindow inherits Window {
                         height: parent.height;
                         interactive: true;
                         // 实测上报预览可用宽：flick 宽扣 PanelGeometry.
-                        // preview-pad-h（列表内边距 + 行描边 + 行内边距），
-                        // 含缩略图列再扣缩略图列宽。窗口缩放联动 changed
-                        // width，重裁由回调驱动
+                        // preview-pad-h（列表内边距 + 卡片内容边距 +
+                        // 行内边距），含缩略图列再扣缩略图列宽。窗口
+                        // 缩放联动 changed width，重裁由回调驱动
                         function report-preview-widths() {
                             root.preview-width-no-thumb = self.width - PanelGeometry.preview-pad-h;
                             root.preview-width-thumb = root.preview-width-no-thumb
