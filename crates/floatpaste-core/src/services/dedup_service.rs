@@ -28,7 +28,7 @@ impl DedupService {
         // 早期版本曾基于 created_at 维护一个 8 秒的 Skip 窗口用于"防抖"，但它与
         // bump_item 刷新 created_at 冲突：连续复制相同内容间隔小于 8 秒时会一直命中
         // Skip，导致该条目永远无法置顶（表现为"有时更新有时不更新"）。
-        // 防抖职责现已由剪贴板序列号检测（ClipboardMonitor）和应用自写回过滤
+        // 防抖职责现已由事件驱动监听（ClipboardMonitor）和应用自写回过滤
         // （SelfWriteGuard）承担，这里不再需要。
         if let Some(existing_id) = repository.find_existing_by_hash(hash)? {
             return Ok(DedupDecision::BumpExisting(existing_id));

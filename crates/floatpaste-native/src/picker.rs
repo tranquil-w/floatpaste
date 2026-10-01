@@ -3,7 +3,8 @@
 //! 行为逐项对齐原版 WindowCoordinator / ShortcutManager / PickerShell：
 //! - 显隐不抢焦点（WS_EX_NOACTIVATE，hide/show 一律以屏幕外停屏复现），
 //!   并把前台还给目标窗口；
-//! - 会话期键盘由 LL 钩子接管（长按连发在 core::session_keyboard）；
+//! - 会话期键盘由 core::session_keyboard 经 RegisterHotKey 专用线程接管
+//!   （LL 钩子方案已被静默摘钩问题淘汰，勿回退）；
 //! - 外击关闭经 WH_MOUSE_LL 钩子；
 //! - 尺寸/位置持久化与三种定位模式在 core::PickerPositionService。
 

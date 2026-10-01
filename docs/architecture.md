@@ -22,7 +22,7 @@ floatpaste-core（与 GUI 无关的共享核心）
   domain/        纯数据与业务概念（clip_item / settings / search_session / editor_session …）
   repository/    rusqlite 数据访问（SQLite + FTS5 与迁移）
   services/      业务规则编排（clip / history / search / normalize / dedup / privacy / retention /
-                 paste_support / picker_position / image_storage / image_decode / startup /
+                 paste_support / picker_position / image_storage / image_decode /
                  tag / time_format / clip_display）
   platform/windows/  Win32 原生集成（clipboard_monitor / session_keyboard / mouse_monitor /
                  hotkey / window_control / active_app / single_instance …，回调向 UI 暴露事件）
@@ -42,7 +42,7 @@ floatpaste-native（唯一桌面壳，Slint 软件渲染）
 | 速贴 Picker | 无焦点（`WS_EX_NOACTIVATE`） | 最近活跃列表（文本/图片缩略图/文件摘要）、会话键导航、收藏、确认上屏；不提供自由文本输入 |
 | 搜索 Search | 正常获焦 | FTS5 全文搜索 + 类型/标签筛选、防抖、触底分页、两段式删除、进编辑器 |
 | 编辑 Editor | 正常获焦 | 条目文本编辑（脏状态与关闭确认）+ 标签管理；从速贴或搜索进入，关闭返回来源窗口 |
-| 设置 Settings | 正常获焦 | 通用/快捷键/外观/行为/排除应用/标签六区，防抖自动保存 + 运行时联动 |
+| 设置 Settings | 正常获焦 | 设置分区（通用/行为/外观/快捷键/排除应用/标签等），防抖自动保存 + 运行时联动 |
 | 悬浮气泡 Tooltip | 无焦点、点击穿透 | 行悬停预览（文本摘要/图片大图），400ms 延迟、屏幕边缘自适应定位，全局单例 |
 | 托盘 | — | 打开速贴/搜索/设置、暂停与恢复监听、退出 |
 
@@ -53,14 +53,14 @@ floatpaste-native（唯一桌面壳，Slint 软件渲染）
 ### 剪贴监听与入库
 
 - 三类条目：文本（原文/预览/搜索文本/来源应用）、图片（PNG 直传与 DIB、缩略图、哈希去重）、文件（路径列表/数量/总大小）。
-- 同 hash（未删除）内容刷新既有记录并置顶，不重复插入；入库防抖由剪贴板序列号检测与自写回过滤（3 秒抑制窗）承担。
+- 同 hash（未删除）内容刷新既有条目并置顶，不重复插入；入库防抖由事件驱动监听（`AddClipboardFormatListener`）与自写回过滤（3 秒抑制窗）承担。
 - 排除应用名单、暂停监听、自写回抑制（上屏写剪贴板不再入库）。
 
 ### 搜索排序
 
 - `recent_desc`：`COALESCE(last_used_at, created_at) DESC`，再按 `created_at DESC`。
-- `relevance_desc`：FTS5 `bm25 ASC` 优先，其后同上。
-- 空关键词强制 `recent_desc`；收藏是独立筛选条件，不参与默认排序、不在速贴置顶。
+- `relevance_desc`：收藏与带标签条目加权置前，其次 `search_text` 子串命中，再按 FTS5 `bm25 ASC`，最后同 `recent_desc` 的时间序。
+- 空关键词强制 `recent_desc`；收藏是独立筛选条件、不在速贴置顶，但在 `relevance_desc` 中有加权。
 
 ### 上屏执行
 
@@ -78,9 +78,7 @@ floatpaste-native（唯一桌面壳，Slint 软件渲染）
 
 ## 数据模型
 
-SQLite（`%APPDATA%\com.floatpaste\floatpaste.db`）+ FTS5，表：`clip_items`、`clip_items_fts`（索引 full_text/search_text/source_app）、`settings`、`excluded_apps`、`tags`、`clip_item_tags`。
-
-`clip_items` 关键字段：`id`、`type`（text/image/file）、`full_text`/`preview_text`/`search_text`、`source_app`、`is_favorited`、`hash`、图片四字段（`image_path`/`width`/`height`/`format`）、文件四字段（`file_paths` JSON/`file_count`/`directory_count`/`total_size`）、`created_at`/`updated_at`/`last_used_at`/`deleted_at`（软删除）。
+SQLite（`%APPDATA%\com.floatpaste\floatpaste.db`）+ FTS5：`clip_items`（条目主表）、`clip_items_fts`（全文索引）、`settings`、`excluded_apps`、`tags`、`clip_item_tags`（条目-标签关联）。表结构与字段以 `repository` 的迁移与 `schema.rs` 为唯一来源，不在此复述。
 
 存储策略：文本进库；图片以 PNG 存数据目录 `images/` 子目录；文件条目只记路径引用；删除为软删除。
 

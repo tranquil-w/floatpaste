@@ -42,8 +42,8 @@ export global Theme {
     in-out property <color> accent-emphasis;
     in-out property <color> accent-hover;
     in-out property <color> accent-subtle; // rgba 合成后的半透明色
-    // 选中行/选中项中性底：canvas 向正文墨色 OKLab 混合
-    // （深 0.12/浅 0.06），选中感由亮度提升 + 左缘 3px 强调条承载
+    // 选中行/选中项中性底：正文墨色低 alpha 半透明叠层
+    // （浅 0.12 压暗 / 深 0.16 提亮），选中感由恒定亮度偏移 + 左缘 3px 强调条承载
     in-out property <color> selected-bg;
 
     // 边框
@@ -109,9 +109,9 @@ export global Metrics {
 // 高频交互，除既有进场语言外不加重入动画；动效只服务 hover/按压
 // 反馈、浮层与横幅进场。
 export global Motion {
-    // 颜色类反馈：hover 底、描边、徽章底、按压渐变
+    // 颜色类反馈：hover 底、描边、徽章底、按压渐变、tooltip 渐显
     out property <duration> dur-color: 120ms;
-    // 浮层与面板进场：tooltip 渐显、标签面板、操作条、横幅收放、滑入
+    // 浮层与面板进场：标签面板、操作条、横幅收放、滑入
     out property <duration> dur-enter: 150ms;
     // 曲线统一 ease-out：快起缓收，反馈即时；状态切换颜色过渡亦用之
     out property <easing> ease: ease-out;

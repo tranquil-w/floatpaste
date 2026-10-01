@@ -545,6 +545,7 @@ export component QuickPasteWindow inherits Window {
 
         VerticalLayout {
             y: root.enter-offset;
+            // 0ms 是进场动画关闭态占位（首帧直落），非时长档
             animate y { duration: root.enter-animated ? Motion.dur-enter : 0ms; easing: Motion.ease; }
 
             // ── 顶栏（图标 + 居中横条 + 关闭，可拖拽）──
