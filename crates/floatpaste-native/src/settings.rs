@@ -49,6 +49,7 @@ const SCROLL_OFFSET: f32 = 80.0;
 /// 项目主页（设置窗「关于」区打开）
 const PROJECT_PAGE_URL: &str = "https://github.com/tranquil-w/floatpaste";
 
+
 /// 会话键行定义（序号 = SessionKeys 字段序号，顺序即界面行序）
 const SESSION_KEY_DEFS: [(&str, &str); 8] = [
     ("上屏", "把选中条目粘贴到目标应用。"),
@@ -714,11 +715,7 @@ pub fn open(app: &App) {
     // 屏外，暖帧与全量重绘渲染出完整内容后再移动上屏，首帧不闪透明，
     // 抢前台激活发生在最终位置
     win32_ext::set_window_visible(hwnd, true);
-    win.set_material_active(overlay::apply_material(
-        app,
-        hwnd,
-        overlay::MaterialSurface::Content,
-    ));
+    win.set_material_active(overlay::apply_material(app, hwnd));
     win32_ext::warm_surface(hwnd);
     win32_ext::force_full_repaint(hwnd);
     win.window()
@@ -1092,21 +1089,13 @@ pub fn apply_side_effects(app: &App) {
     if let Some(win) = app.settings.upgrade() {
         let hwnd = app.state.settings_hwnd.load(Ordering::SeqCst);
         if hwnd != 0 {
-            win.set_material_active(overlay::apply_material(
-                app,
-                hwnd,
-                overlay::MaterialSurface::Content,
-            ));
+            win.set_material_active(overlay::apply_material(app, hwnd));
         }
     }
     if let Some(win) = app.editor.upgrade() {
         let hwnd = app.state.editor_hwnd.load(Ordering::SeqCst);
         if hwnd != 0 {
-            win.set_material_active(overlay::apply_material(
-                app,
-                hwnd,
-                overlay::MaterialSurface::Content,
-            ));
+            win.set_material_active(overlay::apply_material(app, hwnd));
         }
     }
     if let Some(win) = app.settings.upgrade() {
@@ -1237,6 +1226,7 @@ fn winv_self_conflict_text(main: &str, search: &str, main_failed: bool) -> &'sta
 #[cfg(test)]
 mod tests {
     use super::winv_self_conflict_text;
+
 
     #[test]
     fn main_shortcut_winv_reports_effective_takeover() {
@@ -1512,7 +1502,7 @@ impl std::fmt::Display for AutostartError {
     }
 }
 
-/// 在后台线程把自启任务同步到设置期望的状态（对齐 PowerToys 行为逻辑：
+/// 在后台线程把自启任务同步到设置期望的状态（行为逻辑：
 /// 任务计划是开机自启的唯一载体，「开机自启」决定任务有无、「以管理员
 /// 权限启动」决定任务 RunLevel，两开关独立互不牵动）。失败时异步回滚
 /// 对应开关并提示。`allow_prompt`：缺 HIGHEST 任务时是否允许经 UAC 弹窗

@@ -10,7 +10,7 @@
 //!
 //! 因此所有浮层窗口显示后必须经 [`after_show`] 重挂样式与执行前台
 //! 策略，禁止直接 show 后自行散落补样式；启动期取 HWND 用
-//! [`silent_assemble`]。
+//! [`silent_assemble_parked`] / [`silent_assemble_focusable`]。
 
 use std::time::Duration;
 
@@ -34,29 +34,9 @@ pub enum ForegroundPolicy {
     RestoreIfStolen(isize),
 }
 
-/// 启动期静默装配：show 出窗口取 HWND → 挂浮层样式 → 停屏到屏幕外。
-/// winit 惰性建窗，必须在事件循环内调用；show 与停屏之间不泵帧，窗口不闪现。
-/// 收尾**不走 Slint hide**：hide→show 周期中 winit 清空窗口表面且 Slint
-/// 脏区跟踪失效，重现时会得到透明空壳；停屏保持 Slint「已显示」持续渲染，
-/// 此后显隐一律在屏上/屏外之间平移，表面内容始终有效
-pub fn silent_assemble<W: ComponentHandle>(win: &W, decorated: bool) -> Option<isize> {
-    let previous_foreground = ActiveAppResolver::current_foreground_hwnd();
-    let _ = win.window().show();
-    let hwnd = win32_ext::window_hwnd(win)?;
-    win32_ext::apply_overlay_style(hwnd, true);
-    if decorated {
-        win32_ext::apply_dwm_shadow(hwnd);
-        win32_ext::apply_dwm_rounded_corners(hwnd);
-    }
-    let _ = window_control::remove_window_system_menu(hwnd);
-    park_offscreen(win);
-    surrender_startup_foreground(hwnd, previous_foreground);
-    schedule_style_reassert(hwnd, true);
-    Some(hwnd)
-}
-
 /// 搜索窗口的启动期静默装配：可激活（接收键盘输入）的 TOOLWINDOW 变体，
-/// 只挂阴影不挂系统圆角（旧版搜索窗为方角）。停屏语义同 [`silent_assemble`]
+/// 只挂阴影不挂系统圆角（旧版搜索窗为方角）。停屏语义同
+/// [`silent_assemble_parked`]
 pub fn silent_assemble_focusable<W: ComponentHandle>(win: &W) -> Option<isize> {
     let previous_foreground = ActiveAppResolver::current_foreground_hwnd();
     let _ = win.window().show();
@@ -154,29 +134,23 @@ pub fn schedule_caption_strip(hwnd: isize) {
     }
 }
 
-/// 材质管线按窗口生命周期分流（对齐 PowerToys 选型：常驻内容窗
-/// Mica、可激活瞬态浮层 Acrylic）。速贴是无焦点窗：DWM 材质在无焦点
-/// 窗口上系统性不生效（SWCA HOSTBACKDROP 绕过降级的假设实测不成立），
-/// 走实底自绘，不在此分流
-pub enum MaterialSurface {
-    /// 编辑/设置：常驻内容窗 → SystemBackdrop Mica
-    Content,
-    /// 搜索：有焦点瞬态浮层 → SystemBackdrop Acrylic
-    Transient,
-}
-
-/// 全应用统一材质挂载（明暗/回退门控在此收口）。
+/// 全应用统一材质挂载（明暗/回退门控在此收口）：全部可激活窗（搜索/
+/// 编辑/设置）统一 SystemBackdrop Acrylic、窗根玻璃 tint 直透——各窗
+/// 观感一致。设置窗的卡片分层靠卡面亮度差 + 描边 + 投影承担，底随
+/// 壁纸变化是 Acrylic 的固有形态（用户拍板接受）。规划：材质将做成
+/// 设置项「无 / Mica / Acrylic」三档、每窗一致，届时按档位分流
+/// （`apply_window_backdrop` 的 transient 参数即 Mica/Acrylic 开关，
+/// 「无」走 material_active=false 的既有回退路径）。速贴不走本管线
+/// （Acrylic 模糊是激活态特权，无焦点窗拿不到玻璃感，速贴模糊底为
+/// 唤起时自绘烘焙，见 core::backdrop）
 ///
 /// 不支持/系统透明关闭时返回 false，调用方把 material-active 置 false
 /// 让面板回不透明底。挂载幂等，每次显示/恢复重挂即可
-pub fn apply_material(app: &App, hwnd: isize, surface: MaterialSurface) -> bool {
+pub fn apply_material(app: &App, hwnd: isize) -> bool {
     let settings = app.state.current_settings();
     let resolved = theme::resolve_theme(settings.theme_mode.clone(), theme::system_prefers_dark());
     let dark = resolved == theme::ResolvedTheme::Dark;
-    match surface {
-        MaterialSurface::Content => win32_ext::apply_window_backdrop(hwnd, false, dark),
-        MaterialSurface::Transient => win32_ext::apply_window_backdrop(hwnd, true, dark),
-    }
+    win32_ext::apply_window_backdrop(hwnd, true, dark)
 }
 
 /// tooltip 启动装配：样式同 silent_assemble，收起走**停屏**（-32000 平移）

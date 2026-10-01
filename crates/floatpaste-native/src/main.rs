@@ -184,7 +184,6 @@ fn main() {
     // 主题写入放在停屏之后：属性变化使窗口变脏，Slint 在屏外完成首帧
     // 渲染与呈现——表面内容就绪后，任何上屏移动都立即有内容，开窗不闪
     // 透明（写在建窗之前不会触发屏外渲染，表面是空的）
-    let silent_startup = launch_mode.is_silent();
     let app_for_init = app.clone();
     let _ = slint::invoke_from_event_loop(move || {
         let Some(picker_win) = app_for_init.picker.upgrade() else {
@@ -199,12 +198,6 @@ fn main() {
         let editor_win = app_for_init.editor.upgrade();
         let settings_win = app_for_init.settings.upgrade();
 
-        match overlay::silent_assemble(&picker_win, true) {
-            Some(hwnd) => {
-                app_for_init.state.picker_hwnd.store(hwnd, Ordering::SeqCst);
-            }
-            None => tracing::error!("获取速贴窗口句柄失败，会话功能不可用"),
-        }
         if let Some(hwnd) = overlay::silent_assemble_parked(&tooltip_win, false) {
             app_for_init
                 .state
@@ -244,20 +237,29 @@ fn main() {
             }
         }
 
-        // 最小化恢复 → 重挂材质：DWM 偶发不重新应用 SystemBackdrop（用户
-        // 实测编辑窗最小化再恢复后整窗失材质）。两个内容窗共用一个分派
-        // 闭包，按 hwnd 路由
+        // 速贴装配（屏外停屏）：模糊底为唤起时自绘烘焙（core::backdrop），
+        // 不挂 DWM SystemBackdrop（Acrylic 模糊是激活态特权，无焦点窗
+        // 拿不到玻璃感）
+        match overlay::silent_assemble_parked(&picker_win, true) {
+            Some(hwnd) => {
+                app_for_init.state.picker_hwnd.store(hwnd, Ordering::SeqCst);
+            }
+            None => tracing::error!("获取速贴窗口句柄失败，会话功能不可用"),
+        }
+        // 最小化恢复 → 重挂材质：DWM 偶发不重新应用 SystemBackdrop（实测
+        // 编辑窗最小化再恢复后整窗失材质）。两个内容窗共用一个分派
+        // 闭包，按 hwnd 认领窗口（材质策略已全局统一）
         let app_for_restore = app_for_init.clone();
         let restore_material = move |hwnd: isize| {
             let app = app_for_restore.clone();
             let _ = slint::invoke_from_event_loop(move || {
                 if hwnd == app.state.editor_hwnd.load(Ordering::SeqCst) {
                     if let Some(win) = app.editor.upgrade() {
-                        win.set_material_active(overlay::apply_material(&app, hwnd, overlay::MaterialSurface::Content));
+                        win.set_material_active(overlay::apply_material(&app, hwnd));
                     }
                 } else if hwnd == app.state.settings_hwnd.load(Ordering::SeqCst) {
                     if let Some(win) = app.settings.upgrade() {
-                        win.set_material_active(overlay::apply_material(&app, hwnd, overlay::MaterialSurface::Content));
+                        win.set_material_active(overlay::apply_material(&app, hwnd));
                     }
                 }
             });
@@ -287,20 +289,11 @@ fn main() {
             &tokens,
         );
 
-    // 主题写入后同步暖一次表面：停屏窗口收不到自发 WM_PAINT，
-    // 不主动泵一次呈现，上屏首帧会是透明的
-    win32_ext::warm_surface(app_for_init.state.picker_hwnd.load(Ordering::SeqCst));
-    win32_ext::warm_surface(app_for_init.state.search_hwnd.load(Ordering::SeqCst));
-
-    if !silent_startup {
-        // 延一轮事件循环再打开：先让停屏窗口在屏外完成首帧渲染，
-        // 移回屏上时表面已有有效内容，首开不闪透明
-        let app_for_activate = app_for_init.clone();
-        slint::Timer::single_shot(std::time::Duration::from_millis(0), move || {
-            picker::activate(&app_for_activate);
-        });
-    }
-});
+        // 主题写入后同步暖一次表面：停屏窗口收不到自发 WM_PAINT，
+        // 不主动泵一次呈现，上屏首帧会是透明的
+        win32_ext::warm_surface(app_for_init.state.picker_hwnd.load(Ordering::SeqCst));
+        win32_ext::warm_surface(app_for_init.state.search_hwnd.load(Ordering::SeqCst));
+    });
 
     // ── 剪贴板监听：录入成功后同步刷新速贴列表与搜索结果 ──
     {
@@ -380,7 +373,14 @@ fn install_panic_hook() {
     std::panic::set_hook(Box::new(|info| {
         let location = info
             .location()
-            .map(|location| format!("{}:{}:{}", location.file(), location.line(), location.column()))
+            .map(|location| {
+                format!(
+                    "{}:{}:{}",
+                    location.file(),
+                    location.line(),
+                    location.column()
+                )
+            })
             .unwrap_or_else(|| "未知位置".to_string());
         let payload = if let Some(text) = info.payload().downcast_ref::<&str>() {
             (*text).to_string()
@@ -570,8 +570,7 @@ mod settings_scroll_tests {
         let win = crate::SettingsWindow::new().expect("实例化设置窗失败");
         // set_size 同步驱动布局求解（winit 的实际 resize 走事件循环，等不到），
         // 未布局时元素几何为 0，滚轮命中落空
-        win.window()
-            .set_size(slint::LogicalSize::new(920.0, 760.0));
+        win.window().set_size(slint::LogicalSize::new(920.0, 760.0));
 
         let window = win.window();
         let pos = slint::LogicalPosition::new(500.0, 400.0);
@@ -596,10 +595,7 @@ mod settings_scroll_tests {
         scroll(-1_000_000.0);
         let max = (win.get_content_height() - win.get_view_height()).max(0.0);
         assert_eq!(win.get_scroll_y(), -max, "触底应 clamp 到 -最大滚动量");
-        assert!(
-            max > 180.0,
-            "默认设置内容应高于一屏（否则滚动测试无意义）"
-        );
+        assert!(max > 180.0, "默认设置内容应高于一屏（否则滚动测试无意义）");
 
         // 回滚到顶：向上滚超大值应 clamp 回 0
         scroll(1_000_000.0);
@@ -610,10 +606,7 @@ mod settings_scroll_tests {
         // 末区顶恰好贴 80px 线——滚动即可抵达末区，无需点击导航
         let view_h = win.get_view_height();
         let content_h = win.get_content_height();
-        assert!(
-            content_h > view_h,
-            "默认设置内容应超出视口，测试才有意义"
-        );
+        assert!(content_h > view_h, "默认设置内容应超出视口，测试才有意义");
         let bottom = view_h - content_h; // 触底滚动量（负值）
         win.set_scroll_y(bottom);
         assert!(

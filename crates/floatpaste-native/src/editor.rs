@@ -169,11 +169,13 @@ fn show_editor(app: &App, session: EditorSession, anchor: Option<HostAnchor>) {
     // 位置先只计算不上屏：上屏动作（移动到目标位置）必须放在内容就绪
     // 与暖帧之后——停屏窗口 Win32 可见，移动即显示
     let memory = LAST_POSITION.get();
-    let memory_area =
-        memory.and_then(|(x, y)| work_area_from_point(ScreenPoint { x, y }).ok());
+    let memory_area = memory.and_then(|(x, y)| work_area_from_point(ScreenPoint { x, y }).ok());
     let anchor = anchor.and_then(|anchor| {
-        let area =
-            work_area_from_point(ScreenPoint { x: anchor.center.0, y: anchor.center.1 }).ok()?;
+        let area = work_area_from_point(ScreenPoint {
+            x: anchor.center.0,
+            y: anchor.center.1,
+        })
+        .ok()?;
         let width = (EDITOR_LOGICAL_WIDTH * anchor.dpi) as i32;
         let height = (EDITOR_LOGICAL_HEIGHT * anchor.dpi) as i32;
         Some((area, width, height))
@@ -194,11 +196,7 @@ fn show_editor(app: &App, session: EditorSession, anchor: Option<HostAnchor>) {
     // 屏外，暖帧与全量重绘渲染出完整内容后再移动上屏，首帧不闪透明，
     // 抢前台激活发生在最终位置
     win32_ext::set_window_visible(hwnd, true);
-    win.set_material_active(overlay::apply_material(
-        app,
-        hwnd,
-        overlay::MaterialSurface::Content,
-    ));
+    win.set_material_active(overlay::apply_material(app, hwnd));
     win32_ext::warm_surface(hwnd);
     win32_ext::force_full_repaint(hwnd);
     win.window()
@@ -1088,11 +1086,7 @@ mod tests {
         );
         // 屏外点按最近屏也能查到工作区，须靠区内判断拦下停屏坐标
         assert_eq!(
-            resolve_target_position(
-                Some((-32000, -32000)),
-                Some(work),
-                Some((work, 800, 600))
-            ),
+            resolve_target_position(Some((-32000, -32000)), Some(work), Some((work, 800, 600))),
             Some(((1920 - 800) / 2, (1040 - 600) / 2))
         );
     }

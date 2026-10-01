@@ -922,11 +922,7 @@ fn empty_state(
 
 /// 挂 Win11 材质并回写门控（策略在 overlay::apply_material 统一）
 fn apply_material(app: &App, win: &SearchWindow, hwnd: isize) {
-    win.set_material_active(overlay::apply_material(
-        app,
-        hwnd,
-        overlay::MaterialSurface::Transient,
-    ));
+    win.set_material_active(overlay::apply_material(app, hwnd));
 }
 
 pub fn paste_index(app: &App, index: usize, as_path_text: bool) {
@@ -938,7 +934,8 @@ pub fn paste_index(app: &App, index: usize, as_path_text: bool) {
 
 /// 键盘路径的行号来源：当前选中行（鼠标路径由行回调直接带行号）
 fn selected_index(app: &App) -> usize {
-    app.with_search(|win| win.get_selected().max(0) as usize).unwrap_or(0)
+    app.with_search(|win| win.get_selected().max(0) as usize)
+        .unwrap_or(0)
 }
 
 /// 选中条目上屏（键盘路径）；次级形态按类型生效：图片上屏为图片路径、

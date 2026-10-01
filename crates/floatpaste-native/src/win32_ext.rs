@@ -95,22 +95,18 @@ pub fn system_transparency_enabled() -> bool {
 /// （Win10 / Win11 初版）时返回 false 静默跳过——窗口保持自身背景色，
 /// 回退即默认态。
 ///
-/// 合成机制（2026-09-26 实测）：挂 backdrop 后表面像素 alpha 参与合成，
-/// 材质透过率 = 1 - 底色 alpha。UI 侧分两层：前景脚下的内容面用
-/// theme.rs `material_layer`（明暗同 0.90），材质感留给
-/// 窗缘的 `material_base`（明暗同 0.85）；勿改用透明底直露
-/// （100% 材质，用户实测否决：亮背景下深色 UI 对比全乱）。浅色 Acrylic
-/// 系统 tint 白雾重、Mica 透壁纸 tint，均随背景不可控，浅色一并收实
-/// （2026-09-28）。
+/// 合成机制（源码级验证）：挂 backdrop 后表面像素 alpha 参与合成，
+/// 材质透过率 = 1 - 底色 alpha。UI 侧窗根铺 theme.rs `material_layer`
+/// 单层（明暗同 0.70）；勿改用透明底直露（100% 材质——亮背景下深色
+/// UI 对比全乱）。浅色 Acrylic 系统 tint 白雾重，浅色观感定位为轻雾
+/// 磨砂。
 ///
-/// **无焦点窗口（速贴）勿走本函数**：SystemBackdrop Acrylic 在窗口
-/// 非前台时自动降级为纯色（系统行为，无开关）；曾试过 SWCA
-/// HOSTBACKDROP 组合绕过降级，实测无焦点窗口上材质依然不出
-/// （2026-09-30 移除），速贴走实底自绘。
-///
-/// DWM 属性挂在 HWND 上、不受 winit 样式重排影响，停屏方案窗口
-/// （搜索/tooltip）每次显示前挂载即可；走 hide 销毁重建的窗口
-/// （编辑/设置）须在重新 show 后重挂。`transient=true` 用 Acrylic
+/// DWM 属性挂在 HWND 上、不受 winit 样式重排影响。活性前提：窗口必须
+/// 被真正激活过一次——从未激活的窗口（含建窗即 NOACTIVATE）挂属性恒
+/// 降级为平色（裸 Win32 消融探针定案，2026-10-01）；激活后挂载，此后
+/// 转 NOACTIVATE/TOOLWINDOW、剥 SYSMENU、停屏移位均保活。速贴不消费
+/// 本管线（模糊底自绘烘焙，见 core::backdrop）。走 hide 销毁重建的窗口
+/// （编辑/设置）在重新 show 后重挂。`transient=true` 用 Acrylic
 /// （瞬态浮层），false 用 Mica（常驻内容窗）。extend frame 会覆盖
 /// [`apply_dwm_shadow`] 的 1px 底边——backdrop 窗口由 DWM 按窗口轮廓
 /// 投影与圆角，无需保留
@@ -155,7 +151,6 @@ pub fn apply_window_backdrop(hwnd: isize, transient: bool, prefers_dark: bool) -
         DwmExtendFrameIntoClientArea(hwnd, &margins).is_ok()
     }
 }
-
 
 /// 窗口物理 DPI（100%=96）
 pub fn window_dpi(hwnd: isize) -> u32 {
@@ -206,8 +201,8 @@ pub fn apply_overlay_style(hwnd: isize, no_activate: bool) {
 /// 完全由真实可见性驱动——任务栏在窗口首次可见的瞬间按当时的扩展样式
 /// 做「上/不上任务栏」分类，对常驻可见窗口事后翻 TOOLWINDOW 的分类修正
 /// 不可靠（首开无按钮乃至永远无按钮的根源）。隐藏对 Slint 不可见：
-/// Slint 端保持「已显示」，表面与缓冲存活，重现由 open 流程 warm 出
-/// 完整帧。SW_SHOWNOACTIVATE：显示但不抢激活，激活由上屏序列的
+/// Slint 端保持「已显示」，表面与缓冲存活，重现由 open 流程 warm 出完整
+/// 帧。SW_SHOWNOACTIVATE：显示但不抢激活，激活由上屏序列的
 /// force_foreground 在最终位置完成
 pub fn set_window_visible(hwnd: isize, visible: bool) {
     let cmd = if visible { SW_SHOWNOACTIVATE } else { SW_HIDE };
@@ -250,8 +245,8 @@ pub fn apply_dwm_rounded_corners(hwnd: isize) {
 
 /* ───────────────── 最小化恢复的材质重挂 ───────────────── */
 
-/// DWM 对最小化恢复的窗口偶发不重新应用 SystemBackdrop（用户实测：
-/// 编辑窗最小化再恢复后整窗失去材质），需要显示流程重挂。这里用窗口
+/// DWM 对最小化恢复的窗口偶发不重新应用 SystemBackdrop（实测：编辑窗
+/// 最小化再恢复后整窗失去材质），需要显示流程重挂。这里用窗口
 /// 子类拦截 WM_SIZE(SIZE_RESTORED)，交由注册的闭包在事件循环执行
 static RESTORE_HOOK: std::sync::Mutex<Option<Box<dyn Fn(isize) + Send>>> =
     std::sync::Mutex::new(None);
