@@ -7,7 +7,7 @@
 //   面板内搜索/勾选已选/创建；回车采纳、Tab 补全、上下键导航（滚动
 //   跟随）、Backspace 空输入删末位、Esc 分层退出（清输入→关面板→关窗）
 // - 键盘：窗口级 capture 先于输入框（对齐旧版 window keydown capture）
-import { Theme, Metrics, Motion } from "theme.slint";
+import { Theme, Metrics, Motion, SoftShadow } from "theme.slint";
 import { Kbd, WindowTitleBar } from "common.slint";
 
 // 标签建议项：0=match（既有命中）1=create（新建）2=exists（已添加）
@@ -518,7 +518,7 @@ export component EditorWindow inherits Window {
                             // 任何半透明叠加都会比周围更实（区域差 = α叠加·
                             // (1-α材质)，与材质联动永远存在），统一透明是
                             // 唯一无区域差的形态。透出强度只由材质 alpha
-                            // 统一控制（theme.rs material_base_alpha）
+                            // 统一控制（theme.rs material_layer_alpha）
                             background: transparent;
                             clip: true;
                             init => {
@@ -542,8 +542,8 @@ export component EditorWindow inherits Window {
                                     root.draft-byte-len, root.draft-byte-len);
                             }
 
-                        // 自管滚动（Flickable 三轮踩坑后弃用：可滚状态在
-                        // pressed 阶段吞子元素点击、滚轮链路不可控，见
+                        // 自管滚动（弃用 Flickable：可滚状态在 pressed
+                        // 阶段吞子元素点击、滚轮链路不可控，见
                         // docs/adr-0003）。滚动 = 内容层 y 偏移 + 滚轮事件
                         // 驱动，全部显式
                         edit-scroll := Rectangle {
@@ -963,29 +963,42 @@ export component EditorWindow inherits Window {
         // TouchArea 由 tag-open 门控，隐藏与淡出中不拦截指针。
         // 定位读标签条的窗口绝对坐标，自动跟随通知/错误条高度变化
         Rectangle {
-            x: tag-field.absolute-position.x;
-            y: tag-field.absolute-position.y + tag-field.height + 4px;
-            width: 320px;
+            // 容器比面板卡大四周 10px（弹层柔影的落影面——drop-shadow
+            // 在软件渲染下是空实现，见 theme.slint SoftShadow 注释）；
+            // 定位锚点反补同值，面板卡视觉位置不变
+            x: tag-field.absolute-position.x - 10px;
+            y: tag-field.absolute-position.y + tag-field.height + 4px - 10px;
+            width: 340px;
             // 高度随内容：搜索框 44 + 分隔线 1 + 行列表 32px/行 + 列表
-            // 内边距 8，封顶 288
+            // 内边距 8，封顶 288；上下各 +10px 留边
             height: Math.min(288px,
-                45px + (root.tags.length + root.tag-suggestions.length) * 32px + 8px);
+                45px + (root.tags.length + root.tag-suggestions.length) * 32px + 8px) + 20px;
             opacity: root.tag-open ? 1.0 : 0.0;
             animate opacity { duration: Motion.dur-enter; easing: Motion.ease; }
             clip: true;
 
+            // 柔影垫底（几何同 panel-body）
+            SoftShadow {
+                x: 10px;
+                y: 10px;
+                width: parent.width - 20px;
+                height: parent.height - 20px;
+                layers: 8;
+                step: 1px;
+                offset-y: 0px;
+                radius: Metrics.radius-md;
+                alpha: 0.15;
+            }
             panel-body := Rectangle {
-                x: 0;
-                y: root.tag-open ? 0px : 4px;
+                x: 10px;
+                y: 10px + (root.tag-open ? 0px : 4px);
                 animate y { duration: Motion.dur-enter; easing: Motion.ease; }
-                width: parent.width;
-                height: parent.height;
+                width: parent.width - 20px;
+                height: parent.height - 20px;
                 border-radius: Metrics.radius-md;
                 border-width: 1px;
                 border-color: Theme.border-subtle;
                 background: Theme.canvas-default;
-                drop-shadow-blur: 16px;
-                drop-shadow-color: Theme.shadow-color.with-alpha(0.15);
 
                 VerticalLayout {
                     // 搜索框（内部绝对定位：Rectangle 子元素不自动铺满，
@@ -1216,12 +1229,25 @@ export component EditorWindow inherits Window {
                 VerticalLayout {
                     alignment: center;
                     Rectangle {
+                        // 阴影宿：透明包裹层撑起柔影范围（drop-shadow 在
+                        // 软件渲染下是空实现，见 SoftShadow 注释），真卡在内
                         width: 384px;
+                        height: dlg-card.height;
+                        SoftShadow {
+                            width: 100%;
+                            height: 100%;
+                            layers: 10;
+                            step: 1.2px;
+                            offset-y: 2px;
+                            radius: Metrics.radius-lg + 4px;
+                            alpha: 0.25;
+                        }
+                        dlg-card := Rectangle {
+                        width: 100%;
+                        height: dlg-col.preferred-height;
                         border-radius: Metrics.radius-lg + 4px;
                         background: Theme.canvas-default;
-                        drop-shadow-blur: 24px;
-                        drop-shadow-color: Theme.shadow-color.with-alpha(0.25);
-                        VerticalLayout {
+                        dlg-col := VerticalLayout {
                             padding: 24px;
                             spacing: 8px;
                             Text {
@@ -1304,6 +1330,7 @@ export component EditorWindow inherits Window {
                                     }
                                 }
                             }
+                        }
                         }
                     }
                 }

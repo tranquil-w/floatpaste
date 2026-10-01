@@ -414,8 +414,12 @@ fn present(
     anchor: (f32, f32),
     token: u64,
 ) {
-    let physical_w = (width * dpi).round().max(1.0) as u32;
-    let physical_h = (height * dpi).round().max(1.0) as u32;
+    // 柔影留边（单一来源 tooltip.slint shadow-margin，此处读同源值）：
+    // 窗口比卡片大四周 margin——柔影画在卡外圈，贴内容尺寸的窗口没有
+    // 落影面；锚点反补 margin 让卡片仍落在原锚点，越界翻转按窗口全尺寸
+    let margin = win.get_shadow_margin();
+    let physical_w = ((width + 2.0 * margin) * dpi).round().max(1.0) as u32;
+    let physical_h = ((height + 2.0 * margin) * dpi).round().max(1.0) as u32;
     let tooltip_hwnd = app.state.tooltip_hwnd.load(Ordering::SeqCst);
     let prev_foreground = ActiveAppResolver::current_foreground_hwnd();
     if tooltip_hwnd == 0 {
@@ -462,8 +466,14 @@ fn present(
             }
             win32_ext::warm_surface(tooltip_hwnd);
             // ── 定位：宿主窗口原点 + 锚点×scale，越界按光标翻转 ──
-            let position =
-                resolve_position(host_hwnd, anchor.0, anchor.1, dpi, physical_w, physical_h);
+            let position = resolve_position(
+                host_hwnd,
+                anchor.0 - margin,
+                anchor.1 - margin,
+                dpi,
+                physical_w,
+                physical_h,
+            );
             window_control::set_window_bounds(
                 tooltip_hwnd,
                 position.0,

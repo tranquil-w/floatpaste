@@ -2,7 +2,7 @@
 // 6px 圆角、左右/上 12px 下 8px 内边距、图片最大 560×420 居中、元信息
 // 分隔行）。点击穿透与置顶不激活由 Rust 侧 Win32 处理；窗口尺寸由
 // Rust 度量后设置。
-import { Theme, Metrics, Motion } from "theme.slint";
+import { Theme, Metrics, Motion, SoftShadow } from "theme.slint";
 
 export struct TooltipMetaBadge {
     kind: int, // 0=类型徽章（带底色）1=尺寸 2=格式
@@ -84,21 +84,40 @@ export component TooltipWindow inherits Window {
     }
     out property <length> simple-line-height: simple-ruler.height;
 
-    // 卡片显式铺满窗口：窗口尺寸完全由 Rust 按内容度量设定（Window 直子
-    // 不自动铺满，取首选尺寸会在四周露出透明区、透出背景窗口）
+    // 柔影留边（单一来源，Rust 读同源值定窗口尺寸与锚点补偿）：
+    // 窗口比卡片大四周 shadow-margin——柔影画在卡外圈，贴内容尺寸的
+    // 窗口没有落影面（drop-shadow 在软件渲染下是空实现，见 SoftShadow）
+    out property <length> shadow-margin: 12px;
+
+    // 柔影垫底（几何同卡片，渐显与卡同步——否则淡入期只剩悬浮的影）
+    SoftShadow {
+        x: root.shadow-margin;
+        y: root.shadow-margin;
+        width: parent.width - 2 * root.shadow-margin;
+        height: parent.height - 2 * root.shadow-margin;
+        layers: 8;
+        step: 1px;
+        offset-y: 4px;
+        radius: Metrics.radius-md;
+        alpha: 0.12;
+        opacity: root.appear ? 1.0 : 0.0;
+        animate opacity { duration: Motion.dur-color; easing: Motion.ease; }
+    }
+
+    // 卡片：铺满窗口减去四周柔影留边（窗口尺寸由 Rust 按内容度量 +
+    // 2×margin 设定；Window 直子不自动铺满，取首选尺寸会在四周露出
+    // 透明区、透出背景窗口）
     Rectangle {
-        width: 100%;
-        height: 100%;
+        x: root.shadow-margin;
+        y: root.shadow-margin;
+        width: parent.width - 2 * root.shadow-margin;
+        height: parent.height - 2 * root.shadow-margin;
         background: Theme.canvas-subtle;
         opacity: root.appear ? 1.0 : 0.0;
         animate opacity { duration: Motion.dur-color; easing: Motion.ease; }
         border-width: 1px;
         border-color: Theme.border-muted;
         border-radius: Metrics.radius-md;
-        // 原版 box-shadow: 0 8px 24px rgba(shadow, 0.12)
-        drop-shadow-blur: 24px;
-        drop-shadow-offset-y: 8px;
-        drop-shadow-color: Theme.shadow-color.with-alpha(0.12);
 
         VerticalLayout {
             padding-left: Metrics.space-3;
