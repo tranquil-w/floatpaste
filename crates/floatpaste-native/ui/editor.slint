@@ -110,7 +110,8 @@ export component EditorWindow inherits Window {
     in-out property <bool> image-loading: false;
     in-out property <bool> image-failed: false;
     in property <image> image-preview;
-    // 图片原始路径：预览区「打开」按钮用（系统查看器）
+    // 图片存储文件的绝对路径（Rust 侧由库内相对路径解析而来）：
+    // 预览区「打开」按钮用（系统查看器）；空表示图片文件缺失
     in-out property <string> image-path;
     in-out property <[string]> file-paths;
     // 光标行列（1 起，Rust 按 draft 文本计算写回）

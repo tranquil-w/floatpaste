@@ -262,7 +262,15 @@ fn load_session(app: &App, win: &EditorWindow, item_id: &str) {
 
     // 图片大图：后台解码原始像素，事件循环侧构造 slint::Image
     if detail.r#type == "image" {
-        win.set_image_path(detail.image_path.clone().unwrap_or_default().into());
+        // image-path 仅供「打开」按钮消费，shell_open 需要能独立存在的
+        // 绝对路径；解码仍用库内相对原值（resolve 拒绝绝对路径）
+        let absolute = detail
+            .image_path
+            .as_deref()
+            .and_then(|p| app.core().image_storage.resolve_existing_image_path(p).ok())
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
+        win.set_image_path(absolute.into());
         load_image_preview(app, win, &detail);
     }
     let paths: Vec<slint::SharedString> =
