@@ -2,22 +2,22 @@
 // 修法（如 Kbd 的垂直下移只改了搜索窗），新增修复一律收敛到这里。
 import { Theme, Metrics } from "theme.slint";
 
-// 应用标识：make_icon.py V57「墨玉」的同构矢量版（近黑底板 + 灰/白
-// 双人字，旋转 -20° 的顶点为预计算结果）。标题栏位图源在非整倍 DPI
-//（125%/150%）下经软件渲染重采样，边缘过渡带 2-3px 发虚；矢量按
-// 物理像素栅格化，任意缩放锐利。底板取纯色：软渲染对非零
-// border-radius 的渐变背景会退化为直角矩形绘制（渐变漏出圆角外），
-// 且 16px 下三段渐变本就不可辨。几何与色值变更须与 make_icon.py
-// 常量同步（顶点用其 _rot_pts 重算）。
+// 应用标识：make_icon.py「双人字疾进」的同构矢量版（雾蓝底板 +
+// 浅蓝/白双人字，旋转 -20° 的顶点为预计算结果）。标题栏位图源在
+// 非整倍 DPI（125%/150%）下经软件渲染重采样，边缘过渡带 2-3px
+// 发虚；矢量按物理像素栅格化，任意缩放锐利。底板取纯色：软渲染
+// 对非零 border-radius 的渐变背景会退化为直角矩形绘制（渐变漏出
+// 圆角外），且 16px 下三段渐变本就不可辨。几何与色值变更须与
+// make_icon.py 常量同步（顶点用其 _rot_pts 重算）。
 export component AppMark inherits Rectangle {
-    background: #2A2A2A;
+    background: #242F52;
     border-radius: min(self.width, self.height) * 0.22;
     Path {
         width: 100%;
         height: 100%;
         viewbox-width: 1024;
         viewbox-height: 1024;
-        fill: #A6A6A6;
+        fill: #A9C6E8;
         commands: "M 117 398 L 296 333 L 585 485 L 461 788 L 283 853 L 407 550 Z";
     }
     Path {
