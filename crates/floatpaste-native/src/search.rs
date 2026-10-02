@@ -1211,6 +1211,13 @@ fn apply_height(app: &App) {
     let target = (target_logical * scale).round() as i32;
     let last = LAST_HEIGHT.with(|value| value.get()) as i32;
     if target == last {
+        // 内容落定高度与开窗起步一致（默认视图重开必然如此）：开窗已按
+        // 该高度居中，无事可做，但必须就地消费 JUST_OPENED——泄漏到
+        // 用户筛选的收缩时才触发「以新尺寸重居中」，收缩重居中令上缘
+        // 下移，再增长时左上角锚定只向下扩，窗口整体比开窗态偏下一段
+        if !win.get_loading() {
+            JUST_OPENED.with(|flag| flag.set(false));
+        }
         return;
     }
     // 加载态高度不应用：矮历史开窗会在旧位置分步长高、露出「已长高
