@@ -6,7 +6,7 @@
 // 数据流：全部字段以 in-out property 供 Rust 水合/回写，编辑回调触发
 // Rust 的 800ms 防抖自动保存；滚动跟随（scroll-spy）由各分区上报 y，
 // Rust 计算高亮并驱动滚动。
-import { Theme, Metrics, Motion } from "theme.slint";
+import { Theme, Metrics, Motion, SoftShadow } from "theme.slint";
 import { WindowTitleBar } from "common.slint";
 import { ListScrollBar } from "picker.slint";
 import { SearchGeometry } from "search.slint";
@@ -901,12 +901,11 @@ export component SettingsWindow inherits Window {
     // 全局快捷键注册状态（Rust 侧写入，空=正常）：1409 占用等用户可见反馈
     in-out property <string> main-hotkey-status;
     in-out property <string> search-hotkey-status;
-    // Win+V 接管（ADR-0001）
+    // Win+V 接管（ADR-0001）：切换弹模态确认对话框，确认重启才落库
     in-out property <bool> winv-enabled: false;
-    in-out property <string> winv-status-text;
-    in-out property <bool> winv-restart-armed: false;
-    // 关闭接管后尚未重启过资源管理器（系统 Win+V 恢复的过渡态）
-    in-out property <bool> winv-pending-restore: false;
+    in-out property <bool> winv-dialog-open: false;
+    in-out property <string> winv-dialog-title;
+    in-out property <string> winv-dialog-body;
     in-out property <bool> picker-digit-enabled: true;
     in-out property <string> history-limit-text;
     in-out property <string> picker-limit-text;
@@ -982,10 +981,11 @@ export component SettingsWindow inherits Window {
     callback search-shortcut-cancelled();
     callback search-shortcut-enabled-toggled(bool);
     callback picker-digit-toggled(bool);
-    // Win+V 接管：toggled 切换开关（写/清注册表并重注册）；restart-explorer
-    // 为两段式确认（第一次点击进入确认态，3 秒内再点执行）
+    // Win+V 接管：toggled 只弹确认对话框（不落任何状态）；确认
+    // restart 才写/清注册表、落库并重启资源管理器，cancel 无痕回弹
     callback winv-toggled(bool);
-    callback winv-restart-explorer();
+    callback winv-dialog-restart();
+    callback winv-dialog-cancel();
     // 会话键位（行模型）：captured 完成捕获，cancelled 仅清该行提示；
     // session-recorder-id 记录录制中的行（0=无），供根 Esc 捕获让位
     in-out property <[SessionKeyRow]> session-key-rows;
@@ -1054,6 +1054,19 @@ export component SettingsWindow inherits Window {
         // （录制框自己的 key-pressed 消费 Esc；会话键录制允许把 Esc
         // 录成键位，由 session-recorder-id 判断）
         capture-key-pressed(event) => {
+            // 重启引导弹窗打开时键盘先归弹窗（对齐编辑窗关闭确认）：
+            // Esc 取消、Enter 确认重启
+            if (root.winv-dialog-open) {
+                if (event.text == Key.Escape) {
+                    root.winv-dialog-cancel();
+                    return accept;
+                }
+                if (event.text == Key.Return) {
+                    root.winv-dialog-restart();
+                    return accept;
+                }
+                return reject;
+            }
             if (event.text == Key.Escape) {
                 if (root.any-recording) {
                     return reject;
@@ -1808,46 +1821,6 @@ export component SettingsWindow inherits Window {
                                         nested: true;
                                         toggled(checked) => { root.winv-toggled(checked); }
                                     }
-                                    // 生效状态：卡内子行（缩进对齐 nested 行），
-                                    // 接管开启或待重启恢复时出现
-                                    if (root.winv-enabled || root.winv-pending-restore): RowDivider { }
-                                    if (root.winv-enabled || root.winv-pending-restore): SettingRow {
-                                        title: "生效状态";
-                                        nested: true;
-                                        description: root.winv-status-text;
-                                        Rectangle {
-                                            width: restart-btn.width;
-                                            restart-btn := Rectangle {
-                                                x: 0;
-                                                y: (parent.height - self.height) / 2;
-                                                width: restart-btn-text.preferred-width + 24px;
-                                                height: 30px;
-                                                border-radius: 8px;
-                                                border-width: 1px;
-                                                border-color: root.winv-restart-armed
-                                                    ? Theme.accent-fg : Theme.border-default;
-                                                background: root.winv-restart-armed
-                                                    ? Theme.accent-subtle : Theme.canvas-default;
-                                                animate background { duration: Motion.dur-color; easing: Motion.ease; }
-                                                opacity: winv-restart-ta.pressed ? 0.85 : 1.0;
-                                                winv-restart-ta := TouchArea {
-                                                    clicked() => { root.winv-restart-explorer(); }
-                                                }
-                                                restart-btn-text := Text {
-                                                    text: root.winv-restart-armed
-                                                        ? "确认重启？任务栏会短暂消失"
-                                                        : (root.winv-enabled
-                                                            ? "重启资源管理器生效"
-                                                            : "重启资源管理器恢复系统");
-                                                    color: root.winv-restart-armed
-                                                        ? Theme.accent-fg : Theme.fg-default;
-                                                    font-size: Metrics.text-xs;
-                                                    vertical-alignment: center;
-                                                    horizontal-alignment: center;
-                                                }
-                                            }
-                                        }
-                                    }
                                 }
                                 RowGroup {
                                     // 搜索窗口：启用复选 + 录制框同行并排（旧版
@@ -2244,6 +2217,115 @@ export component SettingsWindow inherits Window {
                         user-scrolled() => {
                             root.nav-override = -1;
                             root.user-scroll();
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Win+V 接管重启引导弹窗（编辑窗关闭确认同款：模态遮罩 +
+        // 居中卡）。visible 而非 if：opacity 淡入需常驻实例。遮罩上
+        // 铺满 TouchArea 吃掉全部点击，下层设置项不可交互（真模态），
+        // 卡片后声明位于其上，按钮不受挡 ──
+        Rectangle {
+            width: 100%;
+            height: 100%;
+            visible: root.winv-dialog-open;
+            opacity: root.winv-dialog-open ? 1.0 : 0.0;
+            animate opacity { duration: Motion.dur-color; easing: Motion.ease; }
+            background: rgba(0, 0, 0, 0.45);
+            TouchArea {
+                width: 100%;
+                height: 100%;
+                mouse-cursor: default;
+            }
+            HorizontalLayout {
+                alignment: center;
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        // 阴影宿：透明包裹层撑起柔影范围（drop-shadow 在
+                        // 软件渲染下是空实现，见 SoftShadow 注释）
+                        width: 384px;
+                        height: winv-dlg-card.height;
+                        SoftShadow {
+                            width: 100%;
+                            height: 100%;
+                            layers: 10;
+                            step: 1.2px;
+                            offset-y: 2px;
+                            radius: Metrics.radius-lg + 4px;
+                            alpha: 0.25;
+                        }
+                        winv-dlg-card := Rectangle {
+                            width: 100%;
+                            height: winv-dlg-col.preferred-height;
+                            border-radius: Metrics.radius-lg + 4px;
+                            background: Theme.canvas-default;
+                            winv-dlg-col := VerticalLayout {
+                                padding: 24px;
+                                spacing: 8px;
+                                Text {
+                                    text: root.winv-dialog-title;
+                                    color: Theme.fg-default;
+                                    font-size: 18px;
+                                    font-weight: Metrics.weight-semibold;
+                                }
+                                Text {
+                                    text: root.winv-dialog-body;
+                                    color: Theme.fg-muted;
+                                    font-size: Metrics.text-sm;
+                                    wrap: word-wrap;
+                                }
+                                Rectangle { height: 12px; }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    alignment: end;
+                                    Rectangle {
+                                        width: 72px;
+                                        height: 36px;
+                                        border-radius: Metrics.radius-md;
+                                        border-width: 1px;
+                                        border-color: Theme.border-default;
+                                        opacity: winv-dlg-cancel-ta.pressed ? 0.85 : 1.0;
+                                        background: winv-dlg-cancel-ta.has-hover
+                                            ? Theme.canvas-subtle : transparent;
+                                        animate background { duration: Motion.dur-color; easing: Motion.ease; }
+                                        winv-dlg-cancel-ta := TouchArea {
+                                            mouse-cursor: default;
+                                            clicked() => { root.winv-dialog-cancel(); }
+                                        }
+                                        Text {
+                                            text: "取消";
+                                            color: Theme.fg-default;
+                                            font-size: Metrics.text-sm;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                    Rectangle {
+                                        width: 104px;
+                                        height: 36px;
+                                        border-radius: Metrics.radius-md;
+                                        opacity: winv-dlg-restart-ta.pressed ? 0.85 : 1.0;
+                                        background: winv-dlg-restart-ta.has-hover
+                                            ? Theme.accent-hover : Theme.accent-emphasis;
+                                        animate background { duration: Motion.dur-color; easing: Motion.ease; }
+                                        winv-dlg-restart-ta := TouchArea {
+                                            mouse-cursor: default;
+                                            clicked() => { root.winv-dialog-restart(); }
+                                        }
+                                        Text {
+                                            text: "立即重启";
+                                            color: Theme.fg-on-emphasis;
+                                            font-size: Metrics.text-sm;
+                                            font-weight: Metrics.weight-semibold;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }

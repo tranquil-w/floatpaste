@@ -55,9 +55,6 @@ pub struct SharedState {
     /// 最近一次全局快捷键注册失败的 (id, Win32 错误码) 列表
     /// （id 定义见 main::HOTKEY_ID_*），供设置页展示用户可见反馈
     hotkey_failures: Mutex<Vec<(u32, u32)>>,
-    /// 关闭 Win+V 接管后尚未重启过资源管理器：系统 Win+V 仍处于
-    /// 无人响应的过渡态，设置页据此显示恢复指引；TaskbarCreated 清除
-    winv_pending_restore: AtomicBool,
     /// 是否已发过「管理员目标」托盘通知（每进程只发一次，不重复打扰）
     admin_target_notified: AtomicBool,
 }
@@ -81,7 +78,6 @@ impl SharedState {
             selected_id: Mutex::new(None),
             favorite_pending: AtomicBool::new(false),
             hotkey_failures: Mutex::new(Vec::new()),
-            winv_pending_restore: AtomicBool::new(false),
             admin_target_notified: AtomicBool::new(false),
         }
     }
@@ -227,14 +223,6 @@ impl SharedState {
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .clone()
-    }
-
-    pub fn set_winv_pending_restore(&self, pending: bool) {
-        self.winv_pending_restore.store(pending, Ordering::SeqCst);
-    }
-
-    pub fn winv_pending_restore(&self) -> bool {
-        self.winv_pending_restore.load(Ordering::SeqCst)
     }
 
     /// 首次调用返回 true 并置为已通知（托盘气泡的每进程一次节流）
