@@ -1,22 +1,24 @@
 """FloatPaste 应用图标生成脚本。
 
-最终设计「双人字疾进」（V56）：
-- 深夜蓝三段对角渐变圆角底板 + 左上光斑
-- 两道人字形色块一浅蓝一白，整体逆时针倾斜 20° 向右上疾进——
+最终设计「双人字疾进 · 墨玉」（V57）：
+- 中性近黑三段对角渐变圆角底板（速贴面板深色层底同族的中性语言）
+- 两道人字形色块一灰一白，整体逆时针倾斜 20° 向右上疾进——
   「连续速贴、内容快进上屏」的速度感
+- 全尺寸免光斑：标题栏其余元素（横条/窗控）均为细线级，图标是
+  顶栏唯一实心块，再叠光影会与窗口扁平语言打架；蓝只留给 UI accent
 
 渲染分两条路径：
 
-- 32px 及以上：向量几何 + 超采样，质感层（渐变/光斑）齐全。
+- 32px 及以上：向量几何 + 超采样。
 - 16~48px：同一几何等比绘制（双人字色块占比大、无细笔画，
-  超采样 + 预乘降采样即可锐利）；一律免光斑——左上亮斑会把
-  主体左缘融进背景，破坏小尺寸的明暗平衡。
+  超采样 + 预乘降采样即可锐利）。
 
 用法：python scripts/make_icon.py
 输出：
 - crates/floatpaste-native/assets/icon.ico（16/20/24/28/30/32/36/40/42/48/64 BMP + 256 PNG）
 - crates/floatpaste-native/assets/icon-512.png（512 高清源图，用于展示与再生成）
 - crates/floatpaste-native/ui/titlebar-icon.png（32px，自绘标题栏应用图标源图）
+- crates/floatpaste-native/ui/app-icon.png（512 母图副本，Slint Window.icon 与关于页用）
 - crates/floatpaste-native/assets/_preview_pngs/preview_sheet.png（多尺寸 + 像素放大预览）
 
 依赖：Pillow、numpy
@@ -30,7 +32,7 @@ import struct
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageChops, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw
 
 REPO = Path(__file__).resolve().parent.parent
 ICONS = REPO / "crates" / "floatpaste-native" / "assets"
@@ -40,12 +42,9 @@ UI = REPO / "crates" / "floatpaste-native" / "ui"
 # ---- 大尺寸向量几何（1024 基准画布） ----
 BASE = 1024.0
 TILE_RADIUS = 217.6  # viewBox 22 → 22.5%
-TILE_STOPS = ((0.0, "#2A3F6B"), (0.55, "#16224A"), (1.0, "#0A1230"))
-GLOW_CX, GLOW_CY, GLOW_R = 0.28, 0.16, 0.9
-GLOW_COLOR = "#4F8FFF"
-GLOW_ALPHA = 0.55
+TILE_STOPS = ((0.0, "#3A3A3A"), (0.55, "#2A2A2A"), (1.0, "#1D1D1D"))
 
-# 双人字主体（V56 几何，BASE 尺度）
+# 双人字主体（V57 几何，BASE 尺度）
 CHEVRON_PTS = [
     (250.0, 270.0),
     (440.0, 270.0),
@@ -55,11 +54,11 @@ CHEVRON_PTS = [
     (470.0, 512.0),
 ]
 CHEVRON_ANGLE = -20.0  # y 向下坐标系，负角 = 视觉逆时针，尖端朝右上抬
-CHEVRON_BACK_DX = -70.0  # 后翼（浅蓝）相对基准左移
+CHEVRON_BACK_DX = -70.0  # 后翼（灰）相对基准左移
 CHEVRON_FRONT_DX = 185.0  # 前翼（白）相对基准右移
-CHEVRON_BACK = "#5FA8FF"
+CHEVRON_BACK = "#A6A6A6"
 CHEVRON_FRONT_TOP = "#FFFFFF"
-CHEVRON_FRONT_BOTTOM = "#DCE9FB"
+CHEVRON_FRONT_BOTTOM = "#E4E4E4"
 
 # ---- 小尺寸专用稿：与母图同几何，仅保留底板圆角半径 ----
 
@@ -133,7 +132,7 @@ def _rot_pts(
 
 
 def _draw_chevrons(img: Image.Image) -> None:
-    """双人字主体：浅蓝后翼 + 白渐变前翼，整体旋转后向右上疾进。
+    """双人字主体：灰后翼 + 白渐变前翼，整体旋转后向右上疾进。
     在任意尺寸画布上按 BASE 坐标等比绘制，几何全局一致。"""
     size = img.width
     k = size / BASE
@@ -156,30 +155,14 @@ def _draw_chevrons(img: Image.Image) -> None:
 def draw_icon(px: int, supersample: int = 4) -> Image.Image:
     """大尺寸路径：向量几何在超采样画布上绘制后重采样到目标尺寸。"""
     size = px * supersample
-    k = size / BASE
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
 
-    # 底板：深夜对角渐变 + 左上光斑
+    # 底板：中性近黑对角渐变（免光斑，见模块注释）
     tile = _multi_stop_gradient(size).convert("RGBA")
     tile.putalpha(_rounded_mask(size, (0, 0, BASE, BASE), TILE_RADIUS))
     img.alpha_composite(tile)
 
-    nx = np.linspace(0.0, 1.0, size, dtype=np.float32)
-    gx, gy = np.meshgrid(nx, nx)
-    dist = np.sqrt(((gx - GLOW_CX) ** 2 + (gy - GLOW_CY) ** 2) / GLOW_R**2)
-    glow_a = (np.clip(1.0 - dist, 0.0, 1.0) * GLOW_ALPHA * 255).astype(np.uint8)
-    glow = Image.fromarray(
-        np.dstack([np.full((size, size, 3), _rgba(GLOW_COLOR)[:3], dtype=np.uint8), glow_a]),
-        "RGBA",
-    )
-    glow.putalpha(
-        ImageChops.multiply(
-            glow.getchannel("A"), _rounded_mask(size, (0, 0, BASE, BASE), TILE_RADIUS)
-        )
-    )
-    img.alpha_composite(glow)
-
-    # 双人字主体：浅蓝后翼 + 白渐变前翼
+    # 双人字主体：灰后翼 + 白渐变前翼
     _draw_chevrons(img)
 
     return _downscale(img, px)
@@ -199,14 +182,13 @@ def _rounded_mask_px(size: int, box: tuple[float, float, float, float], radius: 
 
 
 def render_small_canvas(px: int, supersample: int = 8) -> Image.Image:
-    """小尺寸规格的超采样画布（未降采样）。16px 档免光斑/投影的规则在此生效，
-    托盘等常驻小图标的源图应取本画布，避免把母图的强光斑带进小尺寸造成明暗失衡。"""
+    """小尺寸规格的超采样画布（未降采样）。托盘等常驻小图标的源图
+    应取本画布。全尺寸免光斑（见模块注释），大小路径质感层一致。"""
     spec = SMALL_SPECS[px]
     size = px * supersample
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
 
-    # 底板：深夜渐变 + 亮边。小尺寸一律免光斑——左上亮斑会把主体左缘
-    # 融进背景、右缘对比过强，几何居中的内容也会被看成右偏
+    # 底板：中性近黑渐变
     tile = _multi_stop_gradient(size).convert("RGBA")
     tile.putalpha(_rounded_mask_px(size, (0, 0, px, px), spec["radius"], px))
     img.alpha_composite(tile)
@@ -345,6 +327,9 @@ def main() -> None:
     # 150% DPI 下直缩比温和不糊；512 源图直缩 32 倍会糊）。ui/ 目录供
     # Slint @image-url 引用
     images[32].save(UI / "titlebar-icon.png")
+
+    # 512 母图副本：Slint Window.icon（编辑/设置窗）与关于页 48px 展示
+    master.save(UI / "app-icon.png")
 
     _preview(images, master)
     print("icon.ico / icon-512.png / titlebar-icon.png / preview 已生成")
