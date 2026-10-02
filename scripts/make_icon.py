@@ -17,9 +17,12 @@
 输出：
 - crates/floatpaste-native/assets/icon.ico（16/20/24/28/30/32/36/40/42/48/64 BMP + 256 PNG）
 - crates/floatpaste-native/assets/icon-512.png（512 高清源图，用于展示与再生成）
-- crates/floatpaste-native/ui/titlebar-icon.png（32px，自绘标题栏应用图标源图）
 - crates/floatpaste-native/ui/app-icon.png（512 母图副本，Slint Window.icon 与关于页用）
 - crates/floatpaste-native/assets/_preview_pngs/preview_sheet.png（多尺寸 + 像素放大预览）
+
+标题栏 16px 图标不走本脚本位图：软件渲染在非整倍 DPI 下重采样
+发虚，用 ui/common.slint 的 AppMark 矢量版（几何色值与本脚本
+常量同构，变更须双向同步）。
 
 依赖：Pillow、numpy
 """
@@ -323,16 +326,11 @@ def main() -> None:
     images = {px: render_size(px) for px in sizes}
     (ICONS / "icon.ico").write_bytes(build_ico(images))
 
-    # 自绘标题栏应用图标源图：32px 小尺寸规格（16 逻辑 px @2x，125%/
-    # 150% DPI 下直缩比温和不糊；512 源图直缩 32 倍会糊）。ui/ 目录供
-    # Slint @image-url 引用
-    images[32].save(UI / "titlebar-icon.png")
-
     # 512 母图副本：Slint Window.icon（编辑/设置窗）与关于页 48px 展示
     master.save(UI / "app-icon.png")
 
     _preview(images, master)
-    print("icon.ico / icon-512.png / titlebar-icon.png / preview 已生成")
+    print("icon.ico / icon-512.png / app-icon.png / preview 已生成")
 
 
 if __name__ == "__main__":

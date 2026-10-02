@@ -8,6 +8,7 @@
 // - 交互：单击选中 / 双击上屏 / 悬停 400ms 预览（Rust 调度）
 // - 键盘全程不经窗口焦点（LL 键盘钩子会话），窗口本身不抢焦点
 import { Theme, Metrics, Motion } from "theme.slint";
+import { AppMark } from "common.slint";
 
 export struct ClipRow {
     id: string,
@@ -569,13 +570,12 @@ export component QuickPasteWindow inherits Window {
                     }
                 }
 
-                // 软件图标（32px 小尺寸规格源图，同 WindowTitleBar）
-                Image {
+                // 软件图标（矢量版，同 WindowTitleBar）
+                AppMark {
                     x: 10px;
                     y: (parent.height - 16px) / 2;
                     width: 16px;
                     height: 16px;
-                    source: @image-url("titlebar-icon.png");
                 }
 
                 // 居中拖拽横条（装饰性把手，悬停不加粗避免行高跳动）

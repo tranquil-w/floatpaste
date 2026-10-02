@@ -2,6 +2,34 @@
 // 修法（如 Kbd 的垂直下移只改了搜索窗），新增修复一律收敛到这里。
 import { Theme, Metrics } from "theme.slint";
 
+// 应用标识：make_icon.py V57「墨玉」的同构矢量版（近黑底板 + 灰/白
+// 双人字，旋转 -20° 的顶点为预计算结果）。标题栏位图源在非整倍 DPI
+//（125%/150%）下经软件渲染重采样，边缘过渡带 2-3px 发虚；矢量按
+// 物理像素栅格化，任意缩放锐利。底板取纯色：软渲染对非零
+// border-radius 的渐变背景会退化为直角矩形绘制（渐变漏出圆角外），
+// 且 16px 下三段渐变本就不可辨。几何与色值变更须与 make_icon.py
+// 常量同步（顶点用其 _rot_pts 重算）。
+export component AppMark inherits Rectangle {
+    background: #2A2A2A;
+    border-radius: min(self.width, self.height) * 0.22;
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 1024;
+        viewbox-height: 1024;
+        fill: #A6A6A6;
+        commands: "M 117 398 L 296 333 L 585 485 L 461 788 L 283 853 L 407 550 Z";
+    }
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 1024;
+        viewbox-height: 1024;
+        fill: #FFFFFF;
+        commands: "M 357 311 L 535 246 L 825 398 L 701 701 L 522 766 L 646 463 Z";
+    }
+}
+
 // 键位徽章（旧版 kbd：rounded border px-1 font-mono text-[10px] leading-3）
 export component Kbd inherits Rectangle {
     in property <string> key;
@@ -47,14 +75,11 @@ export component WindowTitleBar inherits Rectangle {
 
     height: 32px;
     background: transparent;
-    Image {
+    AppMark {
         x: 10px;
         y: (parent.height - 16px) / 2;
         width: 16px;
         height: 16px;
-        // 32px 小尺寸规格源图（scripts/make_icon.py 产出）。512 源图
-        // 直缩 32 倍发糊；16px 又在 125%/150% DPI 下要放大
-        source: @image-url("titlebar-icon.png");
     }
     Text {
         x: 34px;
