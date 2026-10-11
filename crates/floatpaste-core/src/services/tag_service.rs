@@ -8,8 +8,11 @@ use crate::{
 /// 标签业务服务：归一化、去重、数量上限与 FTS 同步的规则收敛层。
 pub struct TagService;
 
-const MAX_TAG_NAME_LEN: usize = 32;
-const MAX_TAGS_PER_ITEM: usize = 20;
+/// 标签名长度上限（按字符计，支持中文）。native 壳的编辑窗预校验引用
+/// 此份，勿另复制副本。
+pub const MAX_TAG_NAME_LEN: usize = 32;
+/// 单条目标签数上限。
+pub const MAX_TAGS_PER_ITEM: usize = 20;
 
 impl TagService {
     /// 全量替换条目标签。归一化后按 NOCASE 去重，并把名字对齐到既有标签的规范写法。

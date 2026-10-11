@@ -335,8 +335,9 @@ impl SqliteRepository {
         Ok(id)
     }
 
-    /// 物理删除软删除超过保留期的记录（含 FTS 行，标签关联随外键级联），
-    /// 返回被删记录的 image_path（可能为空串）供调用方清理图片文件。
+    /// 物理删除软删除超过保留期的记录（含 FTS 行，标签关联随外键级联，
+    /// 失去全部关联的标签行同步回收），返回被删记录的 image_path（可能为
+    /// 空串）供调用方清理图片文件。
     ///
     /// 软删来自用户的显式删除操作，不豁免收藏；`history_limit` 溢出清理才豁免收藏。
     pub fn purge_soft_deleted(&self, retention_ms: i64) -> Result<Vec<String>, AppError> {
@@ -364,12 +365,15 @@ impl SqliteRepository {
             transaction.execute("DELETE FROM clip_items WHERE id = ?1", [id])?;
             transaction.execute("DELETE FROM clip_items_fts WHERE item_id = ?1", [id])?;
         }
+        // 外键级联只清关联行，孤儿标签行在此一并回收
+        prune_orphan_tags(&transaction)?;
         transaction.commit()?;
         Ok(image_paths)
     }
 
     /// 将未删除的未收藏记录压缩到 `limit` 条以内：按活跃度保留最新的前 `limit` 条，
-    /// 其余物理删除（收藏项始终豁免）。返回被删记录的 image_path 供图片文件清理。
+    /// 其余物理删除（收藏项始终豁免，失去全部关联的标签行同步回收）。
+    /// 返回被删记录的 image_path 供图片文件清理。
     pub fn enforce_history_limit(&self, limit: u32) -> Result<Vec<String>, AppError> {
         let overflow: Vec<(String, String)> = {
             let connection = self.connection.lock()?;
@@ -397,6 +401,8 @@ impl SqliteRepository {
             transaction.execute("DELETE FROM clip_items WHERE id = ?1", [id])?;
             transaction.execute("DELETE FROM clip_items_fts WHERE item_id = ?1", [id])?;
         }
+        // 外键级联只清关联行，孤儿标签行在此一并回收
+        prune_orphan_tags(&transaction)?;
         transaction.commit()?;
         Ok(image_paths)
     }
@@ -486,6 +492,8 @@ impl SqliteRepository {
                 )?;
             }
             rewrite_item_fts_row(&transaction, id)?;
+            // 全量替换可能摘掉条目上的最后一个关联，孤儿标签行就地回收
+            prune_orphan_tags(&transaction)?;
             transaction.commit()?;
         }
         self.get_item_detail(id)
@@ -525,6 +533,9 @@ impl SqliteRepository {
         for item_id in &affected_ids {
             rewrite_item_fts_row(&transaction, item_id)?;
         }
+        // 四步法净关联数不变，新写入路径不会在此产生孤儿；清理针对
+        // 存量库遗留的孤儿行——否则改名会给它们续期
+        prune_orphan_tags(&transaction)?;
         transaction.commit()?;
         Ok(())
     }
@@ -680,6 +691,21 @@ fn tag_affected_item_ids(
         transaction.prepare("SELECT DISTINCT item_id FROM clip_item_tags WHERE tag_name = ?1")?;
     let rows = statement.query_map([tag_name], |row| row.get::<_, String>(0))?;
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+/// 清理不再被任何关联引用的标签行（孤儿标签）。
+///
+/// 软删条目的 `clip_item_tags` 关联保留（保留期即误删缓冲），因此仅被
+/// 软删条目引用的标签不会被清——勿改成 join clip_items 过滤，那会破坏
+/// 恢复语义。
+fn prune_orphan_tags(transaction: &Connection) -> Result<(), AppError> {
+    transaction.execute(
+        "DELETE FROM tags WHERE NOT EXISTS (
+            SELECT 1 FROM clip_item_tags WHERE clip_item_tags.tag_name = tags.name
+        )",
+        [],
+    )?;
+    Ok(())
 }
 
 /// 按数据库当前内容整行重写条目的 FTS 行（含 tags 列）。
@@ -2064,6 +2090,135 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
             })
             .unwrap();
         assert_eq!(result.total, 1);
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn set_item_tags_prunes_tags_that_lost_all_associations() {
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+        let id = seed_text_item(&repository, "孤儿清理验证");
+
+        repository
+            .set_item_tags(&id, &["独占".to_string(), "共享".to_string()])
+            .unwrap();
+
+        // 摘掉"独占"后其 tags 行同步消失，不再以 0 个条目滞留
+        repository
+            .set_item_tags(&id, &["共享".to_string()])
+            .unwrap();
+        let names: Vec<String> = repository
+            .list_tags()
+            .unwrap()
+            .into_iter()
+            .map(|tag| tag.name)
+            .collect();
+        assert_eq!(names, vec!["共享".to_string()]);
+
+        // 清空后全库无标签行
+        repository.set_item_tags(&id, &[]).unwrap();
+        let connection = repository.connection.lock().unwrap();
+        let tag_rows: i64 = connection
+            .query_row("SELECT COUNT(*) FROM tags", [], |r| r.get(0))
+            .unwrap();
+        drop(connection);
+        assert_eq!(tag_rows, 0);
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn physical_delete_paths_prune_tags_left_orphaned() {
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+        let now = Utc::now();
+        let day = Duration::days(1);
+
+        // purge 口：到期标签只挂在过期软删条目上；
+        // limit 口：溢出标签只挂在将被压缩的条目上；
+        // 共享标签同时挂在保留条目上，任何清理路径都必须存活
+        seed_item(
+            &repository,
+            "expired",
+            "到期内容",
+            (now - day * 40).timestamp_millis(),
+            None,
+            false,
+        );
+        seed_item(
+            &repository,
+            "overflow",
+            "溢出内容",
+            (now - day * 5).timestamp_millis(),
+            None,
+            false,
+        );
+        seed_item(
+            &repository,
+            "kept",
+            "保留内容",
+            (now - day).timestamp_millis(),
+            None,
+            false,
+        );
+        repository
+            .set_item_tags("expired", &["到期标".to_string()])
+            .unwrap();
+        repository
+            .set_item_tags("overflow", &["共享标".to_string(), "溢出标".to_string()])
+            .unwrap();
+        repository
+            .set_item_tags("kept", &["共享标".to_string()])
+            .unwrap();
+
+        repository.delete_item("expired").unwrap();
+        {
+            let connection = repository.connection.lock().unwrap();
+            connection
+                .execute(
+                    "UPDATE clip_items SET deleted_at = ?1 WHERE id = 'expired'",
+                    [(now - day * 40).timestamp_millis()],
+                )
+                .unwrap();
+        }
+        repository
+            .purge_soft_deleted(30 * 24 * 60 * 60 * 1000)
+            .unwrap();
+        repository.enforce_history_limit(1).unwrap();
+
+        let names: Vec<String> = repository
+            .list_tags()
+            .unwrap()
+            .into_iter()
+            .map(|tag| tag.name)
+            .collect();
+        assert_eq!(names, vec!["共享标".to_string()]);
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn tags_referenced_by_soft_deleted_items_survive_pruning() {
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+        let id = seed_text_item(&repository, "软删保留验证");
+        repository
+            .set_item_tags(&id, &["待恢复".to_string()])
+            .unwrap();
+
+        // 软删保留关联：条目在保留期内标签不清理（恢复语义）
+        repository.delete_item(&id).unwrap();
+        let names: Vec<String> = repository
+            .list_tags()
+            .unwrap()
+            .into_iter()
+            .map(|tag| tag.name)
+            .collect();
+        assert_eq!(names, vec!["待恢复".to_string()]);
 
         drop(repository);
         fs::remove_file(path).unwrap();
