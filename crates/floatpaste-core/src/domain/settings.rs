@@ -294,7 +294,7 @@ impl Default for UserSetting {
                 "Bitwarden.exe".to_string(),
                 "WindowsTerminal.exe".to_string(),
             ],
-            restore_clipboard_after_paste: true,
+            restore_clipboard_after_paste: false,
             pause_monitoring: false,
             theme_mode: ThemeMode::System,
             search_shortcut: DEFAULT_SEARCH_SHORTCUT.to_string(),
