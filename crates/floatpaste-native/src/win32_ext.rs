@@ -59,6 +59,17 @@ pub fn force_full_repaint(hwnd: isize) {
     window_control::set_window_size_no_activate(hwnd, width, height + 1);
     warm_surface(hwnd);
     slint::Timer::single_shot(std::time::Duration::from_millis(50), move || {
+        // 回位前校验：50ms 窗口内尺寸若已被外部改动（上屏后的高度
+        // 伸缩等），说明缓冲已因那次 resize 重分配——往返目的已达成，
+        // 强回快照值会顶掉新尺寸（预置筛选首开的快速收缩曾由此被
+        // 顶回起步高度，与收缩指令赛跑表现为偶现）
+        if let Some(current) = physical_rect(hwnd) {
+            let still_perturbed =
+                current.right - current.left == width && current.bottom - current.top == height + 1;
+            if !still_perturbed {
+                return;
+            }
+        }
         window_control::set_window_size_no_activate(hwnd, width, height);
         warm_surface(hwnd);
     });
