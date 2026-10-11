@@ -49,7 +49,6 @@ const SCROLL_OFFSET: f32 = 80.0;
 /// 项目主页（设置窗「关于」区打开）
 const PROJECT_PAGE_URL: &str = "https://github.com/tranquil-w/floatpaste";
 
-
 /// 会话键行定义（序号 = SessionKeys 字段序号，顺序即界面行序）
 const SESSION_KEY_DEFS: [(&str, &str); 8] = [
     ("上屏", "把选中条目粘贴到目标应用。"),

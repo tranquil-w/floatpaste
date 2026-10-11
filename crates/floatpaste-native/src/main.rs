@@ -178,12 +178,14 @@ fn main() {
     {
         let app_for_theme = app.clone();
         if let Err(error) =
-            floatpaste_core::platform::windows::theme_change::listen_system_theme_change(move || {
-                let app = app_for_theme.clone();
-                let _ = slint::invoke_from_event_loop(move || {
-                    settings::on_system_theme_changed(&app);
-                });
-            })
+            floatpaste_core::platform::windows::theme_change::listen_system_theme_change(
+                move || {
+                    let app = app_for_theme.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        settings::on_system_theme_changed(&app);
+                    });
+                },
+            )
         {
             tracing::warn!("装载系统明暗监听失败，跟随系统模式回落为开窗/保存时重读: {error}");
         }

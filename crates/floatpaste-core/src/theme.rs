@@ -712,7 +712,11 @@ pub fn derive_tokens(preset_id: &str, theme_accent: &str, resolved: ResolvedThem
         } else {
             scale.canvas
         },
-        card_face: if is_light { scale.surface } else { scale.canvas_subtle },
+        card_face: if is_light {
+            scale.surface
+        } else {
+            scale.canvas_subtle
+        },
 
         fg_default: ink.clone(),
         fg_muted: ink_muted,
