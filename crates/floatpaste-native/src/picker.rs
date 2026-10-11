@@ -17,7 +17,9 @@ use tracing::{info, warn};
 
 use floatpaste_core::backdrop;
 use floatpaste_core::domain::clip_item::{ClipItemSummary, PasteOption};
-use floatpaste_core::domain::settings::{PasteTrigger, PickerPositionMode, UserSetting};
+use floatpaste_core::domain::settings::{
+    PasteTrigger, PickerPositionMode, UserSetting, WindowMaterial,
+};
 use floatpaste_core::platform::windows::active_app::{ActiveAppResolver, WindowFocusTarget};
 use floatpaste_core::platform::windows::picker_position::ScreenPoint;
 use floatpaste_core::platform::windows::screen_capture;
@@ -213,8 +215,8 @@ pub fn activate(app: &App) {
         &tokens,
     );
 
-    // 材质底图：自绘模糊（DWM 管线在无焦点窗上拿不到玻璃感），
-    // 每次唤起在移回屏内前重新烘焙（见 prepare_blur_backdrop）
+    // 材质底：唤起时按设置「背景材质」现读分派（Mica 挂 DWM 材质 /
+    // Acrylic 自绘烘焙 / 无实底，见 prepare_picker_backdrop）
 
     app.state.begin_picker_activation();
 
@@ -238,7 +240,7 @@ pub fn activate(app: &App) {
     let position = resolve_window_position(app, &settings, size, session.target_window_hwnd);
     match position {
         Some(point) => {
-            prepare_blur_backdrop(&win, point, size, &tokens);
+            prepare_picker_backdrop(app, &win, hwnd, point, size, &tokens);
             // 上屏前先暖表面：停屏窗口收不到自发 WM_PAINT，同步泵一次
             // 呈现，让底图与最新列表的首帧在屏外落盘——移回屏上的第
             // 一帧即完整内容，既不透明也不闪旧列表
@@ -441,12 +443,12 @@ pub fn restore_after_editor(app: &App, target: TargetSession) {
     let resolved = theme::resolve_theme(settings.theme_mode.clone(), theme::system_prefers_dark());
     let tokens = theme::derive_tokens(&settings.theme_preset, &settings.theme_accent, resolved);
 
-    // 归位记忆位置 + 烘焙模糊底图（同 activate：移回屏内前完成，背后
+    // 归位记忆位置 + 按档备底（同 activate：移回屏内前完成，背后
     // 区域抓不到面板自己），再暖表面让首帧在屏外落盘
     let point = resolve_parked_position(app, size);
     match point {
         Some(p) => {
-            prepare_blur_backdrop(&win, p, size, &tokens);
+            prepare_picker_backdrop(app, &win, hwnd, p, size, &tokens);
             win32_ext::warm_surface(hwnd);
             window_control::set_window_bounds(
                 hwnd,
@@ -977,6 +979,40 @@ fn resolve_window_position(
     .ok()
     .flatten()
     .or_else(|| resolve_near_cursor(width, height))
+}
+
+/// 速贴底分档编排：唤起时按设置项「背景材质」现读分派（见
+/// [WindowMaterial]）——Mica 档对速贴窗挂 DWM Mica（无焦点窗失活时
+/// DWM 不渲 backdrop 则退化为均匀 tint，已接受），Acrylic 档自绘烘焙
+/// 毛玻璃（失活 DWM Acrylic 无模糊，烘焙更优），「无」档实底。挂载
+/// 失败（系统透明关闭/老系统）回实底；DWM 属性残留不撤销，实底与
+/// 烘焙底均不透明全遮 backdrop。每次唤起重挂，明暗自愈同烘焙管线
+fn prepare_picker_backdrop(
+    app: &App,
+    win: &QuickPasteWindow,
+    hwnd: isize,
+    point: ScreenPoint,
+    size: slint::PhysicalSize,
+    tokens: &theme::ThemeTokens,
+) {
+    let settings = app.state.current_settings();
+    match settings.window_material {
+        WindowMaterial::Mica => {
+            win.set_blur_active(false);
+            let resolved =
+                theme::resolve_theme(settings.theme_mode.clone(), theme::system_prefers_dark());
+            let dark = resolved == theme::ResolvedTheme::Dark;
+            win.set_material_active(win32_ext::apply_window_backdrop(hwnd, false, dark));
+        }
+        WindowMaterial::Acrylic => {
+            win.set_material_active(false);
+            prepare_blur_backdrop(win, point, size, tokens);
+        }
+        WindowMaterial::None => {
+            win.set_blur_active(false);
+            win.set_material_active(false);
+        }
+    }
 }
 
 /// 自绘模糊底图烘焙：抓取目标位屏幕区域（窗口尚在屏外，抓不到面板

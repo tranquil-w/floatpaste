@@ -19,7 +19,7 @@ use tracing::{info, warn};
 use floatpaste_core::domain::clip_item::TagInfo;
 use floatpaste_core::domain::error::AppError;
 use floatpaste_core::domain::settings::{
-    PasteTrigger, PickerPositionMode, SessionKeys, ThemeMode, UserSetting,
+    PasteTrigger, PickerPositionMode, SessionKeys, ThemeMode, UserSetting, WindowMaterial,
 };
 use floatpaste_core::launch_mode;
 use floatpaste_core::platform::windows::active_app::ActiveAppResolver;
@@ -366,6 +366,15 @@ pub fn wire(app: &App) {
         win.on_theme_mode_selected(move |mode| {
             if let Some(win) = app_cb.settings.upgrade() {
                 win.set_theme_mode(mode);
+                schedule_save(&app_cb);
+            }
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_window_material_selected(move |material| {
+            if let Some(win) = app_cb.settings.upgrade() {
+                win.set_window_material(material);
                 schedule_save(&app_cb);
             }
         });
@@ -784,6 +793,11 @@ fn hydrate(app: &App, win: &SettingsWindow) {
         ThemeMode::Light => 1,
         ThemeMode::Dark => 2,
     });
+    win.set_window_material(match settings.window_material {
+        WindowMaterial::None => 0,
+        WindowMaterial::Mica => 1,
+        WindowMaterial::Acrylic => 2,
+    });
     win.set_theme_preset(
         theme::THEME_PRESET_IDS
             .iter()
@@ -858,6 +872,11 @@ fn current_draft(win: &SettingsWindow) -> UserSetting {
             1 => ThemeMode::Light,
             2 => ThemeMode::Dark,
             _ => ThemeMode::System,
+        },
+        window_material: match win.get_window_material() {
+            0 => WindowMaterial::None,
+            1 => WindowMaterial::Mica,
+            _ => WindowMaterial::Acrylic,
         },
         search_shortcut: win.get_search_shortcut().to_string(),
         search_shortcut_enabled: win.get_search_shortcut_enabled(),
@@ -1095,7 +1114,8 @@ fn reapply_theme_and_material(app: &App) -> theme::ResolvedTheme {
     // 明暗切换后可见窗的 DWM 材质按新明暗重挂：Mica/Acrylic 的 tint
     // 明暗跟随 DWMWA_USE_IMMERSIVE_DARK_MODE，仅换 token 不重挂会让
     // 可见窗残留旧明暗的材质底（浅色下透出深色 Mica，实测灰环）。
-    // 停屏窗在各自 show 路径重挂，此处补挂常驻的设置/编辑窗
+    // 停屏窗在各自 show 路径重挂，此处补挂常驻的设置/编辑/搜索窗
+    // （改材质档位时对可见窗即时生效）
     if let Some(win) = app.settings.upgrade() {
         let hwnd = app.state.settings_hwnd.load(Ordering::SeqCst);
         if hwnd != 0 {
@@ -1104,6 +1124,12 @@ fn reapply_theme_and_material(app: &App) -> theme::ResolvedTheme {
     }
     if let Some(win) = app.editor.upgrade() {
         let hwnd = app.state.editor_hwnd.load(Ordering::SeqCst);
+        if hwnd != 0 {
+            win.set_material_active(overlay::apply_material(app, hwnd));
+        }
+    }
+    if let Some(win) = app.search.upgrade() {
+        let hwnd = app.state.search_hwnd.load(Ordering::SeqCst);
         if hwnd != 0 {
             win.set_material_active(overlay::apply_material(app, hwnd));
         }

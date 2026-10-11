@@ -912,6 +912,7 @@ export component SettingsWindow inherits Window {
     in-out property <int> position-mode: 0;   // 0=mouse 1=lastPosition 2=caret
     in-out property <int> paste-trigger: 0;   // 0=click 1=doubleClick
     in-out property <int> theme-mode: 0;      // 0=system 1=light 2=dark
+    in-out property <int> window-material: 2; // 0=none 1=mica 2=acrylic
     in-out property <int> theme-preset: 0;    // THEME_PRESET_IDS 下标
     in property <string> theme-accent-id: "default";
     in-out property <bool> launch-on-startup;
@@ -1004,6 +1005,7 @@ export component SettingsWindow inherits Window {
     callback position-mode-selected(int);
     callback paste-trigger-selected(int);
     callback theme-mode-selected(int);
+    callback window-material-selected(int);
     callback preset-selected(int);
     callback accent-selected(string);
     callback launch-on-startup-toggled(bool);
@@ -1580,7 +1582,7 @@ export component SettingsWindow inherits Window {
                                 spacing: 8px;
                                 SectionHeader {
                                     title: "外观";
-                                    description: "管理界面主题，保证日常使用观感一致。";
+                                    description: "管理界面主题与背景材质，保证日常使用观感一致。";
                                 }
                                 RowGroup {
                                     // 界面模式
@@ -1597,6 +1599,26 @@ export component SettingsWindow inherits Window {
                                                 options: ["跟随系统", "浅色", "深色"];
                                                 value <=> root.theme-mode;
                                                 selected(idx) => { root.theme-mode-selected(idx); }
+                                            }
+                                        }
+                                    }
+                                }
+                                RowGroup {
+                                    // 背景材质（docs/adr-0005）：三档全窗口生效，
+                                    // 速贴为无焦点窗，Mica/Acrylic 的呈现见描述
+                                    SettingRow {
+                                        title: "背景材质";
+                                        description: ["全部窗口使用不透明实底。",
+                                            "窗口透出以桌面壁纸染色的 Mica 材质底，速贴面板同样透底。",
+                                            "窗口透出带模糊的 Acrylic 毛玻璃；速贴面板为唤起时烘焙的模糊底。"][root.window-material];
+                                        Rectangle {
+                                            width: seg-material.width;
+                                            seg-material := Segmented {
+                                                x: 0;
+                                                y: (parent.height - self.height) / 2;
+                                                options: ["无", "Mica", "Acrylic"];
+                                                value <=> root.window-material;
+                                                selected(idx) => { root.window-material-selected(idx); }
                                             }
                                         }
                                     }

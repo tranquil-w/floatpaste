@@ -475,6 +475,10 @@ export component QuickPasteWindow inherits Window {
     // 背后屏幕区域 CPU 模糊烘焙（core::backdrop），每次唤起重生成
     in property <image> blur-backdrop;
     in property <bool> blur-active: false;
+    // DWM 材质态（设置「背景材质」=Mica）：面板底走 Theme.material-layer
+    // 半透直透 DWM Mica backdrop。行卡 blur-active=false 自动回不透明
+    // 实卡，不在半透底上叠第二层半透
+    in property <bool> material-active: false;
     // 加载失败的具体原因（旧版 getErrorMessage 展示）
     in-out property <string> load-error-text;
 
@@ -525,12 +529,17 @@ export component QuickPasteWindow inherits Window {
     in-out property <bool> enter-animated: true;
 
     card := Rectangle {
-        // 面板底双态：自绘模糊底图（blur-active，唤起时烘焙的不透明
+        // 面板底三态：自绘模糊底图（blur-active，唤起时烘焙的不透明
         // 模糊+tint 图，圆角已烘焙进图 alpha——软渲 clip 不按圆角裁剪
-        // slint#4176，靠图自身圆角规避）；抓屏失败/不支持回 card-layer
-        // 层灰实底（浅 canvas-subtle 灰 / 深 canvas 近黑）。透明窗底不能
-        // 裸透，两种形态都必须有底
-        background: root.blur-active ? transparent : Theme.card-layer;
+        // slint#4176，靠图自身圆角规避）；DWM 材质态（material-active，
+        // 设置「背景材质」=Mica，material-layer 半透直透 DWM backdrop）；
+        // 其余回 card-layer 层灰实底（浅 canvas-subtle 灰 / 深 canvas
+        // 近黑）。透明窗底不能裸透，三种形态都必须有底
+        background: root.blur-active
+            ? transparent
+            : root.material-active
+                ? Theme.material-layer
+                : Theme.card-layer;
         border-radius: Metrics.radius-lg;
         border-width: PanelGeometry.card-border;
         border-color: Theme.border-window;

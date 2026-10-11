@@ -16,6 +16,7 @@ use std::time::Duration;
 
 use slint::ComponentHandle;
 
+use floatpaste_core::domain::settings::WindowMaterial;
 use floatpaste_core::platform::windows::{active_app::ActiveAppResolver, window_control};
 use floatpaste_core::theme;
 
@@ -134,23 +135,28 @@ pub fn schedule_caption_strip(hwnd: isize) {
     }
 }
 
-/// 全应用统一材质挂载（明暗/回退门控在此收口）：全部可激活窗（搜索/
-/// 编辑/设置）统一 SystemBackdrop Acrylic、窗根玻璃 tint 直透——各窗
-/// 观感一致。设置窗的卡片分层靠卡面亮度差 + 描边 + 投影承担，底随
-/// 壁纸变化是 Acrylic 的固有形态（用户拍板接受）。规划：材质将做成
-/// 设置项「无 / Mica / Acrylic」三档、每窗一致，届时按档位分流
-/// （`apply_window_backdrop` 的 transient 参数即 Mica/Acrylic 开关，
-/// 「无」走 material_active=false 的既有回退路径）。速贴不走本管线
-/// （Acrylic 模糊是激活态特权，无焦点窗拿不到玻璃感，速贴模糊底为
-/// 唤起时自绘烘焙，见 core::backdrop）
+/// 全应用统一材质挂载（明暗/档位/回退门控在此收口）：全部可激活窗
+/// （搜索/编辑/设置）按设置项「背景材质」分流——「无」返回 false 让
+/// 面板回不透明底，Mica 走 DWM Mica，Acrylic 走 DWM Acrylic，窗根
+/// 玻璃 tint 直透，各窗观感一致。设置窗的卡片分层靠卡面亮度差 +
+/// 描边 + 投影承担，底随壁纸变化是 Acrylic 的固有形态（用户拍板接受）。
+/// 速贴不经本函数：picker.rs 每次唤起按档分派——Mica 档同样挂 DWM
+/// Mica（无焦点窗，失活不渲 backdrop 时退化为均匀 tint，已接受），
+/// Acrylic 档自绘烘焙毛玻璃（见 core::backdrop），「无」档实底
 ///
-/// 不支持/系统透明关闭时返回 false，调用方把 material-active 置 false
-/// 让面板回不透明底。挂载幂等，每次显示/恢复重挂即可
+/// 档位「无」/不支持/系统透明关闭时返回 false，调用方把
+/// material-active 置 false 让面板回不透明底。挂载幂等，每次显示/
+/// 恢复重挂即可
 pub fn apply_material(app: &App, hwnd: isize) -> bool {
     let settings = app.state.current_settings();
     let resolved = theme::resolve_theme(settings.theme_mode.clone(), theme::system_prefers_dark());
     let dark = resolved == theme::ResolvedTheme::Dark;
-    win32_ext::apply_window_backdrop(hwnd, true, dark)
+    let transient = match settings.window_material {
+        WindowMaterial::None => return false,
+        WindowMaterial::Mica => false,
+        WindowMaterial::Acrylic => true,
+    };
+    win32_ext::apply_window_backdrop(hwnd, transient, dark)
 }
 
 /// tooltip 启动装配：样式同 silent_assemble，收起走**停屏**（-32000 平移）

@@ -67,6 +67,40 @@ impl<'de> Deserialize<'de> for ThemeMode {
     }
 }
 
+/// 窗口背景材质档位（docs/adr-0005），全窗口生效：
+/// - 无：全部窗口不透明实底
+/// - Mica：可激活窗走 DWM Mica；速贴为无焦点窗同样挂 DWM Mica，
+///   失活时 DWM 不渲染 backdrop 则退化为均匀 tint（已接受）
+/// - Acrylic：可激活窗走 DWM Acrylic；速贴为唤起时自绘烘焙毛玻璃
+///   （失活 DWM Acrylic 无模糊，烘焙更优）
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum WindowMaterial {
+    None,
+    Mica,
+    Acrylic,
+}
+
+impl Default for WindowMaterial {
+    fn default() -> Self {
+        Self::Acrylic
+    }
+}
+
+impl<'de> Deserialize<'de> for WindowMaterial {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = Option::<String>::deserialize(deserializer)?.unwrap_or_default();
+        Ok(match value.as_str() {
+            "none" => Self::None,
+            "mica" => Self::Mica,
+            _ => Self::Acrylic,
+        })
+    }
+}
+
 /// 速贴/搜索条目的鼠标上屏触发方式
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -252,6 +286,8 @@ pub struct UserSetting {
     pub restore_clipboard_after_paste: bool,
     pub pause_monitoring: bool,
     pub theme_mode: ThemeMode,
+    /// 窗口背景材质档位，见 [WindowMaterial]
+    pub window_material: WindowMaterial,
     #[serde(alias = "workbench_shortcut")]
     pub search_shortcut: String,
     #[serde(alias = "workbench_shortcut_enabled")]
@@ -297,6 +333,7 @@ impl Default for UserSetting {
             restore_clipboard_after_paste: false,
             pause_monitoring: false,
             theme_mode: ThemeMode::System,
+            window_material: WindowMaterial::Acrylic,
             search_shortcut: DEFAULT_SEARCH_SHORTCUT.to_string(),
             search_shortcut_enabled: true,
             picker_digit_shortcuts_enabled: true,
@@ -462,7 +499,9 @@ fn is_valid_hex_color(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_shortcut_for_compare, PickerPositionMode, ThemeMode, UserSetting};
+    use super::{
+        normalize_shortcut_for_compare, PickerPositionMode, ThemeMode, UserSetting, WindowMaterial,
+    };
 
     #[test]
     fn sanitized_turns_off_silent_when_launch_on_startup_is_disabled() {
@@ -771,6 +810,43 @@ mod tests {
 
         let enabled: UserSetting = serde_json::from_str(r#"{"takeoverWinv":true}"#).unwrap();
         assert!(enabled.takeover_winv);
+    }
+
+    #[test]
+    fn deserialize_old_settings_defaults_window_material_to_acrylic() {
+        let settings: UserSetting = serde_json::from_str(
+            r#"{
+                "shortcut":"Alt+Q",
+                "launchOnStartup":false,
+                "historyLimit":1000,
+                "excludedApps":[],
+                "restoreClipboardAfterPaste":true,
+                "pauseMonitoring":false
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(settings.window_material, WindowMaterial::Acrylic);
+    }
+
+    #[test]
+    fn window_material_unknown_value_falls_back_to_acrylic_and_round_trips() {
+        let unknown: UserSetting = serde_json::from_str(r#"{"windowMaterial":"frost"}"#).unwrap();
+        assert_eq!(unknown.window_material, WindowMaterial::Acrylic);
+
+        for material in [
+            WindowMaterial::None,
+            WindowMaterial::Mica,
+            WindowMaterial::Acrylic,
+        ] {
+            let json = serde_json::to_string(&UserSetting {
+                window_material: material,
+                ..UserSetting::default()
+            })
+            .unwrap();
+            let back: UserSetting = serde_json::from_str(&json).unwrap();
+            assert_eq!(back.window_material, material);
+        }
     }
 
     #[test]
