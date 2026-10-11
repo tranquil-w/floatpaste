@@ -47,9 +47,6 @@ use crate::{ClipRow, PanelGeometry, QuickPasteWindow, SearchWindow, TooltipWindo
 const PREVIEW_MAX_LINES: usize = 4;
 /// 入库预览的字符截断上限（normalize_service 同值）：达到即认为原文更长
 const PREVIEW_SOURCE_LIMIT: usize = 120;
-/// 自绘模糊半径（逻辑 px，物理半径 = 该值 × 缩放因子）。等效观感目标
-/// Acrylic 面板底（三遍 box 近似高斯）
-const BLUR_RADIUS_LOGICAL: f32 = 12.0;
 
 /// 事件循环线程上的应用上下文（克隆廉价，闭包捕获后经 invoke 回到事件循环）
 #[derive(Clone)]
@@ -975,8 +972,9 @@ fn resolve_window_position(
 }
 
 /// 自绘模糊底图烘焙：抓取目标位屏幕区域（窗口尚在屏外，抓不到面板
-/// 自己）→ 三遍 box 模糊 → 主题 tint（material-layer 同源 token，观感
-/// 与真 Acrylic 面板底一致）→ 圆角烘焙进图 alpha，写入 blur-backdrop。
+/// 自己；四周外扩一个模糊半径，钳到虚拟桌面）→ 三遍 box 模糊 → 裁回
+/// 窗口尺寸 → 主题 tint（material-layer 同源 token，观感与真 Acrylic
+/// 面板底一致）→ 圆角烘焙进图 alpha，写入 blur-backdrop。
 /// 抓屏失败（锁屏/会话切换等）回实底（blur-active=false）
 fn prepare_blur_backdrop(
     win: &QuickPasteWindow,
@@ -985,9 +983,21 @@ fn prepare_blur_backdrop(
     tokens: &theme::ThemeTokens,
 ) {
     let started = std::time::Instant::now();
-    let w = size.width.max(1) as i32;
-    let h = size.height.max(1) as i32;
-    let Some(mut rgba) = screen_capture::capture_region_rgba(point.x, point.y, w, h) else {
+    let scale = win.window().scale_factor();
+    let blur_radius = (backdrop::BLUR_RADIUS_LOGICAL * scale).round().max(1.0) as usize;
+    let (w, h) = (size.width.max(1) as usize, size.height.max(1) as usize);
+    // 扩边抓屏：四周多抓一个模糊半径，模糊后裁回窗口尺寸——边缘模糊
+    // 吃到窗外内容，不因滑窗边界 clamp 比中心更「实」。抓取范围钳到虚
+    // 拟桌面：桌面之外 BitBlt 填不透明黑，贴屏边唤起会把黑边糊进底图；
+    // clamp 语义随之落在屏幕边界（该侧本无窗外内容可吃）
+    let m = blur_radius as i32;
+    let (want_x, want_y) = (point.x - m, point.y - m);
+    let (vx, vy, vw, vh) = screen_capture::virtual_screen_bounds();
+    let cap_x = want_x.max(vx);
+    let cap_y = want_y.max(vy);
+    let cap_w = ((want_x + w as i32 + 2 * m).min(vx + vw) - cap_x).max(1);
+    let cap_h = ((want_y + h as i32 + 2 * m).min(vy + vh) - cap_y).max(1);
+    let Some(mut rgba) = screen_capture::capture_region_rgba(cap_x, cap_y, cap_w, cap_h) else {
         tracing::warn!(
             "模糊底图抓屏失败: pos=({},{}) size={}x{}",
             point.x,
@@ -998,16 +1008,37 @@ fn prepare_blur_backdrop(
         win.set_blur_active(false);
         return;
     };
-    let scale = win.window().scale_factor();
-    let blur_radius = (BLUR_RADIUS_LOGICAL * scale).round().max(1.0) as usize;
-    backdrop::blur_rgba(&mut rgba, w as usize, h as usize, blur_radius);
+    if cap_w < w as i32 || cap_h < h as i32 {
+        // 钳制后装不下窗口（显示器热插拔竞态）：无完整窗口区域可裁，
+        // 不进 crop 的 debug_assert，回实底
+        tracing::warn!(
+            "模糊底图抓屏范围小于窗口: pos=({},{}) size={}x{}",
+            point.x,
+            point.y,
+            w,
+            h
+        );
+        win.set_blur_active(false);
+        return;
+    }
+    let (full_w, full_h) = (cap_w as usize, cap_h as usize);
+    backdrop::blur_rgba(&mut rgba, full_w, full_h, blur_radius);
+    let mut rgba = backdrop::crop(
+        &rgba,
+        full_w,
+        full_h,
+        (cap_x - want_x) as usize,
+        (cap_y - want_y) as usize,
+        w,
+        h,
+    );
     backdrop::tint_opaque(
         &mut rgba,
         tokens.material_layer_rgb,
         tokens.material_layer_alpha,
     );
     let corner = (win.global::<PanelGeometry>().get_card_radius() * scale).round() as usize;
-    backdrop::bake_round_corners(&mut rgba, w as usize, h as usize, corner);
+    backdrop::bake_round_corners(&mut rgba, w, h, corner);
     let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(w as u32, h as u32);
     buf.make_mut_bytes().copy_from_slice(&rgba);
     win.set_blur_backdrop(slint::Image::from_rgba8(buf));

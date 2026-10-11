@@ -1,5 +1,7 @@
 //! 速贴无焦点窗的自绘模糊底图：唤起时抓取窗口背后屏幕区域，CPU
-//! 模糊 + 主题 tint + 圆角烘焙成不透明底图。
+//! 模糊 + 主题 tint + 圆角烘焙成不透明底图。抓屏区域向四周外扩一个
+//! 模糊半径、模糊后裁回窗口尺寸——边缘模糊吃到窗外内容，不因滑窗
+//! 在图像边界 clamp 而比中心更「实」。
 //!
 //! 为什么不用 DWM 管线：
 //! - SystemBackdrop 的 Acrylic 模糊是激活态特权——失活窗口只剩半透明
@@ -10,6 +12,11 @@
 //!
 //! 代价是底图为唤起瞬间的静态快照（背后内容动态变化不跟随），
 //! 速贴是瞬态面板，可接受。
+
+/// 自绘模糊半径（逻辑 px，物理半径 = 该值 × 缩放因子）。观感目标是
+/// 饱和玻璃（Acrylic 面板底）：半径过小时复杂背景的高对比结构只是
+/// 糊边不成雾，留下一团团可辨识的色斑
+pub const BLUR_RADIUS_LOGICAL: f32 = 30.0;
 
 /// 三遍 box blur 近似高斯。`px` 为 RGBA8（内存序 R,G,B,A）、top-down，
 /// 行宽 `w`。滑动窗口实现，O(n) 与半径无关
@@ -104,6 +111,29 @@ fn blur_pass_v(src: &[u8], dst: &mut [u8], w: usize, h: usize, r: usize) {
     }
 }
 
+/// 从 `w×h` 大图中裁取偏移 `(ox, oy)` 起、尺寸 `out_w×out_h` 的子图。
+/// 配合扩边抓屏：整图模糊后裁回窗口尺寸，消除滑窗边界 clamp 的模糊量
+/// 缩水与拉丝；抓取范围钳到虚拟桌面时裁剪偏移不对称，故带偏移
+pub fn crop(
+    px: &[u8],
+    w: usize,
+    h: usize,
+    ox: usize,
+    oy: usize,
+    out_w: usize,
+    out_h: usize,
+) -> Vec<u8> {
+    debug_assert!(px.len() == w * h * 4);
+    debug_assert!(ox + out_w <= w && oy + out_h <= h);
+    let mut out = vec![0u8; out_w * out_h * 4];
+    for row in 0..out_h {
+        let src = ((row + oy) * w + ox) * 4;
+        let dst = row * out_w * 4;
+        out[dst..dst + out_w * 4].copy_from_slice(&px[src..src + out_w * 4]);
+    }
+    out
+}
+
 /// 主题 tint 混合并置不透明：`out = src*(1-a) + rgb*a`，alpha 通道置
 /// 255。模糊底图的最终观感层（等效原 material-layer 0.70 半透叠底）
 pub fn tint_opaque(px: &mut [u8], rgb: [u8; 3], alpha: f32) {
@@ -177,6 +207,72 @@ mod tests {
         assert!(px[(3 * 8 + 3) * 4] > 0, "中心应仍有点亮");
         assert!(px[(3 * 8 + 4) * 4] > 0, "邻列应获得亮度");
         assert_eq!(px[0], 0, "远角不应被波及");
+    }
+
+    #[test]
+    fn crop_extracts_region_at_offset() {
+        // 4×4 每像素记录坐标编码：对称裁 1 应得 2×2 中心块；
+        // 不对称偏移 (0,2) 应得贴边 2×2 块（钳制抓屏的偏移路径）
+        let mut px = Vec::new();
+        for y in 0..4 {
+            for x in 0..4 {
+                px.extend_from_slice(&[x as u8, y as u8, 0, 255]);
+            }
+        }
+        let out = crop(&px, 4, 4, 1, 1, 2, 2);
+        assert_eq!(out.len(), 2 * 2 * 4);
+        assert_eq!(&out[0..4], &[1, 1, 0, 255], "左上应取自 (1,1)");
+        assert_eq!(&out[out.len() - 4..], &[2, 2, 0, 255], "右下应取自 (2,2)");
+        let edge = crop(&px, 4, 4, 0, 2, 4, 2);
+        assert_eq!(&edge[0..4], &[0, 2, 0, 255], "不对称裁剪左上应取自 (0,2)");
+    }
+
+    #[test]
+    fn expanded_capture_blurs_edges_with_outside_content() {
+        // 贴角白块：扩边抓屏+裁剪路径的角落应混入窗外黑背景（变暗），
+        // 直接按窗口大小模糊则被边界 clamp 重复自身（保持近白）；
+        // 远离边缘与色块的中心点两路径须完全一致
+        let (w, h, r, m, block) = (200usize, 200usize, 12usize, 12usize, 80usize);
+        let mut direct = vec![0u8; w * h * 4];
+        for chunk in direct.chunks_exact_mut(4) {
+            chunk[3] = 255;
+        }
+        for y in 0..block {
+            for x in 0..block {
+                let i = (y * w + x) * 4;
+                direct[i] = 255;
+                direct[i + 1] = 255;
+                direct[i + 2] = 255;
+            }
+        }
+        let mut expanded = vec![0u8; (w + 2 * m) * (h + 2 * m) * 4];
+        for chunk in expanded.chunks_exact_mut(4) {
+            chunk[3] = 255;
+        }
+        for y in 0..block {
+            for x in 0..block {
+                let i = ((y + m) * (w + 2 * m) + (x + m)) * 4;
+                expanded[i] = 255;
+                expanded[i + 1] = 255;
+                expanded[i + 2] = 255;
+            }
+        }
+        blur_rgba(&mut direct, w, h, r);
+        blur_rgba(&mut expanded, w + 2 * m, h + 2 * m, r);
+        let cropped = crop(&expanded, w + 2 * m, h + 2 * m, m, m, w, h);
+        let corner = |px: &[u8]| px[0];
+        assert!(
+            corner(&cropped) < 200,
+            "扩边裁剪后角落应被窗外内容稀释: {}",
+            corner(&cropped)
+        );
+        assert!(
+            corner(&direct) > 240,
+            "clamp 路径角落应近白: {}",
+            corner(&direct)
+        );
+        let mid = (150 * w + 150) * 4;
+        assert_eq!(cropped[mid], direct[mid], "远离边缘处两路径应一致");
     }
 
     #[test]

@@ -92,6 +92,11 @@ fn synthetic_backdrop(
     h: u32,
 ) -> slint::Image {
     let (w, h) = (w as usize, h as usize);
+    // 与 picker::prepare_blur_backdrop 同构：四周外扩一个模糊半径合成，
+    // 模糊后裁回窗口尺寸（快照平台 scale=1，物理半径 = 逻辑半径）
+    let m = (floatpaste_core::backdrop::BLUR_RADIUS_LOGICAL * picker.window().scale_factor())
+        .round() as usize;
+    let (full_w, full_h) = (w + 2 * m, h + 2 * m);
     // 上->下渐变首末色 + 亮窗/红块/绿块三个色斑（模糊后成色晕）
     let (top, bot, win, red, green) = if is_light {
         (
@@ -110,37 +115,41 @@ fn synthetic_backdrop(
             (45, 90, 55),
         )
     };
-    let mut px = vec![0u8; w * h * 4];
-    for y in 0..h {
-        let t = y as f32 / h as f32;
+    let mut px = vec![0u8; full_w * full_h * 4];
+    for y in 0..full_h {
+        let t = ((y as isize - m as isize).max(0) as f32 / h as f32).min(1.0);
         let grad = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t) as u8;
-        for x in 0..w {
-            let i = (y * w + x) * 4;
+        for x in 0..full_w {
+            let i = (y * full_w + x) * 4;
             px[i] = grad(top.0, bot.0);
             px[i + 1] = grad(top.1, bot.1);
             px[i + 2] = grad(top.2, bot.2);
-            // 模拟桌面上的一扇亮窗与两块高饱和色块，模糊后成色晕
-            if (60..180).contains(&x) && (80..200).contains(&y) {
-                px[i] = win.0;
-                px[i + 1] = win.1;
-                px[i + 2] = win.2;
-            }
-            if (w - 140..w - 40).contains(&x) && (h - 220..h - 120).contains(&y) {
-                px[i] = red.0;
-                px[i + 1] = red.1;
-                px[i + 2] = red.2;
-            }
-            if (w - 160..w - 110).contains(&x) && (40..90).contains(&y) {
-                px[i] = green.0;
-                px[i + 1] = green.1;
-                px[i + 2] = green.2;
+            // 模拟桌面上的一扇亮窗与两块高饱和色块（窗口相对坐标），
+            // 模糊后成色晕
+            let (rx, ry) = (x as isize - m as isize, y as isize - m as isize);
+            let spot = if (60..180).contains(&rx) && (80..200).contains(&ry) {
+                Some(win)
+            } else if (w as isize - 140..w as isize - 40).contains(&rx)
+                && (h as isize - 220..h as isize - 120).contains(&ry)
+            {
+                Some(red)
+            } else if (w as isize - 160..w as isize - 110).contains(&rx) && (40..90).contains(&ry) {
+                Some(green)
+            } else {
+                None
+            };
+            if let Some((r, g, b)) = spot {
+                px[i] = r;
+                px[i + 1] = g;
+                px[i + 2] = b;
             }
         }
     }
     let radius = (picker.global::<PanelGeometry>().get_card_radius()
         * picker.window().scale_factor())
     .round() as usize;
-    floatpaste_core::backdrop::blur_rgba(&mut px, w, h, 12);
+    floatpaste_core::backdrop::blur_rgba(&mut px, full_w, full_h, m);
+    let mut px = floatpaste_core::backdrop::crop(&px, full_w, full_h, m, m, w, h);
     floatpaste_core::backdrop::tint_opaque(&mut px, tint_rgb, tint_alpha);
     floatpaste_core::backdrop::bake_round_corners(&mut px, w, h, radius);
     let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(w as u32, h as u32);

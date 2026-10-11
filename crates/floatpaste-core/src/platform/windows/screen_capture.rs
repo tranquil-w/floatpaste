@@ -3,6 +3,22 @@
 //! 输出 RGBA8、top-down。
 
 use windows::Win32::Graphics::Gdi::*;
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
+};
+
+/// 虚拟桌面外接矩形 `(x, y, w, h)`（物理像素，含全部显示器）。扩边抓屏
+/// 的钳制边界：桌面之外没有画面，BitBlt 对越界源区域填不透明黑
+pub fn virtual_screen_bounds() -> (i32, i32, i32, i32) {
+    unsafe {
+        (
+            GetSystemMetrics(SM_XVIRTUALSCREEN),
+            GetSystemMetrics(SM_YVIRTUALSCREEN),
+            GetSystemMetrics(SM_CXVIRTUALSCREEN),
+            GetSystemMetrics(SM_CYVIRTUALSCREEN),
+        )
+    }
+}
 
 /// 抓取屏幕区域（物理像素，虚拟屏坐标系）。失败返回 None
 /// （锁屏/会话切换/DC 不可得等）
