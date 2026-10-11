@@ -7,7 +7,7 @@
 // Rust 的 800ms 防抖自动保存；滚动跟随（scroll-spy）由各分区上报 y，
 // Rust 计算高亮并驱动滚动。
 import { Theme, Metrics, Motion, SoftShadow } from "theme.slint";
-import { WindowTitleBar } from "common.slint";
+import { WindowTitleBar, AppMark } from "common.slint";
 import { ListScrollBar } from "picker.slint";
 import { SearchGeometry } from "search.slint";
 
@@ -2135,11 +2135,12 @@ export component SettingsWindow inherits Window {
                                         padding-bottom: 14px;
                                         HorizontalLayout {
                                             spacing: 14px;
-                                            Image {
+                                            // 矢量版按物理像素栅格化，非整倍 DPI
+                                            // 下位图重采样的锯齿/发虚不再出现
+                                            // （同 WindowTitleBar/搜索窗头部）
+                                            AppMark {
                                                 width: 48px;
                                                 height: 48px;
-                                                source: @image-url("app-icon.png");
-                                                image-fit: contain;
                                             }
                                             VerticalLayout {
                                                 alignment: center;
