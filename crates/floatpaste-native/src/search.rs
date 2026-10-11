@@ -100,6 +100,72 @@ pub fn open_global(app: &App) {
 
 /// 打开搜索会话（对齐 open_search_global）
 pub fn open(app: &App) {
+    open_inner(app, false, Vec::new());
+}
+
+/// 从设置窗标签区打开：预置标签筛选，关闭时把前台还给会话目标（设置窗）。
+/// 首开与快捷键打开同一条上屏链（全尺寸居中、加载态起步），差异只有
+/// 两点：不设 JUST_OPENED（落地收缩顶边锚定，不重居中）、落地后主动
+/// 伸缩高度（PRESET_RESIZE）。会话已激活时（反复点条目数的浏览流）
+/// 直接切筛选，不隐藏不重开
+pub fn open_with_tags(app: &App, preset_tags: Vec<String>) {
+    if app.state.is_search_active() {
+        apply_preset_filter(app, preset_tags);
+        return;
+    }
+    open_inner(app, true, preset_tags);
+}
+
+/// 预置标签与当前标签词汇求交集（大小写不敏感）：目标标签已被清理时
+/// 被滤掉（chip 不渲染、只能靠清除筛选退出）。空结果由调用方决定语义
+fn intersect_known_tags(app: &App, preset_tags: Vec<String>) -> Vec<String> {
+    let known: HashSet<String> = app
+        .core()
+        .repository
+        .list_tags()
+        .map(|tags| tags.into_iter().map(|tag| tag.name.to_lowercase()).collect())
+        .unwrap_or_default();
+    preset_tags
+        .into_iter()
+        .filter(|tag| known.contains(&tag.to_lowercase()))
+        .collect()
+}
+
+/// 已打开会话上应用预置筛选（设置窗条目数反复点击）：等价点了一组
+/// 别的标签 chip——替换筛选、清关键词与类型筛选、重建 chips、重查；
+/// 落地经 PRESET_RESIZE 顶边锚定伸缩。同筛选重复点击不重查
+fn apply_preset_filter(app: &App, preset_tags: Vec<String>) {
+    let Some(win) = app.search.upgrade() else {
+        return;
+    };
+    let tags = intersect_known_tags(app, preset_tags);
+    let same = QUERY.with(|state| {
+        let current: HashSet<String> = state
+            .borrow()
+            .tags
+            .iter()
+            .map(|tag| tag.to_lowercase())
+            .collect();
+        let next: HashSet<String> = tags.iter().map(|tag| tag.to_lowercase()).collect();
+        current == next
+    });
+    if same {
+        return;
+    }
+    QUERY.with(|state| {
+        let mut state = state.borrow_mut();
+        state.tags = tags;
+        state.filter = 0;
+    });
+    // 「看这个标签下的条目」从全新筛选开始
+    win.set_keyword("".into());
+    win.set_active_filter(0);
+    PRESET_RESIZE.with(|flag| flag.set(true));
+    refresh_tags(app);
+    run_query(app);
+}
+
+fn open_inner(app: &App, restore_on_close: bool, preset_tags: Vec<String>) {
     let hwnd = app.state.search_hwnd.load(Ordering::SeqCst);
     if hwnd == 0 {
         warn!("搜索窗口 HWND 尚未就绪，无法显示");
@@ -110,6 +176,7 @@ pub fn open(app: &App) {
     let target = ActiveAppResolver::current_foreground_window_handle();
     app.state.set_search_session(SearchSession {
         target_window_hwnd: target,
+        restore_on_close,
     });
     app.state.begin_search_activation();
     info!("打开 Search，target_window={target:?}");
@@ -131,6 +198,16 @@ pub fn open(app: &App) {
     // 匹配即闪一下（对齐 picker::activate 的「尺寸/数据就绪 → 暖表面 →
     // 上屏」顺序）
     reset_session_state(app);
+    // 外部预置的标签筛选：与当前标签词汇求交集后再注入，交集为空则
+    // 退回常规打开
+    let mut preset_active = false;
+    if !preset_tags.is_empty() {
+        let tags = intersect_known_tags(app, preset_tags);
+        if !tags.is_empty() {
+            QUERY.with(|state| state.borrow_mut().tags = tags);
+            preset_active = true;
+        }
+    }
     // 出现滑入准备：停屏期关动画重置内容偏移，暖首帧落盘的即 4px 起步态
     // （见 search.slint enter-offset 注释）
     win.set_enter_animated(false);
@@ -150,10 +227,30 @@ pub fn open(app: &App) {
         (geo.get_window_max_height() * scale).round() as i32
     };
     // 高度基线对齐到本次实际应用值：加载态的中间高度（低于基线）在无
-    // 收缩许可时被跳过，内容落定只发生一次尺寸变化
+    // 收缩许可时被跳过，内容落定只发生一次尺寸变化。预置筛选首开同
+    // 按默认视图高度起步（对齐快捷键打开表现），落地后收缩到结果高度
     LAST_HEIGHT.with(|value| value.set(height_px as f32));
     tracing::debug!("开窗起步高度: {height_px} (基线 {base})");
-    JUST_OPENED.with(|flag| flag.set(true));
+    // 预置首开不设 JUST_OPENED：落地收缩走顶边锚定（左上不动、底边
+    // 上缩，等价用户点 chip 筛选）；重居中会把顶边挪到「矮窗居中」
+    // 位置，与手动筛选的几何语言不一致
+    if !preset_active {
+        JUST_OPENED.with(|flag| flag.set(true));
+    }
+
+    finish_show(app, &win, hwnd, width_px, height_px);
+    refresh_tags(app);
+    if preset_active {
+        PRESET_RESIZE.with(|flag| flag.set(true));
+    }
+    // 行模型已清空：首帧显示加载态（对齐旧版 keyword 重置后 isLoading）
+    run_query(app);
+}
+
+/// 上屏尾段：光标所在工作区居中落位（失败退回仅定尺寸+上次原位兜底）
+/// → 暖帧全量重绘 → 抢前台 → 解锁滑入 → 重挂浮层样式与材质 → 启动
+/// 焦点监视
+fn finish_show(app: &App, win: &SearchWindow, hwnd: isize, width_px: i32, height_px: i32) {
     // 停屏窗口在屏外，几何变化在移回屏上前完成，无可见中间帧；一次
     // SetWindowPos 同步定尺寸与位置（窗口仍在屏外，不受「先长高后移位」
     // 影响）。定位失败（光标/工作区不可得）才需要单独定尺寸，再退回
@@ -168,6 +265,7 @@ pub fn open(app: &App) {
             win.window().set_position(PhysicalPosition::new(x, y));
         } else {
             warn!("搜索窗口定位失败且无历史位置，保持停屏");
+            return;
         }
     }
     win32_ext::warm_surface(hwnd);
@@ -181,12 +279,9 @@ pub fn open(app: &App) {
     win.set_enter_offset(0.0);
     // 兜底重挂浮层样式（可聚焦变体，不带 WS_EX_NOACTIVATE）并复查置顶
     overlay::after_show_focusable(hwnd);
-    apply_material(app, &win, hwnd);
+    apply_material(app, win, hwnd);
 
     begin_focus_watcher(app);
-    refresh_tags(app);
-    // 行模型已清空：首帧显示加载态（对齐旧版 keyword 重置后 isLoading）
-    run_query(app);
 }
 
 /// 隐藏（对齐 hide_search_window / hide_search_and_restore_target）。
@@ -216,6 +311,8 @@ pub fn hide(app: &App, restore_target: bool) {
         }
     }
     app.state.set_search_session(Default::default());
+    // 未消费的预置伸缩闸随会话清理：不得泄漏到下一次打开的落地
+    PRESET_RESIZE.with(|flag| flag.set(false));
     info!("隐藏 Search，会话已清理");
 }
 
@@ -238,7 +335,17 @@ thread_local! {
     /// 打开后首次内容高度落定的一次性重居中标记：open 按默认/历史高度
     /// 居中，内容加载完成后棘轮变高，若不重居中会保持左上角锚定而偏下
     static JUST_OPENED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// 预置筛选落地的主动伸缩闸：open_with_tags 首开/切筛选置位，
+    /// apply_page 落地时消费——泵帧后经 apply_height 顶边锚定伸缩。
+    /// 不依赖 heights-changed（值语义信号，值净变化才触发）：首开路径
+    /// 窗口起步于默认视图高度、与内容自然高脱钩，中间态被合并渲染或
+    /// 值巧合相等时 changed 哑火，窗口会停在起步高度不跟随内容
+    static PRESET_RESIZE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
+
+/// 预置筛选落地后主动伸缩的延迟：跨过至少 2-3 个渲染帧，保证布局
+/// pass 已把回填后的内容自然高写入属性，读数即终值
+const PRESET_RESIZE_DELAY_MS: u64 = 50;
 
 /// 进入编辑器前的隐藏：结束激活、收 tooltip、停屏窗口，但**不清理
 /// 会话与列表状态**（对齐 hide_search_for_editor_transition）——
@@ -385,17 +492,30 @@ fn begin_focus_watcher(app: &App) {
             if hwnd == 0 {
                 return;
             }
-            let is_foreground = ActiveAppResolver::current_foreground_hwnd() == Some(hwnd);
+            let foreground = ActiveAppResolver::current_foreground_hwnd();
+            let is_foreground = foreground == Some(hwnd);
             if was_foreground && !is_foreground {
+                // 前台转移到设置窗：设置窗标签区「条目数点击」的浏览流
+                // 要求搜索窗保持显示、由 open_with_tags 切筛选而非关闭
+                // 重开（关闭重开=可见的隐藏-再显示循环）。点桌面或其他
+                // 应用仍照常自关
+                let settings = app_for_watch.state.settings_hwnd.load(Ordering::SeqCst);
+                let to_settings = settings != 0 && foreground == Some(settings);
                 let cursor_outside = window_control::is_cursor_inside_window(hwnd)
                     .map(|inside| !inside)
                     .unwrap_or(false);
-                if cursor_outside {
+                if cursor_outside && !to_settings {
                     let app = app_for_watch.clone();
                     let _ = slint::invoke_from_event_loop(move || {
                         hide(&app, false);
                     });
                     return;
+                }
+                // 豁免时不得更新 was_foreground：边沿信号必须保持——
+                // 否则本拍消费掉「失焦中」状态，前台再转移到别处（点
+                // 桌面/其他应用）时不再触发边沿，窗口永不自关
+                if to_settings {
+                    continue;
                 }
             }
             was_foreground = is_foreground;
@@ -570,6 +690,31 @@ fn apply_page(app: &App, result: SearchResult, seq: u64, append: bool) {
     build_rows(app);
     ensure_thumbnails(app, &items);
     sync_height();
+    // 预置筛选触发的落地：主动伸缩高度，延迟一拍执行——apply_page 同
+    // 步段读布局属性是陈旧值（行模型刚写入、布局 pass 未跑），50ms≈
+    // 3 帧后 natural-height 必已写入终值，读数即真值。与 heights-changed
+    // 双保险：changed 触发（值净变化）则先一步伸缩，此处 target==last
+    // 幂等无事；changed 哑火（前后内容高相等，连续打开同标签）则由此
+    // 处兜住——首开起步于默认视图高度，与内容高脱钩，不伸缩会停在
+    // 起步高度
+    if PRESET_RESIZE.with(|flag| flag.replace(false)) {
+        let app_cb = app.clone();
+        slint::Timer::single_shot(Duration::from_millis(PRESET_RESIZE_DELAY_MS), move || {
+            preset_resize(&app_cb);
+        });
+    }
+}
+
+/// 预置筛选落地的主动伸缩：读布局终值经 apply_height 顶边锚定伸缩
+/// （左上不动、底边伸缩），等价用户点 chip 筛选的几何表现
+fn preset_resize(app: &App) {
+    if !app.state.is_search_active() {
+        tracing::debug!("预置伸缩跳过（会话已结束）");
+        return; // 会话已被 hide 清理，不得改动已关闭窗口
+    }
+    tracing::debug!("预置伸缩触发（落地后延迟拍）");
+    ALLOW_SHRINK.with(|flag| flag.set(true));
+    apply_height(app);
 }
 
 /// 触底预载（对齐 fetchNextPage：offset + items.length < total）
@@ -1210,6 +1355,13 @@ fn apply_height(app: &App) {
     let scale = win.window().scale_factor();
     let target = (target_logical * scale).round() as i32;
     let last = LAST_HEIGHT.with(|value| value.get()) as i32;
+    tracing::debug!(
+        "高度读数: target={target} last={last} loading={} rows={} natural={:.0} chrome={:.0}",
+        win.get_loading(),
+        win.get_rows().row_count(),
+        win.get_list_content_height(),
+        win.get_chrome_height()
+    );
     if target == last {
         // 内容落定高度与开窗起步一致（默认视图重开必然如此）：开窗已按
         // 该高度居中，无事可做，但必须就地消费 JUST_OPENED——泄漏到
@@ -1569,7 +1721,10 @@ pub fn wire(app: &App) {
     {
         let app_cb = app.clone();
         win.on_key_close(move || {
-            hide(&app_cb, false);
+            // 设置窗标签区进入的会话：用户仍停在设置窗（未失焦），关闭须
+            // 把前台还给目标；常规路径失焦自关，用户点击处已持有前台
+            let restore = app_cb.state.search_session().restore_on_close;
+            hide(&app_cb, restore);
         });
     }
 

@@ -662,6 +662,19 @@ pub fn wire(app: &App) {
     }
     {
         let app_cb = app.clone();
+        win.on_tag_inspect(move |index| {
+            let Some(win) = app_cb.settings.upgrade() else {
+                return;
+            };
+            let Some(name) = tag_names(&win).get(index.max(0) as usize).cloned() else {
+                return;
+            };
+            // 设置窗保持打开；搜索会话目标即设置窗，关闭时前台自然归还
+            crate::search::open_with_tags(&app_cb, vec![name]);
+        });
+    }
+    {
+        let app_cb = app.clone();
         win.on_tag_delete_cancel(move || {
             if let Some(win) = app_cb.settings.upgrade() {
                 reset_tag_rows(&win);
@@ -1355,7 +1368,8 @@ fn reload_tags(app: &App, win: &SettingsWindow) {
                 .into_iter()
                 .map(|tag: TagInfo| TagRowData {
                     name: tag.name.clone().into(),
-                    count_text: format!("{} 条记录", tag.item_count).into(),
+                    count_text: format!("{} 个条目", tag.item_count).into(),
+                    count: tag.item_count as i32,
                     state: 0,
                     conflict: false,
                 })

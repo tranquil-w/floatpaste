@@ -17,10 +17,13 @@ pub struct TargetSession {
     pub target_focus_hwnd: Option<isize>,
 }
 
-/// 搜索会话：打开时捕获的回贴目标窗口
+/// 搜索会话：打开时捕获的回贴目标窗口。
+/// restore_on_close：从设置窗标签区进入的会话置 true——该路径用户仍停留
+/// 在设置窗（未失焦），Esc 关闭时须把前台显式还给目标，否则出现前台真空档。
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SearchSession {
     pub target_window_hwnd: Option<isize>,
+    pub restore_on_close: bool,
 }
 
 /// 编辑会话：正在编辑的条目与关闭后的返回目标（对齐旧版 EditorSession）

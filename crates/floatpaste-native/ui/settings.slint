@@ -32,10 +32,12 @@ export struct AccentSwatch {
     selected: bool,
 }
 
-// 标签行：state 0=常规 1=重命名 2=确认删除
+// 标签行：state 0=常规 1=重命名 2=确认删除；count 为数值计数，
+// 供确认文案与「点击在搜索窗查看」入口使用（count-text 仅常规态展示）
 export struct TagRowData {
     name: string,
     count-text: string,
+    count: int,
     state: int,
     conflict: bool,
 }
@@ -656,6 +658,7 @@ component TagRow inherits Rectangle {
     callback delete-requested();
     callback delete-confirmed();
     callback delete-cancelled();
+    callback inspect-requested();
 
     in-out property <string> draft;
     // 行高 = 布局首选（按钮 28 + 上下 padding 16 = 44，padding 已含在
@@ -683,11 +686,19 @@ component TagRow inherits Rectangle {
             horizontal-stretch: 1;
             vertical-alignment: center;
         }
-        if (root.row-data.state == 0): Text {
-            text: root.row-data.count-text;
-            color: Theme.fg-subtle;
-            font-size: Metrics.text-xs;
-            vertical-alignment: center;
+        if (root.row-data.state == 0): Rectangle {
+            count-ta := TouchArea {
+                mouse-cursor: pointer;
+                clicked() => { root.inspect-requested(); }
+            }
+            Text {
+                text: root.row-data.count-text;
+                color: count-ta.has-hover ? Theme.accent-fg : Theme.fg-subtle;
+                font-size: Metrics.text-xs;
+                vertical-alignment: center;
+                opacity: count-ta.pressed ? 0.85 : 1.0;
+                animate color { duration: Motion.dur-color; easing: Motion.ease; }
+            }
         }
         if (root.row-data.state == 0): Rectangle {
             width: 60px;
@@ -811,14 +822,24 @@ component TagRow inherits Rectangle {
                 clicked() => { root.rename-cancelled(); }
             }
         }
-        // 确认删除态
-        if (root.row-data.state == 2): Text {
-            text: "确认删除标签「" + root.row-data.name + "」？其全部关联将一并移除。";
-            color: Theme.fg-default;
-            font-size: Metrics.text-sm;
-            overflow: elide;
+        // 确认删除态：条数放次行——首行标签名 elide 不会吃掉句尾数字
+        if (root.row-data.state == 2): VerticalLayout {
             horizontal-stretch: 1;
-            vertical-alignment: center;
+            spacing: 2px;
+            Text {
+                text: "确认删除标签「" + root.row-data.name + "」？";
+                color: Theme.fg-default;
+                font-size: Metrics.text-sm;
+                overflow: elide;
+                vertical-alignment: center;
+            }
+            if (root.row-data.count > 0): Text {
+                text: "将从 " + root.row-data.count + " 个条目上移除该标签。";
+                color: Theme.fg-subtle;
+                font-size: Metrics.text-xs;
+                wrap: word-wrap;
+                vertical-alignment: center;
+            }
         }
         if (root.row-data.state == 2): Rectangle {
             width: 72px;
@@ -1028,6 +1049,7 @@ export component SettingsWindow inherits Window {
     callback tag-delete-request(int);
     callback tag-delete-confirm(int);
     callback tag-delete-cancel();
+    callback tag-inspect(int);
 
     // 窗口级键盘入口：开窗后 Rust 调 focus_root_scope 让 capture 生效
     // （否则无元素获焦，Esc 无人接收）
@@ -2099,7 +2121,7 @@ export component SettingsWindow inherits Window {
                                 spacing: 8px;
                                 SectionHeader {
                                     title: "标签";
-                                    description: "管理条目标签：重命名、合并与删除。";
+                                    description: "管理条目标签：重命名、合并与删除；点击条目数可在搜索窗中查看该标签下的条目。";
                                 }
                                 if (root.tag-error-text != ""): Rectangle {
                                     height: 44px;
@@ -2134,6 +2156,7 @@ export component SettingsWindow inherits Window {
                                         rename-cancelled => { root.tag-rename-cancel(); }
                                         delete-requested => { root.tag-delete-request(idx); }
                                         delete-confirmed => { root.tag-delete-confirm(idx); }
+                                        inspect-requested => { root.tag-inspect(idx); }
                                     }
                                 }
                             }

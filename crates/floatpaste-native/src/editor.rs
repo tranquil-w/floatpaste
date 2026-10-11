@@ -24,7 +24,7 @@ use floatpaste_core::platform::windows::window_control;
 use floatpaste_core::services::clip_display::format_file_size;
 use floatpaste_core::services::clip_service::ClipService;
 use floatpaste_core::services::picker_position_service::center_in_work_area;
-use floatpaste_core::services::tag_service::TagService;
+use floatpaste_core::services::tag_service::{TagService, MAX_TAG_NAME_LEN, MAX_TAGS_PER_ITEM};
 use floatpaste_core::services::time_format::format_relative_time_or_unused;
 
 use crate::app_state::{EditorSession, TargetSession};
@@ -38,8 +38,6 @@ use crate::{EditorTagSuggestion, EditorWindow};
 
 const NOTICE_TIMEOUT_MS: u64 = 3000;
 const DELETE_ARM_TIMEOUT_MS: u64 = 3000;
-const MAX_TAG_NAME_LEN: usize = 32;
-const MAX_TAGS_PER_ITEM: usize = 20;
 const MAX_SUGGESTIONS: usize = 8;
 /// 编辑窗口逻辑尺寸（对齐旧版 inner_size(800,600)）
 const EDITOR_LOGICAL_WIDTH: f32 = 800.0;
