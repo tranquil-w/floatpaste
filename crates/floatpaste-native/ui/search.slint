@@ -67,7 +67,10 @@ component GlyphPath inherits Path {
 
 // ── 方形图标按钮（操作条内），图标经 @children 传入 ──
 // armed：两段式删除确认态——加宽并常驻危险底色（对齐旧壳
-// actionButtonDanger 的 h-7 px-2 自适应宽 + armed 底色），文案由调用方传入
+// actionButtonDanger 的 h-7 px-2 自适应宽 + armed 底色），文案由调用方传入。
+// 内嵌图标描边统一 1.5（viewbox 24→16px）：125% 非整倍 DPI 下 1.2 的
+// 物理宽度恰 1px，线心压在像素边界时抗锯齿整列落空，竖线中段断成豁口；
+// 1.5 → 物理 1.25px 任何相位都保住整列覆盖
 component IconButton inherits Rectangle {
     in property <color> icon-color;
     in property <bool> danger-hover: false;
@@ -236,9 +239,13 @@ component SearchRowCard inherits Rectangle {
     // 操作条显隐依赖 hovered，任一命中区漏报都会让操作条在移入
     // 按钮瞬间被误判离开而消失
     property <bool> hovered: false;
+    // 次级上屏键（条件元素，文本行不存在）的悬停态桥：sync-hover 汇总
+    // 需要它的命中信息，而条件元素不可被外部按名引用
+    property <bool> sec-hover: false;
     function sync-hover() {
         root.hovered = row-ta.has-hover || act-ta.has-hover
-            || paste-btn.pointer-hover || sec-btn.pointer-hover
+            || paste-btn.pointer-hover || root.sec-hover
+            || edit-btn.pointer-hover
             || fav-btn.pointer-hover || del-btn.pointer-hover;
         if (!root.hovered) {
             root.hover-left();
@@ -501,27 +508,43 @@ component SearchRowCard inherits Rectangle {
                                 viewbox-width: 24;
                                 viewbox-height: 24;
                                 stroke: paste-btn.icon-color;
-                                stroke-width: 1.2px;
+                                stroke-width: 1.5px;
                                 commands: "M 8 10 A 2 2 0 0 1 10 8 L 20 8 A 2 2 0 0 1 22 10 L 22 18 A 2 2 0 0 1 20 20 L 10 20 A 2 2 0 0 1 8 18 Z M 4 16 A 2 2 0 0 1 2 14 L 2 4 A 2 2 0 0 1 4 2 L 14 2 A 2 2 0 0 1 16 4";
                             }
                         }
-                        // 第二键随类型切换：文本行=编辑内容；图片/文件行=
-                        // 次级上屏（把所在路径作为文本上屏）。图标与类型
-                        // 图标同源——图片=相框+双山、文件=折角文档
-                        sec-btn := IconButton {
-                            icon-color: Theme.fg-default;
-                            hint: data.kind == 0
-                                ? "编辑内容（Ctrl+Enter）"
-                                : (data.kind == 1
-                                    ? "粘贴为图片路径（Shift+Enter）"
-                                    : "粘贴为文件路径（Shift+Enter）");
-                            clicked => {
-                                if (data.kind == 0) {
-                                    root.edit();
-                                } else {
-                                    root.paste-as-path();
-                                }
+                        // 次级上屏键：图片/文件行独有——把所在路径作为文本
+                        // 上屏，文本无此语义。图标与类型图标同源——图片=
+                        // 相框+双山、文件=折角文档。用 if 条件元素而非
+                        // visible 门控：visible:false 在布局中仍占槽位，文本
+                        // 行会空出一个按钮宽；悬停态经 root.sec-hover 桥接
+                        if (data.kind != 0): IconButton {
+                            hint: data.kind == 1
+                                ? "粘贴为图片路径（Shift+Enter）"
+                                : "粘贴为文件路径（Shift+Enter）";
+                            clicked => { root.paste-as-path(); }
+                            hover(t, x, y) => { root.button-hint(t, x, y); }
+                            hover-left => { root.button-hint-left(); }
+                            changed pointer-hover => {
+                                root.sec-hover = self.pointer-hover;
+                                root.sync-hover();
                             }
+                            Path {
+                                width: 16px;
+                                height: 16px;
+                                viewbox-width: 24;
+                                viewbox-height: 24;
+                                stroke: Theme.fg-default;
+                                stroke-width: 1.5px;
+                                commands: data.kind == 1
+                                    ? "M 5.5 5 L 18.5 5 A 2.5 2.5 0 0 1 21 7.5 L 21 16.5 A 2.5 2.5 0 0 1 18.5 19 L 5.5 19 A 2.5 2.5 0 0 1 3 16.5 L 3 7.5 A 2.5 2.5 0 0 1 5.5 5 Z M 5 16 L 9.2 11.8 A 1.5 1.5 0 0 1 11.3 11.8 L 15 15.5 M 13 13 L 14.7 11.3 A 1.5 1.5 0 0 1 16.8 11.3 L 21 15.5"
+                                    : "M 6 3.75 L 13 3.75 L 18.25 9 L 18.25 20.25 L 6 20.25 Z M 13 3.75 L 13 9 L 18.25 9";
+                            }
+                        }
+                        // 编辑键：全类型通用（编辑器支持文本/图片/文件），
+                        // 与键盘 Ctrl+Enter 同一入口
+                        edit-btn := IconButton {
+                            hint: "编辑内容（Ctrl+Enter）";
+                            clicked => { root.edit(); }
                             hover(t, x, y) => { root.button-hint(t, x, y); }
                             hover-left => { root.button-hint-left(); }
                             hover-changed => { root.sync-hover(); }
@@ -531,12 +554,8 @@ component SearchRowCard inherits Rectangle {
                                 viewbox-width: 24;
                                 viewbox-height: 24;
                                 stroke: Theme.fg-default;
-                                stroke-width: 1.2px;
-                                commands: data.kind == 0
-                                    ? "M 4.75 19.25 L 8.25 19.25 L 18.5 9 L 15 5.5 L 4.75 15.75 L 4.75 19.25 Z M 13.75 6.75 L 17.25 10.25 M 4.75 19.25 L 8 19.2"
-                                    : (data.kind == 1
-                                        ? "M 5.5 5 L 18.5 5 A 2.5 2.5 0 0 1 21 7.5 L 21 16.5 A 2.5 2.5 0 0 1 18.5 19 L 5.5 19 A 2.5 2.5 0 0 1 3 16.5 L 3 7.5 A 2.5 2.5 0 0 1 5.5 5 Z M 5 16 L 9.2 11.8 A 1.5 1.5 0 0 1 11.3 11.8 L 15 15.5 M 13 13 L 14.7 11.3 A 1.5 1.5 0 0 1 16.8 11.3 L 21 15.5"
-                                        : "M 6 3.75 L 13 3.75 L 18.25 9 L 18.25 20.25 L 6 20.25 Z M 13 3.75 L 13 9 L 18.25 9");
+                                stroke-width: 1.5px;
+                                commands: "M 4.75 19.25 L 8.25 19.25 L 18.5 9 L 15 5.5 L 4.75 15.75 L 4.75 19.25 Z M 13.75 6.75 L 17.25 10.25 M 4.75 19.25 L 8 19.2";
                             }
                         }
                         fav-btn := IconButton {
@@ -552,7 +571,7 @@ component SearchRowCard inherits Rectangle {
                                 viewbox-width: 24;
                                 viewbox-height: 24;
                                 stroke: fav-btn.icon-color;
-                                stroke-width: 1.2px;
+                                stroke-width: 1.5px;
                                 fill: data.favorited ? Theme.favorite : transparent;
                                 commands: "M 12 3.85 L 14.55 9.02 L 20.26 9.85 L 16.13 13.88 L 17.11 19.57 L 12 16.89 L 6.89 19.57 L 7.87 13.88 L 3.74 9.85 L 9.45 9.02 Z";
                             }
@@ -583,7 +602,7 @@ component SearchRowCard inherits Rectangle {
                                 viewbox-width: 24;
                                 viewbox-height: 24;
                                 stroke: del-btn.glyph-color;
-                                stroke-width: 1.2px;
+                                stroke-width: 1.5px;
                                 commands: "M 4 7 L 20 7 M 9.5 4.75 L 14.5 4.75 L 14.5 7 L 9.5 7 Z M 6.5 7 L 7.3 19.25 L 16.7 19.25 L 17.5 7 M 10 10.5 L 10 16.5 M 14 10.5 L 14 16.5";
                             }
                         }
@@ -894,7 +913,7 @@ export component SearchWindow inherits Window {
                                             viewbox-height: 24;
                                             stroke: clear-ta.has-hover
                                                 ? Theme.fg-default : Theme.fg-subtle;
-                                            stroke-width: 1.2px;
+                                            stroke-width: 1.5px;
                                             commands: "M 6 6 L 18 18 M 18 6 L 6 18";
                                         }
                                     }
