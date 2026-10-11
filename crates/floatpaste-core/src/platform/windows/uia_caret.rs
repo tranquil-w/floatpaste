@@ -1034,7 +1034,9 @@ unsafe fn take_bounding_rectangles(array: *mut SAFEARRAY) -> Vec<f64> {
     values
 }
 
-fn uia_client() -> Result<IUIAutomation, AppError> {
+// 供同层模块复用（开始菜单几何探测）：定位固定发生在事件循环线程，
+// 共享即共享这份线程缓存客户端与超时设置
+pub(super) fn uia_client() -> Result<IUIAutomation, AppError> {
     UIA_CLIENT.with(|slot| {
         slot.borrow_mut()
             .get_or_insert_with(|| create_uia_client().ok())

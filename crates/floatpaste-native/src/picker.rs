@@ -18,9 +18,10 @@ use tracing::{info, warn};
 use floatpaste_core::backdrop;
 use floatpaste_core::domain::clip_item::{ClipItemSummary, PasteOption};
 use floatpaste_core::domain::settings::{PasteTrigger, PickerPositionMode, UserSetting};
-use floatpaste_core::platform::windows::active_app::ActiveAppResolver;
+use floatpaste_core::platform::windows::active_app::{ActiveAppResolver, WindowFocusTarget};
 use floatpaste_core::platform::windows::picker_position::ScreenPoint;
 use floatpaste_core::platform::windows::screen_capture;
+use floatpaste_core::platform::windows::start_menu;
 use floatpaste_core::platform::windows::window_control::{self, GestureMode, ResizeDirection};
 use floatpaste_core::platform::windows::{mouse_monitor, session_keyboard};
 use floatpaste_core::services::clip_display::clip_type_label;
@@ -178,8 +179,15 @@ pub fn activate(app: &App) {
         (PICKER_MIN_HEIGHT as f32 * win.window().scale_factor()) as i32,
     );
 
-    // 捕获目标窗口（显示后恢复其前台，粘贴时回贴）
-    let focus_target = ActiveAppResolver::current_foreground_focus_target();
+    // 开始菜单开着时速贴压不过它（shell 表面在更高 z-order 带内），定位
+    // 服务会把落位改到开始菜单旁边（开始菜单保持打开）；这里跳过把
+    // shell 窗口记为回贴目标——插入符定位会锚到 shell 自己的焦点元素，
+    // 还原/回贴动作对 shell 窗口全部无效
+    let focus_target = if start_menu::foreground_is_start_menu() {
+        WindowFocusTarget::default()
+    } else {
+        ActiveAppResolver::current_foreground_focus_target()
+    };
     let session = TargetSession {
         target_window_hwnd: focus_target.window_hwnd,
         target_focus_hwnd: focus_target.focus_hwnd,

@@ -12,6 +12,7 @@ pub mod screen_capture;
 pub mod session_keyboard;
 pub mod shell_open;
 pub mod single_instance;
+pub mod start_menu;
 pub mod startup;
 pub mod theme_change;
 pub mod uia_caret;

@@ -1,5 +1,7 @@
 //! 速贴窗口定位与尺寸恢复：三种定位模式（鼠标 / 光标插入符 / 上次位置）；
-//! 窗口尺寸/位置的读取与落盘由调用方传入，本模块只做纯计算与仓储读写。
+//! 开始菜单开着时不论模式统一改贴其边缘同屏共存（速贴压不过 shell 表面，
+//! 见 `platform::windows::start_menu`）；窗口尺寸/位置的读取与落盘由调用方
+//! 传入，本模块只做纯计算与仓储读写。
 
 use crate::domain::error::AppError;
 use crate::domain::settings::{PickerPositionMode, StoredWindowPosition};
@@ -8,6 +10,7 @@ use crate::platform::windows::picker_position::{
     caret_point_for_window, current_cursor_point, work_area_from_point, Anchor, ScreenPoint,
     ScreenRect,
 };
+use crate::platform::windows::start_menu;
 use crate::repository::sqlite_repository::SqliteRepository;
 
 const PICKER_ANCHOR_GAP_PX: i32 = 12;
@@ -43,6 +46,14 @@ impl PickerPositionService {
         window_height: i32,
         target_window_hwnd: Option<isize>,
     ) -> Result<Option<ScreenPoint>, AppError> {
+        // 开始菜单开着时任何模式都逃不出它的矩形：插入符/回贴目标是 shell
+        // 自己的元素，鼠标多半正指在开始菜单里，而速贴的 TOPMOST 压不过
+        // shell 表面所在的更高 z-order 带——统一改贴开始菜单边缘放置
+        if let Some(start) = start_menu::foreground_start_menu_rect() {
+            if let Some(point) = resolve_beside_start_menu(start, window_width, window_height) {
+                return Ok(Some(point));
+            }
+        }
         Ok(match mode {
             PickerPositionMode::Mouse => resolve_near_cursor(window_width, window_height),
             PickerPositionMode::Caret => {
@@ -133,6 +144,57 @@ fn resolve_from_caret(
         placed.y
     );
     Some(placed)
+}
+
+/// 开始菜单同屏共存的落位：取开始菜单中心所在工作区，贴其边缘放置；
+/// 工作区不可得（多屏枚举失败等）返回 None，由调用方走配置模式兜底
+fn resolve_beside_start_menu(
+    start: ScreenRect,
+    window_width: i32,
+    window_height: i32,
+) -> Option<ScreenPoint> {
+    let center = ScreenPoint {
+        x: (start.left + start.right) / 2,
+        y: (start.top + start.bottom) / 2,
+    };
+    let work_area = work_area_from_point(center).ok()?;
+    let placed = beside_start_menu_point(start, work_area, window_width, window_height);
+    tracing::debug!(
+        "开始菜单同屏落位 开始菜单=({},{})-({},{}) 左上角=({},{})",
+        start.left,
+        start.top,
+        start.right,
+        start.bottom,
+        placed.x,
+        placed.y
+    );
+    Some(placed)
+}
+
+/// 贴开始菜单边缘放置 width×height 窗口的左上角：优先右侧（阅读序在
+/// 开始菜单之后），放不下换左侧，两侧都放不下落更宽的一侧并钳进工作区
+/// （部分被盖但可见，不劣于被整块盖住）；顶边对齐开始菜单顶边下方一个
+/// 空隙（2026-10-11 拍板，底边对齐曾被否）
+fn beside_start_menu_point(
+    start: ScreenRect,
+    work_area: ScreenRect,
+    window_width: i32,
+    window_height: i32,
+) -> ScreenPoint {
+    let gap = PICKER_ANCHOR_GAP_PX;
+    let right_x = start.right + gap;
+    let left_x = start.left - gap - window_width;
+    let x = if right_x + window_width <= work_area.right {
+        right_x
+    } else if left_x >= work_area.left {
+        left_x
+    } else if work_area.right - start.right >= start.left - work_area.left {
+        right_x
+    } else {
+        left_x
+    };
+    let y = start.top + gap;
+    clamp_top_left(ScreenPoint { x, y }, work_area, window_width, window_height)
 }
 
 fn resolve_from_last_position(
@@ -241,10 +303,10 @@ fn clamp_window_size(width: u32, height: u32) -> (u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::{
-        center_in_work_area, clamp_top_left, clamp_window_size, current_cursor_point,
-        default_window_size, place_window_near_point, stored_window_size, work_area_from_point,
-        Anchor, ScreenPoint, ScreenRect, StoredWindowPosition, PICKER_DEFAULT_HEIGHT,
-        PICKER_DEFAULT_WIDTH, PICKER_MIN_HEIGHT, PICKER_MIN_WIDTH,
+        beside_start_menu_point, center_in_work_area, clamp_top_left, clamp_window_size,
+        current_cursor_point, default_window_size, place_window_near_point, stored_window_size,
+        work_area_from_point, Anchor, ScreenPoint, ScreenRect, StoredWindowPosition,
+        PICKER_DEFAULT_HEIGHT, PICKER_DEFAULT_WIDTH, PICKER_MIN_HEIGHT, PICKER_MIN_WIDTH,
     };
 
     const WORK: ScreenRect = ScreenRect {
@@ -370,6 +432,76 @@ mod tests {
         let placed = place_window_near_point(caret, WORK, 360, 420);
 
         assert_eq!(placed.y, 212);
+    }
+
+    /// 开始菜单（居中，Win11 常态）开着：落其右侧，顶边对齐其顶边下方
+    /// 一个空隙
+    #[test]
+    fn beside_start_menu_places_on_right_side_top_aligned() {
+        let work = ScreenRect {
+            left: 0,
+            top: 0,
+            right: 1920,
+            bottom: 1040,
+        };
+        let start = ScreenRect {
+            left: 640,
+            top: 300,
+            right: 1280,
+            bottom: 1030,
+        };
+
+        let placed = beside_start_menu_point(start, work, 360, 420);
+
+        assert_eq!(placed.x, 1280 + 12);
+        assert_eq!(placed.y, 300 + 12);
+        assert_fits_inside(placed, work, 360, 420);
+    }
+
+    /// 右侧放不下（开始菜单偏右）：换左缘放置
+    #[test]
+    fn beside_start_menu_falls_back_to_left_side() {
+        let work = ScreenRect {
+            left: 0,
+            top: 0,
+            right: 1920,
+            bottom: 1040,
+        };
+        let start = ScreenRect {
+            left: 1400,
+            top: 300,
+            right: 1900,
+            bottom: 1030,
+        };
+
+        let placed = beside_start_menu_point(start, work, 360, 420);
+
+        assert_eq!(placed.x, 1400 - 12 - 360);
+        assert_fits_inside(placed, work, 360, 420);
+    }
+
+    /// 两侧都放不下（开始菜单几乎占满工作区）：落更宽的一侧并整体钳进
+    /// 工作区（部分被盖但可见，不越屏）
+    #[test]
+    fn beside_start_menu_clamps_into_wider_side_when_neither_fits() {
+        let work = ScreenRect {
+            left: 0,
+            top: 0,
+            right: 1000,
+            bottom: 700,
+        };
+        let start = ScreenRect {
+            left: 80,
+            top: 0,
+            right: 920,
+            bottom: 690,
+        };
+
+        let placed = beside_start_menu_point(start, work, 360, 420);
+
+        // 右侧剩 80、左侧剩 80：右侧胜出，钳进工作区后贴右沿
+        assert_eq!(placed.x, 1000 - 360);
+        assert_fits_inside(placed, work, 360, 420);
     }
 
     #[test]

@@ -96,7 +96,7 @@ SQLite（`%APPDATA%\com.floatpaste\floatpaste.db`）+ FTS5：`clip_items`（条�
 - 监听：`platform/windows/clipboard_monitor.rs`、`image_clipboard.rs`、`file_clipboard.rs`
 - 会话键盘（LL 钩子）`session_keyboard.rs`；外击关闭（LL 鼠标钩子）`mouse_monitor.rs`
 - 窗口手势（拖拽/八方向拉伸）`window_control.rs`；前台与焦点 `active_app.rs`
-- 定位 `picker_position.rs`（含插入符探测，UI Automation 兜底见 `uia_caret.rs`）+ `services/picker_position_service.rs`；热键 `hotkey.rs`；单实例 `single_instance.rs`；自启 `startup.rs`
+- 定位 `picker_position.rs`（含插入符探测，UI Automation 兜底见 `uia_caret.rs`）+ `services/picker_position_service.rs`；开始菜单同屏共存（宿主识别与几何）`start_menu.rs`；热键 `hotkey.rs`；单实例 `single_instance.rs`；自启 `startup.rs`
 - 提权检测与 runas 启动 `elevation.rs`；管理员自启任务 `elevated_task.rs`（COM ITaskService）
 - 仓储 `repository/sqlite_repository.rs`；展示格式化 `services/clip_display.rs`；主题 `theme.rs`
 
