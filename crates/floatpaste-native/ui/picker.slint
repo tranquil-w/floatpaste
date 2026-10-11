@@ -147,9 +147,9 @@ component ClipRowCard inherits Rectangle {
     in property <ClipRow> data;
     in property <bool> selected;
     in property <length> text-width;
-    // 面板处于自绘模糊底图形态时行卡半透（玻璃卡透底）；实底形态保持
-    // 不透明——底下是平色层灰，透它没有意义
-    in property <bool> blur-active: false;
+    // Acrylic 档烘焙底上行卡半透（玻璃卡透底）；Mica 档（0.92 近实
+    // 底）与「无」档实底保持不透明——底下是平色，透它没有意义
+    in property <bool> glass-card: false;
     callback clicked();
     callback double-clicked();
     callback hover(length, length);
@@ -209,19 +209,24 @@ component ClipRowCard inherits Rectangle {
 
         inner-card := Rectangle {
             border-radius: Metrics.radius-lg;
-            // 行结构明暗同构：层底（card-layer）+ 浮起行卡（card-face，
-            // 与设置窗分组卡共用同一 token），行区分靠亮度差 + 圆角 +
-            // 卡缝。底色不设动画：键盘导航是高频交互，渐隐会让上一个
-            // 选中项闪一拍强调色（Motion 频率纪律）。
-            // 模糊形态玻璃卡（浮起层语言）：
-            // 浅色白 70% / 深色白墨 5%，两态都是「比底更浅」的浮起层
-            // （fg-default 随明暗反色，深色态即白墨）；实底形态保持
+            // 行结构明暗同构：层底 + 浮起行卡（card-face，与设置窗分组
+            // 卡共用同一 token），行区分靠亮度差 + 圆角 + 卡缝。底色不
+            // 设动画：键盘导航是高频交互，渐隐会让上一个选中项闪一拍
+            // 强调色（Motion 频率纪律）。
+            // Acrylic 档玻璃卡（浮起层语言）：浅色白 70% / 深色白墨 5%，
+            // 都是「比底更浅」的浮起层（fg-default 随明暗反色，深色态
+            // 即白墨）；Mica 档（0.92 近实底）与「无」档实底保持
             // card-face 不透明
-            background: blur-active
+            background: glass-card
                 ? (Theme.is-dark
                     ? Theme.fg-default.with-alpha(0.05)
                     : Theme.card-face.with-alpha(0.70))
                 : Theme.card-face;
+            // 非玻璃态行卡（实底/Mica 实底烘焙）与浅色白面板同色，1px
+            // 细描边分层（玻璃态靠投影与彩底对比，不描边）；选中 2px
+            // 墨框为顶层环，z 序在其上
+            border-width: glass-card ? 0 : 1px;
+            border-color: Theme.border-subtle;
 
             // 悬停覆盖层：声明在内容之前垫底（选中无底色变化，
             // 强调全部由外层墨色边框 + 字重承载）；悬停 = 墨色微叠层
@@ -475,9 +480,10 @@ export component QuickPasteWindow inherits Window {
     // 背后屏幕区域 CPU 模糊烘焙（core::backdrop），每次唤起重生成
     in property <image> blur-backdrop;
     in property <bool> blur-active: false;
-    // DWM 材质态（设置「背景材质」=Mica）：面板底走 Theme.material-layer
-    // 半透直透 DWM Mica backdrop。行卡 blur-active=false 自动回不透明
-    // 实卡，不在半透底上叠第二层半透
+    // Mica 档标记（伴随 blur-active=true 的烘焙底）：tint 0.92 近不
+    // 透明（Mica 材质本身不透明），行卡走不透明实卡细描边——玻璃卡
+    // 叠此实底必然塌层；玻璃卡仅 Acrylic 档（0.70 透底）。速贴永不
+    // 激活，DWM 不渲其 Mica backdrop（实测），Mica 档为自绘烘焙近似
     in property <bool> material-active: false;
     // 加载失败的具体原因（旧版 getErrorMessage 展示）
     in-out property <string> load-error-text;
@@ -529,17 +535,16 @@ export component QuickPasteWindow inherits Window {
     in-out property <bool> enter-animated: true;
 
     card := Rectangle {
-        // 面板底三态：自绘模糊底图（blur-active，唤起时烘焙的不透明
-        // 模糊+tint 图，圆角已烘焙进图 alpha——软渲 clip 不按圆角裁剪
-        // slint#4176，靠图自身圆角规避）；DWM 材质态（material-active，
-        // 设置「背景材质」=Mica，material-layer 半透直透 DWM backdrop）；
-        // 其余回 card-layer 层灰实底（浅 canvas-subtle 灰 / 深 canvas
-        // 近黑）。透明窗底不能裸透，三种形态都必须有底
+        // 面板底二态：自绘模糊底图（blur-active，唤起时烘焙的不透明
+        // 模糊+tint 图，Acrylic 档 0.80 / Mica 档 0.92 近实底，圆角已
+        // 烘焙进图 alpha——软渲 clip 不按圆角裁剪 slint#4176，靠图自
+        // 身圆角规避）；其余回实底（深 card-layer 近黑 / 浅 surface
+        // 白——canvas-subtle 灰在无模糊时成主色显灰闷，白底 + 行卡细
+        // 描边是 Win11 关透明的列表形态语言）。透明窗底不能裸透，两种
+        // 形态都必须有底
         background: root.blur-active
             ? transparent
-            : root.material-active
-                ? Theme.material-layer
-                : Theme.card-layer;
+            : Theme.is-dark ? Theme.card-layer : Theme.surface;
         border-radius: Metrics.radius-lg;
         border-width: PanelGeometry.card-border;
         border-color: Theme.border-window;
@@ -729,7 +734,7 @@ export component QuickPasteWindow inherits Window {
                             for row[i] in root.rows: ClipRowCard {
                                 data: row;
                                 selected: i == root.selected;
-                                blur-active: root.blur-active;
+                                glass-card: root.blur-active && !root.material-active;
                                 text-width: row.has-thumb
                                     ? root.preview-width-thumb
                                     : root.preview-width-no-thumb;

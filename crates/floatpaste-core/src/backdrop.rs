@@ -18,6 +18,23 @@
 /// 糊边不成雾，留下一团团可辨识的色斑
 pub const BLUR_RADIUS_LOGICAL: f32 = 30.0;
 
+/// Acrylic 档速贴烘焙的 tint alpha（明暗同值）：比可激活窗侧的
+/// material-layer 0.70（ADR 锁定勿放开）更实一档。速贴底图是唤起
+/// 瞬间的静态快照，更实的 tint 稀释静态背景的杂色存在感；此档同时
+/// 是半透玻璃卡的分层甜点（卡底合成差浅色 ~33 / 深色 ~11 灰阶，
+/// 0.85+ 浅色塌到 9 阶，快照取色实测）
+pub const ACRYLIC_TINT_ALPHA: f32 = 0.80;
+
+/// Mica 档速贴烘焙的 tint alpha（明暗同值）。Mica 材质本身不透明
+/// （壁纸取色染色，不透窗口背后的内容），可激活窗侧 DWM Mica 即如此；
+/// 速贴的近似 = 近不透明的烘焙底：92% tint 盖住模糊底图，只留 8% 色
+/// 晕暗示「背后环境」的存在（烘焙管线的意义所在，全盖死则与「无」档
+/// 实底无区分且烘焙白跑）。此实度下半透玻璃卡必然塌层（0.85+ 卡底
+/// 合成差即跌到 9 灰阶，快照取色实测），行卡走不透明实卡 + 细描边
+/// 分层。速贴永不激活，DWM 对从未激活窗不渲染 Mica backdrop（实测），
+/// 两档均走本烘焙管线
+pub const MICA_TINT_ALPHA: f32 = 0.92;
+
 /// 三遍 box blur 近似高斯。`px` 为 RGBA8（内存序 R,G,B,A）、top-down，
 /// 行宽 `w`。滑动窗口实现，O(n) 与半径无关
 pub fn blur_rgba(px: &mut [u8], w: usize, h: usize, radius: usize) {

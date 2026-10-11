@@ -1604,13 +1604,15 @@ export component SettingsWindow inherits Window {
                                     }
                                 }
                                 RowGroup {
-                                    // 背景材质（docs/adr-0005）：三档全窗口生效，
-                                    // 速贴为无焦点窗，Mica/Acrylic 的呈现见描述
+                                    // 背景材质（docs/adr-0005）：三档全窗口生效。
+                                    // 速贴永不激活、DWM 不渲染其 Mica backdrop
+                                    // （实测），Mica/Acrylic 两档在速贴上均为自绘
+                                    // 烘焙毛玻璃、以 tint 深浅分档
                                     SettingRow {
                                         title: "背景材质";
                                         description: ["全部窗口使用不透明实底。",
-                                            "窗口透出以桌面壁纸染色的 Mica 材质底，速贴面板同样透底。",
-                                            "窗口透出带模糊的 Acrylic 毛玻璃；速贴面板为唤起时烘焙的模糊底。"][root.window-material];
+                                            "窗口透出以桌面壁纸染色的 Mica 材质底；速贴面板为近实底的沉稳色面。",
+                                            "窗口透出带模糊的 Acrylic 毛玻璃；速贴面板为通透的毛玻璃。"][root.window-material];
                                         Rectangle {
                                             width: seg-material.width;
                                             seg-material := Segmented {

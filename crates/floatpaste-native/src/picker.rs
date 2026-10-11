@@ -215,8 +215,8 @@ pub fn activate(app: &App) {
         &tokens,
     );
 
-    // 材质底：唤起时按设置「背景材质」现读分派（Mica 挂 DWM 材质 /
-    // Acrylic 自绘烘焙 / 无实底，见 prepare_picker_backdrop）
+    // 材质底：唤起时按设置「背景材质」现读分派（Mica/Acrylic 均自绘
+    // 烘焙、tint 分档 / 无实底，见 prepare_picker_backdrop）
 
     app.state.begin_picker_activation();
 
@@ -240,7 +240,7 @@ pub fn activate(app: &App) {
     let position = resolve_window_position(app, &settings, size, session.target_window_hwnd);
     match position {
         Some(point) => {
-            prepare_picker_backdrop(app, &win, hwnd, point, size, &tokens);
+            prepare_picker_backdrop(app, &win, point, size, &tokens);
             // 上屏前先暖表面：停屏窗口收不到自发 WM_PAINT，同步泵一次
             // 呈现，让底图与最新列表的首帧在屏外落盘——移回屏上的第
             // 一帧即完整内容，既不透明也不闪旧列表
@@ -448,7 +448,7 @@ pub fn restore_after_editor(app: &App, target: TargetSession) {
     let point = resolve_parked_position(app, size);
     match point {
         Some(p) => {
-            prepare_picker_backdrop(app, &win, hwnd, p, size, &tokens);
+            prepare_picker_backdrop(app, &win, p, size, &tokens);
             win32_ext::warm_surface(hwnd);
             window_control::set_window_bounds(
                 hwnd,
@@ -982,48 +982,48 @@ fn resolve_window_position(
 }
 
 /// 速贴底分档编排：唤起时按设置项「背景材质」现读分派（见
-/// [WindowMaterial]）——Mica 档对速贴窗挂 DWM Mica（无焦点窗失活时
-/// DWM 不渲 backdrop 则退化为均匀 tint，已接受），Acrylic 档自绘烘焙
-/// 毛玻璃（失活 DWM Acrylic 无模糊，烘焙更优），「无」档实底。挂载
-/// 失败（系统透明关闭/老系统）回实底；DWM 属性残留不撤销，实底与
-/// 烘焙底均不透明全遮 backdrop。每次唤起重挂，明暗自愈同烘焙管线
+/// [WindowMaterial]）。速贴永不激活，DWM 对从未激活窗不渲染 Mica
+/// backdrop（ADR-0005 窗口活性前提，实测确认），Mica 与 Acrylic 两档
+/// 均为自绘烘焙毛玻璃、以 tint 深浅分档——Mica 档
+/// [`backdrop::MICA_TINT_ALPHA`]=0.92 近不透明（Mica 材质本身不透明，
+/// 行卡走不透明实卡），Acrylic 档 [`backdrop::ACRYLIC_TINT_ALPHA`]
+/// =0.80（行卡半透玻璃卡），「无」档实底。烘焙抓屏失败（锁屏/会话
+/// 切换）回实底。每次唤起重烘焙，明暗自愈
 fn prepare_picker_backdrop(
     app: &App,
     win: &QuickPasteWindow,
-    hwnd: isize,
     point: ScreenPoint,
     size: slint::PhysicalSize,
     tokens: &theme::ThemeTokens,
 ) {
     let settings = app.state.current_settings();
-    match settings.window_material {
-        WindowMaterial::Mica => {
-            win.set_blur_active(false);
-            let resolved =
-                theme::resolve_theme(settings.theme_mode.clone(), theme::system_prefers_dark());
-            let dark = resolved == theme::ResolvedTheme::Dark;
-            win.set_material_active(win32_ext::apply_window_backdrop(hwnd, false, dark));
-        }
-        WindowMaterial::Acrylic => {
-            win.set_material_active(false);
-            prepare_blur_backdrop(win, point, size, tokens);
-        }
+    let material = settings.window_material;
+    // Mica 档实底近不透明，玻璃卡叠上必然塌层，行卡切实卡（细描边
+    // 分层，同「无」档语言）；Acrylic 档保持玻璃卡
+    win.set_material_active(matches!(material, WindowMaterial::Mica));
+    let tint_alpha = match material {
+        WindowMaterial::Mica => backdrop::MICA_TINT_ALPHA,
+        WindowMaterial::Acrylic => backdrop::ACRYLIC_TINT_ALPHA,
         WindowMaterial::None => {
             win.set_blur_active(false);
-            win.set_material_active(false);
+            return;
         }
-    }
+    };
+    prepare_blur_backdrop(win, point, size, tint_alpha, tokens);
 }
 
 /// 自绘模糊底图烘焙：抓取目标位屏幕区域（窗口尚在屏外，抓不到面板
 /// 自己；四周外扩一个模糊半径，钳到虚拟桌面）→ 三遍 box 模糊 → 裁回
-/// 窗口尺寸 → 主题 tint（material-layer 同源 token，观感与真 Acrylic
+/// 窗口尺寸 → 主题 tint（material-layer 同源 rgb，观感与真 Acrylic
 /// 面板底一致）→ 圆角烘焙进图 alpha，写入 blur-backdrop。
-/// 抓屏失败（锁屏/会话切换等）回实底（blur-active=false）
+/// `tint_alpha`：档位 tint 浓度（[`backdrop::ACRYLIC_TINT_ALPHA`] /
+/// [`backdrop::MICA_TINT_ALPHA`]）。抓屏失败（锁屏/会话切换等）回
+/// 实底（blur-active=false）
 fn prepare_blur_backdrop(
     win: &QuickPasteWindow,
     point: ScreenPoint,
     size: slint::PhysicalSize,
+    tint_alpha: f32,
     tokens: &theme::ThemeTokens,
 ) {
     let started = std::time::Instant::now();
@@ -1076,11 +1076,7 @@ fn prepare_blur_backdrop(
         w,
         h,
     );
-    backdrop::tint_opaque(
-        &mut rgba,
-        tokens.material_layer_rgb,
-        tokens.material_layer_alpha,
-    );
+    backdrop::tint_opaque(&mut rgba, tokens.material_layer_rgb, tint_alpha);
     let corner = (win.global::<PanelGeometry>().get_card_radius() * scale).round() as usize;
     backdrop::bake_round_corners(&mut rgba, w, h, corner);
     let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(w as u32, h as u32);

@@ -6,6 +6,8 @@
 //! - hover-y：可选逻辑 y 坐标，dispatch PointerMoved 模拟行悬停
 //! - blur：可选，合成彩底并走与 prepare_blur_backdrop 同一条烘焙管线
 //!   （模糊→tint→圆角），预览自绘模糊底图与行卡半透观感
+//! - mica[=alpha]：同 blur 但 tint 近不透明 + 行卡实卡（Mica 档观感），
+//!   alpha 缺省取代码内 MICA_TINT_ALPHA
 //!
 //! 输出 `.artifacts/snapshot/picker-<mode>-<tag>.png`（不入 Git）。
 //! 实底形态快照按中灰蓝桌面色合成材质残透，近似真机观感。
@@ -224,16 +226,27 @@ fn main() {
     picker.set_rows(slint::ModelRc::new(slint::VecModel::from(rows)));
     picker.set_selected(1);
 
-    if std::env::args().any(|a| a == "blur") {
+    // blur：Acrylic 档烘焙观感（tint 取 ACRYLIC_TINT_ALPHA）；
+    // mica[=alpha]：Mica 档烘焙观感（tint 0.92 近不透明 + 行卡实卡，
+    // 缺省取 MICA_TINT_ALPHA 档）
+    let mica_alpha: Option<f32> =
+        std::env::args().find_map(|a| a.strip_prefix("mica=").and_then(|v| v.parse::<f32>().ok()));
+    let use_mica = mica_alpha.is_some() || std::env::args().any(|a| a == "mica");
+    if std::env::args().any(|a| a == "blur") || use_mica {
         picker.set_blur_backdrop(synthetic_backdrop(
             &picker,
             tokens.material_layer_rgb,
-            tokens.material_layer_alpha,
+            mica_alpha.unwrap_or(if use_mica {
+                floatpaste_core::backdrop::MICA_TINT_ALPHA
+            } else {
+                floatpaste_core::backdrop::ACRYLIC_TINT_ALPHA
+            }),
             is_light,
             360,
             420,
         ));
         picker.set_blur_active(true);
+        picker.set_material_active(use_mica);
     }
 
     picker.window().set_size(slint::PhysicalSize::new(360, 420));
