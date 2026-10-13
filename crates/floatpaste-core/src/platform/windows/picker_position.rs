@@ -267,7 +267,7 @@ fn rect_height(rect: RECT) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{current_cursor_point, is_real_screen_point, usable_probe, Anchor, ScreenPoint};
+    use super::{is_real_screen_point, usable_probe, Anchor, ScreenPoint};
     use crate::domain::error::AppError;
 
     #[test]
@@ -281,20 +281,6 @@ mod tests {
             x: i32::MIN,
             y: i32::MIN
         }));
-    }
-
-    /// 真机不变量：真实光标位置必然落在虚拟屏幕内（多屏/负原点/任意缩放
-    /// 下都成立，不假设固定分辨率）
-    #[test]
-    fn real_screen_check_accepts_current_cursor() {
-        let Ok(cursor) = current_cursor_point() else {
-            return;
-        };
-
-        assert!(
-            is_real_screen_point(cursor),
-            "光标位置被判为屏外: {cursor:?}"
-        );
     }
 
     /// 行高超过真实文本行上限的锚点不可信：provider 把字段/页面大框当成

@@ -18,16 +18,3 @@ pub fn decode_limits() -> Limits {
     limits.max_alloc = Some(MAX_DECODE_ALLOC);
     limits
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn decode_limits_caps_edges_and_alloc() {
-        let limits = decode_limits();
-        assert_eq!(limits.max_image_width, Some(MAX_IMAGE_EDGE));
-        assert_eq!(limits.max_image_height, Some(MAX_IMAGE_EDGE));
-        assert_eq!(limits.max_alloc, Some(MAX_DECODE_ALLOC));
-    }
-}

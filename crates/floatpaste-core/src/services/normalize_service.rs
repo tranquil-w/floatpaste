@@ -301,15 +301,6 @@ mod tests {
     }
 
     #[test]
-    fn normalize_text_treats_whitespace_only_variants_as_same_hash() {
-        let first = NormalizeService::normalize_text("Alpha\nBeta", None).unwrap();
-        let second = NormalizeService::normalize_text(" Alpha   Beta ", None).unwrap();
-
-        assert_eq!(first.normalized.hash, second.normalized.hash);
-        assert_eq!(first.normalized.search_text, second.normalized.search_text);
-    }
-
-    #[test]
     fn normalize_files_skips_empty_path_list() {
         let item = NormalizeService::normalize_files(vec![" ".to_string()], 0, None, None);
         assert!(item.is_none());

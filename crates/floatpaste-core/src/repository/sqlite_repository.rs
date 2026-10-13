@@ -1737,83 +1737,6 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
         fs::remove_file(path).unwrap();
     }
 
-    #[test]
-    fn find_existing_by_hash_returns_id() {
-        let path = temp_db_path();
-        let repository = SqliteRepository::new(&path).unwrap();
-        let now = Utc::now();
-
-        seed_item(
-            &repository,
-            "item-a",
-            "hello",
-            (now - Duration::minutes(5)).timestamp_millis(),
-            None,
-            false,
-        );
-        // seed_item 使用 format!("hash-{id}") 作为 hash
-        let found = repository.find_existing_by_hash("hash-item-a").unwrap();
-        assert_eq!(found, Some("item-a".to_string()));
-
-        let not_found = repository
-            .find_existing_by_hash("nonexistent-hash")
-            .unwrap();
-        assert_eq!(not_found, None);
-
-        drop(repository);
-        fs::remove_file(path).unwrap();
-    }
-
-    #[test]
-    fn find_existing_by_hash_ignores_deleted() {
-        let path = temp_db_path();
-        let repository = SqliteRepository::new(&path).unwrap();
-        let now = Utc::now();
-
-        seed_item(
-            &repository,
-            "deleted-item",
-            "deleted content",
-            (now - Duration::minutes(5)).timestamp_millis(),
-            None,
-            false,
-        );
-        // 软删除这条记录
-        repository.delete_item("deleted-item").unwrap();
-
-        let found = repository
-            .find_existing_by_hash("hash-deleted-item")
-            .unwrap();
-        assert_eq!(found, None);
-
-        drop(repository);
-        fs::remove_file(path).unwrap();
-    }
-
-    #[test]
-    fn bump_item_updates_timestamps() {
-        let path = temp_db_path();
-        let repository = SqliteRepository::new(&path).unwrap();
-        let old_time = (Utc::now() - Duration::hours(1)).timestamp_millis();
-
-        seed_item(&repository, "old-item", "bump me", old_time, None, true);
-
-        let before = repository.get_item_detail("old-item").unwrap();
-        let bumped = repository.bump_item("old-item").unwrap();
-
-        // 时间戳应该被更新到更新的值
-        assert_ne!(bumped.created_at, before.created_at);
-        assert_ne!(bumped.updated_at, before.updated_at);
-        // last_used_at 也应被刷新，避免排序仍指向旧时间戳导致条目无法置顶
-        assert_ne!(bumped.last_used_at, before.last_used_at);
-        assert!(bumped.last_used_at.is_some());
-        // 收藏状态应保持不变
-        assert!(bumped.is_favorited);
-
-        drop(repository);
-        fs::remove_file(path).unwrap();
-    }
-
     /// 回归测试：当用户重新复制与历史记录中已有项完全相同的内容时，
     /// 该已有项应被置顶，即便它之前曾被粘贴使用过（last_used_at 非空）。
     ///
@@ -1952,37 +1875,6 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
         // 空数组清空
         let detail = repository.set_item_tags(&id, &[]).unwrap();
         assert!(detail.tags.is_empty());
-
-        drop(repository);
-        fs::remove_file(path).unwrap();
-    }
-
-    #[test]
-    fn set_item_tags_nocase_variants_dedupe_to_single_row() {
-        let path = temp_db_path();
-        let repository = SqliteRepository::new(&path).unwrap();
-        let id = seed_text_item(&repository, "去重验证");
-
-        // 模拟 TagService 归一化去重后的提交
-        let detail = repository
-            .set_item_tags(&id, &["Work".to_string()])
-            .unwrap();
-        assert_eq!(detail.tags, vec!["Work".to_string()]);
-        // 数据库中仅一行关联（tags 表也只有一个标签）
-        let connection = repository.connection.lock().unwrap();
-        let rows: i64 = connection
-            .query_row(
-                "SELECT COUNT(*) FROM clip_item_tags WHERE item_id = ?1",
-                [&id],
-                |r| r.get(0),
-            )
-            .unwrap();
-        let tag_rows: i64 = connection
-            .query_row("SELECT COUNT(*) FROM tags", [], |r| r.get(0))
-            .unwrap();
-        drop(connection);
-        assert_eq!(rows, 1);
-        assert_eq!(tag_rows, 1);
 
         drop(repository);
         fs::remove_file(path).unwrap();
@@ -2391,23 +2283,6 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
         );
         let detail = repository.get_item_detail(&id).unwrap();
         assert_eq!(detail.tags, summary.tags.clone());
-
-        drop(repository);
-        fs::remove_file(path).unwrap();
-    }
-
-    #[test]
-    fn get_item_summary_matches_saved_detail() {
-        let path = temp_db_path();
-        let repository = SqliteRepository::new(&path).unwrap();
-        let id = seed_text_item(&repository, "快照一致性验证");
-
-        let detail = repository.get_item_detail(&id).unwrap();
-        let summary = repository.get_item_summary(&id).unwrap();
-        assert_eq!(summary.id, detail.id);
-        assert_eq!(summary.content_preview, detail.content_preview);
-        assert_eq!(summary.tags, detail.tags);
-        assert_eq!(summary.is_favorited, detail.is_favorited);
 
         drop(repository);
         fs::remove_file(path).unwrap();

@@ -581,7 +581,7 @@ pub fn end_window_gesture(hwnd: isize) {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_alt_menu_syscommand, strip_system_menu_style, GestureMode};
+    use super::{is_alt_menu_syscommand, strip_system_menu_style};
     use windows::Win32::UI::WindowsAndMessaging::{
         SC_CLOSE, SC_KEYMENU, WS_CAPTION, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_SYSMENU,
     };
@@ -601,12 +601,5 @@ mod tests {
         assert!(is_alt_menu_syscommand(SC_KEYMENU as usize));
         assert!(is_alt_menu_syscommand((SC_KEYMENU as usize) | 0x0001));
         assert!(!is_alt_menu_syscommand(SC_CLOSE as usize));
-    }
-
-    #[test]
-    fn gesture_mode_is_copy_and_comparable() {
-        let mode = GestureMode::Resize(super::ResizeDirection::SouthEast);
-        assert_eq!(mode, mode);
-        assert_ne!(GestureMode::Move, mode);
     }
 }

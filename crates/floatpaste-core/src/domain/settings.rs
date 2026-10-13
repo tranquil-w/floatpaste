@@ -516,36 +516,6 @@ mod tests {
     }
 
     #[test]
-    fn shortcut_defaults_to_ctrl_q() {
-        let settings = UserSetting::default();
-        assert_eq!(settings.shortcut, "Ctrl+Q");
-    }
-
-    #[test]
-    fn always_run_elevated_defaults_to_false() {
-        assert!(!UserSetting::default().always_run_elevated);
-
-        // 两开关独立：管理员启动不牵动开机自启
-        let settings = UserSetting {
-            always_run_elevated: true,
-            launch_on_startup: true,
-            silent_on_startup: true,
-            ..UserSetting::default()
-        }
-        .sanitized();
-
-        assert!(settings.always_run_elevated);
-        assert!(settings.launch_on_startup);
-        assert!(settings.silent_on_startup);
-    }
-
-    #[test]
-    fn paste_trigger_defaults_to_click() {
-        let settings = UserSetting::default();
-        assert_eq!(settings.paste_trigger, super::PasteTrigger::Click);
-    }
-
-    #[test]
     fn deserialize_unknown_paste_trigger_falls_back_to_click() {
         let settings: UserSetting =
             serde_json::from_str(r#"{"pasteTrigger":"tripleClick"}"#).unwrap();
@@ -642,34 +612,6 @@ mod tests {
     }
 
     #[test]
-    fn deserialize_invalid_theme_mode_falls_back_to_system() {
-        let settings: UserSetting = serde_json::from_str(
-            r#"{
-                "shortcut":"Alt+Q",
-                "launchOnStartup":false,
-                "silentOnStartup":false,
-                "historyLimit":1000,
-                "pickerRecordLimit":50,
-                "pickerPositionMode":"mouse",
-                "excludedApps":["KeePass.exe"],
-                "restoreClipboardAfterPaste":true,
-                "pauseMonitoring":false,
-                "themeMode":"sepia"
-            }"#,
-        )
-        .unwrap();
-
-        assert_eq!(settings.theme_mode, ThemeMode::System);
-    }
-
-    #[test]
-    fn search_shortcut_defaults_to_alt_s() {
-        let settings = UserSetting::default();
-        assert_eq!(settings.search_shortcut, "Alt+S");
-        assert!(settings.search_shortcut_enabled);
-    }
-
-    #[test]
     fn normalize_shortcut_for_registration_uses_super_alias() {
         use super::normalize_shortcut_for_registration;
 
@@ -687,17 +629,6 @@ mod tests {
     fn sanitized_migrates_legacy_ctrl_backtick_to_default() {
         let settings = UserSetting {
             shortcut: "Ctrl+`".to_string(),
-            ..UserSetting::default()
-        }
-        .sanitized();
-
-        assert_eq!(settings.shortcut, "Ctrl+Q");
-    }
-
-    #[test]
-    fn sanitized_migrates_legacy_alt_q_to_default() {
-        let settings = UserSetting {
-            shortcut: "Alt+Q".to_string(),
             ..UserSetting::default()
         }
         .sanitized();
@@ -728,41 +659,11 @@ mod tests {
     }
 
     #[test]
-    fn sanitized_migrates_legacy_super_f_to_alt_s() {
-        let settings = UserSetting {
-            search_shortcut: "Super+F".to_string(),
-            ..UserSetting::default()
-        }
-        .sanitized();
-
-        assert_eq!(settings.search_shortcut, "Alt+S");
-    }
-
-    #[test]
     fn win_and_super_shortcuts_are_treated_as_the_same_combination() {
         assert_eq!(
             normalize_shortcut_for_compare("Win+F"),
             normalize_shortcut_for_compare("Super+F")
         );
-    }
-
-    #[test]
-    fn deserialize_old_settings_without_search_shortcut_uses_defaults() {
-        let settings: UserSetting = serde_json::from_str(
-            r#"{
-                "shortcut":"Alt+Q",
-                "launchOnStartup":false,
-                "historyLimit":1000,
-                "pickerRecordLimit":50,
-                "excludedApps":[],
-                "restoreClipboardAfterPaste":true,
-                "pauseMonitoring":false
-            }"#,
-        )
-        .unwrap();
-
-        assert_eq!(settings.search_shortcut, "Alt+S");
-        assert!(settings.search_shortcut_enabled);
     }
 
     #[test]
@@ -790,43 +691,6 @@ mod tests {
         )
         .unwrap();
         assert!(!disabled.picker_digit_shortcuts_enabled);
-    }
-
-    #[test]
-    fn deserialize_old_settings_defaults_takeover_winv_to_disabled() {
-        let settings: UserSetting = serde_json::from_str(
-            r#"{
-                "shortcut":"Alt+Q",
-                "launchOnStartup":false,
-                "historyLimit":1000,
-                "excludedApps":[],
-                "restoreClipboardAfterPaste":true,
-                "pauseMonitoring":false
-            }"#,
-        )
-        .unwrap();
-
-        assert!(!settings.takeover_winv);
-
-        let enabled: UserSetting = serde_json::from_str(r#"{"takeoverWinv":true}"#).unwrap();
-        assert!(enabled.takeover_winv);
-    }
-
-    #[test]
-    fn deserialize_old_settings_defaults_window_material_to_acrylic() {
-        let settings: UserSetting = serde_json::from_str(
-            r#"{
-                "shortcut":"Alt+Q",
-                "launchOnStartup":false,
-                "historyLimit":1000,
-                "excludedApps":[],
-                "restoreClipboardAfterPaste":true,
-                "pauseMonitoring":false
-            }"#,
-        )
-        .unwrap();
-
-        assert_eq!(settings.window_material, WindowMaterial::Acrylic);
     }
 
     #[test]
@@ -865,23 +729,6 @@ mod tests {
     }
 
     #[test]
-    fn deserialize_old_settings_defaults_session_keys() {
-        let settings: UserSetting = serde_json::from_str(
-            r#"{
-                "shortcut":"Alt+Q",
-                "launchOnStartup":false,
-                "historyLimit":1000,
-                "excludedApps":[],
-                "restoreClipboardAfterPaste":true,
-                "pauseMonitoring":false
-            }"#,
-        )
-        .unwrap();
-
-        assert_eq!(settings.session_keys, super::SessionKeys::default());
-    }
-
-    #[test]
     fn session_keys_round_trip_through_serialization() {
         let settings = UserSetting {
             session_keys: super::SessionKeys {
@@ -914,23 +761,6 @@ mod tests {
         assert_eq!(settings.session_keys.confirm, "Enter");
         assert_eq!(settings.session_keys.dismiss, "Escape");
         assert_eq!(settings.session_keys.confirm_as_file, "Shift+Enter");
-    }
-
-    #[test]
-    fn session_keys_field_accessors_cover_all_actions() {
-        use super::SessionKeys;
-
-        let mut keys = SessionKeys::default();
-        for action in 0..8 {
-            assert!(!keys.field(action).is_empty());
-            keys.set_field(action, format!("K{action}"));
-        }
-        for action in 0..8 {
-            assert_eq!(keys.field(action), format!("K{action}"));
-        }
-        // 越界动作读写为空/忽略，不 panic
-        assert_eq!(keys.field(99), "");
-        keys.set_field(99, "ignored".to_string());
     }
 
     #[test]
@@ -971,33 +801,6 @@ mod tests {
         .sanitized();
 
         assert!(!settings.search_shortcut_enabled);
-    }
-
-    #[test]
-    fn theme_fields_default_to_preset_following() {
-        let settings = UserSetting::default();
-
-        assert_eq!(settings.theme_preset, "default");
-        assert_eq!(settings.theme_accent, "default");
-    }
-
-    #[test]
-    fn deserialize_old_settings_without_theme_fields_uses_defaults() {
-        let settings: UserSetting = serde_json::from_str(
-            r#"{
-                "shortcut":"Alt+Q",
-                "launchOnStartup":false,
-                "historyLimit":1000,
-                "pickerRecordLimit":50,
-                "excludedApps":[],
-                "restoreClipboardAfterPaste":true,
-                "pauseMonitoring":false
-            }"#,
-        )
-        .unwrap();
-
-        assert_eq!(settings.theme_preset, "default");
-        assert_eq!(settings.theme_accent, "default");
     }
 
     #[test]

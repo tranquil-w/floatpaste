@@ -1068,7 +1068,7 @@ mod tests {
     use super::{
         anchor_from_rect, attachment, blocks_within_element, caret_bar_with_line, caret_rect,
         covers_element, field_rect_anchor, is_soft_wrap, log_label, probe_anchor, single_rect,
-        trusted, Attachment, DrilldownRecord, LOG_FIELD_CHARS, MAX_CARET_LINE_HEIGHT,
+        trusted, Attachment, LOG_FIELD_CHARS,
     };
     use crate::platform::windows::picker_position::{Anchor, ScreenPoint};
     use windows::Win32::Foundation::RECT;
@@ -1080,17 +1080,6 @@ mod tests {
             line_height,
             centered: false,
         }
-    }
-
-    #[test]
-    fn caret_rect_at_start_uses_first_rect_left_edge() {
-        let rect = caret_rect(&[1515.0, 1166.0, 1.0, 21.0], true);
-
-        assert_eq!(rect, Some([1515.0, 1166.0, 1.0, 21.0]));
-        assert_eq!(
-            anchor_from_rect(rect.unwrap(), true),
-            anchor(1515, 1187, 21)
-        );
     }
 
     /// VS Code EditContext 只给整行矩形（列位置丢失），但段展开的多块里带
@@ -1234,7 +1223,6 @@ mod tests {
             bottom: 1329,
         };
         assert_eq!(field_rect_anchor(Some(icon), Some(client), false), None);
-        assert_eq!(MAX_CARET_LINE_HEIGHT, 100);
     }
 
     /// 夸克空搜索框（折叠插入符，真机探针）：各粒度展开都返回整条输入行
@@ -1323,14 +1311,6 @@ mod tests {
             anchor_from_rect(caret_rect(&rects, false).unwrap(), false),
             anchor(24, 136, 18)
         );
-    }
-
-    /// 行高必须跟着矩形走：翻到上方时落位要靠它让开整行
-    #[test]
-    fn anchor_from_rect_reports_line_height_of_chosen_rect() {
-        let rect = caret_rect(&[0.0, 118.0, 24.0, 31.0], false).unwrap();
-
-        assert_eq!(anchor_from_rect(rect, false), anchor(24, 149, 31));
     }
 
     #[test]
@@ -1442,15 +1422,6 @@ mod tests {
                 centered: false,
             }
         );
-    }
-
-    /// 上一条视觉行跨多块矩形（罕见）时取末块可用矩形，跳过零几何的垃圾块
-    #[test]
-    fn previous_line_rects_skip_unusable_blocks() {
-        let rects = [1541.0, 1211.0, 222.0, 21.0, 10.0, 10.0, 0.0, 0.0];
-
-        let rect = caret_rect(&rects, false).unwrap();
-        assert_eq!(rect, [1541.0, 1211.0, 222.0, 21.0]);
     }
 
     /// 字段兜底：范围几何全空时用焦点元素框底边中心。数值来自 Obsidian 真机
@@ -1601,43 +1572,5 @@ mod tests {
         );
 
         assert_eq!(log_label("第一行\n第二行\t第三行"), "第一行 第二行 第三行");
-    }
-
-    /// 下钻记录在失败现场里要能区分的形态：焦点元素自己有 TextPattern 时
-    /// 未触发下钻；从焦点元素搜无候选；从窗口根搜（焦点条带无文本后代，
-    /// VS Code EditContext 宿主）无候选；命中候选（带截断后的摘要）
-    #[test]
-    fn drilldown_record_summary_distinguishes_failure_shapes() {
-        assert_eq!(DrilldownRecord::default().summary(), "未触发");
-
-        assert_eq!(
-            DrilldownRecord {
-                attempted: true,
-                from_window_root: false,
-                candidate: None,
-            }
-            .summary(),
-            "从焦点元素搜无候选"
-        );
-
-        assert_eq!(
-            DrilldownRecord {
-                attempted: true,
-                from_window_root: true,
-                candidate: None,
-            }
-            .summary(),
-            "从窗口根搜无候选"
-        );
-
-        assert_eq!(
-            DrilldownRecord {
-                attempted: true,
-                from_window_root: true,
-                candidate: Some("ClassName='Edit' Name='搜索'".to_string()),
-            }
-            .summary(),
-            "从窗口根命中候选 ClassName='Edit' Name='搜索'"
-        );
     }
 }

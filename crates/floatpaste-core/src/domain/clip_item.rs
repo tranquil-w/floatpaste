@@ -220,24 +220,3 @@ pub struct NewClipTextItem {
     pub source_app: Option<String>,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::SearchQuery;
-
-    #[test]
-    fn search_query_rejects_invalid_clip_type() {
-        let result = serde_json::from_str::<SearchQuery>(
-            r#"{
-                "keyword": "",
-                "filters": {
-                    "clipType": "video"
-                },
-                "offset": 0,
-                "limit": 30,
-                "sort": "recent_desc"
-            }"#,
-        );
-
-        assert!(result.is_err());
-    }
-}

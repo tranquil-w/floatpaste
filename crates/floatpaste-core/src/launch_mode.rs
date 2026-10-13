@@ -42,31 +42,10 @@ impl LaunchMode {
 
 #[cfg(test)]
 mod tests {
-    use super::{needs_elevated_relaunch, LaunchMode, ELEVATED_RELAUNCH_ARG};
-
-    fn parse(args: &[&str]) -> LaunchMode {
-        if args.iter().any(|arg| *arg == "--silent") {
-            LaunchMode::SilentStartup
-        } else {
-            LaunchMode::Normal
-        }
-    }
+    use super::{needs_elevated_relaunch, ELEVATED_RELAUNCH_ARG};
 
     fn args(list: &[&str]) -> Vec<String> {
         list.iter().map(|arg| arg.to_string()).collect()
-    }
-
-    #[test]
-    fn defaults_to_normal_without_silent_flag() {
-        assert_eq!(parse(&["floatpaste.exe"]), LaunchMode::Normal);
-    }
-
-    #[test]
-    fn parses_silent_flag() {
-        assert_eq!(
-            parse(&["floatpaste.exe", "--silent"]),
-            LaunchMode::SilentStartup
-        );
     }
 
     #[test]

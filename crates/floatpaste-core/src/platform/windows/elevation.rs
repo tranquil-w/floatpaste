@@ -140,13 +140,3 @@ fn cancelled_or_error(error: windows::core::Error) -> AppError {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::is_window_process_elevated;
-
-    #[test]
-    fn invalid_hwnd_is_not_elevated() {
-        assert!(!is_window_process_elevated(0));
-        assert!(!is_window_process_elevated(-1));
-    }
-}

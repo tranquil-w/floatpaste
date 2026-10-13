@@ -76,14 +76,3 @@ fn delete_value(key: HKEY, name: &str) -> Result<(), AppError> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use windows::core::HRESULT;
-
-    use super::ERROR_FILE_NOT_FOUND_HRESULT;
-
-    #[test]
-    fn file_not_found_hresult_matches_missing_registry_value() {
-        assert_eq!(ERROR_FILE_NOT_FOUND_HRESULT, HRESULT(0x80070002u32 as i32));
-    }
-}

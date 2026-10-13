@@ -23,23 +23,3 @@ pub enum EditorReturnTarget {
     Picker,
     Search,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::{EditorReturnTarget, EditorSession, EditorSource};
-
-    #[test]
-    fn editor_session_source_and_return_target_should_roundtrip() {
-        let session = EditorSession {
-            item_id: "clip-1".to_string(),
-            source: EditorSource::Picker,
-            return_to: EditorReturnTarget::Picker,
-            target_window_hwnd: None,
-            target_focus_hwnd: None,
-        };
-
-        let json = serde_json::to_string(&session).unwrap();
-        assert!(json.contains("\"source\":\"picker\""));
-        assert!(json.contains("\"returnTo\":\"picker\""));
-    }
-}

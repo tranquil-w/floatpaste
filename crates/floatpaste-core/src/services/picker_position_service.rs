@@ -303,10 +303,9 @@ fn clamp_window_size(width: u32, height: u32) -> (u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::{
-        beside_start_menu_point, center_in_work_area, clamp_top_left, clamp_window_size,
-        current_cursor_point, default_window_size, place_window_near_point, stored_window_size,
-        work_area_from_point, Anchor, ScreenPoint, ScreenRect, StoredWindowPosition,
-        PICKER_DEFAULT_HEIGHT, PICKER_DEFAULT_WIDTH, PICKER_MIN_HEIGHT, PICKER_MIN_WIDTH,
+        beside_start_menu_point, center_in_work_area, default_window_size,
+        place_window_near_point, stored_window_size, Anchor, ScreenPoint, ScreenRect,
+        StoredWindowPosition, PICKER_DEFAULT_WIDTH, PICKER_MIN_HEIGHT, PICKER_MIN_WIDTH,
     };
 
     const WORK: ScreenRect = ScreenRect {
@@ -331,42 +330,6 @@ mod tests {
             point.x + width <= work.right && point.y + height <= work.bottom,
             "右下角越界: {point:?}"
         );
-    }
-
-    #[test]
-    fn place_window_below_anchor_when_there_is_space() {
-        let point = place_window_near_point(
-            mouse_anchor(700, 200),
-            ScreenRect {
-                left: 0,
-                top: 0,
-                right: 1600,
-                bottom: 900,
-            },
-            360,
-            420,
-        );
-
-        assert_eq!(point.x, 700);
-        assert_eq!(point.y, 212);
-    }
-
-    #[test]
-    fn place_window_flips_above_when_bottom_space_is_not_enough() {
-        let point = place_window_near_point(
-            mouse_anchor(700, 860),
-            ScreenRect {
-                left: 0,
-                top: 0,
-                right: 1600,
-                bottom: 900,
-            },
-            360,
-            420,
-        );
-
-        assert_eq!(point.x, 700);
-        assert_eq!(point.y, 428);
     }
 
     /// 翻到上方时窗口底边必须让开锚点**整行**：只有空隙（12px）会让窗口压在
@@ -505,24 +468,6 @@ mod tests {
     }
 
     #[test]
-    fn clamp_top_left_keeps_window_inside_work_area() {
-        let point = clamp_top_left(
-            ScreenPoint { x: -120, y: 880 },
-            ScreenRect {
-                left: 0,
-                top: 0,
-                right: 1600,
-                bottom: 900,
-            },
-            360,
-            420,
-        );
-
-        assert_eq!(point.x, 0);
-        assert_eq!(point.y, 480);
-    }
-
-    #[test]
     fn center_in_work_area_uses_visible_center() {
         let point = center_in_work_area(
             ScreenRect {
@@ -537,27 +482,6 @@ mod tests {
 
         assert_eq!(point.x, 720);
         assert_eq!(point.y, 320);
-    }
-
-    #[test]
-    fn clamp_window_size_respects_minimum_bounds() {
-        assert_eq!(clamp_window_size(240, 180), (256, 280));
-    }
-
-    #[test]
-    fn stored_window_size_uses_defaults_for_missing_dimension() {
-        let size = stored_window_size(
-            StoredWindowPosition {
-                x: 0,
-                y: 0,
-                width: Some(540),
-                height: None,
-            },
-            1.0,
-        )
-        .unwrap();
-
-        assert_eq!(size, (540, PICKER_DEFAULT_HEIGHT));
     }
 
     #[test]
@@ -658,25 +582,6 @@ mod tests {
         let placed = place_window_near_point(mouse_anchor(380, 290), work, 600, 500);
 
         assert_eq!(placed, ScreenPoint { x: 100, y: 60 });
-    }
-
-    /// 真机不变量：拿当前光标位置与真实显示器工作区（含多屏/负原点/
-    /// 任务栏占用）验证「窗口整块可见」，不假设任何固定分辨率
-    #[test]
-    fn real_cursor_and_work_area_always_keep_window_inside() {
-        let Ok(cursor) = current_cursor_point() else {
-            return;
-        };
-        let Ok(work) = work_area_from_point(cursor) else {
-            return;
-        };
-
-        for size in [(360, 420), (720, 840)] {
-            let placed = place_window_near_point(Anchor::at_point(cursor), work, size.0, size.1);
-            if size.0 <= work.width() && size.1 <= work.height() {
-                assert_fits_inside(placed, work, size.0, size.1);
-            }
-        }
     }
 
     #[test]

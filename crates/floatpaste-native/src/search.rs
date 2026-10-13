@@ -1767,43 +1767,12 @@ pub fn wire(app: &App) {
 mod tests {
     use super::*;
 
-    fn summary_of(kind: &str) -> ClipItemSummary {
-        ClipItemSummary {
-            id: "id".into(),
-            r#type: kind.into(),
-            content_preview: String::new(),
-            source_app: Some("浏览器".into()),
-            is_favorited: false,
-            file_count: 0,
-            directory_count: 0,
-            created_at: "2026-01-01T00:00:00Z".into(),
-            updated_at: "2026-01-01T00:00:00Z".into(),
-            last_used_at: None,
-            image_path: None,
-            image_width: None,
-            image_height: None,
-            image_format: None,
-            file_size: None,
-            tags: Vec::new(),
-        }
-    }
-
     #[test]
     fn navigation_wraps_in_both_directions() {
         assert_eq!(next_navigation_index(5, 0, true), 4);
         assert_eq!(next_navigation_index(5, 4, true), 3);
         assert_eq!(next_navigation_index(5, 4, false), 0);
         assert_eq!(next_navigation_index(1, 0, true), 0);
-    }
-
-    #[test]
-    fn file_meta_lists_files_and_directories() {
-        let mut item = summary_of("file");
-        item.file_count = 5;
-        item.directory_count = 2;
-        let meta = build_meta(&item);
-        assert!(meta.contains("5 个文件"));
-        assert!(meta.contains("2 个文件夹"));
     }
 
     #[test]

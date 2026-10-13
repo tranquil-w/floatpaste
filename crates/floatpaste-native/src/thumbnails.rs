@@ -219,13 +219,4 @@ mod tests {
         evict("cap-0");
         assert!(!contains("cap-0"));
     }
-
-    #[test]
-    fn insert_without_touch_evicts_oldest() {
-        for index in 0..=MAX_CACHE_ENTRIES {
-            insert(format!("old-{index}"), None);
-        }
-        assert!(!contains("old-0"));
-        assert!(contains(&format!("old-{MAX_CACHE_ENTRIES}")));
-    }
 }

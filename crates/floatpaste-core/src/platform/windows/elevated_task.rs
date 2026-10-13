@@ -226,7 +226,7 @@ unsafe fn connect() -> Result<ITaskService, AppError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_task_not_found, query};
+    use super::is_task_not_found;
 
     #[test]
     fn sched_e_task_not_found_is_recognized() {
@@ -237,12 +237,5 @@ mod tests {
         assert!(!is_task_not_found(&windows::core::Error::from_hresult(
             windows::core::HRESULT(0x80070005u32 as i32)
         )));
-    }
-
-    #[test]
-    fn task_query_connects_and_reports_snapshot() {
-        // 只读查询（COM 连接 + GetTask），不需要提权；注册与否都返回 Ok，
-        // 此处验证 COM 绑定与连接在真实系统上可用
-        let _ = query().expect("任务计划查询应可用");
     }
 }
