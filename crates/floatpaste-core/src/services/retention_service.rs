@@ -13,6 +13,16 @@ const FIRST_RUN_DELAY: Duration = Duration::from_secs(60);
 /// 单轮物理删除超过该行数时顺带 VACUUM 收缩数据库文件。
 const VACUUM_THRESHOLD: usize = 500;
 
+/// E2E 隔离钩子：FLOATPASTE_RETENTION_FIRST_DELAY_MS 覆盖首轮清理延迟，
+/// 让端到端测试在秒级时间尺度内验证清理接线；缺省或非法值走默认 60s。
+fn first_run_delay() -> Duration {
+    std::env::var("FLOATPASTE_RETENTION_FIRST_DELAY_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(Duration::from_millis)
+        .unwrap_or(FIRST_RUN_DELAY)
+}
+
 /// 剪贴历史保留策略：把 `history_limit` 设置从"仅展示"兑现为真实的存储上限。
 ///
 /// 职责：定期回收超过保留期的软删记录、把未收藏历史压缩到用户设置的上限内，
@@ -23,7 +33,7 @@ impl RetentionService {
     /// 启动后台清理线程：启动延迟一轮，此后按固定周期执行，退出标志生效时结束。
     pub fn start(state: CoreState) {
         thread::spawn(move || {
-            thread::sleep(FIRST_RUN_DELAY);
+            thread::sleep(first_run_delay());
 
             loop {
                 if state.is_quitting() {

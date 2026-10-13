@@ -1484,6 +1484,11 @@ impl std::fmt::Display for AutostartError {
 pub fn spawn_autostart_sync(app: &App, allow_prompt: bool) {
     let app_cb = app.clone();
     std::thread::spawn(move || {
+        // E2E 隔离钩子：自启同步操作的是真实系统的 Run 键与任务计划，
+        // 不随 APPDATA 重定向隔离，被测实例必须整体跳过
+        if std::env::var("FLOATPASTE_SKIP_AUTOSTART_SYNC").as_deref() == Ok("1") {
+            return;
+        }
         let _guard = AUTOSTART_SYNC_LOCK
             .lock()
             .unwrap_or_else(|error| error.into_inner());

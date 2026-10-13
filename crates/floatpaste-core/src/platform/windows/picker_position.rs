@@ -302,9 +302,11 @@ mod tests {
     /// 必须拒绝让调用方回退鼠标
     #[test]
     fn usable_probe_rejects_page_sized_line_height() {
+        // 本测试验证行高过滤，锚点坐标用固定屏内值即可：真实光标 API 在
+        // 测试并行环境下会间歇被拒（E_ACCESSDENIED），与本测试的断言无关
         let caret = |line_height| {
             Ok(Anchor {
-                point: current_cursor_point().unwrap(),
+                point: ScreenPoint { x: 100, y: 100 },
                 line_height,
                 centered: false,
             })

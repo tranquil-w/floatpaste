@@ -191,6 +191,22 @@ fn main() {
         }
     }
 
+    // ── E2E 优雅退出：测试收尾经命名事件请求退出，走与托盘退出相同的
+    //    收尾路径（强杀被测实例若撞上其剪贴板临界区会把系统剪贴板锁死；
+    //    未设置 FLOATPASTE_INSTANCE_ID 时为空操作）──
+    {
+        let core_for_exit = state.core.clone();
+        if let Err(error) =
+            floatpaste_core::platform::windows::single_instance::listen_test_exit(move || {
+                tracing::info!("收到测试退出事件，请求事件循环退出");
+                core_for_exit.begin_quit();
+                let _ = slint::quit_event_loop();
+            })
+        {
+            tracing::warn!("装载测试退出事件失败: {error}");
+        }
+    }
+
     picker::wire(&app);
     search::wire(&app);
     editor::wire(&app);
@@ -327,6 +343,9 @@ fn main() {
             tracing::error!("启动剪贴板监听失败: {error}");
         }
     }
+
+    // ── 历史保留策略：定期回收软删记录、按 history_limit 压缩未收藏历史 ──
+    floatpaste_core::services::retention_service::RetentionService::start(state.core.clone());
 
     // ── 全局快捷键：主快捷键切换速贴，搜索快捷键切换搜索窗口；
     //    托盘常驻（设置窗口「打开设置」左键单击与右键菜单）──

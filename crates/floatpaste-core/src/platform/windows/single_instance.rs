@@ -14,6 +14,33 @@ use super::wide_string::to_wide;
 
 const SINGLE_INSTANCE_MUTEX_NAME: &str = "Local\\FloatPaste.SingleInstance";
 
+/// E2E 隔离钩子：FLOATPASTE_INSTANCE_ID 给互斥量与唤醒事件名追加后缀，
+/// 让被测实例与日常实例在同一登录会话内共存。值仅允许字母数字与连字符
+/// （防异常字符进入内核对象名），空值或缺省时名称保持不变。
+fn instance_suffix() -> Option<String> {
+    match std::env::var("FLOATPASTE_INSTANCE_ID") {
+        Ok(id)
+            if !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') =>
+        {
+            Some(id)
+        }
+        _ => None,
+    }
+}
+
+/// 内核对象名后缀拼接的唯一格式来源：listen 侧与 signal 侧必须拼出
+/// 同名，格式漂移会让测试侧打不开事件、收尾退化到强杀兜底
+fn with_suffix(base: &str, suffix: &str) -> String {
+    format!("{base}.{suffix}")
+}
+
+fn namespaced(base: &str) -> String {
+    match instance_suffix() {
+        Some(id) => with_suffix(base, &id),
+        None => base.to_string(),
+    }
+}
+
 pub struct SingleInstanceGuard {
     handle: HANDLE,
 }
@@ -33,7 +60,7 @@ pub fn acquire_or_focus_existing(
     launch_mode: LaunchMode,
     focus_existing: impl Fn() -> bool,
 ) -> Result<Option<SingleInstanceGuard>, AppError> {
-    let mutex_name = to_wide(SINGLE_INSTANCE_MUTEX_NAME);
+    let mutex_name = to_wide(&namespaced(SINGLE_INSTANCE_MUTEX_NAME));
     let handle = unsafe { CreateMutexW(None, false, PCWSTR::from_raw(mutex_name.as_ptr())) }?;
 
     if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
@@ -66,7 +93,7 @@ pub fn retry_focus_existing(try_once: impl Fn() -> bool) -> bool {
 /// 唤醒旧实例而自杀）。超时返回 false（调用方照常继续，让正常单实例
 /// 逻辑兜底）。
 pub fn wait_mutex_release(timeout: Duration) -> bool {
-    let name = to_wide(SINGLE_INSTANCE_MUTEX_NAME);
+    let name = to_wide(&namespaced(SINGLE_INSTANCE_MUTEX_NAME));
     let deadline = std::time::Instant::now() + timeout;
     while std::time::Instant::now() < deadline {
         let handle = unsafe { CreateMutexW(None, false, PCWSTR::from_raw(name.as_ptr())) };
@@ -93,7 +120,7 @@ pub fn listen_wake(on_wake: impl Fn() + Send + 'static) -> Result<(), AppError> 
     use std::sync::Arc;
     use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject, INFINITE};
 
-    let name = to_wide(WAKE_EVENT_NAME);
+    let name = to_wide(&namespaced(WAKE_EVENT_NAME));
     let event = unsafe { CreateEventW(None, false, false, PCWSTR::from_raw(name.as_ptr()))? };
 
     // HANDLE 裸指针非 Send/Sync：用 newtype 携带（Win32 句柄跨线程等待是安全的）
@@ -117,7 +144,58 @@ pub fn listen_wake(on_wake: impl Fn() + Send + 'static) -> Result<(), AppError> 
 pub fn signal_wake_event() -> bool {
     use windows::Win32::System::Threading::{OpenEventW, SetEvent, EVENT_MODIFY_STATE};
 
-    let name = to_wide(WAKE_EVENT_NAME);
+    let name = to_wide(&namespaced(WAKE_EVENT_NAME));
+    let Ok(event) =
+        (unsafe { OpenEventW(EVENT_MODIFY_STATE, false, PCWSTR::from_raw(name.as_ptr())) })
+    else {
+        return false;
+    };
+    let signaled = unsafe { SetEvent(event) }.is_ok();
+    let _ = unsafe { CloseHandle(event) };
+    signaled
+}
+
+/* ───────────────── E2E 优雅退出事件 ───────────────── */
+
+/// E2E 收尾钩子：仅当 FLOATPASTE_INSTANCE_ID 设置时装载（生产实例不装载）。
+/// 测试收尾经命名事件请求被测实例退出，走与托盘退出相同的正常收尾路径。
+/// 不用强杀：被测实例若正处于剪贴板打开临界区，进程死亡会把系统剪贴板
+/// 锁死（OpenClipboard 持续 ERROR_ACCESS_DENIED，实测无法自愈，只能重启
+/// explorer 恢复）。
+const TEST_EXIT_EVENT_NAME: &str = "Local\\FloatPaste.TestExit";
+
+/// 被测实例侧：装载退出事件监听（未设置隔离后缀时为空操作）
+pub fn listen_test_exit(on_exit: impl Fn() + Send + 'static) -> Result<(), AppError> {
+    use std::sync::Arc;
+    use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject, INFINITE};
+
+    if instance_suffix().is_none() {
+        return Ok(());
+    }
+    let name = to_wide(&namespaced(TEST_EXIT_EVENT_NAME));
+    let event = unsafe { CreateEventW(None, false, false, PCWSTR::from_raw(name.as_ptr()))? };
+
+    struct SendHandle(windows::Win32::Foundation::HANDLE);
+    unsafe impl Send for SendHandle {}
+    unsafe impl Sync for SendHandle {}
+    let event = Arc::new(SendHandle(event));
+
+    thread::spawn(move || loop {
+        let wait = unsafe { WaitForSingleObject(event.0, INFINITE) };
+        if wait != windows::Win32::Foundation::WAIT_OBJECT_0 {
+            break;
+        }
+        on_exit();
+    });
+
+    Ok(())
+}
+
+/// 测试侧：向指定实例发送退出信号（instance_id 须与被测实例的隔离后缀一致）
+pub fn signal_test_exit(instance_id: &str) -> bool {
+    use windows::Win32::System::Threading::{OpenEventW, SetEvent, EVENT_MODIFY_STATE};
+
+    let name = to_wide(&with_suffix(TEST_EXIT_EVENT_NAME, instance_id));
     let Ok(event) =
         (unsafe { OpenEventW(EVENT_MODIFY_STATE, false, PCWSTR::from_raw(name.as_ptr())) })
     else {

@@ -1143,6 +1143,7 @@ dependencies = [
  "floatpaste-core",
  "image",
  "raw-window-handle",
+ "rusqlite",
  "serde_json",
  "slint",
  "slint-build",

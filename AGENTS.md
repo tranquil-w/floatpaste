@@ -41,7 +41,8 @@ native 壳内约定：
 | 命令 | 说明 |
 |------|------|
 | `cargo run -p floatpaste-native` | 启动桌面应用（debug） |
-| `cargo test` | 运行全部 Rust 测试（覆盖 `floatpaste-core` 与 `floatpaste-native`） |
+| `cargo test` | 运行全部 Rust 测试（覆盖 `floatpaste-core` 与 `floatpaste-native`，含端到端冒烟） |
+| `cargo test -p floatpaste-native --test e2e_smoke` | 单跑真进程端到端冒烟（运行数秒；期间短暂占用全局快捷键并读写系统剪贴板；体系见 [docs/testing.md](docs/testing.md)） |
 | `cargo build --release -p floatpaste-native` | 发布构建 |
 | `cargo run -p floatpaste-native --bin picker-snapshot -- <light\|dark> <tag> [hover-y] [blur]` | 无头渲染速贴观感快照到 `.artifacts/snapshot/`（诊断工具，不模拟桌面输入）；`blur` 合成彩底走烘焙管线，预览玻璃底图与行卡半透 |
 | `node scripts/bump-version.mjs <版本>` | 同步升级 package.json / native Cargo.toml / Cargo.lock |
