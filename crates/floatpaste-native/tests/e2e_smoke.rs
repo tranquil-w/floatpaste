@@ -23,15 +23,20 @@ use std::{
 
 use floatpaste_core::{
     domain::settings::{PickerPositionMode, StoredWindowPosition, UserSetting},
+    platform::windows::picker_position::{current_cursor_point, work_area_from_point},
     repository::sqlite_repository::SqliteRepository,
     services::normalize_service::NormalizeService,
+    services::picker_position_service::center_in_work_area,
 };
 use windows::{
-    core::PCWSTR,
+    core::{BOOL, PCWSTR},
     Win32::{
-        Foundation::RECT,
+        Foundation::{HWND, LPARAM, RECT},
         System::DataExchange::{CloseClipboard, OpenClipboard},
-        UI::WindowsAndMessaging::{FindWindowW, GetWindowRect},
+        UI::{
+            HiDpi::GetDpiForWindow,
+            WindowsAndMessaging::{EnumWindows, FindWindowW, GetWindowRect, GetWindowTextW},
+        },
     },
 };
 
@@ -39,6 +44,7 @@ use windows::{
 const BULK_ITEMS: usize = 105;
 const HISTORY_LIMIT: u32 = 100;
 const PICKER_TITLE: &str = "FloatPaste · 速贴";
+const SEARCH_TITLE: &str = "FloatPaste · 搜索";
 /// 停屏位在 Windows 坐标下限（-32000），左上角小于该阈值视为屏外
 const OFFSCREEN_THRESHOLD: i32 = -30_000;
 
@@ -162,6 +168,54 @@ fn picker_onscreen() -> bool {
             _ => false,
         }
     }
+}
+
+struct SearchEnumState {
+    found: Option<(isize, RECT)>,
+}
+
+unsafe extern "system" fn enum_onscreen_search_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    let state = &mut *(lparam.0 as *mut SearchEnumState);
+    let mut text = [0u16; 64];
+    let len = GetWindowTextW(hwnd, &mut text);
+    if len > 0 && String::from_utf16_lossy(&text[..len as usize]) == SEARCH_TITLE {
+        let mut rect = RECT::default();
+        if GetWindowRect(hwnd, &mut rect).is_ok() && rect.top > OFFSCREEN_THRESHOLD {
+            state.found = Some((hwnd.0 as isize, rect));
+            return BOOL::from(false);
+        }
+    }
+    BOOL::from(true)
+}
+
+/// 屏内搜索窗的句柄与几何。双实例并存（主场景实例 + 搜索窗场景实例）时
+/// 存在同标题的停屏搜索窗，FindWindowW 返回哪个不确定，必须枚举并按
+/// 屏内过滤；找不到（尚未打开/已停屏）返回 None
+fn onscreen_search_window() -> Option<(isize, RECT)> {
+    let mut state = SearchEnumState { found: None };
+    unsafe {
+        let _ = EnumWindows(
+            Some(enum_onscreen_search_proc),
+            LPARAM(&mut state as *mut _ as isize),
+        );
+    }
+    state.found
+}
+
+/// 搜索窗在自身 DPI 下的满高（物理像素）：窗口逻辑 max 620px，首开无
+/// 历史基线时以该高度起步并按光标所在工作区居中
+fn search_window_full_height(hwnd: isize) -> i32 {
+    let dpi = unsafe { GetDpiForWindow(HWND(hwnd as *mut _)) };
+    (620.0 * dpi as f32 / 96.0).round() as i32
+}
+
+/// 搜索窗开窗落位的期望上边沿：被测实例与测试进程读的是同一静止光标，
+/// 用同源的居中计算复算「满高起步」的居中 top，作为顶边锚定的基准——
+/// 直接对比窗口两次读数会在「首读已收缩完成」时漏检重居中回归
+fn expected_search_top_at_full_height(full_height: i32) -> i32 {
+    let cursor = current_cursor_point().expect("读取光标位置失败");
+    let work = work_area_from_point(cursor).expect("取光标所在工作区失败");
+    center_in_work_area(work, 0, full_height).y
 }
 
 fn spawn_instance(envs: &[(&str, String)], silent: bool) -> Child {
@@ -481,6 +535,84 @@ fn app_e2e_smoke_flow() {
         }),
         "恢复监听后复制的内容应重新录入"
     );
+
+    // ── 场景 7：搜索窗顶边锚定（独立实例；落地收缩不移动上边沿）──
+    // 回归：开窗首落重居中标记曾因 changed 值相等哑火而悬置，泄漏到后续
+    // 高度变化时触发「以新尺寸重居中」，表现为筛选后高度变低、窗口跳回
+    // 屏幕中心、顶边下移。矮数据集让「起步满高 → 落地收缩」必然发生，
+    // 断言收缩后上边沿仍停在开窗居中基准上（顶边锚定）。独立实例隔离
+    // 数据与信号，不与主场景链互扰
+    {
+        let search_stamp = format!("e2e-search-{stamp}");
+        let search_root: PathBuf =
+            std::env::temp_dir().join(format!("floatpaste-e2e-search-{stamp}"));
+        let search_app_dir = search_root.join("com.floatpaste");
+        fs::create_dir_all(&search_app_dir).unwrap();
+        {
+            let repository =
+                SqliteRepository::new(&search_app_dir.join("floatpaste.db")).unwrap();
+            for index in 0..3 {
+                let item =
+                    NormalizeService::normalize_text(&format!("e2e-search-row-{index}"), None)
+                        .unwrap();
+                repository.save_text_item(&item).unwrap();
+            }
+        }
+        let search_envs = [
+            (
+                "APPDATA",
+                search_root
+                    .to_str()
+                    .expect("临时目录路径应为 UTF-8")
+                    .to_string(),
+            ),
+            ("FLOATPASTE_INSTANCE_ID", search_stamp.clone()),
+            ("FLOATPASTE_SKIP_AUTOSTART_SYNC", "1".to_string()),
+        ];
+        let mut search_cleanup = Cleanup {
+            child: Some(spawn_instance(&search_envs, true)),
+            instance_id: search_stamp.clone(),
+            original_text: None,
+            data_root: search_root,
+        };
+
+        // 打开搜索窗：钩子在装配段装载，早于装载的信号打不开事件，轮询重试
+        search_cleanup.assert_running("打开搜索窗");
+        assert!(
+            wait_until(Duration::from_secs(15), Duration::from_millis(200), || {
+                floatpaste_core::platform::windows::single_instance::signal_test_open_search(
+                    &search_stamp,
+                )
+            }),
+            "打开搜索信号应送达被测实例（钩子装载后必然成功）"
+        );
+
+        // 屏内落位（首开无历史基线：起步高度=满高，按光标所在工作区居中）
+        assert!(
+            wait_until(Duration::from_secs(10), Duration::from_millis(150), || {
+                onscreen_search_window().is_some()
+            }),
+            "搜索窗应落位屏内"
+        );
+        let (hwnd, _) = onscreen_search_window().unwrap();
+        let full_height = search_window_full_height(hwnd);
+        let baseline_top = expected_search_top_at_full_height(full_height);
+
+        // 落地收缩到 3 行：起步满高 620 逻辑，落地整档更矮（阈值 550 逻辑）
+        assert!(
+            wait_until(Duration::from_secs(10), Duration::from_millis(150), || {
+                onscreen_search_window()
+                    .map(|(_, rect)| (rect.bottom - rect.top) < full_height * 550 / 620)
+                    .unwrap_or(false)
+            }),
+            "矮数据集落地后搜索窗高度应收缩到满高以下"
+        );
+        let (_, shrunk) = onscreen_search_window().unwrap();
+        assert_eq!(
+            shrunk.top, baseline_top,
+            "落地收缩不得移动上边沿（顶边锚定，保持开窗居中基准）"
+        );
+    }
 
     // 收尾（终止被测实例、恢复剪贴板、清理临时目录）由 Cleanup 守卫统一执行
 }

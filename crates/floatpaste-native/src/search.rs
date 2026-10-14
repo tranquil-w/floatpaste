@@ -108,9 +108,10 @@ pub fn open(app: &App) {
 
 /// 从设置窗标签区打开：预置标签筛选，关闭时把前台还给会话目标（设置窗）。
 /// 首开与快捷键打开同一条上屏链（全尺寸居中、加载态起步），差异只有
-/// 两点：不设 JUST_OPENED（落地收缩顶边锚定，不重居中）、落地后主动
-/// 伸缩高度（PRESET_RESIZE）。会话已激活时（反复点条目数的浏览流）
-/// 直接切筛选，不隐藏不重开
+/// 一点：落地后主动伸缩高度（PRESET_RESIZE）——首开起步于默认视图
+/// 高度、与内容自然高脱钩，changed 哑火时窗口会停在起步高度不跟随
+/// 内容。会话已激活时（反复点条目数的浏览流）直接切筛选，不隐藏不
+/// 重开
 pub fn open_with_tags(app: &App, preset_tags: Vec<String>) {
     if app.state.is_search_active() {
         apply_preset_filter(app, preset_tags);
@@ -238,12 +239,6 @@ fn open_inner(app: &App, restore_on_close: bool, preset_tags: Vec<String>) {
     // 按默认视图高度起步（对齐快捷键打开表现），落地后收缩到结果高度
     LAST_HEIGHT.with(|value| value.set(height_px as f32));
     tracing::debug!("开窗起步高度: {height_px} (基线 {base})");
-    // 预置首开不设 JUST_OPENED：落地收缩走顶边锚定（左上不动、底边
-    // 上缩，等价用户点 chip 筛选）；重居中会把顶边挪到「矮窗居中」
-    // 位置，与手动筛选的几何语言不一致
-    if !preset_active {
-        JUST_OPENED.with(|flag| flag.set(true));
-    }
 
     finish_show(app, &win, hwnd, width_px, height_px);
     refresh_tags(app);
@@ -339,9 +334,6 @@ static PARKED_POSITION: std::sync::Mutex<Option<(i32, i32)>> = std::sync::Mutex:
 static LAST_HIDDEN_POSITION: std::sync::Mutex<Option<(i32, i32)>> = std::sync::Mutex::new(None);
 
 thread_local! {
-    /// 打开后首次内容高度落定的一次性重居中标记：open 按默认/历史高度
-    /// 居中，内容加载完成后棘轮变高，若不重居中会保持左上角锚定而偏下
-    static JUST_OPENED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// 预置筛选落地的主动伸缩闸：open_with_tags 首开/切筛选置位，
     /// apply_page 落地时消费——泵帧后经 apply_height 顶边锚定伸缩。
     /// 不依赖 heights-changed（值语义信号，值净变化才触发）：首开路径
@@ -1339,8 +1331,7 @@ pub fn hover_left(app: &App) {
 /// 收缩许可，读数与应用由 heights-changed 驱动（见 apply_height）。
 /// 命令式调用点不得自行读数——list-content-height 依赖布局 pass 写入的
 /// content-height，0ms 定时器读数可能先于渲染帧，拿到的是布局未跟上的
-/// 陈旧值（曾致开窗会话按陈旧的空态高度重居中、消费 JUST_OPENED，真值
-/// 落地后窗口永久偏下）
+/// 陈旧值，按陈旧值伸缩会让窗口高度与内容脱节
 pub fn sync_height() {
     ALLOW_SHRINK.with(|flag| flag.set(true));
 }
@@ -1352,9 +1343,11 @@ pub fn heights_changed(app: &App) {
     apply_height(app);
 }
 
-/// 读数并应用目标高度：target = min(620, 5 + chrome + 列表内容高)。
-/// ALLOW_SHRINK 由结构性变化的 sync_height() 置位、应用后消费（棘轮）；
-/// 开窗会话内容未落地（加载态）的中间高度不应用，等内容落地一次到位
+/// 读数并应用目标高度：target = min(max, slack + chrome + 列表内容高)。
+/// 顶边锚定伸缩（左上不动、底边伸缩），开窗后任何高度变化都不重定位，
+/// 上边沿保持 finish_show 居中落位。ALLOW_SHRINK 由结构性变化的
+/// sync_height() 置位、应用后消费（棘轮）：加载态空列表的中间高度低于
+/// 开窗起步，无收缩许可被拦下，等内容落地一次到位
 fn apply_height(app: &App) {
     let Some(win) = app.search.upgrade() else {
         return;
@@ -1374,19 +1367,6 @@ fn apply_height(app: &App) {
         win.get_chrome_height()
     );
     if target == last {
-        // 内容落定高度与开窗起步一致（默认视图重开必然如此）：开窗已按
-        // 该高度居中，无事可做，但必须就地消费 JUST_OPENED——泄漏到
-        // 用户筛选的收缩时才触发「以新尺寸重居中」，收缩重居中令上缘
-        // 下移，再增长时左上角锚定只向下扩，窗口整体比开窗态偏下一段
-        if !win.get_loading() {
-            JUST_OPENED.with(|flag| flag.set(false));
-        }
-        return;
-    }
-    // 加载态高度不应用：矮历史开窗会在旧位置分步长高、露出「已长高
-    // 未居中」的偏下中间帧，等内容落地一次到位
-    if JUST_OPENED.with(|flag| flag.get()) && win.get_loading() {
-        tracing::debug!("高度同步跳过（加载态中间高）: target={target} last={last}");
         return;
     }
     let allow = ALLOW_SHRINK.with(|flag| flag.get());
@@ -1414,15 +1394,6 @@ fn apply_height(app: &App) {
         tracing::debug!("开窗基线更新: {target}");
     }
     let width_px = (geo.get_window_width() * scale).round() as i32;
-    // 打开后首次高度落定：以新尺寸重新居中（左上角锚定的增长会让
-    // 窗口偏离打开时的居中位置）。一次 SetWindowPos 原子完成缩放+
-    // 移动，避免「先长高后移位」的两帧呈现；工作区不可得则退回仅缩放
-    if JUST_OPENED.with(|flag| flag.replace(false)) {
-        let hwnd = app.state.search_hwnd.load(Ordering::SeqCst);
-        if position_centered_on_cursor(hwnd, width_px, target) {
-            return;
-        }
-    }
     win.window().set_size(PhysicalSize::new(
         width_px.max(1) as u32,
         target.max(1) as u32,

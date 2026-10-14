@@ -40,9 +40,10 @@
 ### 驱动与断言
 
 - 外部驱动只走真实用户路径：写系统剪贴板触发录入、二次启动进程经唤醒事件开关速贴面板；不使用键盘注入（SendInput 在安全软件环境不可靠），上屏注入环节留给人工验收
-- 托盘菜单命令（切换监听）经命名事件 `signal_test_toggle_monitoring` 驱动：模态 TrackPopupMenu 点击无法可靠自动化，事件触发的处理路径与菜单选择完全相同（翻转落库 + 运行时联动），仅 `FLOATPASTE_INSTANCE_ID` 设置时装载
+- 托盘菜单命令（切换监听、打开搜索）经命名事件 `signal_test_toggle_monitoring` / `signal_test_open_search` 驱动：模态菜单点击无法可靠自动化，事件触发的处理路径与菜单选择完全相同，仅 `FLOATPASTE_INSTANCE_ID` 设置时装载
 - 速贴面板显隐是「屏内 ↔ 屏外停屏（-32000 平移）」语义而非 `SW_HIDE`，`IsWindowVisible` 恒真——面板开合断言必须看窗口几何（`GetWindowRect` 左上角是否在屏内）
 - 速贴定位预置 `LastPosition` 模式与屏内记忆位置：Mouse/Caret 模式依赖运行环境的光标与前台窗口，E2E 验证的是唤醒链路而非定位模式
+- 搜索窗几何断言（顶边锚定）用独立第二实例：矮数据集保证「起步满高 → 落地收缩」必然发生；顶边基准用与被测实例同源的 `center_in_work_area` 复算「满高起步的居中 top」——直接对比窗口两次读数会在首读已收缩完成时漏检重居中回归；双实例并存时存在同标题停屏搜索窗，`FindWindowW` 返回哪个不确定，必须 `EnumWindows` 按屏内过滤
 
 ### 卫生纪律
 

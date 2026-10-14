@@ -213,3 +213,23 @@ pub fn listen_test_toggle_monitoring(
 pub fn signal_test_toggle_monitoring(instance_id: &str) -> bool {
     set_named_event(&with_suffix(TEST_TOGGLE_MONITORING_EVENT_NAME, instance_id))
 }
+
+/// E2E 驱动钩子：仅当 FLOATPASTE_INSTANCE_ID 设置时装载（生产实例不装载）。
+/// 搜索窗的打开走全局热键或托盘菜单，两者都无法可靠自动化（不使用输入
+/// 注入），测试经命名事件请求被测实例执行与菜单「打开搜索」相同的动作
+/// 路径。搜索窗几何（顶边锚定伸缩）依赖真窗口与布局管线，headless 层
+/// 覆盖不到，只能在真进程里断言
+const TEST_OPEN_SEARCH_EVENT_NAME: &str = "Local\\FloatPaste.TestOpenSearch";
+
+/// 被测实例侧：装载打开搜索事件（未设置隔离后缀时为空操作）
+pub fn listen_test_open_search(on_open: impl Fn() + Send + 'static) -> Result<(), AppError> {
+    if instance_suffix().is_none() {
+        return Ok(());
+    }
+    spawn_named_event_listener(namespaced(TEST_OPEN_SEARCH_EVENT_NAME), on_open)
+}
+
+/// 测试侧：向指定实例发送打开搜索信号（instance_id 须与被测实例的隔离后缀一致）
+pub fn signal_test_open_search(instance_id: &str) -> bool {
+    set_named_event(&with_suffix(TEST_OPEN_SEARCH_EVENT_NAME, instance_id))
+}

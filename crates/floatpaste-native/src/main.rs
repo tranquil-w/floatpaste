@@ -236,6 +236,26 @@ fn main() {
         }
     }
 
+    // ── E2E 托盘命令：测试经命名事件驱动「打开搜索」，走与托盘菜单
+    //    「打开搜索」相同的动作路径（搜索窗几何断言依赖真窗口；未设置
+    //    FLOATPASTE_INSTANCE_ID 时为空操作）──
+    {
+        let app_for_open_search = app.clone();
+        if let Err(error) =
+            floatpaste_core::platform::windows::single_instance::listen_test_open_search(
+                move || {
+                    tracing::info!("收到测试打开搜索事件");
+                    let app = app_for_open_search.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        search::open_global(&app);
+                    });
+                },
+            )
+        {
+            tracing::warn!("装载测试打开搜索事件失败: {error}");
+        }
+    }
+
     picker::wire(&app);
     search::wire(&app);
     editor::wire(&app);
