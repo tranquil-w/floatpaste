@@ -93,7 +93,7 @@ SQLite（`%APPDATA%\com.floatpaste\floatpaste.db`）+ FTS5：`clip_items`（条�
 
 - 启动装配：`src/main.rs`、`system.rs`
 - 窗口会话：`picker.rs`、`search.rs`、`editor.rs`、`settings.rs`（各含 `wire()`）
-- 悬停预览 `tooltip.rs`；停屏与上屏 `overlay.rs`；上屏编排 `paste_flow.rs`；托盘 `tray.rs`
+- 悬停预览 `tooltip.rs`；托盘菜单（Slint 自绘、跟随主题）`tray_menu.rs`；停屏与上屏 `overlay.rs`；上屏编排 `paste_flow.rs`；托盘图标与转发 `tray.rs`
 - 缩略图缓存 `thumbnails.rs`；主题桥 `theme_bridge.rs`；共享状态 `app_state.rs`；Win32 辅助 `win32_ext.rs`
 
 **floatpaste-core（核心域）**

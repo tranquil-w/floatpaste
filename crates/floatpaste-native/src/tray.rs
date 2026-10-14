@@ -1,10 +1,8 @@
-//! 系统托盘：Shell_NotifyIcon 图标 + Win32 弹出菜单，独立线程消息循环。
+//! 系统托盘：Shell_NotifyIcon 图标 + 右键转发，独立线程消息循环。
 //!
-//! 对齐旧壳 tray_service.rs：
 //! - 左键单击托盘 = 打开设置（show_menu_on_left_click(false) 语义）；
-//! - 右键弹菜单：打开速贴面板 / 打开搜索 / 打开设置 / 暂停监听（或
-//!   「恢复监听（当前已暂停）」）/ 退出，无分隔线；监听文案跟随当前
-//!   设置——菜单每次右键现建，等价旧壳的 refresh_menu 推送；
+//! - 右键转发到事件循环线程的 `tray_menu::toggle`——菜单本体是 Slint
+//!   自绘浮层（跟随应用主题），见 tray_menu.rs；
 //! - 图标按 DPI 取档（app_icon::tray_icon_hicon，同旧壳 tray_icon_image）；
 //! - 监听 TaskbarCreated 广播，explorer 重启后自动重挂图标。
 
@@ -13,30 +11,22 @@ use std::sync::{Mutex, OnceLock};
 
 use tracing::{info, warn};
 use windows::core::PCWSTR;
-use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM};
+use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Shell::{
     Shell_NotifyIconW, NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIIF_WARNING, NIM_ADD, NIM_DELETE,
     NIM_MODIFY, NOTIFYICONDATAW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DispatchMessageW,
-    GetCursorPos, GetMessageW, PostMessageW, PostQuitMessage, RegisterClassW,
-    RegisterWindowMessageW, SetForegroundWindow, TrackPopupMenu, HICON, MF_STRING, MSG,
-    TPM_BOTTOMALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON, WINDOW_EX_STYLE, WM_APP, WM_DESTROY,
-    WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP, WNDCLASSW, WS_OVERLAPPED,
+    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, PostQuitMessage,
+    RegisterClassW, RegisterWindowMessageW, HICON, MSG, WINDOW_EX_STYLE, WM_APP, WM_DESTROY,
+    WM_LBUTTONUP, WM_RBUTTONUP, WNDCLASSW, WS_OVERLAPPED,
 };
 
 use crate::picker::App;
 
 /// 托盘回调消息：wParam=图标 id，lParam=鼠标消息
 const WM_APP_TRAY: u32 = WM_APP + 0x4E;
-/// 菜单项 id（顺序对齐旧壳 MenuBuilder：速贴、搜索、设置、监听、退出）
-const MENU_OPEN_PICKER: usize = 1;
-const MENU_OPEN_SEARCH: usize = 2;
-const MENU_OPEN_SETTINGS: usize = 3;
-const MENU_TOGGLE_MONITORING: usize = 4;
-const MENU_QUIT: usize = 5;
 
 static TRAY_APP: OnceLock<Mutex<Option<App>>> = OnceLock::new();
 static TASKBAR_CREATED: OnceLock<u32> = OnceLock::new();
@@ -54,15 +44,6 @@ pub fn start(app: App) {
         .spawn(|| unsafe { run() })
     {
         warn!("托盘线程启动失败: {error}");
-    }
-}
-
-/// 监听菜单文案（对齐旧壳 monitoring_menu_label）
-fn monitoring_menu_label(paused: bool) -> &'static str {
-    if paused {
-        "恢复监听（当前已暂停）"
-    } else {
-        "暂停监听"
     }
 }
 
@@ -197,62 +178,6 @@ pub fn notify_elevation_declined() {
     notify_failure(ELEVATION_DECLINED_INFO);
 }
 
-unsafe fn show_menu(hwnd: HWND) {
-    let paused = TRAY_APP
-        .get()
-        .and_then(|lock| lock.lock().ok())
-        .and_then(|guard| {
-            guard
-                .as_ref()
-                .map(|app| app.state.current_settings().pause_monitoring)
-        })
-        .unwrap_or(false);
-
-    let Ok(menu) = CreatePopupMenu() else {
-        warn!("创建托盘菜单失败");
-        return;
-    };
-    let items: [(usize, &str); 5] = [
-        (MENU_OPEN_PICKER, "打开速贴面板"),
-        (MENU_OPEN_SEARCH, "打开搜索"),
-        (MENU_OPEN_SETTINGS, "打开设置"),
-        (MENU_TOGGLE_MONITORING, monitoring_menu_label(paused)),
-        (MENU_QUIT, "退出"),
-    ];
-    for (id, text) in items {
-        let wide = to_wide(text);
-        if let Err(error) = AppendMenuW(menu, MF_STRING, id, PCWSTR(wide.as_ptr())) {
-            warn!("托盘菜单项添加失败: {error}");
-        }
-    }
-
-    // 标准托盘菜单三件套：先抢前台（否则点击菜单外不消失），TPM_RETURNCMD
-    // 直接返回所选 id，结束后补 WM_NULL 让菜单正确收起
-    let _ = SetForegroundWindow(hwnd);
-    let mut point = POINT::default();
-    let _ = GetCursorPos(&mut point);
-    let chosen = TrackPopupMenu(
-        menu,
-        TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_BOTTOMALIGN,
-        point.x,
-        point.y,
-        None,
-        hwnd,
-        None,
-    );
-    let _ = DestroyMenu(menu);
-    let _ = PostMessageW(Some(hwnd), WM_NULL, WPARAM(0), LPARAM(0));
-
-    match chosen.0 as usize {
-        MENU_OPEN_PICKER => dispatch(|app| crate::picker::activate(app)),
-        MENU_OPEN_SEARCH => dispatch(|app| crate::search::open_global(app)),
-        MENU_OPEN_SETTINGS => dispatch(|app| crate::settings::open(app)),
-        MENU_TOGGLE_MONITORING => dispatch(toggle_monitoring),
-        MENU_QUIT => dispatch(quit),
-        _ => {}
-    }
-}
-
 /// 切换监听暂停（对齐旧壳 toggle-monitoring：翻转设置 + 应用运行时副作用）。
 /// 菜单经 TrackPopupMenu+TPM_RETURNCMD 返回值分发，一次点击恰好一次调用，
 /// 无需旧壳时代的菜单事件去抖（那针对 Tauri 菜单库的双触发缺陷）。
@@ -274,7 +199,7 @@ pub(crate) fn toggle_monitoring(app: &App) {
 
 /// 退出：置退出标志并结束事件循环，main 在循环退出后统一收尾
 /// （停钩子/监听/热键，对齐旧壳 prepare_for_exit + exit(0)）
-fn quit(app: &App) {
+pub(crate) fn quit(app: &App) {
     // 「事件循环已返回」日志无法区分 quit 来源，此处留痕：出现非用户
     // 操作的退出时可排查菜单命令是否被误配
     info!("托盘退出菜单命中，请求事件循环退出");
@@ -302,7 +227,8 @@ unsafe extern "system" fn tray_wndproc(
         WM_APP_TRAY => {
             match lparam.0 as u32 {
                 WM_LBUTTONUP => dispatch(|app| crate::settings::open(app)),
-                WM_RBUTTONUP => show_menu(hwnd),
+                // 菜单本体是 Slint 浮层（tray_menu.rs），托盘线程只转发
+                WM_RBUTTONUP => dispatch(crate::tray_menu::toggle),
                 _ => {}
             }
             LRESULT(0)

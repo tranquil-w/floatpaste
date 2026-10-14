@@ -57,6 +57,7 @@ pub struct App {
     pub state: Arc<SharedState>,
     pub picker: slint::Weak<QuickPasteWindow>,
     pub tooltip: slint::Weak<TooltipWindow>,
+    pub tray_menu: slint::Weak<crate::TrayMenuWindow>,
     pub search: slint::Weak<SearchWindow>,
     pub editor: slint::Weak<crate::EditorWindow>,
     pub settings: slint::Weak<crate::SettingsWindow>,
@@ -127,6 +128,9 @@ fn stop_topmost_guard() {
 
 /// 打开速贴面板（对齐 WindowCoordinator::activate_picker）
 pub fn activate(app: &App) {
+    // 互斥收口：托盘菜单开着时热键唤起，其键鼠会话（单例）即将被本会话
+    // 顶掉，先收菜单防浮层滞留
+    crate::tray_menu::close(app);
     let Some(win) = app.picker.upgrade() else {
         return;
     };
@@ -209,6 +213,7 @@ pub fn activate(app: &App) {
     theme_bridge::apply_theme(
         Some(&win),
         app.tooltip.upgrade().as_ref(),
+        app.tray_menu.upgrade().as_ref(),
         app.search.upgrade().as_ref(),
         app.editor.upgrade().as_ref(),
         app.settings.upgrade().as_ref(),
@@ -479,6 +484,7 @@ pub fn restore_after_editor(app: &App, target: TargetSession) {
     theme_bridge::apply_theme(
         Some(&win),
         app.tooltip.upgrade().as_ref(),
+        app.tray_menu.upgrade().as_ref(),
         app.search.upgrade().as_ref(),
         app.editor.upgrade().as_ref(),
         app.settings.upgrade().as_ref(),

@@ -689,6 +689,8 @@ pub fn wire(app: &App) {
 /// 速贴活跃时先收起（会话快捷键是全局的，不先解除会劫持设置窗口键盘，
 /// 对齐旧壳 WindowCoordinator::open_settings）。
 pub fn open(app: &App) {
+    // 互斥收口：托盘菜单开着时先收（本函数也是菜单「打开设置」项的落点）
+    crate::tray_menu::close(app);
     if app.state.is_picker_active() {
         crate::picker::hide(app, true);
     }

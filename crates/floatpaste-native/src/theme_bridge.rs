@@ -1,8 +1,8 @@
 //! 主题桥接：core 派生的语义 token 写入各窗口的 Theme 全局。
 //!
-//! Slint 全局按组件实例各存一份，四个窗口都要显式写入。速贴/搜索/编辑
-//! 消费同一完整键集（[`write_full_tokens`]），tooltip 只消费卡片所需
-//! 子集（[`write_tooltip_tokens`]）——新增 token 只改这两个函数，
+//! Slint 全局按组件实例各存一份，五个窗口都要显式写入。速贴/搜索/编辑/
+//! 设置/托盘菜单消费同一完整键集（[`write_full_tokens`]），tooltip 只消费
+//! 卡片所需子集（[`write_tooltip_tokens`])——新增 token 只改这两个函数，
 //! 不要在调用点散落增量写入，否则漏掉的窗口会静默落入默认色。
 
 use slint::{Color, ComponentHandle};
@@ -101,6 +101,7 @@ fn write_tooltip_tokens(theme: &Theme, tokens: &ThemeTokens) {
 pub fn apply_theme(
     picker: Option<&QuickPasteWindow>,
     tooltip: Option<&TooltipWindow>,
+    tray_menu: Option<&crate::TrayMenuWindow>,
     search: Option<&SearchWindow>,
     editor: Option<&EditorWindow>,
     settings: Option<&crate::SettingsWindow>,
@@ -111,6 +112,9 @@ pub fn apply_theme(
     }
     if let Some(tooltip) = tooltip {
         write_tooltip_tokens(&tooltip.global::<Theme>(), tokens);
+    }
+    if let Some(tray_menu) = tray_menu {
+        write_full_tokens(&tray_menu.global::<Theme>(), tokens);
     }
     if let Some(search) = search {
         write_full_tokens(&search.global::<Theme>(), tokens);
@@ -130,6 +134,7 @@ pub fn reapply_theme(app: &crate::picker::App, tokens: &ThemeTokens) {
     apply_theme(
         app.picker.upgrade().as_ref(),
         app.tooltip.upgrade().as_ref(),
+        app.tray_menu.upgrade().as_ref(),
         app.search.upgrade().as_ref(),
         app.editor.upgrade().as_ref(),
         app.settings.upgrade().as_ref(),

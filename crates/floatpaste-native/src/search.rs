@@ -80,6 +80,9 @@ pub fn toggle_from_shortcut(app: &App) {
 /// 分支）；否则速贴活跃先收起（不还原目标，焦点交给搜索窗口）再走完整
 /// 打开流程
 pub fn open_global(app: &App) {
+    // 互斥收口：托盘菜单开着时其键鼠会话（单例）保留无碍，但浮层不该与
+    // 搜索窗同屏滞留
+    crate::tray_menu::close(app);
     if app.state.is_search_active() {
         let hwnd = app.state.search_hwnd.load(Ordering::SeqCst);
         // 已不在前台 = 失焦自动关闭正待焦点看门狗执行（120ms 轮询间隔），
@@ -1976,6 +1979,7 @@ pub(crate) mod scroll_reset_tests {
             state: Arc::new(SharedState::new(core)),
             picker: Default::default(),
             tooltip: Default::default(),
+            tray_menu: Default::default(),
             search: win.as_weak(),
             editor: Default::default(),
             settings: Default::default(),
@@ -2086,6 +2090,7 @@ pub(crate) mod refresh_after_editor_tests {
             state: Arc::new(SharedState::new(core)),
             picker: Default::default(),
             tooltip: Default::default(),
+            tray_menu: Default::default(),
             search: win.as_weak(),
             editor: Default::default(),
             settings: Default::default(),

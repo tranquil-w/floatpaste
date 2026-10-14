@@ -1,0 +1,109 @@
+// 托盘菜单：右键托盘图标的浮层菜单（替代 Win32 TrackPopupMenu，绘制走
+// 应用主题 token，跟随 themeMode 与强调色预设）。卡片语言与 tooltip 同构
+// （surface 卡底、1px 描边、柔影），行项悬停 = 墨色微叠、按压 0.85。
+// 无焦点不激活与停屏显隐由 Rust 侧 Win32 处理；窗口尺寸由 Rust 度量后设置。
+import { Theme, Metrics, Motion, SoftShadow } from "theme.slint";
+
+export component TrayMenuWindow inherits Window {
+    no-frame: true;
+    background: transparent;
+    title: "FloatPaste · 托盘菜单";
+    // Rust 在打开前按内容度量设置物理尺寸
+    preferred-width: 200px;
+    preferred-height: 200px;
+
+    // 菜单项文案（「暂停监听」项随状态变化，每次打开由 Rust 整组重设）
+    in-out property <[string]> items;
+    // 菜单项命中：索引对齐 items
+    callback activate(int);
+    // 出现动画：Rust 在打开时置 false（透明重绘），上屏后置 true 渐显
+    in property <bool> appear: true;
+
+    // ── 卡片固定几何：Rust 定窗口尺寸时读取（单一事实来源，禁双边手抄）──
+    // 柔影留边：窗口比卡片大四周（同 tooltip，Rust 锚点补偿与定尺寸同源）
+    out property <length> shadow-margin: 12px;
+    out property <length> row-height: 36px;
+    // 卡片内边距（四周 space-1）+ 上下描边：内容之外的固定纵向占用
+    out property <length> chrome-v: 2 * Metrics.space-1 + 2px;
+    // 卡片内边距（左右 space-1）+ 行内左右 padding（space-3）+ 左右描边：
+    // 最长菜单项自然宽之外的固定横向占用
+    out property <length> chrome-h: 2 * Metrics.space-1 + 2 * Metrics.space-3 + 2px;
+
+    // 宽度度量标尺：Rust 借它量最长菜单项的自然宽（与渲染同引擎同行高）
+    callback measure-item-width(string) -> length;
+    measure-item-width(text) => {
+        item-ruler.text = text;
+        item-ruler.preferred-width
+    }
+
+    // 柔影垫底（几何同卡片，渐显与卡同步——否则淡入期只剩悬浮的影）
+    SoftShadow {
+        x: root.shadow-margin;
+        y: root.shadow-margin;
+        width: parent.width - 2 * root.shadow-margin;
+        height: parent.height - 2 * root.shadow-margin;
+        layers: 8;
+        step: 1px;
+        offset-y: 4px;
+        radius: Metrics.radius-md;
+        alpha: 0.12;
+        opacity: root.appear ? 1.0 : 0.0;
+        animate opacity { duration: Motion.dur-color; easing: Motion.ease; }
+    }
+
+    // 卡片：铺满窗口减去四周柔影留边
+    Rectangle {
+        x: root.shadow-margin;
+        y: root.shadow-margin;
+        width: parent.width - 2 * root.shadow-margin;
+        height: parent.height - 2 * root.shadow-margin;
+        background: Theme.surface;
+        opacity: root.appear ? 1.0 : 0.0;
+        animate opacity { duration: Motion.dur-color; easing: Motion.ease; }
+        border-width: 1px;
+        border-color: Theme.border-muted;
+        border-radius: Metrics.radius-md;
+
+        VerticalLayout {
+            padding: Metrics.space-1;
+
+            for item[i] in root.items: Rectangle {
+                height: root.row-height;
+                border-radius: Metrics.radius-sm;
+                background: row-ta.has-hover
+                    ? Theme.fg-default.with-alpha(Theme.is-dark ? 0.08 : 0.06)
+                    : transparent;
+                opacity: row-ta.pressed ? 0.85 : 1.0;
+
+                HorizontalLayout {
+                    padding-left: Metrics.space-3;
+                    padding-right: Metrics.space-3;
+
+                    Text {
+                        text: item;
+                        color: Theme.fg-default;
+                        font-size: Metrics.text-body;
+                        vertical-alignment: center;
+                    }
+                }
+
+                row-ta := TouchArea {
+                    clicked => {
+                        root.activate(i);
+                    }
+                }
+            }
+        }
+
+        // 宽度标尺（不可见不挡输入，排版属性与菜单项 Text 一致）：
+        // Rust 打开前借它量最长项的自然宽
+        item-ruler := Text {
+            opacity: 0;
+            x: 0;
+            y: 0;
+            font-size: Metrics.text-body;
+            wrap: no-wrap;
+            text: "";
+        }
+    }
+}

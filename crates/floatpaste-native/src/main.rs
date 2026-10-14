@@ -21,6 +21,7 @@ mod theme_bridge;
 mod thumbnails;
 mod tooltip;
 mod tray;
+mod tray_menu;
 mod win32_ext;
 
 use std::sync::atomic::Ordering;
@@ -124,6 +125,13 @@ fn main() {
             return;
         }
     };
+    let tray_menu_win = match TrayMenuWindow::new() {
+        Ok(win) => win,
+        Err(error) => {
+            tracing::error!("创建托盘菜单窗口失败: {error}");
+            return;
+        }
+    };
     let search_win = match SearchWindow::new() {
         Ok(win) => win,
         Err(error) => {
@@ -154,6 +162,7 @@ fn main() {
         state: state.clone(),
         picker: picker_win.as_weak(),
         tooltip: tooltip_win.as_weak(),
+        tray_menu: tray_menu_win.as_weak(),
         search: search_win.as_weak(),
         editor: editor_win.as_weak(),
         settings: settings_win.as_weak(),
@@ -231,6 +240,7 @@ fn main() {
     search::wire(&app);
     editor::wire(&app);
     settings::wire(&app);
+    tray_menu::wire(&app);
 
     // ── 窗口句柄与浮层样式：事件循环首轮装配（winit 惰性建窗，
     // show/停屏舞蹈统一在 overlay::silent_assemble）──
@@ -243,6 +253,9 @@ fn main() {
             return;
         };
         let Some(tooltip_win) = app_for_init.tooltip.upgrade() else {
+            return;
+        };
+        let Some(tray_menu_win) = app_for_init.tray_menu.upgrade() else {
             return;
         };
         let Some(search_win) = app_for_init.search.upgrade() else {
@@ -259,6 +272,14 @@ fn main() {
             // 穿透位守护：winit 异步样式重排会剥掉 TRANSPARENT/LAYERED，
             // 剥掉后 tooltip 盖在条目上吞点击（点铅笔无响应的根因）
             win32_ext::install_click_through_subclass(hwnd);
+        }
+        // 托盘菜单：无焦点停屏浮层（同 tooltip 装配；柔影为窗口内自绘，
+        // 不挂 DWM 阴影），打开/关闭走 tray_menu 模块
+        if let Some(hwnd) = overlay::silent_assemble_parked(&tray_menu_win, false) {
+            app_for_init
+                .state
+                .tray_menu_hwnd
+                .store(hwnd, Ordering::SeqCst);
         }
         // 搜索窗口可聚焦（需要真实键盘焦点），装配变体不带 NOACTIVATE
         match overlay::silent_assemble_focusable(&search_win) {
@@ -336,6 +357,7 @@ fn main() {
         theme_bridge::apply_theme(
             Some(&picker_win),
             Some(&tooltip_win),
+            Some(&tray_menu_win),
             Some(&search_win),
             editor_for_theme.as_ref(),
             settings_for_theme.as_ref(),
@@ -621,6 +643,7 @@ fn l2_headless_ui_contracts() {
     settings_scroll_tests::run();
     search::scroll_reset_tests::run();
     search::refresh_after_editor_tests::run();
+    tray_menu::headless_contract_tests::run();
 }
 
 #[cfg(test)]
