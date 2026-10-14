@@ -35,7 +35,10 @@ use windows::{
         System::DataExchange::{CloseClipboard, OpenClipboard},
         UI::{
             HiDpi::GetDpiForWindow,
-            WindowsAndMessaging::{EnumWindows, FindWindowW, GetWindowRect, GetWindowTextW},
+            WindowsAndMessaging::{
+                EnumWindows, FindWindowW, GetSystemMetrics, GetWindowRect, GetWindowTextW,
+                GetWindowThreadProcessId, IsWindowVisible, SM_CXSCREEN, SM_CYSCREEN,
+            },
         },
     },
 };
@@ -207,6 +210,55 @@ fn onscreen_search_window() -> Option<(isize, RECT)> {
 fn search_window_full_height(hwnd: isize) -> i32 {
     let dpi = unsafe { GetDpiForWindow(HWND(hwnd as *mut _)) };
     (620.0 * dpi as f32 / 96.0).round() as i32
+}
+
+/* ── CI 诊断（临时，取证后移除）：同标题窗口全景 ── */
+
+unsafe extern "system" fn dump_search_windows_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    let mut text = [0u16; 64];
+    let len = GetWindowTextW(hwnd, &mut text);
+    if len > 0 && String::from_utf16_lossy(&text[..len as usize]) == SEARCH_TITLE {
+        let mut rect = RECT::default();
+        let rect_ok = GetWindowRect(hwnd, &mut rect).is_ok();
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        eprintln!(
+            "[diag-win] hwnd={:x} pid={pid} visible={} rect={rect:?} rect_ok={rect_ok}",
+            hwnd.0 as usize,
+            IsWindowVisible(hwnd).as_bool(),
+        );
+    }
+    BOOL::from(true)
+}
+
+fn dump_search_windows(tag: &str) {
+    eprintln!("[diag-win] ── {tag} ──");
+    unsafe {
+        let _ = EnumWindows(Some(dump_search_windows_proc), LPARAM(0));
+    }
+}
+
+/// 转储被测实例日志（APPDATA 重定向目录下 logs/，非阻塞 appender 有
+/// ~百毫秒延迟，读到的可能缺最后几行）
+fn dump_instance_logs(app_dir: &Path) {
+    let Ok(entries) = fs::read_dir(app_dir.join("logs")) else {
+        eprintln!("[diag-log] 无 logs 目录");
+        return;
+    };
+    for entry in entries.flatten() {
+        match fs::read(entry.path()) {
+            Ok(bytes) => {
+                let text = String::from_utf8_lossy(&bytes);
+                let tail = if text.len() > 16_000 {
+                    &text[text.len() - 16_000..]
+                } else {
+                    &text
+                };
+                eprintln!("[diag-log] ═══ {} ═══\n{tail}", entry.file_name().display());
+            }
+            Err(error) => eprintln!("[diag-log] 读取失败 {}: {error}", entry.path().display()),
+        }
+    }
 }
 
 /// 搜索窗开窗落位的期望上边沿：被测实例与测试进程读的是同一静止光标，
@@ -594,9 +646,54 @@ fn app_e2e_smoke_flow() {
             }),
             "搜索窗应落位屏内"
         );
-        let (hwnd, _) = onscreen_search_window().unwrap();
-        let full_height = search_window_full_height(hwnd);
+        let (first_hwnd, first_rect) = onscreen_search_window().unwrap();
+        let full_height = search_window_full_height(first_hwnd);
         let baseline_top = expected_search_top_at_full_height(full_height);
+
+        // ── CI 诊断（临时，取证后移除）：环境 + 几何采样轨迹 ──
+        eprintln!(
+            "[diag-env] dpi={} full_height={full_height} baseline_top={baseline_top} \
+             first_hwnd={:x} first_rect={first_rect:?} \
+             pidA={} pidB={}",
+            unsafe { GetDpiForWindow(HWND(first_hwnd as *mut _)) },
+            first_hwnd as usize,
+            cleanup.child.as_ref().unwrap().id(),
+            search_cleanup.child.as_ref().unwrap().id(),
+        );
+        unsafe {
+            eprintln!(
+                "[diag-env] screen={}x{}",
+                GetSystemMetrics(SM_CXSCREEN),
+                GetSystemMetrics(SM_CYSCREEN)
+            );
+        }
+        if let Ok(cursor) = current_cursor_point() {
+            eprintln!("[diag-env] cursor={cursor:?} work={:?}", work_area_from_point(cursor));
+        }
+        dump_search_windows("首读时");
+        let trail: std::sync::Arc<std::sync::Mutex<Vec<(u128, i32, i32, u32)>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let sampler = {
+            let trail = trail.clone();
+            let stop = stop.clone();
+            thread::spawn(move || {
+                let start = Instant::now();
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    if let Some((hwnd, rect)) = onscreen_search_window() {
+                        let mut pid = 0u32;
+                        unsafe { GetWindowThreadProcessId(HWND(hwnd as *mut _), Some(&mut pid)) };
+                        trail.lock().unwrap().push((
+                            start.elapsed().as_millis(),
+                            rect.top,
+                            rect.bottom,
+                            pid,
+                        ));
+                    }
+                    thread::sleep(Duration::from_millis(25));
+                }
+            })
+        };
 
         // 落地收缩到 3 行：起步满高 620 逻辑，落地整档更矮（阈值 550 逻辑）
         assert!(
@@ -607,7 +704,25 @@ fn app_e2e_smoke_flow() {
             }),
             "矮数据集落地后搜索窗高度应收缩到满高以下"
         );
-        let (_, shrunk) = onscreen_search_window().unwrap();
+        let (final_hwnd, shrunk) = onscreen_search_window().unwrap();
+
+        // ── CI 诊断（临时）：轨迹回放 + 日志转储，然后照常断言 ──
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        let _ = sampler.join();
+        eprintln!(
+            "[diag-env] final_hwnd={:x} shrunk={shrunk:?} (首读 hwnd={:x})",
+            final_hwnd as usize,
+            first_hwnd as usize,
+        );
+        let mut last: Option<(i32, i32, u32)> = None;
+        for (ms, top, bottom, pid) in trail.lock().unwrap().iter().copied() {
+            if last != Some((top, bottom, pid)) {
+                eprintln!("[diag-trail] t={ms}ms top={top} bottom={bottom} pid={pid}");
+                last = Some((top, bottom, pid));
+            }
+        }
+        dump_search_windows("断言前");
+        dump_instance_logs(&search_app_dir);
         assert_eq!(
             shrunk.top, baseline_top,
             "落地收缩不得移动上边沿（顶边锚定，保持开窗居中基准）"
