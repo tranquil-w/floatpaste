@@ -29,7 +29,7 @@ use floatpaste_core::domain::error::AppError;
 use floatpaste_core::domain::settings::{PasteTrigger, UserSetting};
 use floatpaste_core::platform::windows::active_app::ActiveAppResolver;
 use floatpaste_core::platform::windows::picker_position::{
-    current_cursor_point, work_area_from_point, ScreenRect,
+    current_cursor_point, primary_monitor_work_area, work_area_from_point, ScreenRect,
 };
 use floatpaste_core::platform::windows::session_keyboard::parse_session_combo;
 use floatpaste_core::platform::windows::window_control;
@@ -419,10 +419,41 @@ pub fn resume_input(app: &App) {
     });
 }
 
-/// 光标所在显示器工作区（物理坐标）；光标/工作区不可得返回 None
+/// 光标所在显示器工作区（物理坐标）。GetCursorPos 在输入桌面短暂不可达时
+/// 返回拒绝访问（会话切换/显示器栈重初始化、断连 RDP 会话）：先短重试
+/// 消化瞬态，持续失败退回主屏工作区——落位宁可贵为主屏居中，不可让开窗
+/// 停在停屏位成为不可见窗口
 fn cursor_monitor_work_area() -> Option<ScreenRect> {
-    let cursor = current_cursor_point().ok()?;
-    work_area_from_point(cursor).ok()
+    let mut last_error = None;
+    for _ in 0..5 {
+        match current_cursor_point() {
+            Ok(cursor) => {
+                return match work_area_from_point(cursor) {
+                    Ok(work) => Some(work),
+                    Err(error) => {
+                        tracing::warn!("搜索落位: cursor={cursor:?} 工作区读取失败: {error}");
+                        None
+                    }
+                };
+            }
+            Err(error) => {
+                last_error = Some(error);
+                thread::sleep(Duration::from_millis(30));
+            }
+        }
+    }
+    match primary_monitor_work_area() {
+        Ok(work) => {
+            tracing::warn!(
+                "搜索落位: 光标读取持续失败（{last_error:?}），退回主屏工作区 work={work:?}"
+            );
+            Some(work)
+        }
+        Err(error) => {
+            tracing::warn!("搜索落位: 光标读取失败（{last_error:?}）且主屏工作区不可得: {error}");
+            None
+        }
+    }
 }
 
 /// 以新尺寸一次 SetWindowPos 完成缩放+移动并按光标所在工作区居中；

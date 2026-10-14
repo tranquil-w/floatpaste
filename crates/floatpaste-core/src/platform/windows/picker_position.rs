@@ -5,6 +5,7 @@ use windows::Win32::{
     Foundation::{CloseHandle, HWND, POINT, RECT},
     Graphics::Gdi::{
         ClientToScreen, GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+        MONITOR_DEFAULTTOPRIMARY,
     },
     System::Threading::{
         OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
@@ -243,6 +244,23 @@ pub fn work_area_from_point(point: ScreenPoint) -> Result<ScreenRect, AppError> 
         return Err(AppError::Message("未找到目标显示器".to_string()));
     }
 
+    monitor_work_area(monitor)
+}
+
+/// 主显示器工作区：完全不依赖光标读取。GetCursorPos 在输入桌面短暂不可达
+/// 时返回拒绝访问（会话切换/显示器栈重初始化、断连 RDP 会话），此时以
+/// 主屏居中兜底，窗口仍能落位而不是消失
+pub fn primary_monitor_work_area() -> Result<ScreenRect, AppError> {
+    let monitor =
+        unsafe { MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY) };
+    if monitor.0.is_null() {
+        return Err(AppError::Message("未找到主显示器".to_string()));
+    }
+
+    monitor_work_area(monitor)
+}
+
+fn monitor_work_area(monitor: windows::Win32::Graphics::Gdi::HMONITOR) -> Result<ScreenRect, AppError> {
     let mut monitor_info = MONITORINFO {
         cbSize: size_of::<MONITORINFO>() as u32,
         ..Default::default()
@@ -267,8 +285,19 @@ fn rect_height(rect: RECT) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_real_screen_point, usable_probe, Anchor, ScreenPoint};
+    use super::{
+        is_real_screen_point, primary_monitor_work_area, usable_probe, Anchor, ScreenPoint,
+    };
     use crate::domain::error::AppError;
+
+    /// 主屏工作区兜底是落位链的最后一环（光标读取被拒时靠它落位），断言
+    /// 平台调用序列在真机可用且矩形合法（cbSize/字段映射回归哨兵）
+    #[test]
+    fn primary_monitor_work_area_returns_valid_rect() {
+        let work = primary_monitor_work_area().expect("主屏工作区应可读");
+        assert!(work.right > work.left && work.bottom > work.top, "工作区矩形应非空: {work:?}");
+        assert!(work.left <= 0 && work.top <= 0, "主屏工作区左上角应贴原点: {work:?}");
+    }
 
     #[test]
     fn real_screen_check_rejects_offscreen_coordinates() {
