@@ -75,4 +75,3 @@ fn delete_value(key: HKEY, name: &str) -> Result<(), AppError> {
         Err(error) => Err(AppError::from(error)),
     }
 }
-

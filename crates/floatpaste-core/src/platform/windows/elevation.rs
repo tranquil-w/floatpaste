@@ -139,4 +139,3 @@ fn cancelled_or_error(error: windows::core::Error) -> AppError {
         AppError::from(error)
     }
 }
-

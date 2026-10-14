@@ -123,7 +123,11 @@ fn intersect_known_tags(app: &App, preset_tags: Vec<String>) -> Vec<String> {
         .core()
         .repository
         .list_tags()
-        .map(|tags| tags.into_iter().map(|tag| tag.name.to_lowercase()).collect())
+        .map(|tags| {
+            tags.into_iter()
+                .map(|tag| tag.name.to_lowercase())
+                .collect()
+        })
         .unwrap_or_default();
     preset_tags
         .into_iter()
@@ -2024,7 +2028,7 @@ pub(crate) mod scroll_reset_tests {
                 eprintln!("quit_event_loop 失败: {error:?}");
             }
         });
-        slint::run_event_loop_until_quit();
+        let _ = slint::run_event_loop_until_quit();
         closer.join().unwrap();
 
         assert_eq!(win.get_rows().row_count(), 0, "图片筛选下应无结果");
@@ -2105,7 +2109,11 @@ pub(crate) mod refresh_after_editor_tests {
             .iter()
             .map(|chip| chip.name.to_string())
             .collect();
-        assert_eq!(chips, vec!["新标签".to_string()], "编辑后新标签应出现在筛选 chips");
+        assert_eq!(
+            chips,
+            vec!["新标签".to_string()],
+            "编辑后新标签应出现在筛选 chips"
+        );
 
         // 泵事件循环消费查询落地：行卡同步带出新标签
         let closer = thread::spawn(|| {
@@ -2114,13 +2122,16 @@ pub(crate) mod refresh_after_editor_tests {
                 eprintln!("quit_event_loop 失败: {error:?}");
             }
         });
-        slint::run_event_loop_until_quit();
+        let _ = slint::run_event_loop_until_quit();
         closer.join().unwrap();
 
         assert_eq!(win.get_rows().row_count(), 1, "列表应重查到该条目");
         let row = win.get_rows().row_data(0).expect("首行应存在");
         assert_eq!(
-            row.tags.iter().map(|tag| tag.to_string()).collect::<Vec<_>>(),
+            row.tags
+                .iter()
+                .map(|tag| tag.to_string())
+                .collect::<Vec<_>>(),
             vec!["新标签".to_string()],
             "行卡应显示新标签"
         );

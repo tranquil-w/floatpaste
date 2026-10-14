@@ -49,9 +49,10 @@ fn clip_history_lifecycle() {
     let state = CoreState::new(repository.clone(), image_storage, settings);
 
     // ── 录入与去重置顶 ──
-    let first = HistoryService::ingest_text(&state, "lifecycle 首条内容", Some("app-a.exe".to_string()))
-        .unwrap()
-        .expect("全新文本应入库");
+    let first =
+        HistoryService::ingest_text(&state, "lifecycle 首条内容", Some("app-a.exe".to_string()))
+            .unwrap()
+            .expect("全新文本应入库");
     HistoryService::ingest_text(&state, "第二条内容", None).unwrap();
     let before = repository.list_recent(10).unwrap().len();
     assert_eq!(before, 2);
@@ -72,12 +73,8 @@ fn clip_history_lifecycle() {
     );
 
     // ── 标签 ──
-    TagService::set_item_tags(
-        &state,
-        &first.id,
-        &["工作".to_string(), "临时".to_string()],
-    )
-    .unwrap();
+    TagService::set_item_tags(&state, &first.id, &["工作".to_string(), "临时".to_string()])
+        .unwrap();
     let tags = repository.list_tags().unwrap();
     assert_eq!(tags.len(), 2, "两个标签都应建行");
     assert!(tags.iter().all(|tag| tag.item_count == 1));
@@ -128,11 +125,7 @@ fn clip_history_lifecycle() {
     RetentionService::run_once(&state).unwrap();
 
     let surviving = repository.list_recent(10).unwrap();
-    assert_eq!(
-        surviving.len(),
-        2,
-        "未收藏未删条目应被压缩到 history_limit"
-    );
+    assert_eq!(surviving.len(), 2, "未收藏未删条目应被压缩到 history_limit");
     assert!(
         surviving.iter().all(|item| item.id != first.id),
         "超期软删行应被物理清除，收藏也救不回"

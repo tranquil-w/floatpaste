@@ -303,9 +303,9 @@ fn clamp_window_size(width: u32, height: u32) -> (u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::{
-        beside_start_menu_point, center_in_work_area, default_window_size,
-        place_window_near_point, stored_window_size, Anchor, ScreenPoint, ScreenRect,
-        StoredWindowPosition, PICKER_DEFAULT_WIDTH, PICKER_MIN_HEIGHT, PICKER_MIN_WIDTH,
+        beside_start_menu_point, center_in_work_area, default_window_size, place_window_near_point,
+        stored_window_size, Anchor, ScreenPoint, ScreenRect, StoredWindowPosition,
+        PICKER_DEFAULT_WIDTH, PICKER_MIN_HEIGHT, PICKER_MIN_WIDTH,
     };
 
     const WORK: ScreenRect = ScreenRect {

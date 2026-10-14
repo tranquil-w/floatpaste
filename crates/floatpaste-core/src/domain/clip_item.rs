@@ -219,4 +219,3 @@ pub struct NewClipTextItem {
     pub normalized: NormalizedClipText,
     pub source_app: Option<String>,
 }
-

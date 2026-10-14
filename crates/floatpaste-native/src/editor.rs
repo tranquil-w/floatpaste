@@ -24,7 +24,7 @@ use floatpaste_core::platform::windows::window_control;
 use floatpaste_core::services::clip_display::format_file_size;
 use floatpaste_core::services::clip_service::ClipService;
 use floatpaste_core::services::picker_position_service::center_in_work_area;
-use floatpaste_core::services::tag_service::{TagService, MAX_TAG_NAME_LEN, MAX_TAGS_PER_ITEM};
+use floatpaste_core::services::tag_service::{TagService, MAX_TAGS_PER_ITEM, MAX_TAG_NAME_LEN};
 use floatpaste_core::services::time_format::format_relative_time_or_unused;
 
 use crate::app_state::{EditorSession, TargetSession};
