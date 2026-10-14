@@ -438,8 +438,8 @@ fn position_centered_on_cursor(hwnd: isize, width_px: i32, height_px: i32) -> bo
     true
 }
 
-/// 会话开始重置（对齐 SEARCH_SESSION_START）：关键词/筛选/选中/滚动/错误
-/// 全部归零，行模型清空进入加载态
+/// 会话开始重置（对齐 SEARCH_SESSION_START）：关键词/筛选/选中/错误
+/// 全部归零，行模型清空进入加载态；滚动回顶由紧随的 run_query 统一负责
 fn reset_session_state(app: &App) {
     let Some(win) = app.search.upgrade() else {
         return;
@@ -473,7 +473,6 @@ fn reset_session_state(app: &App) {
     win.set_tag_chips(ModelRc::new(Rc::new(VecModel::from(
         Vec::<SearchTagChip>::new(),
     ))));
-    win.set_scroll_generation(win.get_scroll_generation() + 1);
     win.invoke_focus_input();
 }
 
@@ -603,6 +602,9 @@ fn run_query(app: &App) {
     win.set_fetching_next(false);
     let keep_loading = win.get_rows().row_count() == 0;
     win.set_loading(keep_loading);
+    // 行集即将整体替换：视口先回顶，深滚动位置上的空态/短结果会整体
+    // 落在视口外（Flickable 不随内容收缩钳制 content-y）
+    win.set_scroll_generation(win.get_scroll_generation() + 1);
 
     let core = app.core().clone();
     let app_cb = app.clone();
@@ -1904,5 +1906,129 @@ mod tests {
         assert_eq!(event_key_name("ab"), None);
         assert_eq!(event_key_name("剪"), None);
         assert_eq!(event_key_name("\u{a}"), Some("Enter".to_string()));
+    }
+}
+
+/* ───────────────── L2 无头 UI 测试 ───────────────── */
+
+#[cfg(test)]
+pub(crate) mod scroll_reset_tests {
+    //! 搜索列表回顶契约（docs/testing.md L2 层）：深滚动位上发起任何
+    //! 新查询，视口必须回顶——Flickable 不随内容收缩钳制旧偏移，空
+    //! 态/短结果会整体落在视口外。临时 SQLite 预置数据，不经系统剪
+    //! 贴板。由 l2_headless_ui_contracts 单线程串行调用（独立挂
+    //! #[test] 会与其他 UI 测试抢 Slint 平台线程绑定）。
+
+    use super::*;
+    use std::sync::Arc;
+
+    use floatpaste_core::repository::sqlite_repository::SqliteRepository;
+    use floatpaste_core::services::image_storage::ImageStorage;
+    use floatpaste_core::services::normalize_service::NormalizeService;
+    use floatpaste_core::state::CoreState;
+
+    use crate::app_state::SharedState;
+
+    /// 测试临时目录回收：Drop 时整体删除（覆盖 panic unwind 路径）
+    struct TempDirGuard(std::path::PathBuf);
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// 单测试函数串行多段中的一段（见模块注释）
+    pub(crate) fn run() {
+        // 临时库预置文本条目：图片筛选下恒为空 → 空态可稳定复现
+        let stamp = std::process::id();
+        let dir = std::env::temp_dir().join(format!("floatpaste-scroll-{stamp}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("floatpaste.db");
+        {
+            let repository = SqliteRepository::new(&db_path).unwrap();
+            for index in 0..10 {
+                let item =
+                    NormalizeService::normalize_text(&format!("滚动行 {index}"), None).unwrap();
+                repository.save_text_item(&item).unwrap();
+            }
+        }
+        let _cleanup = TempDirGuard(dir.clone());
+
+        // 装配：真实 core（临时库）+ 仅搜索窗接线的 App
+        let win = SearchWindow::new().expect("实例化搜索窗失败");
+        win.window().set_size(slint::LogicalSize::new(780.0, 620.0));
+        let repository = SqliteRepository::new(&db_path).unwrap();
+        let core = CoreState::new(
+            repository,
+            ImageStorage::new(dir).unwrap(),
+            UserSetting::default(),
+        );
+        let app = App {
+            state: Arc::new(SharedState::new(core)),
+            picker: Default::default(),
+            tooltip: Default::default(),
+            search: win.as_weak(),
+            editor: Default::default(),
+            settings: Default::default(),
+        };
+
+        // 手工注入行模型，等价一次查询落地后的满列表（60 行必超一屏）
+        let rows: Vec<SearchRow> = (0..60)
+            .map(|index| SearchRow {
+                id: format!("row-{index}").into(),
+                preview: format!("条目 {index}").into(),
+                kind: 0,
+                source_app: "".into(),
+                time_text: "".into(),
+                meta: "".into(),
+                favorited: false,
+                has_thumb: false,
+                thumb: Default::default(),
+                tags: Default::default(),
+                tag_more: 0,
+            })
+            .collect();
+        win.set_rows(ModelRc::new(Rc::new(VecModel::from(rows))));
+        win.set_loading(false);
+        // 60 行（行高 ≥44px）内容远超 620px 视口，深滚动位真实可达。
+        // 不在此断言 content-height：无事件循环时布局 pass 未跑，读数
+        // 停留在注入前的空内容布局（陈旧读数坑见 docs/testing.md）
+
+        // 深滚动位（等价滚动条拖到列表深处；Flickable 偏移赋值即生效）
+        win.invoke_set_list_scroll_y(-1200.0);
+        assert!(
+            win.get_list_scroll_y() < 0.0,
+            "程序性深滚动应生效，视口在内容深处"
+        );
+
+        // 发起筛选查询：回顶信号同步递增（changed 守卫由事件循环调度，
+        // 生产环境循环常驻、一帧内生效）
+        let generation_before = win.get_scroll_generation();
+        filter_selected(&app, 3); // 图片筛选，库中全是文本 → 必空
+        assert_eq!(
+            win.get_scroll_generation(),
+            generation_before + 1,
+            "新查询发起应递增回顶信号"
+        );
+
+        // 泵事件循环：消费回顶守卫（content-y=0）与查询落地（行集清空、
+        // 空态为「清除筛选」）
+        let closer = thread::spawn(|| {
+            thread::sleep(Duration::from_millis(1000));
+            if let Err(error) = slint::quit_event_loop() {
+                eprintln!("quit_event_loop 失败: {error:?}");
+            }
+        });
+        slint::run_event_loop_until_quit();
+        closer.join().unwrap();
+
+        assert_eq!(win.get_rows().row_count(), 0, "图片筛选下应无结果");
+        assert_eq!(win.get_empty_action(), 2, "空态动作应为「清除筛选」");
+        assert_eq!(
+            win.get_list_scroll_y(),
+            0.0,
+            "深滚动位上的空态视口必须回顶（bug 现场：清除筛选按钮不可见）"
+        );
     }
 }

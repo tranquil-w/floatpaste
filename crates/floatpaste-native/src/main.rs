@@ -592,6 +592,16 @@ pub(crate) fn sync_global_hotkeys(app: &App) {
     app.state.set_hotkey_failures(last_failures);
 }
 
+/// L2 无头 UI 测试总入口：Slint 平台绑定首个初始化线程且 winit 事件
+/// 循环是进程级单例，各窗口契约必须在本函数（同一线程）内串行多段
+/// 执行（docs/testing.md）
+#[cfg(test)]
+#[test]
+fn l2_headless_ui_contracts() {
+    settings_scroll_tests::run();
+    search::scroll_reset_tests::run();
+}
+
 #[cfg(test)]
 mod settings_scroll_tests {
     //! 设置窗自管滚动（弃 Flickable，编辑窗同款方案，docs/editor-window.md）的行为契约：
@@ -601,8 +611,9 @@ mod settings_scroll_tests {
 
     use slint::ComponentHandle;
 
-    #[test]
-    fn wheel_scroll_clamp_and_spy_contract() {
+    /// 由 l2_headless_ui_contracts 单线程串行调用（不再挂 #[test]，
+    /// 独立跑会与其他 UI 测试抢 Slint 平台线程绑定）
+    pub(crate) fn run() {
         let win = crate::SettingsWindow::new().expect("实例化设置窗失败");
         // set_size 同步驱动布局求解（winit 的实际 resize 走事件循环，等不到），
         // 未布局时元素几何为 0，滚轮命中落空

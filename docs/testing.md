@@ -12,6 +12,20 @@
 运行入口统一为 `cargo test`（含全部层）；单跑 L3 用
 `cargo test -p floatpaste-native --test e2e_smoke`。
 
+## L2 无头驱动约束
+
+- 入口唯一：各窗口契约段以 `pub(crate) fn run()` 提供并由单一 `#[test]`
+  （`l2_headless_ui_contracts`）串行调用——Slint 平台绑定首个初始化它的
+  线程，`#[test]` 各占一线程，多入口会抢占线程绑定而实例化失败
+- 布局读数须在事件循环泵帧后取：无循环时布局 pass 不跑，行模型注入后
+  `content-height` 等布局派生属性停留在旧值；不受布局影响的属性
+  （如 Flickable 偏移）可直接赋值断言
+- `changed` 回调由事件循环调度而非属性赋值时同步执行：断言其副作用须
+  先泵一次循环（`run_event_loop_until_quit` + 定时线程 `quit_event_loop`，
+  异步落地（`invoke_from_event_loop` 的闭包）同样只有循环运行时才消费）
+- 查询链路用临时 SQLite 直写预置数据，不经系统剪贴板（互斥资源，
+  见 L3 约束）
+
 ## L3 端到端约束
 
 ### 隔离

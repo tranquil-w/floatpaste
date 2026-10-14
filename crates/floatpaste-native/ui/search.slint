@@ -645,8 +645,15 @@ export component SearchWindow inherits Window {
     in-out property <string> empty-title;
     in-out property <string> empty-description;
     in-out property <int> empty-action: 0;
-    // 每次会话打开滚回顶部
+    // 新查询发起时递增：视口滚回顶部（见列表区守卫）
     in-out property <int> scroll-generation: 0;
+    // L2 无头测试断言口（docs/testing.md）：列表视口偏移只读 +
+    // 程序性设偏移（等价滚动条拖动，生产 UI 不经此口）；内容高断言
+    // 复用 list-content-height
+    out property <length> list-scroll-y: list-flick.content-y;
+    public function set-list-scroll-y(value: length) {
+        list-flick.content-y = value;
+    }
     // DWM 材质挂载成功与否：false 时面板用不透明底回退
     in property <bool> material-active: false;
 
@@ -1235,7 +1242,10 @@ export component SearchWindow inherits Window {
                         content-y <=> list-flick.content-y;
                     }
 
-                    // 会话打开滚回顶部
+                    // 行集整体替换前视口必须回顶：Flickable 不随内容高度
+                    // 收缩钳制旧 content-y，深滚动位置上的空态/短结果会
+                    // 整体落在视口外（分页追加不递增 generation，滚动位置
+                    // 保持）
                     Rectangle {
                         visible: false;
                         property <int> generation: root.scroll-generation;
