@@ -23,7 +23,9 @@ use std::{
 
 use floatpaste_core::{
     domain::settings::{PickerPositionMode, StoredWindowPosition, UserSetting},
-    platform::windows::picker_position::{current_cursor_point, work_area_from_point},
+    platform::windows::picker_position::{
+        current_cursor_point, primary_monitor_work_area, work_area_from_point,
+    },
     repository::sqlite_repository::SqliteRepository,
     services::normalize_service::NormalizeService,
     services::picker_position_service::center_in_work_area,
@@ -35,7 +37,9 @@ use windows::{
         System::DataExchange::{CloseClipboard, OpenClipboard},
         UI::{
             HiDpi::GetDpiForWindow,
-            WindowsAndMessaging::{EnumWindows, FindWindowW, GetWindowRect, GetWindowTextW},
+            WindowsAndMessaging::{
+                EnumWindows, FindWindowW, GetWindowRect, GetWindowTextW, IsWindowVisible,
+            },
         },
     },
 };
@@ -180,7 +184,16 @@ unsafe extern "system" fn enum_onscreen_search_proc(hwnd: HWND, lparam: LPARAM) 
     let len = GetWindowTextW(hwnd, &mut text);
     if len > 0 && String::from_utf16_lossy(&text[..len as usize]) == SEARCH_TITLE {
         let mut rect = RECT::default();
-        if GetWindowRect(hwnd, &mut rect).is_ok() && rect.top > OFFSCREEN_THRESHOLD {
+        // 屏内过滤必须叠加可见性：winit 预建的隐藏窗口自进程启动起就停在
+        // 级联默认位（CI 实测 top 130~156），矩形上过得了停屏位阈值；不看
+        // IsWindowVisible 会把「尚未装配/落位」的隐藏窗口当成已落位，测试
+        // 与应用赛跑（CI 实测测试先赢：应用随即将窗正确落位 top=50，断言
+        // 却已拿默认位 130 失败）。装配后的搜索窗走 Slint show + 停屏平移，
+        // Win32 恒可见，可见性过滤不影响正常路径
+        if GetWindowRect(hwnd, &mut rect).is_ok()
+            && rect.top > OFFSCREEN_THRESHOLD
+            && IsWindowVisible(hwnd).as_bool()
+        {
             state.found = Some((hwnd.0 as isize, rect));
             return BOOL::from(false);
         }
@@ -211,10 +224,19 @@ fn search_window_full_height(hwnd: isize) -> i32 {
 
 /// 搜索窗开窗落位的期望上边沿：被测实例与测试进程读的是同一静止光标，
 /// 用同源的居中计算复算「满高起步」的居中 top，作为顶边锚定的基准——
-/// 直接对比窗口两次读数会在「首读已收缩完成」时漏检重居中回归
+/// 直接对比窗口两次读数会在「首读已收缩完成」时漏检重居中回归。
+/// 光标读取被拒（输入桌面不可达，CI 断连会话必现）时与应用同样退回
+/// 主屏工作区：单屏下矩形相同，基准与落位仍逐位一致
 fn expected_search_top_at_full_height(full_height: i32) -> i32 {
-    let cursor = current_cursor_point().expect("读取光标位置失败");
-    let work = work_area_from_point(cursor).expect("取光标所在工作区失败");
+    let work = match current_cursor_point()
+        .and_then(|cursor| work_area_from_point(cursor))
+    {
+        Ok(work) => work,
+        Err(error) => {
+            eprintln!("[e2e] 光标/工作区不可得（{error}），基准退回主屏工作区");
+            primary_monitor_work_area().expect("主屏工作区不可得")
+        }
+    };
     center_in_work_area(work, 0, full_height).y
 }
 
