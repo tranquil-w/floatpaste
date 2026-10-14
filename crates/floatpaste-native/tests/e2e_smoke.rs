@@ -5,7 +5,8 @@
 //! FLOATPASTE_SKIP_AUTOSTART_SYNC 挡住对真实系统 Run 键与任务计划的同步）。
 //!
 //! 外部驱动只走真实用户路径：写系统剪贴板触发录入、二次启动进程经唤醒
-//! 事件开关速贴面板；断言落在隔离库（只读连接）与窗口几何上。
+//! 事件开关速贴面板、命名事件驱动托盘「切换监听」的处理路径；断言落在
+//! 隔离库（只读连接）与窗口几何上。
 //! 上屏注入（SendInput）依赖注入环境是否放行，按验收纪律留给用户实测。
 //!
 //! 单测试函数串行推进：系统剪贴板、全局热键、速贴窗口都是会话级全局
@@ -90,14 +91,14 @@ fn retry_clipboard<T>(mut op: impl FnMut() -> Result<T, arboard::Error>) -> T {
 
 /// 只读连接查隔离库；被测实例持有写连接（短事务），busy_timeout 兜并发
 fn count_rows(db_path: &Path, sql: &str, param: Option<&str>) -> i64 {
-    let connection = rusqlite::Connection::open_with_flags(
-        db_path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )
-    .unwrap();
+    let connection =
+        rusqlite::Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .unwrap();
     connection.busy_timeout(Duration::from_secs(5)).unwrap();
     match param {
-        Some(value) => connection.query_row(sql, [value], |row| row.get(0)).unwrap(),
+        Some(value) => connection
+            .query_row(sql, [value], |row| row.get(0))
+            .unwrap(),
         None => connection.query_row(sql, [], |row| row.get(0)).unwrap(),
     }
 }
@@ -116,6 +117,31 @@ fn active_full_text_exists(db_path: &Path, text: &str) -> bool {
         "SELECT COUNT(*) FROM clip_items WHERE deleted_at IS NULL AND full_text = ?1",
         Some(text),
     ) > 0
+}
+
+/// 只读查询隔离库 settings 表，取 user_settings JSON 的 pauseMonitoring
+/// 当前落库值（UserSetting 按 serde camelCase 序列化；托盘切换监听翻转后
+/// 经 update_settings 即时落库，可作切换已受理的确认信号）
+fn monitoring_paused(db_path: &Path) -> bool {
+    let connection =
+        rusqlite::Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .unwrap();
+    connection.busy_timeout(Duration::from_secs(5)).unwrap();
+    let raw: String = connection
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'user_settings'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    serde_json::from_str::<serde_json::Value>(&raw)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("pauseMonitoring")
+                .and_then(|field| field.as_bool())
+        })
+        .unwrap_or(false)
 }
 
 /// 速贴显隐是「屏内/屏外停屏」语义而非 SW_HIDE：隐藏=平移到 (-32000,-32000)，
@@ -155,9 +181,11 @@ fn spawn_instance(envs: &[(&str, String)], silent: bool) -> Child {
 /// 这是「二次启动唤醒面板」的真实用户路径，不依赖键盘注入。
 fn wake_via_second_launch(envs: &[(&str, String)]) {
     let mut second = spawn_instance(envs, false);
-    let exited_cleanly = wait_until(Duration::from_secs(15), Duration::from_millis(100), || {
-        matches!(second.try_wait(), Ok(Some(status)) if status.success())
-    });
+    let exited_cleanly = wait_until(
+        Duration::from_secs(15),
+        Duration::from_millis(100),
+        || matches!(second.try_wait(), Ok(Some(status)) if status.success()),
+    );
     if !exited_cleanly {
         let _ = second.kill();
         let _ = second.wait();
@@ -181,7 +209,10 @@ impl Cleanup {
             unreachable!("守卫内子进程不应被提前取走");
         };
         let status = child.try_wait().expect("查询被测实例状态失败");
-        assert!(status.is_none(), "被测实例在「{stage}」阶段前已退出: {status:?}");
+        assert!(
+            status.is_none(),
+            "被测实例在「{stage}」阶段前已退出: {status:?}"
+        );
     }
 }
 
@@ -282,12 +313,17 @@ fn app_e2e_smoke_flow() {
     let envs = [
         (
             "APPDATA",
-            data_root.to_str().expect("临时目录路径应为 UTF-8").to_string(),
+            data_root
+                .to_str()
+                .expect("临时目录路径应为 UTF-8")
+                .to_string(),
         ),
         ("FLOATPASTE_INSTANCE_ID", instance_id.clone()),
         ("FLOATPASTE_RETENTION_FIRST_DELAY_MS", "1500".to_string()),
         ("FLOATPASTE_SKIP_AUTOSTART_SYNC", "1".to_string()),
     ];
+    // 场景 6 托盘切换监听事件的信号侧副本（Cleanup 构造会 move 走原值）
+    let instance_id_for_toggle = instance_id.clone();
     let mut cleanup = Cleanup {
         child: Some(spawn_instance(&envs, true)),
         instance_id,
@@ -370,7 +406,11 @@ fn app_e2e_smoke_flow() {
     cleanup.assert_running("唤醒面板");
     wake_via_second_launch(&envs);
     assert!(
-        wait_until(Duration::from_secs(10), Duration::from_millis(150), picker_onscreen),
+        wait_until(
+            Duration::from_secs(10),
+            Duration::from_millis(150),
+            picker_onscreen
+        ),
         "唤醒事件后速贴面板应落位屏内"
     );
     wake_via_second_launch(&envs);
@@ -379,6 +419,67 @@ fn app_e2e_smoke_flow() {
             !picker_onscreen()
         }),
         "再次唤醒应切换关闭面板（平移回屏外停屏位）"
+    );
+
+    // ── 场景 6：托盘切换监听（暂停即停录；去抖窗口内恢复一次即生效）──
+    // 回归：旧壳移植的去抖闸门曾把暂停后 1.5 秒内的恢复当重复事件吞掉
+    // （「要点两次才恢复」）。模态菜单点击无法可靠自动化，经命名事件走
+    // 与托盘菜单选择完全相同的 toggle 路径（翻转落库 + 运行时联动）
+    cleanup.assert_running("切换监听");
+    let toggle_monitoring = move || {
+        assert!(
+            floatpaste_core::platform::windows::single_instance::signal_test_toggle_monitoring(
+                &instance_id_for_toggle
+            ),
+            "发送切换监听事件失败（被测实例未装载钩子）"
+        );
+    };
+    // 暂停 → 确认落库：确认即代表上一次切换已受理，此后立刻恢复，
+    // 间隔压在旧去抖窗口（1.5s）内才能回归「第二次被吞」
+    toggle_monitoring();
+    assert!(
+        wait_until(Duration::from_secs(5), Duration::from_millis(50), || {
+            monitoring_paused(&db_path)
+        }),
+        "托盘切换后 pause_monitoring 应翻转为 true 并落库"
+    );
+    toggle_monitoring();
+    assert!(
+        wait_until(Duration::from_secs(5), Duration::from_millis(50), || {
+            !monitoring_paused(&db_path)
+        }),
+        "暂停后立即（旧去抖窗口 1.5s 内）再次切换应恢复监听，不得被吞"
+    );
+    // 行为验证：暂停期间复制不入库、恢复后复制恢复录入（监听停启是
+    // 处理时读设置即时判断，无需等待异步启停）
+    toggle_monitoring();
+    assert!(
+        wait_until(Duration::from_secs(5), Duration::from_millis(50), || {
+            monitoring_paused(&db_path)
+        }),
+        "再次暂停应翻转落库"
+    );
+    let paused_marker = format!("e2e-paused-{stamp}");
+    retry_clipboard(|| clipboard.set_text(paused_marker.clone()));
+    thread::sleep(Duration::from_secs(2));
+    assert!(
+        !active_full_text_exists(&db_path, &paused_marker),
+        "暂停监听期间复制的内容不应录入"
+    );
+    toggle_monitoring();
+    assert!(
+        wait_until(Duration::from_secs(5), Duration::from_millis(50), || {
+            !monitoring_paused(&db_path)
+        }),
+        "恢复监听应翻转落库"
+    );
+    let resumed_marker = format!("e2e-resumed-{stamp}");
+    retry_clipboard(|| clipboard.set_text(resumed_marker.clone()));
+    assert!(
+        wait_until(Duration::from_secs(10), Duration::from_millis(200), || {
+            active_full_text_exists(&db_path, &resumed_marker)
+        }),
+        "恢复监听后复制的内容应重新录入"
     );
 
     // 收尾（终止被测实例、恢复剪贴板、清理临时目录）由 Cleanup 守卫统一执行

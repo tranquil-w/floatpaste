@@ -40,6 +40,7 @@
 ### 驱动与断言
 
 - 外部驱动只走真实用户路径：写系统剪贴板触发录入、二次启动进程经唤醒事件开关速贴面板；不使用键盘注入（SendInput 在安全软件环境不可靠），上屏注入环节留给人工验收
+- 托盘菜单命令（切换监听）经命名事件 `signal_test_toggle_monitoring` 驱动：模态 TrackPopupMenu 点击无法可靠自动化，事件触发的处理路径与菜单选择完全相同（翻转落库 + 运行时联动），仅 `FLOATPASTE_INSTANCE_ID` 设置时装载
 - 速贴面板显隐是「屏内 ↔ 屏外停屏（-32000 平移）」语义而非 `SW_HIDE`，`IsWindowVisible` 恒真——面板开合断言必须看窗口几何（`GetWindowRect` 左上角是否在屏内）
 - 速贴定位预置 `LastPosition` 模式与屏内记忆位置：Mouse/Caret 模式依赖运行环境的光标与前台窗口，E2E 验证的是唤醒链路而非定位模式
 

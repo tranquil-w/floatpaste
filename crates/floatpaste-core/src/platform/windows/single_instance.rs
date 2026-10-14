@@ -19,9 +19,7 @@ const SINGLE_INSTANCE_MUTEX_NAME: &str = "Local\\FloatPaste.SingleInstance";
 /// （防异常字符进入内核对象名），空值或缺省时名称保持不变。
 fn instance_suffix() -> Option<String> {
     match std::env::var("FLOATPASTE_INSTANCE_ID") {
-        Ok(id)
-            if !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') =>
-        {
+        Ok(id) if !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') => {
             Some(id)
         }
         _ => None,
@@ -109,21 +107,21 @@ pub fn wait_mutex_release(timeout: Duration) -> bool {
     false
 }
 
-/* ───────────────── 跨进程唤醒事件 ───────────────── */
+/* ───────────────── 命名事件（唤醒 / 测试钩子共用骨架） ───────────────── */
 
-/// 二次启动时通过命名事件通知首个实例（首个实例据此打开速贴会话，
-/// 比跨进程 SetForegroundWindow 多一步：键盘/鼠标会话同步激活）。
-const WAKE_EVENT_NAME: &str = "Local\\FloatPaste.Wake";
-
-/// 首个实例：装载唤醒事件并监听，收到信号时调用 on_wake（监听线程上触发）
-pub fn listen_wake(on_wake: impl Fn() + Send + 'static) -> Result<(), AppError> {
+/// 装载 auto-reset 命名事件的监听线程，每次 SetEvent 触发一次 on_signal
+/// （监听线程上触发）。HANDLE 裸指针非 Send/Sync：用 newtype 携带
+/// （Win32 句柄跨线程等待是安全的）
+fn spawn_named_event_listener(
+    name: String,
+    on_signal: impl Fn() + Send + 'static,
+) -> Result<(), AppError> {
     use std::sync::Arc;
     use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject, INFINITE};
 
-    let name = to_wide(&namespaced(WAKE_EVENT_NAME));
-    let event = unsafe { CreateEventW(None, false, false, PCWSTR::from_raw(name.as_ptr()))? };
+    let wide = to_wide(&name);
+    let event = unsafe { CreateEventW(None, false, false, PCWSTR::from_raw(wide.as_ptr()))? };
 
-    // HANDLE 裸指针非 Send/Sync：用 newtype 携带（Win32 句柄跨线程等待是安全的）
     struct SendHandle(windows::Win32::Foundation::HANDLE);
     unsafe impl Send for SendHandle {}
     unsafe impl Sync for SendHandle {}
@@ -134,25 +132,41 @@ pub fn listen_wake(on_wake: impl Fn() + Send + 'static) -> Result<(), AppError> 
         if wait != windows::Win32::Foundation::WAIT_OBJECT_0 {
             break;
         }
-        on_wake();
+        on_signal();
     });
 
     Ok(())
 }
 
-/// 二次启动实例：向首个实例发送唤醒信号
-pub fn signal_wake_event() -> bool {
+/// 向命名事件发一次信号（事件不存在返回 false）
+fn set_named_event(name: &str) -> bool {
     use windows::Win32::System::Threading::{OpenEventW, SetEvent, EVENT_MODIFY_STATE};
 
-    let name = to_wide(&namespaced(WAKE_EVENT_NAME));
+    let wide = to_wide(name);
     let Ok(event) =
-        (unsafe { OpenEventW(EVENT_MODIFY_STATE, false, PCWSTR::from_raw(name.as_ptr())) })
+        (unsafe { OpenEventW(EVENT_MODIFY_STATE, false, PCWSTR::from_raw(wide.as_ptr())) })
     else {
         return false;
     };
     let signaled = unsafe { SetEvent(event) }.is_ok();
     let _ = unsafe { CloseHandle(event) };
     signaled
+}
+
+/* ───────────────── 跨进程唤醒事件 ───────────────── */
+
+/// 二次启动时通过命名事件通知首个实例（首个实例据此打开速贴会话，
+/// 比跨进程 SetForegroundWindow 多一步：键盘/鼠标会话同步激活）。
+const WAKE_EVENT_NAME: &str = "Local\\FloatPaste.Wake";
+
+/// 首个实例：装载唤醒事件并监听，收到信号时调用 on_wake（监听线程上触发）
+pub fn listen_wake(on_wake: impl Fn() + Send + 'static) -> Result<(), AppError> {
+    spawn_named_event_listener(namespaced(WAKE_EVENT_NAME), on_wake)
+}
+
+/// 二次启动实例：向首个实例发送唤醒信号
+pub fn signal_wake_event() -> bool {
+    set_named_event(&namespaced(WAKE_EVENT_NAME))
 }
 
 /* ───────────────── E2E 优雅退出事件 ───────────────── */
@@ -166,42 +180,36 @@ const TEST_EXIT_EVENT_NAME: &str = "Local\\FloatPaste.TestExit";
 
 /// 被测实例侧：装载退出事件监听（未设置隔离后缀时为空操作）
 pub fn listen_test_exit(on_exit: impl Fn() + Send + 'static) -> Result<(), AppError> {
-    use std::sync::Arc;
-    use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject, INFINITE};
-
     if instance_suffix().is_none() {
         return Ok(());
     }
-    let name = to_wide(&namespaced(TEST_EXIT_EVENT_NAME));
-    let event = unsafe { CreateEventW(None, false, false, PCWSTR::from_raw(name.as_ptr()))? };
-
-    struct SendHandle(windows::Win32::Foundation::HANDLE);
-    unsafe impl Send for SendHandle {}
-    unsafe impl Sync for SendHandle {}
-    let event = Arc::new(SendHandle(event));
-
-    thread::spawn(move || loop {
-        let wait = unsafe { WaitForSingleObject(event.0, INFINITE) };
-        if wait != windows::Win32::Foundation::WAIT_OBJECT_0 {
-            break;
-        }
-        on_exit();
-    });
-
-    Ok(())
+    spawn_named_event_listener(namespaced(TEST_EXIT_EVENT_NAME), on_exit)
 }
 
 /// 测试侧：向指定实例发送退出信号（instance_id 须与被测实例的隔离后缀一致）
 pub fn signal_test_exit(instance_id: &str) -> bool {
-    use windows::Win32::System::Threading::{OpenEventW, SetEvent, EVENT_MODIFY_STATE};
+    set_named_event(&with_suffix(TEST_EXIT_EVENT_NAME, instance_id))
+}
 
-    let name = to_wide(&with_suffix(TEST_EXIT_EVENT_NAME, instance_id));
-    let Ok(event) =
-        (unsafe { OpenEventW(EVENT_MODIFY_STATE, false, PCWSTR::from_raw(name.as_ptr())) })
-    else {
-        return false;
-    };
-    let signaled = unsafe { SetEvent(event) }.is_ok();
-    let _ = unsafe { CloseHandle(event) };
-    signaled
+/* ───────────────── E2E 托盘命令事件 ───────────────── */
+
+/// E2E 驱动钩子：仅当 FLOATPASTE_INSTANCE_ID 设置时装载（生产实例不装载）。
+/// 托盘菜单是模态 TrackPopupMenu 弹出，点击无法可靠自动化（不使用输入
+/// 注入），测试经命名事件请求被测实例执行与菜单「切换监听」相同的处理
+/// 路径（翻转设置落库 + 运行时联动），覆盖除模态菜单点击本身外的全链路。
+const TEST_TOGGLE_MONITORING_EVENT_NAME: &str = "Local\\FloatPaste.TestToggleMonitoring";
+
+/// 被测实例侧：装载切换监听事件（未设置隔离后缀时为空操作）
+pub fn listen_test_toggle_monitoring(
+    on_toggle: impl Fn() + Send + 'static,
+) -> Result<(), AppError> {
+    if instance_suffix().is_none() {
+        return Ok(());
+    }
+    spawn_named_event_listener(namespaced(TEST_TOGGLE_MONITORING_EVENT_NAME), on_toggle)
+}
+
+/// 测试侧：向指定实例发送切换监听信号（instance_id 须与被测实例的隔离后缀一致）
+pub fn signal_test_toggle_monitoring(instance_id: &str) -> bool {
+    set_named_event(&with_suffix(TEST_TOGGLE_MONITORING_EVENT_NAME, instance_id))
 }

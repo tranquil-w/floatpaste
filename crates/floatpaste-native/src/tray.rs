@@ -253,16 +253,19 @@ unsafe fn show_menu(hwnd: HWND) {
     }
 }
 
-/// 切换监听暂停（对齐旧壳 toggle-monitoring：翻转设置 + 应用运行时副作用，
-/// 经 should_accept_monitoring_toggle 去抖过滤上游双触发）
-fn toggle_monitoring(app: &App) {
-    if !app.state.core.should_accept_monitoring_toggle() {
-        return;
-    }
+/// 切换监听暂停（对齐旧壳 toggle-monitoring：翻转设置 + 应用运行时副作用）。
+/// 菜单经 TrackPopupMenu+TPM_RETURNCMD 返回值分发，一次点击恰好一次调用，
+/// 无需旧壳时代的菜单事件去抖（那针对 Tauri 菜单库的双触发缺陷）。
+/// E2E 测试经命名事件复用同一路径（main.rs 装载，见 single_instance 模块）。
+pub(crate) fn toggle_monitoring(app: &App) {
     let mut settings = app.state.current_settings();
     settings.pause_monitoring = !settings.pause_monitoring;
     match app.state.core.update_settings(settings) {
-        Ok(_) => {
+        Ok(saved) => {
+            info!(
+                "托盘切换监听已生效：pause_monitoring={}",
+                saved.pause_monitoring
+            );
             crate::settings::apply_side_effects(app);
         }
         Err(error) => warn!("托盘更新监听状态失败: {error}"),

@@ -207,6 +207,26 @@ fn main() {
         }
     }
 
+    // ── E2E 托盘命令：测试经命名事件驱动「切换监听」，走与托盘菜单选择
+    //    相同的处理路径（模态菜单点击无法可靠自动化；未设置
+    //    FLOATPASTE_INSTANCE_ID 时为空操作）──
+    {
+        let app_for_toggle = app.clone();
+        if let Err(error) =
+            floatpaste_core::platform::windows::single_instance::listen_test_toggle_monitoring(
+                move || {
+                    tracing::info!("收到测试监听切换事件");
+                    let app = app_for_toggle.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        tray::toggle_monitoring(&app);
+                    });
+                },
+            )
+        {
+            tracing::warn!("装载测试监听切换事件失败: {error}");
+        }
+    }
+
     picker::wire(&app);
     search::wire(&app);
     editor::wire(&app);
