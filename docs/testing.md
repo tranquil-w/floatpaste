@@ -53,8 +53,23 @@
 
 ### 故障模式：系统剪贴板锁死
 
-任意进程在剪贴板打开临界区内死亡（强杀、崩溃）都可能把系统剪贴板锁死：
-`OpenClipboard` 持续返回 `ERROR_ACCESS_DENIED`，`GetOpenClipboardWindow` 查不到
-持有者（持有窗口已亡），无法自愈。表现为 E2E 在清空/写入剪贴板处持续重试后失败。
-恢复手段：重启 explorer（`taskkill /f /im explorer.exe && start explorer.exe`）或注销重登。
+系统剪贴板是全局互斥资源，锁死后 `OpenClipboard` 持续返回
+`ERROR_ACCESS_DENIED`，无法自愈。两种成因，恢复手段相同：
+
+- 外部进程打开剪贴板后持有不释放（实测：shell 组件——explorer 树内的
+  TextInputHost/WebView2 组件群会周期性进入此态，锁死瞬间无进程死亡、
+  `GetOpenClipboardWindow` 查无持有者，杀 explorer 树 1 秒内释放）
+- 任意进程在剪贴板打开临界区内死亡（强杀、崩溃——受控实验已实证）
+
+恢复手段：重启 explorer（`taskkill /f /im explorer.exe && start
+explorer.exe`，连带退出坏态 shell 组件并拉起新实例）或注销重登。
+
+测试对此分两段处理：
+
+- 启动前探测（`clipboard_unusable_before_start`）：~1.2 秒内无法打开即
+  视为环境先在的锁死/长占用态——此时测试与被测实例都还没碰过剪贴板，
+  责任不在被测物，打印恢复指引后跳过，不把环境故障计成测试失败
+- 运行中途失败仍照常报错：写入短重试后 panic，附带锁死恢复指引——
+  中途失效可能是被测实例把剪贴板搞坏，不得跳过掩盖
+
 多测试目标全量并行时为低概率竞态，单跑 E2E 稳定。
