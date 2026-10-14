@@ -775,9 +775,11 @@ pub fn notify_clips_changed(app: &App) {
 }
 
 /// 编辑器内保存/删除/改标签后的刷新：搜索窗此时处于隐藏失活态，
-/// 跳过活跃判定强制重查，保证返回时列表已反映变更
+/// 跳过活跃判定强制重查（列表行与标签筛选 chips——chips 仅在会话
+/// 打开时加载，不随查询重载），保证返回时已反映变更
 pub fn refresh_after_editor(app: &App) {
     run_query(app);
+    refresh_tags(app);
 }
 
 /// 关键词编辑：重启 200ms 防抖（输入框文本已双向绑定到窗口属性）
@@ -1911,6 +1913,17 @@ mod tests {
 
 /* ───────────────── L2 无头 UI 测试 ───────────────── */
 
+/// 测试临时目录回收：Drop 时整体删除（覆盖 panic unwind 路径）
+#[cfg(test)]
+struct TempDirGuard(std::path::PathBuf);
+
+#[cfg(test)]
+impl Drop for TempDirGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod scroll_reset_tests {
     //! 搜索列表回顶契约（docs/testing.md L2 层）：深滚动位上发起任何
@@ -1928,15 +1941,6 @@ pub(crate) mod scroll_reset_tests {
     use floatpaste_core::state::CoreState;
 
     use crate::app_state::SharedState;
-
-    /// 测试临时目录回收：Drop 时整体删除（覆盖 panic unwind 路径）
-    struct TempDirGuard(std::path::PathBuf);
-
-    impl Drop for TempDirGuard {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
 
     /// 单测试函数串行多段中的一段（见模块注释）
     pub(crate) fn run() {
@@ -2029,6 +2033,96 @@ pub(crate) mod scroll_reset_tests {
             win.get_list_scroll_y(),
             0.0,
             "深滚动位上的空态视口必须回顶（bug 现场：清除筛选按钮不可见）"
+        );
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod refresh_after_editor_tests {
+    //! 编辑后刷新契约（docs/testing.md L2 层）：编辑器内改标签经
+    //! refresh_after_editor 落到搜索窗——列表行与标签筛选 chips 都必须
+    //! 反映库中最新标签（bug 现场：chips 仅在会话打开时加载，新增标签
+    //! 要重开搜索窗才可见）。临时 SQLite 预置数据，不经系统剪贴板。由
+    //! l2_headless_ui_contracts 单线程串行调用（独立挂 #[test] 会与其他
+    //! UI 测试抢 Slint 平台线程绑定）。
+
+    use super::*;
+    use std::sync::Arc;
+
+    use floatpaste_core::repository::sqlite_repository::SqliteRepository;
+    use floatpaste_core::services::image_storage::ImageStorage;
+    use floatpaste_core::services::normalize_service::NormalizeService;
+    use floatpaste_core::services::tag_service::TagService;
+    use floatpaste_core::state::CoreState;
+
+    use crate::app_state::SharedState;
+
+    /// 单测试函数串行多段中的一段（见模块注释）
+    pub(crate) fn run() {
+        let stamp = std::process::id();
+        let dir = std::env::temp_dir().join(format!("floatpaste-editor-refresh-{stamp}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("floatpaste.db");
+        let item_id = {
+            let repository = SqliteRepository::new(&db_path).unwrap();
+            let item = NormalizeService::normalize_text("编辑后刷新用条目", None).unwrap();
+            repository.save_text_item(&item).unwrap().id
+        };
+        let _cleanup = TempDirGuard(dir.clone());
+
+        let win = SearchWindow::new().expect("实例化搜索窗失败");
+        win.window().set_size(slint::LogicalSize::new(780.0, 620.0));
+        let repository = SqliteRepository::new(&db_path).unwrap();
+        let core = CoreState::new(
+            repository,
+            ImageStorage::new(dir).unwrap(),
+            UserSetting::default(),
+        );
+        let app = App {
+            state: Arc::new(SharedState::new(core)),
+            picker: Default::default(),
+            tooltip: Default::default(),
+            search: win.as_weak(),
+            editor: Default::default(),
+            settings: Default::default(),
+        };
+
+        // 串行前段（scroll_reset_tests）在 thread_local QUERY 留下筛选
+        // 状态；等价新会话打开前的重置，保证本段从干净查询态起步
+        reset_session_state(&app);
+
+        // 前置等价 bug 现场：搜索窗已建而 chips 未加载（编辑器路径不
+        // 经过会话打开，无从加载）
+        assert_eq!(win.get_tag_chips().row_count(), 0, "前置：chips 为空");
+
+        // 编辑器内给条目加标签（生产路径：commit_tags → refresh_lists）
+        TagService::set_item_tags(&app.core(), &item_id, &["新标签".to_string()]).unwrap();
+        refresh_after_editor(&app);
+
+        // chips 同步重建，新标签无需重开窗口即可见
+        let chips: Vec<String> = win
+            .get_tag_chips()
+            .iter()
+            .map(|chip| chip.name.to_string())
+            .collect();
+        assert_eq!(chips, vec!["新标签".to_string()], "编辑后新标签应出现在筛选 chips");
+
+        // 泵事件循环消费查询落地：行卡同步带出新标签
+        let closer = thread::spawn(|| {
+            thread::sleep(Duration::from_millis(1000));
+            if let Err(error) = slint::quit_event_loop() {
+                eprintln!("quit_event_loop 失败: {error:?}");
+            }
+        });
+        slint::run_event_loop_until_quit();
+        closer.join().unwrap();
+
+        assert_eq!(win.get_rows().row_count(), 1, "列表应重查到该条目");
+        let row = win.get_rows().row_data(0).expect("首行应存在");
+        assert_eq!(
+            row.tags.iter().map(|tag| tag.to_string()).collect::<Vec<_>>(),
+            vec!["新标签".to_string()],
+            "行卡应显示新标签"
         );
     }
 }
