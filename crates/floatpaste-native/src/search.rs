@@ -65,6 +65,7 @@ const INJECT_DELAY: Duration = Duration::from_millis(60);
 /// 原目标，焦点交给搜索窗口），再打开搜索（对齐 open_search_global）。
 /// 每击必响应，不做防抖（系统重复由注册层 MOD_NOREPEAT 过滤）
 pub fn toggle_from_shortcut(app: &App) {
+    tracing::info!("diag 搜索快捷键命中");
     if app.state.is_search_active() {
         hide(app, true);
         return;
@@ -241,6 +242,10 @@ fn open_inner(app: &App, restore_on_close: bool, preset_tags: Vec<String>) {
     tracing::debug!("开窗起步高度: {height_px} (基线 {base})");
 
     finish_show(app, &win, hwnd, width_px, height_px);
+    tracing::info!(
+        "diag 开窗: finish_show 返回 hwnd={hwnd} rect={:?}",
+        crate::win32_ext::physical_rect(hwnd)
+    );
     refresh_tags(app);
     if preset_active {
         PRESET_RESIZE.with(|flag| flag.set(true));
@@ -460,11 +465,16 @@ fn cursor_monitor_work_area() -> Option<ScreenRect> {
 /// 工作区不可得返回 false，调用方退回自身兜底路径
 fn position_centered_on_cursor(hwnd: isize, width_px: i32, height_px: i32) -> bool {
     let Some(work) = cursor_monitor_work_area() else {
+        tracing::warn!("diag 落位: 光标/工作区不可得，退回兜底");
         return false;
     };
     let (width, height) = (width_px.max(1), height_px.max(1));
     let point = center_in_work_area(work, width, height);
     window_control::set_window_bounds(hwnd, point.x, point.y, width, height);
+    tracing::info!(
+        "diag 落位: work={work:?} point={point:?} {width}x{height} 落位后 rect={:?}",
+        crate::win32_ext::physical_rect(hwnd)
+    );
     true
 }
 

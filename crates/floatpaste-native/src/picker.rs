@@ -128,6 +128,7 @@ fn stop_topmost_guard() {
 
 /// 打开速贴面板（对齐 WindowCoordinator::activate_picker）
 pub fn activate(app: &App) {
+    tracing::info!("diag picker activate 进入");
     // 互斥收口：托盘菜单开着时热键唤起，其键鼠会话（单例）即将被本会话
     // 顶掉，先收菜单防浮层滞留
     crate::tray_menu::close(app);

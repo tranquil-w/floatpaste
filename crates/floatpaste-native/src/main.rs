@@ -174,6 +174,7 @@ fn main() {
         if let Err(error) =
             floatpaste_core::platform::windows::single_instance::listen_wake(move || {
                 let app = app_for_wake.clone();
+                tracing::info!("diag 收到唤醒事件");
                 let _ = slint::invoke_from_event_loop(move || {
                     picker::toggle(&app);
                 });

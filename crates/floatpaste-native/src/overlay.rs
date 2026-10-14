@@ -40,13 +40,23 @@ pub enum ForegroundPolicy {
 /// [`silent_assemble_parked`]
 pub fn silent_assemble_focusable<W: ComponentHandle>(win: &W) -> Option<isize> {
     let previous_foreground = ActiveAppResolver::current_foreground_hwnd();
+    let pre_hwnd = win32_ext::window_hwnd(win);
+    tracing::info!("diag 装配 search: show 前 pre_hwnd={pre_hwnd:?}");
     let _ = win.window().show();
     let hwnd = win32_ext::window_hwnd(win)?;
+    tracing::info!(
+        "diag 装配 search: show 后 hwnd={hwnd} rect={:?}",
+        win32_ext::physical_rect(hwnd)
+    );
     win32_ext::apply_overlay_style(hwnd, false);
     win32_ext::apply_dwm_shadow(hwnd);
     let _ = window_control::remove_window_system_menu(hwnd);
     win32_ext::install_caption_strip_subclass(hwnd);
     park_offscreen(win);
+    tracing::info!(
+        "diag 装配 search: park 后 rect={:?}",
+        win32_ext::physical_rect(hwnd)
+    );
     surrender_startup_foreground(hwnd, previous_foreground);
     schedule_style_reassert(hwnd, false);
     Some(hwnd)
