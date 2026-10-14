@@ -37,7 +37,7 @@ use windows::{
             HiDpi::GetDpiForWindow,
             WindowsAndMessaging::{
                 EnumWindows, FindWindowW, GetSystemMetrics, GetWindowRect, GetWindowTextW,
-                GetWindowThreadProcessId, IsWindowVisible, SM_CXSCREEN, SM_CYSCREEN,
+                GetWindowThreadProcessId, IsIconic, IsWindowVisible, SM_CXSCREEN, SM_CYSCREEN,
             },
         },
     },
@@ -238,9 +238,10 @@ fn dump_search_windows(tag: &str) {
     }
 }
 
-/// 转储被测实例日志（APPDATA 重定向目录下 logs/，非阻塞 appender 有
-/// ~百毫秒延迟，读到的可能缺最后几行）
+/// 转储被测实例日志（APPDATA 重定向目录下 logs/）。非阻塞 appender 有
+/// 百毫秒级滞留，调用前先 sleep 让 worker 追平
 fn dump_instance_logs(app_dir: &Path) {
+    thread::sleep(Duration::from_millis(2000));
     let Ok(entries) = fs::read_dir(app_dir.join("logs")) else {
         eprintln!("[diag-log] 无 logs 目录");
         return;
@@ -249,8 +250,8 @@ fn dump_instance_logs(app_dir: &Path) {
         match fs::read(entry.path()) {
             Ok(bytes) => {
                 let text = String::from_utf8_lossy(&bytes);
-                let tail = if text.len() > 16_000 {
-                    &text[text.len() - 16_000..]
+                let tail = if text.len() > 24_000 {
+                    &text[text.len() - 24_000..]
                 } else {
                     &text
                 };
@@ -259,6 +260,66 @@ fn dump_instance_logs(app_dir: &Path) {
             Err(error) => eprintln!("[diag-log] 读取失败 {}: {error}", entry.path().display()),
         }
     }
+}
+
+/// 目标窗口的 Win32 状态全景（placement/styles/可见性），诊断装配与
+/// 上屏链路哪一环没走到
+fn dump_window_state(tag: &str, hwnd: isize) {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetWindowPlacement, GetWindowLongW, GWL_STYLE, WINDOWPLACEMENT,
+    };
+    let handle = HWND(hwnd as *mut _);
+    let mut wp = WINDOWPLACEMENT {
+        length: std::mem::size_of::<WINDOWPLACEMENT>() as u32,
+        ..Default::default()
+    };
+    let placement_ok = unsafe { GetWindowPlacement(handle, &mut wp) }.is_ok();
+    let style = unsafe { GetWindowLongW(handle, GWL_STYLE) };
+    let mut rect = RECT::default();
+    unsafe {
+        let _ = GetWindowRect(handle, &mut rect);
+    }
+    let visible = unsafe { IsWindowVisible(handle) }.as_bool();
+    let iconic = unsafe { IsIconic(handle) }.as_bool();
+    eprintln!(
+        "[diag-state] {tag}: visible={visible} iconic={iconic} placement_ok={placement_ok} \
+         show_cmd={} flags={} normal={:?} rect={rect:?} style={style:#x}",
+        wp.showCmd,
+        wp.flags.0,
+        wp.rcNormalPosition,
+    );
+}
+
+/// 当前全部同标题搜索窗（pid, visible, iconic, rect），不限屏内外——
+/// 停屏位（-32000）也要采样，才看得到装配/停屏/落位全程
+fn search_windows_all() -> Vec<(u32, bool, bool, RECT)> {
+    struct AllState {
+        found: Vec<(u32, bool, bool, RECT)>,
+    }
+    unsafe extern "system" fn proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        let state = &mut *(lparam.0 as *mut AllState);
+        let mut text = [0u16; 64];
+        let len = GetWindowTextW(hwnd, &mut text);
+        if len > 0 && String::from_utf16_lossy(&text[..len as usize]) == SEARCH_TITLE {
+            let mut rect = RECT::default();
+            if GetWindowRect(hwnd, &mut rect).is_ok() {
+                let mut pid = 0u32;
+                GetWindowThreadProcessId(hwnd, Some(&mut pid));
+                state.found.push((
+                    pid,
+                    IsWindowVisible(hwnd).as_bool(),
+                    IsIconic(hwnd).as_bool(),
+                    rect,
+                ));
+            }
+        }
+        BOOL::from(true)
+    }
+    let mut state = AllState { found: Vec::new() };
+    unsafe {
+        let _ = EnumWindows(Some(proc), LPARAM(&mut state as *mut _ as isize));
+    }
+    state.found
 }
 
 /// 搜索窗开窗落位的期望上边沿：被测实例与测试进程读的是同一静止光标，
@@ -628,6 +689,30 @@ fn app_e2e_smoke_flow() {
             data_root: search_root,
         };
 
+        // ── CI 诊断（临时，取证后移除）：从 spawn 起全程采样搜索窗几何 ──
+        // （含停屏态，采样 pid/可见性/最小化 + 完整矩形，覆盖装配→停屏→
+        // 落位→收缩整条链路，识别「开窗请求早于装配」类时序）
+        let pid_b = search_cleanup.child.as_ref().unwrap().id();
+        let pid_a = cleanup.child.as_ref().unwrap().id();
+        let trail: std::sync::Arc<std::sync::Mutex<Vec<(u128, u32, bool, bool, RECT)>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let sampler = {
+            let trail = trail.clone();
+            let stop = stop.clone();
+            thread::spawn(move || {
+                let start = Instant::now();
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    let mut snapshot = trail.lock().unwrap();
+                    for (pid, visible, iconic, rect) in search_windows_all() {
+                        snapshot.push((start.elapsed().as_millis(), pid, visible, iconic, rect));
+                    }
+                    drop(snapshot);
+                    thread::sleep(Duration::from_millis(25));
+                }
+            })
+        };
+
         // 打开搜索窗：钩子在装配段装载，早于装载的信号打不开事件，轮询重试
         search_cleanup.assert_running("打开搜索窗");
         assert!(
@@ -650,15 +735,12 @@ fn app_e2e_smoke_flow() {
         let full_height = search_window_full_height(first_hwnd);
         let baseline_top = expected_search_top_at_full_height(full_height);
 
-        // ── CI 诊断（临时，取证后移除）：环境 + 几何采样轨迹 ──
+        // ── CI 诊断（临时）：环境快照 ──
         eprintln!(
             "[diag-env] dpi={} full_height={full_height} baseline_top={baseline_top} \
-             first_hwnd={:x} first_rect={first_rect:?} \
-             pidA={} pidB={}",
+             first_hwnd={:x} first_rect={first_rect:?} pidA={pid_a} pidB={pid_b}",
             unsafe { GetDpiForWindow(HWND(first_hwnd as *mut _)) },
             first_hwnd as usize,
-            cleanup.child.as_ref().unwrap().id(),
-            search_cleanup.child.as_ref().unwrap().id(),
         );
         unsafe {
             eprintln!(
@@ -671,29 +753,7 @@ fn app_e2e_smoke_flow() {
             eprintln!("[diag-env] cursor={cursor:?} work={:?}", work_area_from_point(cursor));
         }
         dump_search_windows("首读时");
-        let trail: std::sync::Arc<std::sync::Mutex<Vec<(u128, i32, i32, u32)>>> =
-            std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let sampler = {
-            let trail = trail.clone();
-            let stop = stop.clone();
-            thread::spawn(move || {
-                let start = Instant::now();
-                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
-                    if let Some((hwnd, rect)) = onscreen_search_window() {
-                        let mut pid = 0u32;
-                        unsafe { GetWindowThreadProcessId(HWND(hwnd as *mut _), Some(&mut pid)) };
-                        trail.lock().unwrap().push((
-                            start.elapsed().as_millis(),
-                            rect.top,
-                            rect.bottom,
-                            pid,
-                        ));
-                    }
-                    thread::sleep(Duration::from_millis(25));
-                }
-            })
-        };
+        dump_window_state("首读", first_hwnd);
 
         // 落地收缩到 3 行：起步满高 620 逻辑，落地整档更矮（阈值 550 逻辑）
         assert!(
@@ -706,7 +766,7 @@ fn app_e2e_smoke_flow() {
         );
         let (final_hwnd, shrunk) = onscreen_search_window().unwrap();
 
-        // ── CI 诊断（临时）：轨迹回放 + 日志转储，然后照常断言 ──
+        // ── CI 诊断（临时）：轨迹回放 + 状态全景 + 日志转储，然后照常断言 ──
         stop.store(true, std::sync::atomic::Ordering::Relaxed);
         let _ = sampler.join();
         eprintln!(
@@ -714,14 +774,17 @@ fn app_e2e_smoke_flow() {
             final_hwnd as usize,
             first_hwnd as usize,
         );
-        let mut last: Option<(i32, i32, u32)> = None;
-        for (ms, top, bottom, pid) in trail.lock().unwrap().iter().copied() {
-            if last != Some((top, bottom, pid)) {
-                eprintln!("[diag-trail] t={ms}ms top={top} bottom={bottom} pid={pid}");
-                last = Some((top, bottom, pid));
+        let mut last: Option<(u32, bool, bool, RECT)> = None;
+        for (ms, pid, visible, iconic, rect) in trail.lock().unwrap().iter().copied() {
+            if last.map(|last| (last.0, last.1, last.2, last.3)) != Some((pid, visible, iconic, rect))
+            {
+                eprintln!(
+                    "[diag-trail] t={ms}ms pid={pid} visible={visible} iconic={iconic} rect={rect:?}"
+                );
+                last = Some((pid, visible, iconic, rect));
             }
         }
-        dump_search_windows("断言前");
+        dump_window_state("断言前", final_hwnd);
         dump_instance_logs(&search_app_dir);
         assert_eq!(
             shrunk.top, baseline_top,
