@@ -442,7 +442,7 @@ pub fn wire(app: &App) {
             if let Err(error) = elevation::relaunch_elevated(launch_mode::ELEVATED_RELAUNCH_ARG) {
                 warn!("提权重启失败: {error}");
                 if let Some(win) = app_cb.settings.upgrade() {
-                    win.set_elevated_status_text(format!("提权重启失败：{error}").into());
+                    win.set_elevated_status_text("以管理员身份重启失败，请稍后重试".into());
                 }
                 return;
             }
@@ -579,7 +579,7 @@ pub fn wire(app: &App) {
             floatpaste_core::platform::windows::shell_open::open_url(PROJECT_PAGE_URL)
         {
             tracing::warn!("打开项目主页失败：{error}");
-            crate::tray::notify_failure(&format!("打开项目主页失败：{error}"));
+            crate::tray::notify_failure("打开项目主页失败，请稍后重试");
         }
     });
 
@@ -655,7 +655,8 @@ pub fn wire(app: &App) {
             match TagService::delete_tag(&app_cb.state.core, &name) {
                 Ok(()) => reload_tags(&app_cb, &win),
                 Err(error) => {
-                    win.set_tag_error_text(format!("删除失败：{error}").into());
+                    warn!("删除标签失败: {error}");
+                    win.set_tag_error_text("删除标签失败，请重试".into());
                 }
             }
         });
@@ -1222,7 +1223,7 @@ fn refresh_hotkey_status_hints(win: &SettingsWindow, failures: &[(u32, u32)]) {
                 } else if *code == crate::ERROR_HOTKEY_OCCUPIED {
                     "注册失败：组合键已被其他程序占用，请换一组组合。".to_string()
                 } else {
-                    format!("注册失败（错误码 {code}）。")
+                    "注册失败，请重试或换一组组合。".to_string()
                 }
             })
             .unwrap_or_default()
@@ -1380,7 +1381,7 @@ fn reload_tags(app: &App, win: &SettingsWindow) {
         }
         Err(error) => {
             warn!("加载标签失败: {error}");
-            win.set_tag_error_text(format!("标签加载失败：{error}").into());
+            win.set_tag_error_text("标签加载失败，请重试".into());
         }
     }
 }
@@ -1446,7 +1447,8 @@ fn commit_tag_rename(app: &App, index: usize, text: &str) {
     match TagService::rename_tag(&app.state.core, &name, new_name) {
         Ok(()) => reload_tags(app, &win),
         Err(error) => {
-            win.set_tag_error_text(format!("重命名失败：{error}").into());
+            warn!("重命名标签失败: {error}");
+            win.set_tag_error_text("重命名标签失败，请重试".into());
         }
     }
 }
@@ -1504,12 +1506,14 @@ pub fn spawn_autostart_sync(app: &App, allow_prompt: bool) {
                 };
                 match &error {
                     AutostartError::Launch(message) => {
+                        warn!("开机自启设置失败: {message}");
                         win.set_launch_on_startup(false);
-                        win.set_elevated_status_text(format!("开机自启设置失败：{message}").into());
+                        win.set_elevated_status_text("开机自启设置失败，请稍后重试".into());
                     }
                     AutostartError::Elevated(message) => {
+                        warn!("管理员自启设置失败: {message}");
                         win.set_always_run_elevated(false);
-                        win.set_elevated_status_text(format!("设置失败：{message}").into());
+                        win.set_elevated_status_text("设置失败，请稍后重试".into());
                     }
                 }
                 // 回滚后的期望再落盘，保存后的联动会按回滚值收敛任务状态
@@ -1637,7 +1641,7 @@ fn is_bare_digit(combo: &str) -> bool {
 }
 
 /// 键位串 → 键帽展示拆分（"Ctrl+Enter" → ["Ctrl","Enter"]）
-fn parts_vec(value: &str) -> Vec<slint::SharedString> {
+pub(crate) fn parts_vec(value: &str) -> Vec<slint::SharedString> {
     if value.is_empty() {
         Vec::new()
     } else {

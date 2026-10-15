@@ -261,6 +261,6 @@ begin
   else
     RegWriteStringValue(HKEY_CURRENT_USER, ExplorerAdvancedKey, DisabledHotkeysValue, Kept);
   if not WizardSilent() then
-    MsgBox('已恢复系统 Win+V 剪贴板历史热键。' + #13#10 +
+    MsgBox('已恢复系统 Win+V 剪贴板历史快捷键。' + #13#10 +
       '若未自动生效，请重启资源管理器或注销后重新登录。', mbInformation, MB_OK);
 end;

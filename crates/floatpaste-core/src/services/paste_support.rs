@@ -302,7 +302,7 @@ pub fn clip_type_label(value: &str) -> &'static str {
         "text" => "文本内容",
         "image" => "图片内容",
         "file" => "文件列表",
-        _ => "剪贴内容",
+        _ => "剪贴板内容",
     }
 }
 
@@ -343,7 +343,7 @@ mod tests {
         assert_eq!(clip_type_label("text"), "文本内容");
         assert_eq!(clip_type_label("image"), "图片内容");
         assert_eq!(clip_type_label("file"), "文件列表");
-        assert_eq!(clip_type_label("other"), "剪贴内容");
+        assert_eq!(clip_type_label("other"), "剪贴板内容");
     }
 
     #[test]

@@ -55,7 +55,7 @@ pub fn build_meta(item: &ClipItemSummary) -> String {
             parts.push(format!("{} 个文件夹", item.directory_count));
         }
     }
-    parts.join(" • ")
+    parts.join(" · ")
 }
 
 /// 文件大小人类可读（对齐旧版 formatFileSize：1024 进制，按值选小数位）
@@ -139,7 +139,7 @@ mod tests {
         item.source_app = Some("记事本".into());
         item.created_at = chrono::Local::now().to_rfc3339();
         item.file_size = Some(2048);
-        assert_eq!(build_meta(&item), "记事本 • 刚刚 • 2.00 KB");
+        assert_eq!(build_meta(&item), "记事本 · 刚刚 · 2.00 KB");
     }
 
     #[test]
@@ -149,7 +149,7 @@ mod tests {
         item.created_at = chrono::Local::now().to_rfc3339();
         assert_eq!(
             build_meta(&item),
-            "资源管理器 • 刚刚 • 2 个文件 • 1 个文件夹"
+            "资源管理器 · 刚刚 · 2 个文件 · 1 个文件夹"
         );
     }
 }

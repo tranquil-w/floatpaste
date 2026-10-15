@@ -152,7 +152,6 @@ pub const ACCENT_FOLLOW_PRESET: &str = "default";
 /// 强调色安全列表（Radix Colors light step 9 / dark step 10）
 pub struct AccentChoice {
     pub id: &'static str,
-    pub label: &'static str,
     pub light: &'static str,
     pub dark: &'static str,
 }
@@ -160,49 +159,41 @@ pub struct AccentChoice {
 pub const ACCENT_CHOICES: [AccentChoice; 8] = [
     AccentChoice {
         id: "blue",
-        label: "蓝",
         light: "#0090ff",
         dark: "#3b9eff",
     },
     AccentChoice {
         id: "indigo",
-        label: "靛蓝",
         light: "#3e63dd",
         dark: "#5472e4",
     },
     AccentChoice {
         id: "cyan",
-        label: "青",
         light: "#00a2c7",
         dark: "#23afd0",
     },
     AccentChoice {
         id: "green",
-        label: "绿",
         light: "#30a46c",
         dark: "#33b074",
     },
     AccentChoice {
         id: "orange",
-        label: "橙",
         light: "#f76b15",
         dark: "#ff801f",
     },
     AccentChoice {
         id: "red",
-        label: "红",
         light: "#e5484d",
         dark: "#ec5d5e",
     },
     AccentChoice {
         id: "purple",
-        label: "紫",
         light: "#8e4ec6",
         dark: "#9a5cd0",
     },
     AccentChoice {
         id: "pink",
-        label: "粉",
         light: "#d6409f",
         dark: "#de51a8",
     },

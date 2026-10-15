@@ -140,6 +140,14 @@ pub fn open_from_search(app: &App, item_id: String) {
     );
 }
 
+/// 引导键帽按当前"编辑内容"会话键注入（无会话态的键位提示不可写死，
+/// 会话键在设置中可自定义）
+fn refresh_edit_key_parts(app: &App, win: &EditorWindow) {
+    let value = app.state.current_settings().session_keys.open_editor;
+    let parts = crate::settings::parts_vec(&value);
+    win.set_edit_key_parts(slint::ModelRc::new(slint::VecModel::from(parts)));
+}
+
 fn show_editor(app: &App, session: EditorSession, anchor: Option<HostAnchor>) {
     app.state.set_editor_session(Some(session.clone()));
     let Some(win) = app.editor.upgrade() else {
@@ -147,6 +155,7 @@ fn show_editor(app: &App, session: EditorSession, anchor: Option<HostAnchor>) {
         warn!("编辑窗口尚未就绪，无法打开编辑器");
         return;
     };
+    refresh_edit_key_parts(app, &win);
     let hwnd = app.state.editor_hwnd.load(Ordering::SeqCst);
     if hwnd == 0 {
         warn!("编辑窗口 HWND 尚未就绪，无法打开编辑器");
@@ -394,7 +403,7 @@ pub fn open_externally(app: &App, path: &str) {
     if let Err(error) = floatpaste_core::platform::windows::shell_open::open_path(path) {
         warn!("打开路径失败: {error}");
         win.set_notice_text("".into());
-        win.set_error_text(format!("打开失败：{error}").into());
+        win.set_error_text("无法打开该文件".into());
     }
 }
 
@@ -456,7 +465,7 @@ pub fn save(app: &App) {
         Err(error) => {
             warn!("保存条目失败: {error}");
             win.set_notice_text("".into());
-            win.set_error_text(format!("保存失败：{error}").into());
+            win.set_error_text("保存失败，请重试".into());
         }
     }
 }
@@ -571,7 +580,7 @@ pub fn delete_requested(app: &App) {
             warn!("删除条目失败: {error}");
             if let Some(win) = app.editor.upgrade() {
                 win.set_notice_text("".into());
-                win.set_error_text(format!("删除失败：{error}").into());
+                win.set_error_text("删除失败，请重试".into());
             }
         }
     }
@@ -767,7 +776,7 @@ fn add_tag(app: &App, raw_name: &str) {
     }
     if current.len() >= MAX_TAGS_PER_ITEM {
         win.set_notice_text("".into());
-        win.set_error_text(format!("单条目标签数不能超过 {MAX_TAGS_PER_ITEM} 个").into());
+        win.set_error_text(format!("一个条目最多添加 {MAX_TAGS_PER_ITEM} 个标签").into());
         return;
     }
     let mut next = current;
@@ -795,7 +804,7 @@ fn commit_tags(app: &App, next: Vec<String>) {
         Err(error) => {
             warn!("标签保存失败: {error}");
             win.set_notice_text("".into());
-            win.set_error_text(format!("标签保存失败：{error}").into());
+            win.set_error_text("标签保存失败，请重试".into());
         }
     }
 }
@@ -910,6 +919,7 @@ pub fn wire(app: &App) {
     let Some(win) = app.editor.upgrade() else {
         return;
     };
+    refresh_edit_key_parts(app, &win);
 
     let app_cb = app.clone();
     win.on_text_edited(move |text| {

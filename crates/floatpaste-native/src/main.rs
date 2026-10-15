@@ -107,7 +107,7 @@ fn main() {
             &core.repository,
         )
     {
-        tracing::warn!("初始化欢迎记录失败: {error}");
+        tracing::warn!("写入欢迎条目失败: {error}");
     }
 
     // ── 窗口创建 ──

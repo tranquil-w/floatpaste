@@ -834,7 +834,7 @@ component TagRow inherits Rectangle {
                 vertical-alignment: center;
             }
             if (root.row-data.count > 0): Text {
-                text: "将从 " + root.row-data.count + " 个条目上移除该标签。";
+                text: "将从 " + root.row-data.count + " 个条目中移除该标签。";
                 color: Theme.fg-subtle;
                 font-size: Metrics.text-xs;
                 wrap: word-wrap;
@@ -1430,7 +1430,7 @@ export component SettingsWindow inherits Window {
                                 }
                                 RowGroup {
                                     SettingRow {
-                                        title: "速贴窗口条目数";
+                                        title: "速贴面板条目数";
                                         description: "速贴面板一次可滚动浏览的条目数，数字快捷键只覆盖前 9 条。";
                                         Rectangle {
                                             width: 96px;
@@ -1453,7 +1453,7 @@ export component SettingsWindow inherits Window {
                                 spacing: 8px;
                                 SectionHeader {
                                     title: "行为";
-                                    description: "控制开机启动、监听状态、上屏与速贴窗口显示位置，明确主次关系。";
+                                    description: "控制开机启动、监听状态、上屏与速贴面板显示位置。";
                                 }
                                 RowGroup {
                                     ToggleRow {
@@ -1505,7 +1505,7 @@ export component SettingsWindow inherits Window {
                                                 }
                                                 elev-restart-btn-text := Text {
                                                     text: root.process-elevated
-                                                        ? "当前已以管理员运行"
+                                                        ? "当前已以管理员身份运行"
                                                         : "以管理员身份重启";
                                                     color: root.process-elevated
                                                         ? Theme.fg-subtle : Theme.fg-default;
@@ -1519,7 +1519,7 @@ export component SettingsWindow inherits Window {
                                     RowDivider { }
                                     ToggleRow {
                                         title: "始终以管理员身份运行";
-                                        description: "每次启动（含手动打开）均以管理员权限运行，手动启动时会弹出 UAC 确认，取消则本次以普通权限运行。仅当以管理员身份运行时才能更改此设置。";
+                                        description: "每次启动均以管理员权限运行；手动启动时会弹出 UAC 确认，取消则本次以普通权限运行。仅以管理员身份运行时可更改此设置。";
                                         checked: root.always-run-elevated;
                                         disabled: !root.process-elevated;
                                         nested: true;
@@ -1552,7 +1552,7 @@ export component SettingsWindow inherits Window {
                                 RowGroup {
                                     ToggleRow {
                                         title: "暂停监听";
-                                        description: "暂停后不会继续采集新的剪贴板条目。";
+                                        description: "暂停后不再保存新的剪贴板条目。";
                                         checked: root.pause-monitoring;
                                         toggled(checked) => { root.pause-monitoring-toggled(checked); }
                                     }
@@ -1578,8 +1578,8 @@ export component SettingsWindow inherits Window {
                                 RowGroup {
                                     // 速贴窗口显示位置
                                     SettingRow {
-                                        title: "速贴窗口显示位置";
-                                        description: ["默认推荐，速贴窗口会贴近当前鼠标所在位置弹出。",
+                                        title: "速贴面板显示位置";
+                                        description: ["默认推荐，速贴面板会贴近当前鼠标所在位置弹出。",
                                             "保留上次拖动或关闭时的位置；首次使用会落在屏幕中心。",
                                             "优先跟随当前输入光标；如果系统拿不到光标位置，会退回鼠标位置。"][root.position-mode];
                                         Rectangle {
@@ -1664,7 +1664,7 @@ export component SettingsWindow inherits Window {
                                                 font-weight: Metrics.weight-medium;
                                             }
                                             Text {
-                                                text: "配色方案基于经过验证的公开色板，全部通过对比度门禁，跨设备观感一致。";
+                                                text: "配色方案来自经过验证的公开色板，明暗模式均保证可读性。";
                                                 color: Theme.fg-muted;
                                                 font-size: Metrics.text-xs;
                                                 wrap: word-wrap;
@@ -1862,7 +1862,7 @@ export component SettingsWindow inherits Window {
                                     RowDivider { }
                                     ToggleRow {
                                         title: "Win+V 唤起速贴";
-                                        description: "接管系统 Win+V：开启后 Win+V 与上方快捷键一样唤起速贴面板，系统剪贴板历史同时失效。需重启资源管理器生效；关闭开关并重启资源管理器即恢复系统原状。";
+                                        description: "接管系统 Win+V：开启后 Win+V 与上方快捷键一样唤起速贴面板，系统剪贴板历史同时停用。需重启资源管理器生效；关闭开关并重启资源管理器即恢复系统默认。";
                                         checked: root.winv-enabled;
                                         nested: true;
                                         toggled(checked) => { root.winv-toggled(checked); }
@@ -2000,7 +2000,7 @@ export component SettingsWindow inherits Window {
                                 RowGroup {
                                     ToggleRow {
                                         title: "数字键 1-9 直达";
-                                        description: "速贴面板打开时按 1-9 直接粘贴对应条目。数字键是无修饰全局热键，若与其他软件冲突可关闭。";
+                                        description: "速贴面板打开时按 1-9 直接上屏对应条目。数字键是无修饰的全局快捷键，若与其他软件冲突可关闭。";
                                         checked: root.picker-digit-enabled;
                                         toggled(checked) => { root.picker-digit-toggled(checked); }
                                     }
@@ -2052,7 +2052,7 @@ export component SettingsWindow inherits Window {
                                 spacing: 8px;
                                 SectionHeader {
                                     title: "排除应用";
-                                    description: "按进程名忽略特定应用，避免敏感内容被采集入库。";
+                                    description: "按进程名排除特定应用，来自这些应用的复制内容不会进入历史。";
                                 }
                                 RowGroup {
                                     ex-col := VerticalLayout {
@@ -2062,13 +2062,13 @@ export component SettingsWindow inherits Window {
                                         padding-bottom: 12px;
                                         spacing: 2px;
                                         Text {
-                                            text: "忽略指定进程";
+                                            text: "排除指定进程";
                                             color: Theme.fg-default;
                                             font-size: Metrics.text-sm;
                                             font-weight: Metrics.weight-medium;
                                         }
                                         Text {
-                                            text: "每行填写一个可执行文件名，命中的应用不会被采集入库。建议使用完整进程名，避免误伤其他应用。";
+                                            text: "每行填写一个可执行文件名，来自这些应用的复制内容不会进入历史。建议填写完整进程名，避免误伤其他应用。";
                                             color: Theme.fg-muted;
                                             font-size: Metrics.text-xs;
                                             wrap: word-wrap;

@@ -645,7 +645,6 @@ fn run_query(app: &App) {
             Ok(result) => apply_page(&app_cb, result, seq, false),
             Err(error) => {
                 warn!("搜索查询失败: {error}");
-                let message = error.to_string();
                 let stale = QUERY.with(|state| {
                     let mut state = state.borrow_mut();
                     if state.seq != seq {
@@ -663,7 +662,7 @@ fn run_query(app: &App) {
                     if win.get_rows().row_count() == 0 {
                         win.set_loading(false);
                         win.set_load_failed(true);
-                        win.set_load_error_text(message.into());
+                        win.set_load_error_text("数据读取失败，请重试".into());
                     }
                 });
             }
@@ -1082,19 +1081,19 @@ fn empty_state(
 ) -> (String, String, i32) {
     if !keyword.trim().is_empty() {
         return (
-            "未找到匹配记录".to_string(),
+            "未找到匹配条目".to_string(),
             "尝试调整搜索关键词".to_string(),
             1,
         );
     }
     if filter != 0 || tags_len > 0 {
         return (
-            "当前筛选下暂无记录".to_string(),
+            "当前筛选下暂无条目".to_string(),
             "尝试切换其他筛选或复制更多内容".to_string(),
             2,
         );
     }
-    ("暂无剪贴板记录".to_string(), open_hint.to_string(), 0)
+    ("暂无剪贴板条目".to_string(), open_hint.to_string(), 0)
 }
 
 /* ───────────────── 条目动作 ───────────────── */
@@ -1133,7 +1132,7 @@ fn paste_item(app: &App, item: &ClipItemSummary, as_path_text: bool) {
     };
     if let Err(error) = execute_paste(app, &item.id, option) {
         warn!("搜索粘贴失败: {error}");
-        crate::tray::notify_failure("执行粘贴失败，请稍后重试");
+        crate::tray::notify_failure("上屏失败，请稍后重试");
     }
 }
 
@@ -1217,7 +1216,7 @@ pub fn toggle_favorite(app: &App, index: usize) {
     match result {
         Err(error) => {
             warn!("更新收藏状态失败: {error}");
-            crate::tray::notify_failure("更新收藏状态失败，请稍后重试");
+            crate::tray::notify_failure("更新收藏失败，请稍后重试");
         }
         Ok(()) => {
             let mut items = app.state.search_items();
@@ -1810,12 +1809,12 @@ mod tests {
     fn empty_state_picks_branch_by_keyword_then_filters() {
         assert_eq!(
             empty_state("  abc ", 0, 0, "提示"),
-            ("未找到匹配记录".into(), "尝试调整搜索关键词".into(), 1)
+            ("未找到匹配条目".into(), "尝试调整搜索关键词".into(), 1)
         );
         assert_eq!(
             empty_state("", 2, 0, "提示"),
             (
-                "当前筛选下暂无记录".into(),
+                "当前筛选下暂无条目".into(),
                 "尝试切换其他筛选或复制更多内容".into(),
                 2
             )
@@ -1823,14 +1822,14 @@ mod tests {
         assert_eq!(
             empty_state("", 0, 1, "提示"),
             (
-                "当前筛选下暂无记录".into(),
+                "当前筛选下暂无条目".into(),
                 "尝试切换其他筛选或复制更多内容".into(),
                 2
             )
         );
         assert_eq!(
             empty_state("", 0, 0, "提示"),
-            ("暂无剪贴板记录".into(), "提示".into(), 0)
+            ("暂无剪贴板条目".into(), "提示".into(), 0)
         );
     }
 

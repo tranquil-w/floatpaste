@@ -10,8 +10,10 @@ use crate::{
     state::CoreState,
 };
 
-/// 欢迎指引的正文与标签：数据库为空时作为首条记录写入并收藏。
-const WELCOME_TEXT: &str = "欢迎使用 FloatPaste 👋  [↑↓] 导航记录 · [Enter] 快速粘贴 · [1~9] 数字键直达 · [Tab] 打开完整资料库 · [Esc] 随时退出";
+/// 欢迎指引的正文与标签：数据库为空时作为首条条目写入并收藏。
+/// 键位必须与当前会话键一致（无 Tab 动作；数字键仅 1-9）。
+const WELCOME_TEXT: &str =
+    "欢迎使用 FloatPaste。[↑↓] 选择条目 · [Enter] 上屏 · [1-9] 数字直达 · [Esc] 关闭";
 const WELCOME_TITLE: &str = "使用指引";
 
 pub struct HistoryService;

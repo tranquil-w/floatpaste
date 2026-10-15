@@ -645,10 +645,9 @@ fn refresh_list(app: &App, keep_anchor: bool) {
         }
         Err(error) => {
             warn!("加载速贴列表失败: {error}");
-            let message = error.to_string();
             app.with_picker(|win| {
                 win.set_load_failed(true);
-                win.set_load_error_text(message.into());
+                win.set_load_error_text("数据读取失败，请重试".into());
             });
         }
     }
@@ -887,7 +886,7 @@ pub fn confirm(app: &App, index: usize, as_path_text: bool) {
 
     if let Err(error) = paste_flow::paste_item(app, &item.id, option) {
         warn!("粘贴失败: {error}");
-        crate::tray::notify_failure(&format!("粘贴失败：{error}"));
+        crate::tray::notify_failure("上屏失败，请稍后重试");
     }
 }
 

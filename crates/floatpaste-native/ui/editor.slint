@@ -94,6 +94,8 @@ export component EditorWindow inherits Window {
     in-out property <bool> has-session: false;
     in-out property <bool> item-missing: false;
     in-out property <bool> is-text: false;
+    // 引导键帽（"编辑内容"会话键，含 "+" 分隔符），Rust 按当前设置注入
+    in-out property <[string]> edit-key-parts: ["Ctrl", "+", "Enter"];
     in-out property <string> meta-source;
     in-out property <string> meta-time;
     in-out property <string> meta-extra;
@@ -315,24 +317,22 @@ export component EditorWindow inherits Window {
                             alignment: center;
                             spacing: 4px;
                             Text {
-                                text: "在速贴面板或搜索结果中选中文本后按";
+                                text: "在速贴面板或搜索窗口中选中文本条目后按";
                                 color: Theme.fg-subtle;
                                 font-size: Metrics.text-xs;
                                 vertical-alignment: center;
                             }
-                            VerticalLayout {
+                            for part in root.edit-key-parts: VerticalLayout {
                                 alignment: center;
-                                Kbd { key: "Ctrl"; }
-                            }
-                            Text {
-                                text: "+";
-                                color: Theme.fg-subtle;
-                                font-size: Metrics.text-xs;
-                                vertical-alignment: center;
-                            }
-                            VerticalLayout {
-                                alignment: center;
-                                Kbd { key: "Enter"; }
+                                if (part == "+"): Text {
+                                    text: part;
+                                    color: Theme.fg-subtle;
+                                    font-size: Metrics.text-xs;
+                                    vertical-alignment: center;
+                                }
+                                if (part != "+"): Kbd {
+                                    key: part == "Super" ? "Win" : part;
+                                }
                             }
                         }
                     }
@@ -594,7 +594,7 @@ export component EditorWindow inherits Window {
                                         y: 16px;
                                         width: parent.width - 40px;
                                         height: 23px;
-                                        text: "在此输入或修改文本...";
+                                        text: "在此输入或修改文本…";
                                         color: Theme.fg-subtle;
                                         font-size: Metrics.text-sm;
                                         vertical-alignment: top;
@@ -765,7 +765,7 @@ export component EditorWindow inherits Window {
                         if (root.image-loading): Text {
                             y: (parent.height - self.height) / 2;
                             x: (parent.width - self.width) / 2;
-                            text: "正在加载图片...";
+                            text: "正在加载图片…";
                             color: Theme.fg-subtle;
                             font-size: Metrics.text-sm;
                         }
