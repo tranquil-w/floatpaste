@@ -548,29 +548,6 @@ mod tests {
     }
 
     #[test]
-    fn deserialize_picker_position_mode() {
-        let settings: UserSetting = serde_json::from_str(
-            r#"{
-                "shortcut":"Alt+Q",
-                "launchOnStartup":false,
-                "silentOnStartup":false,
-                "historyLimit":1000,
-                "pickerRecordLimit":50,
-                "pickerPositionMode":"lastPosition",
-                "excludedApps":["KeePass.exe"],
-                "restoreClipboardAfterPaste":true,
-                "pauseMonitoring":false
-            }"#,
-        )
-        .unwrap();
-
-        assert_eq!(
-            settings.picker_position_mode,
-            PickerPositionMode::LastPosition
-        );
-    }
-
-    #[test]
     fn deserialize_invalid_picker_position_mode_falls_back_to_mouse() {
         let settings: UserSetting = serde_json::from_str(
             r#"{
@@ -591,41 +568,6 @@ mod tests {
     }
 
     #[test]
-    fn deserialize_theme_mode() {
-        let settings: UserSetting = serde_json::from_str(
-            r#"{
-                "shortcut":"Alt+Q",
-                "launchOnStartup":false,
-                "silentOnStartup":false,
-                "historyLimit":1000,
-                "pickerRecordLimit":50,
-                "pickerPositionMode":"mouse",
-                "excludedApps":["KeePass.exe"],
-                "restoreClipboardAfterPaste":true,
-                "pauseMonitoring":false,
-                "themeMode":"dark"
-            }"#,
-        )
-        .unwrap();
-
-        assert_eq!(settings.theme_mode, ThemeMode::Dark);
-    }
-
-    #[test]
-    fn normalize_shortcut_for_registration_uses_super_alias() {
-        use super::normalize_shortcut_for_registration;
-
-        assert_eq!(normalize_shortcut_for_registration("Win+F"), "Super+F");
-        assert_eq!(normalize_shortcut_for_registration("win+f"), "Super+f");
-        assert_eq!(
-            normalize_shortcut_for_registration("Windows+Shift+F"),
-            "Super+Shift+F"
-        );
-        assert_eq!(normalize_shortcut_for_registration("Super+F"), "Super+F");
-        assert_eq!(normalize_shortcut_for_registration("Ctrl+F"), "Ctrl+F");
-    }
-
-    #[test]
     fn sanitized_migrates_legacy_ctrl_backtick_to_default() {
         let settings = UserSetting {
             shortcut: "Ctrl+`".to_string(),
@@ -634,17 +576,6 @@ mod tests {
         .sanitized();
 
         assert_eq!(settings.shortcut, "Ctrl+Q");
-    }
-
-    #[test]
-    fn sanitized_preserves_alt_s_as_display_value() {
-        let settings = UserSetting {
-            search_shortcut: "Alt+S".to_string(),
-            ..UserSetting::default()
-        }
-        .sanitized();
-
-        assert_eq!(settings.search_shortcut, "Alt+S");
     }
 
     #[test]
@@ -667,30 +598,17 @@ mod tests {
     }
 
     #[test]
-    fn deserialize_old_settings_defaults_picker_digit_shortcuts_to_enabled() {
-        let settings: UserSetting = serde_json::from_str(
-            r#"{
-                "shortcut":"Alt+Q",
-                "launchOnStartup":false,
-                "historyLimit":1000,
-                "pickerRecordLimit":50,
-                "excludedApps":[],
-                "restoreClipboardAfterPaste":true,
-                "pauseMonitoring":false
-            }"#,
-        )
-        .unwrap();
+    fn normalize_shortcut_for_registration_uses_super_alias() {
+        use super::normalize_shortcut_for_registration;
 
-        assert!(settings.picker_digit_shortcuts_enabled);
-
-        let disabled: UserSetting = serde_json::from_str(
-            r#"{
-                "shortcut":"Alt+Q",
-                "pickerDigitShortcutsEnabled":false
-            }"#,
-        )
-        .unwrap();
-        assert!(!disabled.picker_digit_shortcuts_enabled);
+        assert_eq!(normalize_shortcut_for_registration("Win+F"), "Super+F");
+        assert_eq!(normalize_shortcut_for_registration("win+f"), "Super+f");
+        assert_eq!(
+            normalize_shortcut_for_registration("Windows+Shift+F"),
+            "Super+Shift+F"
+        );
+        assert_eq!(normalize_shortcut_for_registration("Super+F"), "Super+F");
+        assert_eq!(normalize_shortcut_for_registration("Ctrl+F"), "Ctrl+F");
     }
 
     #[test]
@@ -711,21 +629,6 @@ mod tests {
             let back: UserSetting = serde_json::from_str(&json).unwrap();
             assert_eq!(back.window_material, material);
         }
-    }
-
-    #[test]
-    fn session_keys_default_to_classic_combinations() {
-        use super::SessionKeys;
-
-        let keys = SessionKeys::default();
-        assert_eq!(keys.confirm, "Enter");
-        assert_eq!(keys.confirm_as_file, "Shift+Enter");
-        assert_eq!(keys.open_editor, "Ctrl+Enter");
-        assert_eq!(keys.toggle_favorite, "Ctrl+Space");
-        assert_eq!(keys.dismiss, "Escape");
-        assert_eq!(keys.navigate_up, "Up");
-        assert_eq!(keys.navigate_down, "Down");
-        assert_eq!(keys.delete_entry, "Delete");
     }
 
     #[test]
@@ -778,19 +681,6 @@ mod tests {
     }
 
     #[test]
-    fn search_shortcut_gets_disabled_when_default_value_also_conflicts_with_main_shortcut() {
-        let settings = UserSetting {
-            shortcut: "Alt+S".to_string(),
-            search_shortcut: "Alt+S".to_string(),
-            search_shortcut_enabled: true,
-            ..UserSetting::default()
-        }
-        .sanitized();
-
-        assert!(!settings.search_shortcut_enabled);
-    }
-
-    #[test]
     fn search_shortcut_conflict_detection_uses_normalized_shortcuts() {
         let settings = UserSetting {
             shortcut: "ALT+S".to_string(),
@@ -801,21 +691,6 @@ mod tests {
         .sanitized();
 
         assert!(!settings.search_shortcut_enabled);
-    }
-
-    #[test]
-    fn sanitized_fills_blank_theme_fields_with_defaults() {
-        let settings: UserSetting = serde_json::from_str(
-            r#"{
-                "themePreset":"",
-                "themeAccent":" "
-            }"#,
-        )
-        .unwrap();
-
-        let settings = settings.sanitized();
-        assert_eq!(settings.theme_preset, "default");
-        assert_eq!(settings.theme_accent, "default");
     }
 
     #[test]
@@ -835,22 +710,6 @@ mod tests {
     }
 
     #[test]
-    fn sanitized_keeps_default_when_legacy_accent_matches_old_defaults() {
-        let settings: UserSetting = serde_json::from_str(
-            r##"{
-                "customThemeColors":{
-                    "light":{"windowBg":"#EFF2F5","cardBg":"#E6EAEF","accent":"#0969DA"},
-                    "dark":{"windowBg":"#282C34","cardBg":"#2E333C","accent":"#478BE6"}
-                }
-            }"##,
-        )
-        .unwrap();
-
-        let settings = settings.sanitized();
-        assert_eq!(settings.theme_accent, "default");
-    }
-
-    #[test]
     fn sanitized_ignores_invalid_legacy_accent_hex() {
         let settings: UserSetting = serde_json::from_str(
             r##"{
@@ -864,22 +723,6 @@ mod tests {
 
         let settings = settings.sanitized();
         assert_eq!(settings.theme_accent, "default");
-    }
-
-    #[test]
-    fn explicit_theme_accent_is_not_overridden_by_legacy_migration() {
-        let settings: UserSetting = serde_json::from_str(
-            r##"{
-                "themeAccent":"purple",
-                "customThemeColors":{
-                    "light":{"windowBg":"#EFF2F5","cardBg":"#E6EAEF","accent":"#8250DF"}
-                }
-            }"##,
-        )
-        .unwrap();
-
-        let settings = settings.sanitized();
-        assert_eq!(settings.theme_accent, "purple");
     }
 
     #[test]

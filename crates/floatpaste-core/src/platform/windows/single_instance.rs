@@ -233,3 +233,62 @@ pub fn listen_test_open_search(on_open: impl Fn() + Send + 'static) -> Result<()
 pub fn signal_test_open_search(instance_id: &str) -> bool {
     set_named_event(&with_suffix(TEST_OPEN_SEARCH_EVENT_NAME, instance_id))
 }
+
+/// E2E 驱动钩子：仅当 FLOATPASTE_INSTANCE_ID 设置时装载（生产实例不装载）。
+/// 搜索窗的 Esc 关闭是键盘路径，按键注入不可用（不使用输入注入），测试经
+/// 命名事件请求被测实例触发 key-close 回调——与 Esc 按键经键位解析后的
+/// 终点相同，仅绕过按键分发层。焦点归属（前台还原给会话目标）依赖真窗口
+/// 与真实前台转移，headless 层覆盖不到
+const TEST_SEARCH_ESCAPE_EVENT_NAME: &str = "Local\\FloatPaste.TestSearchEscape";
+
+/// 被测实例侧：装载搜索窗 Esc 关闭事件（未设置隔离后缀时为空操作）
+pub fn listen_test_search_escape(on_escape: impl Fn() + Send + 'static) -> Result<(), AppError> {
+    if instance_suffix().is_none() {
+        return Ok(());
+    }
+    spawn_named_event_listener(namespaced(TEST_SEARCH_ESCAPE_EVENT_NAME), on_escape)
+}
+
+/// 测试侧：向指定实例发送搜索窗 Esc 信号（instance_id 须与被测实例的隔离后缀一致）
+pub fn signal_test_search_escape(instance_id: &str) -> bool {
+    set_named_event(&with_suffix(TEST_SEARCH_ESCAPE_EVENT_NAME, instance_id))
+}
+
+/// E2E 驱动钩子：仅当 FLOATPASTE_INSTANCE_ID 设置时装载（生产实例不装载）。
+/// 速贴收藏切换是键盘/点击路径（不使用输入注入），测试经命名事件触发
+/// toggle_favorite 回调——与会话键（默认 Ctrl+Space）处理后的终点相同，
+/// 仅绕过按键分发层
+const TEST_PICKER_FAVORITE_EVENT_NAME: &str = "Local\\FloatPaste.TestPickerFavorite";
+
+/// 被测实例侧：装载速贴收藏切换事件（未设置隔离后缀时为空操作）
+pub fn listen_test_picker_favorite(
+    on_favorite: impl Fn() + Send + 'static,
+) -> Result<(), AppError> {
+    if instance_suffix().is_none() {
+        return Ok(());
+    }
+    spawn_named_event_listener(namespaced(TEST_PICKER_FAVORITE_EVENT_NAME), on_favorite)
+}
+
+/// 测试侧：向指定实例发送速贴收藏信号（instance_id 须与被测实例的隔离后缀一致）
+pub fn signal_test_picker_favorite(instance_id: &str) -> bool {
+    set_named_event(&with_suffix(TEST_PICKER_FAVORITE_EVENT_NAME, instance_id))
+}
+
+/// E2E 驱动钩子：仅当 FLOATPASTE_INSTANCE_ID 设置时装载（生产实例不装载）。
+/// 搜索窗两段式删除是键盘路径（不使用输入注入），测试经命名事件触发
+/// request_delete 回调——与删除键处理后的终点相同，仅绕过按键分发层
+const TEST_SEARCH_DELETE_EVENT_NAME: &str = "Local\\FloatPaste.TestSearchDelete";
+
+/// 被测实例侧：装载搜索窗删除事件（未设置隔离后缀时为空操作）
+pub fn listen_test_search_delete(on_delete: impl Fn() + Send + 'static) -> Result<(), AppError> {
+    if instance_suffix().is_none() {
+        return Ok(());
+    }
+    spawn_named_event_listener(namespaced(TEST_SEARCH_DELETE_EVENT_NAME), on_delete)
+}
+
+/// 测试侧：向指定实例发送搜索删除信号（instance_id 须与被测实例的隔离后缀一致）
+pub fn signal_test_search_delete(instance_id: &str) -> bool {
+    set_named_event(&with_suffix(TEST_SEARCH_DELETE_EVENT_NAME, instance_id))
+}

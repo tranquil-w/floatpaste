@@ -41,8 +41,8 @@ native 壳内约定：
 | 命令 | 说明 |
 |------|------|
 | `cargo run -p floatpaste-native` | 启动桌面应用（debug） |
-| `cargo test` | 运行全部 Rust 测试（覆盖 `floatpaste-core` 与 `floatpaste-native`，含端到端冒烟） |
-| `cargo test -p floatpaste-native --test e2e_smoke` | 单跑真进程端到端冒烟（运行数秒；期间短暂占用全局快捷键并读写系统剪贴板；体系见 [docs/testing.md](docs/testing.md)） |
+| `cargo test` | 运行全部 Rust 测试（覆盖 `floatpaste-core` 与 `floatpaste-native`，含端到端） |
+| `cargo test -p floatpaste-native --test e2e_smoke` | 单跑真进程端到端（运行十余秒；期间短暂占用全局快捷键并读写系统剪贴板；体系见 [docs/testing.md](docs/testing.md)） |
 | `cargo build --release -p floatpaste-native` | 发布构建 |
 | `cargo run -p floatpaste-native --bin picker-snapshot -- <light\|dark> <tag> [hover-y] [blur]` | 无头渲染速贴观感快照到 `.artifacts/snapshot/`（诊断工具，不模拟桌面输入）；`blur` 合成彩底走烘焙管线，预览玻璃底图与行卡半透 |
 | `node scripts/bump-version.mjs <版本>` | 同步升级 package.json / native Cargo.toml / Cargo.lock |
@@ -74,9 +74,9 @@ Rust 改动后，保证 `cargo test` 与 `cargo build -p floatpaste-native` 通�
 
 ## 测试指南
 
-- 建议为逻辑变更补充单元测试
-- 测试就近写在模块内，或放入所属 crate 的 `tests/` 目录
-- 测试名应描述行为，例如：`ingest_text_skips_self_write`
+- 主要工作流以真进程 e2e 兜底（录入、去重、面板开关、搜索、收藏、两段式删除等）；单元测试只保留 e2e 不可达的部分——纯函数边界、错误路径、持久化格式兼容、平台契约，不写与 e2e 重复的端到端行为断言（分层见 [docs/testing.md](docs/testing.md)）
+- 新增 e2e 驱动钩子走命名事件模式（`single_instance.rs` 的 `listen_test_*` / `signal_test_*`），触发与真实入口相同的处理终点，仅绕过按键分发/模态菜单层
+- 单元测试就近写在模块内，或放入所属 crate 的 `tests/` 目录；测试名应描述行为，例如：`ingest_text_skips_self_write`
 
 ---
 

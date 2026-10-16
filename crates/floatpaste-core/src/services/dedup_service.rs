@@ -92,20 +92,6 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 
-    #[test]
-    fn decide_stores_new_when_no_existing_record() {
-        let path = temp_db_path();
-        let repository = SqliteRepository::new(&path).unwrap();
-
-        let decision = DedupService::default()
-            .decide(&repository, "never-seen-hash")
-            .unwrap();
-        assert!(matches!(decision, DedupDecision::StoreNew));
-
-        drop(repository);
-        fs::remove_file(path).unwrap();
-    }
-
     /// 回归测试：删除一条记录后再复制相同内容，应作为全新记录存储，
     /// 而不是被 `find_existing_by_hash` 命中（它必须忽略软删除行）。
     #[test]

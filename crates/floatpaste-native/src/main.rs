@@ -256,6 +256,75 @@ fn main() {
         }
     }
 
+    // ── E2E 键盘路径：测试经命名事件触发搜索窗 key-close 回调（与 Esc
+    //    按键经键位解析后的终点相同），供真进程断言关闭后的前台还原；
+    //    未设置 FLOATPASTE_INSTANCE_ID 时为空操作──
+    {
+        let app_for_escape = app.clone();
+        if let Err(error) =
+            floatpaste_core::platform::windows::single_instance::listen_test_search_escape(
+                move || {
+                    let app = app_for_escape.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        // 真实 Esc 只在搜索窗活跃时可达（FocusScope 收到按键
+                        // 的前提），未活跃时忽略以对齐该语义
+                        if app.state.is_search_active() {
+                            app.with_search(|win| win.invoke_key_close());
+                        }
+                    });
+                },
+            )
+        {
+            tracing::warn!("装载测试搜索 Esc 事件失败: {error}");
+        }
+    }
+
+    // ── E2E 键盘路径：测试经命名事件触发速贴收藏切换（与会话键处理后的
+    //    终点相同，仅绕过按键分发层）；未设置 FLOATPASTE_INSTANCE_ID 时为
+    //    空操作──
+    {
+        let app_for_favorite = app.clone();
+        if let Err(error) =
+            floatpaste_core::platform::windows::single_instance::listen_test_picker_favorite(
+                move || {
+                    let app = app_for_favorite.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        // 收藏键只在速贴会话内可达（FocusScope 前提）
+                        if app.state.is_picker_active() {
+                            picker::toggle_favorite(&app);
+                        }
+                    });
+                },
+            )
+        {
+            tracing::warn!("装载测试速贴收藏事件失败: {error}");
+        }
+    }
+
+    // ── E2E 键盘路径：测试经命名事件触发搜索窗两段式删除（与删除键处理
+    //    后的终点相同，仅绕过按键分发层）；未设置 FLOATPASTE_INSTANCE_ID
+    //    时为空操作──
+    {
+        let app_for_delete = app.clone();
+        if let Err(error) =
+            floatpaste_core::platform::windows::single_instance::listen_test_search_delete(
+                move || {
+                    let app = app_for_delete.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if app.state.is_search_active() {
+                            let index = app
+                                .with_search(|win| win.get_selected().max(0) as usize)
+                                .unwrap_or(0);
+                            search::request_delete(&app, index);
+                        }
+                    });
+                },
+            )
+        {
+            tracing::warn!("装载测试搜索删除事件失败: {error}");
+        }
+    }
+
     picker::wire(&app);
     search::wire(&app);
     editor::wire(&app);

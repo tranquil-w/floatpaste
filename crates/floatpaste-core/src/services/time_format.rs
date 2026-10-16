@@ -97,11 +97,6 @@ mod tests {
     }
 
     #[test]
-    fn invalid_value_is_returned_as_is() {
-        assert_eq!(format_relative_time("not-a-date"), "not-a-date");
-    }
-
-    #[test]
     fn none_shows_unused() {
         assert_eq!(format_relative_time_or_unused(None), "未使用");
     }

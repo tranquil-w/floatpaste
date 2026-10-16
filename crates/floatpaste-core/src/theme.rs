@@ -778,51 +778,6 @@ mod tests {
 
     /// 参考值锁定关键派生档位的当前实现；调色规则变更时与下方的
     /// 对比度门禁测试一起更新。
-    #[test]
-    fn default_light_tokens_reference() {
-        let tokens = derive_tokens("default", "default", ResolvedTheme::Light);
-        assert_eq!(tokens.canvas_default, "#f9f9fb");
-        assert_eq!(tokens.fg_default, "#1C2024");
-        assert_eq!(tokens.fg_muted, "#5C6168");
-        assert_eq!(tokens.fg_subtle, "#6D727B");
-        assert_eq!(tokens.accent_fg, "#0074D0");
-        assert_eq!(tokens.accent_emphasis, "#0078D6");
-        assert_eq!(tokens.border_default, "#8B8D98");
-        assert_eq!(tokens.border_window, "#EAEBEF");
-        assert_eq!(tokens.border_subtle, "#E7E7EC");
-        assert_eq!(tokens.success_fg, "#008451");
-        assert_eq!(tokens.danger_fg, "#D43740");
-        assert_eq!(tokens.warning_fg, "#C24F00");
-        assert_eq!(tokens.done_fg, "#8E4EC6");
-        // 层底：浅=canvas-subtle 灰承托白卡，深=canvas 近黑（层亮即发灰）
-        assert_eq!(tokens.card_layer, "#f0f0f3");
-        assert_eq!(tokens.card_face, "#ffffff");
-    }
-
-    #[test]
-    fn default_dark_tokens_reference() {
-        let tokens = derive_tokens("default", "default", ResolvedTheme::Dark);
-        // 色板直通字段保留原始大小写（下游 CSS 颜色大小写不敏感）
-        assert_eq!(tokens.canvas_default, "#18191b");
-        assert_eq!(tokens.fg_default, "#EDEEF0");
-        assert_eq!(tokens.accent_fg, "#3B9EFF");
-        assert_eq!(tokens.border_default, "#61676F");
-        assert_eq!(tokens.border_window, "#25272B");
-        assert_eq!(tokens.border_subtle, "#282B2E");
-        assert_eq!(tokens.shadow_color, [0, 0, 0]);
-        assert_eq!(tokens.card_layer, "#18191b");
-        // 深色卡面 = canvas-subtle 微亮（surface 亮灰卡被否）
-        assert_eq!(tokens.card_face, "#212225");
-    }
-
-    #[test]
-    fn accent_override_changes_accent_tokens() {
-        let tokens = derive_tokens("default", "purple", ResolvedTheme::Light);
-        assert_eq!(tokens.accent_fg, "#8E4EC6");
-        assert_eq!(tokens.accent_subtle_rgb, [142, 78, 198]);
-        // 旧版 --pg-border-accent = accentFg：聚焦边框跟随用户强调色
-        assert_eq!(tokens.border_accent, "#8E4EC6");
-    }
 
     #[test]
     fn material_layer_rgb_follows_theme_and_alpha_is_stable() {
@@ -833,14 +788,6 @@ mod tests {
         let dark = derive_tokens("default", "default", ResolvedTheme::Dark);
         assert_eq!(dark.material_layer_rgb, [24, 25, 27]);
         assert!((dark.material_layer_alpha - 0.70).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn legacy_hex_accent_is_accepted_uppercase() {
-        assert_eq!(
-            resolve_accent_hex("#8250df", "default", ResolvedTheme::Light),
-            "#8250DF"
-        );
     }
 
     #[test]

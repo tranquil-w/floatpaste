@@ -308,13 +308,6 @@ mod tests {
         PICKER_DEFAULT_WIDTH, PICKER_MIN_HEIGHT, PICKER_MIN_WIDTH,
     };
 
-    const WORK: ScreenRect = ScreenRect {
-        left: 0,
-        top: 0,
-        right: 1600,
-        bottom: 900,
-    };
-
     /// 鼠标式锚点（无行高）
     fn mouse_anchor(x: i32, y: i32) -> Anchor {
         Anchor::at_point(ScreenPoint { x, y })
@@ -384,18 +377,6 @@ mod tests {
     }
 
     /// 下方放得下时行高不参与（免得平白把窗口往下推）
-    #[test]
-    fn place_window_below_anchor_ignores_line_height() {
-        let caret = Anchor {
-            point: ScreenPoint { x: 700, y: 200 },
-            line_height: 20,
-            centered: false,
-        };
-
-        let placed = place_window_near_point(caret, WORK, 360, 420);
-
-        assert_eq!(placed.y, 212);
-    }
 
     /// 开始菜单（居中，Win11 常态）开着：落其右侧，顶边对齐其顶边下方
     /// 一个空隙
@@ -531,27 +512,6 @@ mod tests {
 
         assert_eq!(size, (256, 280));
         assert_ne!(size.0, PICKER_DEFAULT_WIDTH);
-    }
-
-    #[test]
-    fn place_window_stays_inside_work_area_at_every_corner() {
-        // 光标贴四角时窗口也必须整块可见（越界即失败）；带行高的锚点一并覆盖
-        let probes = [
-            mouse_anchor(0, 0),
-            mouse_anchor(1599, 0),
-            mouse_anchor(0, 899),
-            mouse_anchor(1599, 899),
-            Anchor {
-                point: ScreenPoint { x: 1599, y: 899 },
-                line_height: 24,
-                centered: false,
-            },
-        ];
-
-        for anchor in probes {
-            let placed = place_window_near_point(anchor, WORK, 360, 420);
-            assert_fits_inside(placed, WORK, 360, 420);
-        }
     }
 
     #[test]

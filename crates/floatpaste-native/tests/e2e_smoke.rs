@@ -5,8 +5,9 @@
 //! FLOATPASTE_SKIP_AUTOSTART_SYNC 挡住对真实系统 Run 键与任务计划的同步）。
 //!
 //! 外部驱动只走真实用户路径：写系统剪贴板触发录入、二次启动进程经唤醒
-//! 事件开关速贴面板、命名事件驱动托盘「切换监听」的处理路径；断言落在
-//! 隔离库（只读连接）与窗口几何上。
+//! 事件开关速贴面板、命名事件驱动托盘「切换监听」「打开搜索」与搜索窗
+//! Esc 关闭（key-close 回调，与按键经键位解析后的终点相同）的处理路径；
+//! 断言落在隔离库（只读连接）与窗口几何/前台归属上。
 //! 上屏注入（SendInput）依赖注入环境是否放行，按验收纪律留给用户实测。
 //!
 //! 单测试函数串行推进：系统剪贴板、全局热键、速贴窗口都是会话级全局
@@ -33,12 +34,17 @@ use floatpaste_core::{
 use windows::{
     core::{BOOL, PCWSTR},
     Win32::{
-        Foundation::{HWND, LPARAM, RECT},
+        Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM},
+        Graphics::Gdi::{GetSysColorBrush, COLOR_WINDOW},
         System::DataExchange::{CloseClipboard, OpenClipboard},
+        System::LibraryLoader::GetModuleHandleW,
         UI::{
             HiDpi::GetDpiForWindow,
             WindowsAndMessaging::{
-                EnumWindows, FindWindowW, GetWindowRect, GetWindowTextW, IsWindowVisible,
+                CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, EnumWindows,
+                FindWindowW, GetForegroundWindow, GetWindowRect, GetWindowTextW, IsWindowVisible,
+                PeekMessageW, RegisterClassW, ShowWindow, TranslateMessage, UnregisterClassW, MSG,
+                PM_REMOVE, SW_SHOW, WINDOW_EX_STYLE, WNDCLASSW, WS_OVERLAPPEDWINDOW,
             },
         },
     },
@@ -228,9 +234,7 @@ fn search_window_full_height(hwnd: isize) -> i32 {
 /// 光标读取被拒（输入桌面不可达，CI 断连会话必现）时与应用同样退回
 /// 主屏工作区：单屏下矩形相同，基准与落位仍逐位一致
 fn expected_search_top_at_full_height(full_height: i32) -> i32 {
-    let work = match current_cursor_point()
-        .and_then(|cursor| work_area_from_point(cursor))
-    {
+    let work = match current_cursor_point().and_then(|cursor| work_area_from_point(cursor)) {
         Ok(work) => work,
         Err(error) => {
             eprintln!("[e2e] 光标/工作区不可得（{error}），基准退回主屏工作区");
@@ -238,6 +242,115 @@ fn expected_search_top_at_full_height(full_height: i32) -> i32 {
         }
     };
     center_in_work_area(work, 0, full_height).y
+}
+
+/// Esc 焦点还原断言的目标窗口：测试进程创建的真实可见顶层窗口。搜索窗
+/// 打开瞬间捕获当前前台为会话目标，关闭后「前台还原给目标」的断言要求
+/// 该目标确定可控。无人值守会话（前台锁定策略拒绝转让，CI 断连环境必现）
+/// 拿不到前台时返回 None，调用方跳过焦点段——焦点语义只能在交互桌面
+/// 验证，窗口几何断言不受影响照常执行
+struct FocusTargetGuard {
+    hwnd: isize,
+}
+
+unsafe extern "system" fn focus_target_wndproc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    DefWindowProcW(hwnd, msg, wparam, lparam)
+}
+
+/// 泵掉目标窗口的待处理消息（绘制等）：不泵则 SetForegroundWindow 后的
+/// 前台归属可能滞后于可见性建立
+fn pump_window_messages(hwnd: HWND) {
+    unsafe {
+        let mut msg = MSG::default();
+        while PeekMessageW(&mut msg, Some(hwnd), 0, 0, PM_REMOVE).as_bool() {
+            let _ = TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
+}
+
+impl FocusTargetGuard {
+    fn acquire() -> Option<Self> {
+        unsafe {
+            let module = GetModuleHandleW(None).ok()?;
+            let class_name: Vec<u16> = "FloatPasteE2ETarget"
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
+            let title: Vec<u16> = "FloatPaste · E2E 目标窗口"
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
+            let class = WNDCLASSW {
+                lpfnWndProc: Some(focus_target_wndproc),
+                hInstance: module.into(),
+                hbrBackground: GetSysColorBrush(COLOR_WINDOW),
+                lpszClassName: PCWSTR::from_raw(class_name.as_ptr()),
+                ..Default::default()
+            };
+            if RegisterClassW(&class) == 0 {
+                return None;
+            }
+            let created = CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                PCWSTR::from_raw(class_name.as_ptr()),
+                PCWSTR::from_raw(title.as_ptr()),
+                WS_OVERLAPPEDWINDOW,
+                120,
+                120,
+                240,
+                160,
+                None,
+                None,
+                Some(module.into()),
+                None,
+            );
+            let Ok(hwnd) = created else {
+                let _ =
+                    UnregisterClassW(PCWSTR::from_raw(class_name.as_ptr()), Some(module.into()));
+                return None;
+            };
+            let _ = ShowWindow(hwnd, SW_SHOW);
+            // 测试进程未必是前台进程（cargo 经工具链/CI 拉起，前台在终端/
+            // IDE 上或无人值守会话无前台），裸 SetForegroundWindow 受前台锁
+            // 拒绝——复用被测实例同款 AttachThreadInput 抢前台手法
+            floatpaste_core::platform::windows::active_app::ActiveAppResolver::force_foreground_window(
+                hwnd.0 as isize,
+            );
+            let owned = wait_until(Duration::from_secs(3), Duration::from_millis(50), || {
+                pump_window_messages(hwnd);
+                GetForegroundWindow() == hwnd
+            });
+            if !owned {
+                let _ = DestroyWindow(hwnd);
+                let _ =
+                    UnregisterClassW(PCWSTR::from_raw(class_name.as_ptr()), Some(module.into()));
+                return None;
+            }
+            Some(Self {
+                hwnd: hwnd.0 as isize,
+            })
+        }
+    }
+}
+
+impl Drop for FocusTargetGuard {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = DestroyWindow(HWND(self.hwnd as *mut _));
+            let class_name: Vec<u16> = "FloatPasteE2ETarget"
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
+            let module = GetModuleHandleW(None).unwrap_or_default();
+            let _ = UnregisterClassW(PCWSTR::from_raw(class_name.as_ptr()), Some(module.into()));
+        }
+    }
 }
 
 fn spawn_instance(envs: &[(&str, String)], silent: bool) -> Child {
@@ -321,8 +434,17 @@ impl Drop for Cleanup {
                 thread::sleep(Duration::from_millis(200));
             }
         }
-        // 句柄延迟释放时删除失败不视作测试失败，留给系统临时目录自清
-        let _ = fs::remove_dir_all(&self.data_root);
+        // 诊断开关：FLOATPASTE_E2E_KEEP=1 时保留临时目录（实例日志在
+        // com.floatpaste/logs），供间歇失败的事后取证；平时不留痕
+        if std::env::var("FLOATPASTE_E2E_KEEP").as_deref() != Ok("1") {
+            // 句柄延迟释放时删除失败不视作测试失败，留给系统临时目录自清
+            let _ = fs::remove_dir_all(&self.data_root);
+        } else {
+            eprintln!(
+                "[e2e] FLOATPASTE_E2E_KEEP=1，临时目录已保留: {}",
+                self.data_root.display()
+            );
+        }
     }
 }
 
@@ -398,8 +520,9 @@ fn app_e2e_smoke_flow() {
         ("FLOATPASTE_RETENTION_FIRST_DELAY_MS", "1500".to_string()),
         ("FLOATPASTE_SKIP_AUTOSTART_SYNC", "1".to_string()),
     ];
-    // 场景 6 托盘切换监听事件的信号侧副本（Cleanup 构造会 move 走原值）
+    // 场景 6/6b 托盘与收藏事件的信号侧副本（Cleanup 构造会 move 走原值）
     let instance_id_for_toggle = instance_id.clone();
+    let instance_id_for_favorite = instance_id.clone();
     let mut cleanup = Cleanup {
         child: Some(spawn_instance(&envs, true)),
         instance_id,
@@ -558,6 +681,55 @@ fn app_e2e_smoke_flow() {
         "恢复监听后复制的内容应重新录入"
     );
 
+    // ── 场景 6b：速贴收藏切换（选中行 = 列表首行 = 最新条目）──
+    // 收藏是键盘/点击路径，经命名事件触发 toggle_favorite（与会话键处理后
+    // 的终点相同）。开面板即选中 0（refresh_list_reset），列表按活动时间
+    // 排序，选中条目即 resumed_marker
+    cleanup.assert_running("收藏切换");
+    wake_via_second_launch(&envs);
+    assert!(
+        wait_until(
+            Duration::from_secs(10),
+            Duration::from_millis(150),
+            picker_onscreen
+        ),
+        "收藏场景前置：唤醒事件后速贴面板应落位屏内"
+    );
+    let assert_favorited = |text: &str, expected: bool, stage: &str| {
+        assert!(
+            wait_until(Duration::from_secs(5), Duration::from_millis(100), || {
+                count_rows(
+                    &db_path,
+                    "SELECT is_favorited FROM clip_items WHERE deleted_at IS NULL AND full_text = ?1",
+                    Some(text),
+                ) == i64::from(expected)
+            }),
+            "{stage}: 条目「{text}」的收藏态应为 {expected}"
+        );
+    };
+    assert!(
+        floatpaste_core::platform::windows::single_instance::signal_test_picker_favorite(
+            &instance_id_for_favorite
+        ),
+        "发送速贴收藏信号失败（被测实例未装载钩子）"
+    );
+    assert_favorited(&resumed_marker, true, "首次收藏");
+    thread::sleep(Duration::from_millis(400));
+    assert!(
+        floatpaste_core::platform::windows::single_instance::signal_test_picker_favorite(
+            &instance_id_for_favorite
+        ),
+        "发送速贴取消收藏信号失败"
+    );
+    assert_favorited(&resumed_marker, false, "再次取消");
+    wake_via_second_launch(&envs);
+    assert!(
+        wait_until(Duration::from_secs(10), Duration::from_millis(150), || {
+            !picker_onscreen()
+        }),
+        "收藏场景收尾：应关闭面板（平移回屏外停屏位）"
+    );
+
     // ── 场景 7：搜索窗顶边锚定（独立实例；落地收缩不移动上边沿）──
     // 回归：开窗首落重居中标记曾因 changed 值相等哑火而悬置，泄漏到后续
     // 高度变化时触发「以新尺寸重居中」，表现为筛选后高度变低、窗口跳回
@@ -571,13 +743,15 @@ fn app_e2e_smoke_flow() {
         let search_app_dir = search_root.join("com.floatpaste");
         fs::create_dir_all(&search_app_dir).unwrap();
         {
-            let repository =
-                SqliteRepository::new(&search_app_dir.join("floatpaste.db")).unwrap();
+            let repository = SqliteRepository::new(&search_app_dir.join("floatpaste.db")).unwrap();
             for index in 0..3 {
                 let item =
                     NormalizeService::normalize_text(&format!("e2e-search-row-{index}"), None)
                         .unwrap();
                 repository.save_text_item(&item).unwrap();
+                // 活动时间戳 1ms 步进保证排序确定：场景 9 的删除按选中 0
+                // （列表首行）定位目标，同毫秒并列时首行不确定
+                thread::sleep(Duration::from_millis(1));
             }
         }
         let search_envs = [
@@ -597,6 +771,16 @@ fn app_e2e_smoke_flow() {
             original_text: None,
             data_root: search_root,
         };
+
+        // 场景 8 前置：目标窗口持前台后再开窗，被测实例捕获的会话目标即它。
+        // 无人值守会话拿不到前台（前台锁定策略）时场景 8 整段跳过
+        let focus_target = FocusTargetGuard::acquire();
+        if focus_target.is_none() {
+            eprintln!(
+                "[e2e] 3 秒内未取得前台目标窗口（无人值守会话前台锁定策略），\n\
+                 跳过 Esc 关闭焦点还原断言段；几何断言不受影响"
+            );
+        }
 
         // 打开搜索窗：钩子在装配段装载，早于装载的信号打不开事件，轮询重试
         search_cleanup.assert_running("打开搜索窗");
@@ -633,6 +817,122 @@ fn app_e2e_smoke_flow() {
         assert_eq!(
             shrunk.top, baseline_top,
             "落地收缩不得移动上边沿（顶边锚定，保持开窗居中基准）"
+        );
+
+        // ── 场景 8：搜索窗 Esc 关闭还原会话目标前台 ──
+        // 回归：Esc 关闭曾被归入「失焦自关」一档不还原前台——失焦自关的
+        // 前提（用户点击处已持有前台）对键盘路径不成立，Esc 时前台在搜索
+        // 窗自己手上，停屏后键盘焦点须显式还给会话目标。
+        // 测试路径无 RegisterHotKey 的前台锁豁免（热键路径用户按键即显式
+        // 输入事件，命名事件没有），被测实例打开搜索后拿不到前台是预期——
+        // 由测试进程把前台交给搜索窗（跨进程 AttachThreadInput 手法），
+        // 才能区分「显式还原给目标」与「停屏后前台自然流转」
+        if let Some(target) = focus_target {
+            let search_hwnd = hwnd;
+            let handed =
+                floatpaste_core::platform::windows::active_app::ActiveAppResolver::force_foreground_window(
+                    search_hwnd,
+                );
+            assert!(
+                handed
+                    && wait_until(Duration::from_secs(5), Duration::from_millis(100), || {
+                        pump_window_messages(HWND(search_hwnd as *mut _));
+                        (unsafe { GetForegroundWindow().0 as isize }) == search_hwnd
+                    }),
+                "测试进程应能把前台交给搜索窗（Esc 还原的前置态）"
+            );
+            assert!(
+                floatpaste_core::platform::windows::single_instance::signal_test_search_escape(
+                    &search_stamp,
+                ),
+                "发送搜索 Esc 信号失败（被测实例未装载钩子）"
+            );
+            assert!(
+                wait_until(Duration::from_secs(5), Duration::from_millis(100), || {
+                    onscreen_search_window().is_none()
+                }),
+                "Esc 后搜索窗应停屏（平移回屏外）"
+            );
+            assert!(
+                wait_until(Duration::from_secs(5), Duration::from_millis(100), || {
+                    pump_window_messages(HWND(target.hwnd as *mut _));
+                    (unsafe { GetForegroundWindow().0 as isize }) == target.hwnd
+                }),
+                "Esc 关闭后前台应还原给会话目标窗口"
+            );
+        }
+
+        // ── 场景 9：搜索窗两段式删除（选中行 = 列表首行 = 最新条目）──
+        // 首次触发进入待确认态（库无变化），3 秒内再次触发同一目标才真删。
+        // 删除目标=选中 0=列表首行=库中活动时间最新的未删条目（与列表排序
+        // 同源；预置数据之外还可能有启动核对录入的剪贴板残留，故动态读取
+        // 而非假设为最后一条预置数据）
+        let delete_marker: String = {
+            let connection = rusqlite::Connection::open_with_flags(
+                search_app_dir.join("floatpaste.db"),
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+            )
+            .unwrap();
+            connection.busy_timeout(Duration::from_secs(5)).unwrap();
+            connection
+                .query_row(
+                    "SELECT full_text FROM clip_items WHERE deleted_at IS NULL \
+                     ORDER BY COALESCE(last_used_at, created_at) DESC, created_at DESC LIMIT 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("删除场景前置：库中应有未删条目")
+        };
+        let delete_soft_count = || {
+            count_rows(
+                search_app_dir.join("floatpaste.db").as_path(),
+                "SELECT COUNT(*) FROM clip_items WHERE full_text = ?1 AND deleted_at IS NOT NULL",
+                Some(&delete_marker),
+            )
+        };
+        assert!(
+            floatpaste_core::platform::windows::single_instance::signal_test_open_search(
+                &search_stamp,
+            ),
+            "删除场景前置：打开搜索信号应送达"
+        );
+        assert!(
+            wait_until(Duration::from_secs(10), Duration::from_millis(150), || {
+                onscreen_search_window().is_some()
+            }),
+            "删除场景前置：搜索窗应落位屏内"
+        );
+        // 等列表数据落地再发删除：落位先于异步加载（fetch_next），选中行
+        // 此时读不到条目会静默返回；高度收缩完成 = 数据已入库渲染
+        let full = search_window_full_height(hwnd);
+        assert!(
+            wait_until(Duration::from_secs(10), Duration::from_millis(150), || {
+                onscreen_search_window()
+                    .map(|(_, rect)| (rect.bottom - rect.top) < full * 550 / 620)
+                    .unwrap_or(false)
+            }),
+            "删除场景前置：搜索窗应收缩到结果高度（数据落地）"
+        );
+        assert!(
+            floatpaste_core::platform::windows::single_instance::signal_test_search_delete(
+                &search_stamp,
+            ),
+            "发送搜索删除信号失败（被测实例未装载钩子）"
+        );
+        thread::sleep(Duration::from_millis(300));
+        assert_eq!(delete_soft_count(), 0, "首次删除只进入待确认态，不得软删");
+        // 待确认窗口 3 秒，间隔 300ms 的第二次触发必落在窗口内
+        assert!(
+            floatpaste_core::platform::windows::single_instance::signal_test_search_delete(
+                &search_stamp,
+            ),
+            "发送搜索确认删除信号失败"
+        );
+        assert!(
+            wait_until(Duration::from_secs(5), Duration::from_millis(100), || {
+                delete_soft_count() > 0
+            }),
+            "待确认窗口内的第二次触发应软删条目"
         );
     }
 

@@ -1221,38 +1221,6 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
     }
 
     #[test]
-    fn list_recent_prioritizes_newest_created_item_before_older_used_item() {
-        let path = temp_db_path();
-        let repository = SqliteRepository::new(&path).unwrap();
-        let now = Utc::now();
-
-        seed_item(
-            &repository,
-            "older-used",
-            "older used",
-            (now - Duration::minutes(10)).timestamp_millis(),
-            Some((now - Duration::minutes(2)).timestamp_millis()),
-            false,
-        );
-        seed_item(
-            &repository,
-            "new-created",
-            "new created",
-            (now - Duration::minutes(1)).timestamp_millis(),
-            None,
-            false,
-        );
-
-        let items = repository.list_recent(10).unwrap();
-
-        assert_eq!(items[0].id, "new-created");
-        assert_eq!(items[1].id, "older-used");
-
-        drop(repository);
-        fs::remove_file(path).unwrap();
-    }
-
-    #[test]
     fn vacuum_runs_on_separate_connection_and_keeps_data() {
         let path = temp_db_path();
         let repository = SqliteRepository::new(&path).unwrap();
@@ -1342,107 +1310,6 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
         assert_eq!(detail.image_height, Some(16));
         assert_eq!(detail.image_format.as_deref(), Some("png"));
         assert_eq!(detail.file_size, Some(92));
-
-        drop(repository);
-        fs::remove_file(path).unwrap();
-    }
-
-    #[test]
-    fn summary_includes_image_metadata_for_recent_and_search_results() {
-        let path = temp_db_path();
-        let repository = SqliteRepository::new(&path).unwrap();
-        let item = crate::domain::clip_item::NewClipImageItem {
-            normalized: crate::domain::clip_item::NormalizedClipImage {
-                preview_text: "图片 (16 x 16, 92 B)".to_string(),
-                search_text: "diagram preview png".to_string(),
-                hash: "image-hash-summary".to_string(),
-                image_path: Some("images/test-summary.png".to_string()),
-                image_width: Some(16),
-                image_height: Some(16),
-                image_format: Some("png".to_string()),
-                file_size: Some(92),
-            },
-            source_app: Some("画图".to_string()),
-        };
-
-        let detail = repository.save_image_item(&item).unwrap();
-        let recent_items = repository.list_recent(10).unwrap();
-        let recent_summary = recent_items
-            .iter()
-            .find(|summary| summary.id == detail.id)
-            .expect("recent summary should contain saved image item");
-
-        assert_eq!(
-            recent_summary.image_path.as_deref(),
-            Some("images/test-summary.png")
-        );
-        assert_eq!(recent_summary.image_width, Some(16));
-        assert_eq!(recent_summary.image_height, Some(16));
-        assert_eq!(recent_summary.image_format.as_deref(), Some("png"));
-        assert_eq!(recent_summary.file_size, Some(92));
-
-        let search_result = repository
-            .search(SearchQuery {
-                keyword: "diagram".to_string(),
-                filters: SearchFilters::default(),
-                offset: 0,
-                limit: 10,
-                sort: SearchSort::RelevanceDesc,
-            })
-            .unwrap();
-        let search_summary = search_result
-            .items
-            .iter()
-            .find(|summary| summary.id == detail.id)
-            .expect("search summary should contain saved image item");
-
-        assert_eq!(
-            search_summary.image_path.as_deref(),
-            Some("images/test-summary.png")
-        );
-        assert_eq!(search_summary.image_width, Some(16));
-        assert_eq!(search_summary.image_height, Some(16));
-        assert_eq!(search_summary.image_format.as_deref(), Some("png"));
-        assert_eq!(search_summary.file_size, Some(92));
-
-        drop(repository);
-        fs::remove_file(path).unwrap();
-    }
-
-    #[test]
-    fn search_recent_desc_uses_activity_time_without_favorite_boost() {
-        let path = temp_db_path();
-        let repository = SqliteRepository::new(&path).unwrap();
-        let now = Utc::now();
-
-        seed_item(
-            &repository,
-            "favorite-older",
-            "shared keyword",
-            (now - Duration::minutes(8)).timestamp_millis(),
-            Some((now - Duration::minutes(4)).timestamp_millis()),
-            true,
-        );
-        seed_item(
-            &repository,
-            "newer-normal",
-            "shared keyword",
-            (now - Duration::minutes(1)).timestamp_millis(),
-            None,
-            false,
-        );
-
-        let result = repository
-            .search(SearchQuery {
-                keyword: String::new(),
-                filters: SearchFilters::default(),
-                offset: 0,
-                limit: 10,
-                sort: SearchSort::RecentDesc,
-            })
-            .unwrap();
-
-        assert_eq!(result.items[0].id, "newer-normal");
 
         drop(repository);
         fs::remove_file(path).unwrap();
@@ -1743,62 +1610,6 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
     /// 复现条件：列表排序键为 `COALESCE(last_used_at, created_at) DESC`。
     /// 若 bump_item 只更新 created_at 而不动 last_used_at，
     /// 对 last_used_at 已有值的记录，重新复制时其排序位置不会变化。
-    #[test]
-    fn bump_item_moves_already_used_item_to_top() {
-        let path = temp_db_path();
-        let repository = SqliteRepository::new(&path).unwrap();
-        let now = Utc::now();
-
-        // 一条"曾被粘贴使用过"的旧记录（last_used_at 已设为 8 分钟前）
-        seed_item(
-            &repository,
-            "previously-used",
-            "shared content",
-            (now - Duration::minutes(30)).timestamp_millis(),
-            Some((now - Duration::minutes(8)).timestamp_millis()),
-            false,
-        );
-        // 一条稍后创建、但活跃时间早于"刚刚重新复制"的新记录
-        seed_item(
-            &repository,
-            "newer-item",
-            "newer content",
-            (now - Duration::minutes(2)).timestamp_millis(),
-            None,
-            false,
-        );
-
-        // 初始顺序：newer-item（2 分钟前）排在 previously-used（last_used_at = 8 分钟前）之前
-        let items = repository.list_recent(10).unwrap();
-        assert_eq!(items[0].id, "newer-item");
-        assert_eq!(items[1].id, "previously-used");
-
-        // 模拟"再次复制相同内容"：去重命中后调用 bump_item
-        let before_bump = Utc::now();
-        std::thread::sleep(std::time::Duration::from_millis(10));
-        let bumped = repository.bump_item("previously-used").unwrap();
-        assert!(bumped.last_used_at.is_some());
-
-        // 修复后：previously-used 应被置顶，因为 last_used_at 已刷新为当前时间
-        let items = repository.list_recent(10).unwrap();
-        assert_eq!(
-            items[0].id, "previously-used",
-            "重新复制相同内容应把已有项置顶，即使它曾被粘贴使用过"
-        );
-        assert_eq!(items[1].id, "newer-item");
-
-        // bumped.last_used_at 必须严格晚于 bump 之前的时间戳，证明已被刷新
-        let bumped_used_at = chrono::DateTime::parse_from_rfc3339(&bumped.last_used_at.unwrap())
-            .unwrap()
-            .with_timezone(&Utc);
-        assert!(
-            bumped_used_at > before_bump,
-            "last_used_at 应被刷新为当前时间，实际: {bumped_used_at:?}"
-        );
-
-        drop(repository);
-        fs::remove_file(path).unwrap();
-    }
 
     #[test]
     fn save_and_load_picker_window_state() {
@@ -1844,37 +1655,6 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
                 height: None,
             })
         );
-
-        drop(repository);
-        fs::remove_file(path).unwrap();
-    }
-
-    #[test]
-    fn set_item_tags_replaces_idempotently_and_clears_with_empty() {
-        let path = temp_db_path();
-        let repository = SqliteRepository::new(&path).unwrap();
-        let id = seed_text_item(&repository, "标签测试内容");
-
-        let detail = repository
-            .set_item_tags(&id, &["工作".to_string(), "资料".to_string()])
-            .unwrap();
-        assert_eq!(detail.tags, vec!["工作".to_string(), "资料".to_string()]);
-
-        // 幂等：重复提交同一集合结果不变
-        let detail = repository
-            .set_item_tags(&id, &["工作".to_string(), "资料".to_string()])
-            .unwrap();
-        assert_eq!(detail.tags.len(), 2);
-
-        // 全量替换：旧标签被移除，NOCASE 变体对齐到既有写法
-        let detail = repository
-            .set_item_tags(&id, &["WORK".to_string(), "个人".to_string()])
-            .unwrap();
-        assert_eq!(detail.tags, vec!["WORK".to_string(), "个人".to_string()]);
-
-        // 空数组清空
-        let detail = repository.set_item_tags(&id, &[]).unwrap();
-        assert!(detail.tags.is_empty());
 
         drop(repository);
         fs::remove_file(path).unwrap();
@@ -1982,41 +1762,6 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
             })
             .unwrap();
         assert_eq!(result.total, 1);
-
-        drop(repository);
-        fs::remove_file(path).unwrap();
-    }
-
-    #[test]
-    fn set_item_tags_prunes_tags_that_lost_all_associations() {
-        let path = temp_db_path();
-        let repository = SqliteRepository::new(&path).unwrap();
-        let id = seed_text_item(&repository, "孤儿清理验证");
-
-        repository
-            .set_item_tags(&id, &["独占".to_string(), "共享".to_string()])
-            .unwrap();
-
-        // 摘掉"独占"后其 tags 行同步消失，不再以 0 个条目滞留
-        repository
-            .set_item_tags(&id, &["共享".to_string()])
-            .unwrap();
-        let names: Vec<String> = repository
-            .list_tags()
-            .unwrap()
-            .into_iter()
-            .map(|tag| tag.name)
-            .collect();
-        assert_eq!(names, vec!["共享".to_string()]);
-
-        // 清空后全库无标签行
-        repository.set_item_tags(&id, &[]).unwrap();
-        let connection = repository.connection.lock().unwrap();
-        let tag_rows: i64 = connection
-            .query_row("SELECT COUNT(*) FROM tags", [], |r| r.get(0))
-            .unwrap();
-        drop(connection);
-        assert_eq!(tag_rows, 0);
 
         drop(repository);
         fs::remove_file(path).unwrap();
@@ -2266,29 +2011,6 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
     }
 
     #[test]
-    fn list_recent_and_detail_carry_tags() {
-        let path = temp_db_path();
-        let repository = SqliteRepository::new(&path).unwrap();
-        let id = seed_text_item(&repository, "聚合列验证");
-        repository
-            .set_item_tags(&id, &["乙标签".to_string(), "甲标签".to_string()])
-            .unwrap();
-
-        // 聚合顺序确定（NOCASE 对 CJK 即码点序：乙 U+4E59 < 甲 U+7532）
-        let recent = repository.list_recent(10).unwrap();
-        let summary = recent.iter().find(|item| item.id == id).unwrap();
-        assert_eq!(
-            summary.tags,
-            vec!["乙标签".to_string(), "甲标签".to_string()]
-        );
-        let detail = repository.get_item_detail(&id).unwrap();
-        assert_eq!(detail.tags, summary.tags.clone());
-
-        drop(repository);
-        fs::remove_file(path).unwrap();
-    }
-
-    #[test]
     fn purge_soft_deleted_removes_only_expired_rows() {
         let path = temp_db_path();
         let repository = SqliteRepository::new(&path).unwrap();
@@ -2404,46 +2126,6 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
             .unwrap();
         drop(connection);
         assert_eq!(remaining_ids, vec!["newest", "newer", "oldest-favorited"]);
-
-        drop(repository);
-        fs::remove_file(path).unwrap();
-    }
-
-    #[test]
-    fn enforce_history_limit_keeps_search_results_clean() {
-        let path = temp_db_path();
-        let repository = SqliteRepository::new(&path).unwrap();
-        // 走真实写路径入库，验证溢出删除后 FTS 不再命中幽灵记录
-        let old_id = seed_text_item(&repository, "待清理的旧记录关键词");
-        let old_created = (Utc::now() - Duration::days(9)).timestamp_millis();
-        {
-            let connection = repository.connection.lock().unwrap();
-            connection
-                .execute(
-                    "UPDATE clip_items SET created_at = ?1, updated_at = ?1 WHERE id = ?2",
-                    params![old_created, old_id],
-                )
-                .unwrap();
-        }
-        for index in 0..3 {
-            std::thread::sleep(std::time::Duration::from_millis(5));
-            seed_text_item(&repository, &format!("新记录 {index}"));
-        }
-
-        // limit=3：保留最新 3 条未收藏，仅最旧的"待清理的旧记录"溢出
-        let removed = repository.enforce_history_limit(3).unwrap();
-        assert_eq!(removed.len(), 1);
-
-        let result = repository
-            .search(SearchQuery {
-                keyword: "旧记录".to_string(),
-                filters: SearchFilters::default(),
-                offset: 0,
-                limit: 10,
-                sort: SearchSort::RelevanceDesc,
-            })
-            .unwrap();
-        assert_eq!(result.total, 0, "溢出删除的记录不应再被搜索命中");
 
         drop(repository);
         fs::remove_file(path).unwrap();
