@@ -17,7 +17,7 @@ use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::atomic::Ordering;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use slint::{ComponentHandle, Model, ModelRc, PhysicalPosition, PhysicalSize, VecModel};
 use tracing::{info, warn};
@@ -58,6 +58,9 @@ const DELETE_ARM_TIMEOUT_MS: u64 = 3000;
 const FOCUS_WATCH_INTERVAL_MS: u64 = 120;
 const RESTORE_DELAY: Duration = Duration::from_millis(90);
 const INJECT_DELAY: Duration = Duration::from_millis(60);
+/// 关闭路径还原前台后的激活落地等待上限：正常几十毫秒内完成，超时则
+/// 尽力停屏（还原未落地时前台会由系统回收，不阻塞用户）
+const RESTORE_SETTLE_MAX: Duration = Duration::from_millis(200);
 
 /* ───────────────── 会话生命周期 ───────────────── */
 
@@ -103,21 +106,20 @@ pub fn open_global(app: &App) {
 
 /// 打开搜索会话（对齐 open_search_global）
 pub fn open(app: &App) {
-    open_inner(app, false, Vec::new());
+    open_inner(app, Vec::new());
 }
 
-/// 从设置窗标签区打开：预置标签筛选，关闭时把前台还给会话目标（设置窗）。
-/// 首开与快捷键打开同一条上屏链（全尺寸居中、加载态起步），差异只有
-/// 一点：落地后主动伸缩高度（PRESET_RESIZE）——首开起步于默认视图
-/// 高度、与内容自然高脱钩，changed 哑火时窗口会停在起步高度不跟随
-/// 内容。会话已激活时（反复点条目数的浏览流）直接切筛选，不隐藏不
-/// 重开
+/// 从设置窗标签区打开：预置标签筛选。首开与快捷键打开同一条上屏链
+/// （全尺寸居中、加载态起步），差异只有一点：落地后主动伸缩高度
+/// （PRESET_RESIZE）——首开起步于默认视图高度、与内容自然高脱钩，
+/// changed 哑火时窗口会停在起步高度不跟随内容高。会话已激活时（反复
+/// 点条目数的浏览流）直接切筛选，不隐藏不重开
 pub fn open_with_tags(app: &App, preset_tags: Vec<String>) {
     if app.state.is_search_active() {
         apply_preset_filter(app, preset_tags);
         return;
     }
-    open_inner(app, true, preset_tags);
+    open_inner(app, preset_tags);
 }
 
 /// 预置标签与当前标签词汇求交集（大小写不敏感）：目标标签已被清理时
@@ -173,7 +175,7 @@ fn apply_preset_filter(app: &App, preset_tags: Vec<String>) {
     run_query(app);
 }
 
-fn open_inner(app: &App, restore_on_close: bool, preset_tags: Vec<String>) {
+fn open_inner(app: &App, preset_tags: Vec<String>) {
     let hwnd = app.state.search_hwnd.load(Ordering::SeqCst);
     if hwnd == 0 {
         warn!("搜索窗口 HWND 尚未就绪，无法显示");
@@ -184,9 +186,8 @@ fn open_inner(app: &App, restore_on_close: bool, preset_tags: Vec<String>) {
     let target = ActiveAppResolver::current_foreground_window_handle();
     app.state.set_search_session(SearchSession {
         target_window_hwnd: target,
-        restore_on_close,
     });
-    app.state.begin_search_activation();
+    let epoch = app.state.begin_search_activation();
     info!("打开 Search，target_window={target:?}");
 
     let Some(win) = app.search.upgrade() else {
@@ -240,7 +241,7 @@ fn open_inner(app: &App, restore_on_close: bool, preset_tags: Vec<String>) {
     LAST_HEIGHT.with(|value| value.set(height_px as f32));
     tracing::debug!("开窗起步高度: {height_px} (基线 {base})");
 
-    finish_show(app, &win, hwnd, width_px, height_px);
+    finish_show(app, &win, hwnd, width_px, height_px, epoch);
     refresh_tags(app);
     if preset_active {
         PRESET_RESIZE.with(|flag| flag.set(true));
@@ -252,7 +253,14 @@ fn open_inner(app: &App, restore_on_close: bool, preset_tags: Vec<String>) {
 /// 上屏尾段：光标所在工作区居中落位（失败退回仅定尺寸+上次原位兜底）
 /// → 暖帧全量重绘 → 抢前台 → 解锁滑入 → 重挂浮层样式与材质 → 启动
 /// 焦点监视
-fn finish_show(app: &App, win: &SearchWindow, hwnd: isize, width_px: i32, height_px: i32) {
+fn finish_show(
+    app: &App,
+    win: &SearchWindow,
+    hwnd: isize,
+    width_px: i32,
+    height_px: i32,
+    epoch: u64,
+) {
     // 停屏窗口在屏外，几何变化在移回屏上前完成，无可见中间帧；一次
     // SetWindowPos 同步定尺寸与位置（窗口仍在屏外，不受「先长高后移位」
     // 影响）。定位失败（光标/工作区不可得）才需要单独定尺寸，再退回
@@ -283,16 +291,38 @@ fn finish_show(app: &App, win: &SearchWindow, hwnd: isize, width_px: i32, height
     overlay::after_show_focusable(hwnd);
     apply_material(app, win, hwnd);
 
-    begin_focus_watcher(app);
+    begin_focus_watcher(app, epoch);
 }
 
 /// 隐藏（对齐 hide_search_window / hide_search_and_restore_target）。
-/// restore_target=true 立即把前台还给会话目标（粘贴/快捷键关闭路径）；
-/// false 时不动前台（失焦自动关闭/Esc，用户点击处已持有前台）
+/// restore_target=true 立即把前台还给会话目标（Esc/快捷键关闭/上屏路径，
+/// 关闭时前台在搜索窗自己手上）；false 时不动前台（失焦自动关闭——
+/// 用户点击处已持有前台）
 pub fn hide(app: &App, restore_target: bool) {
     tooltip::cancel(app);
     app.state.end_search_activation();
     let session = app.state.search_session();
+    // 先还原前台再停屏：此刻搜索窗还是前台进程，SetForegroundWindow 放行
+    // 有保证；若先停屏（窗口移出屏幕），系统会立即把前台转让给下一 z 序
+    // 窗口，被测实例随之失去前台进程身份，随后的还原被前台锁拒绝——
+    // 还原退化为与系统转让赛跑（e2e 场景 8 间歇失败的实证根因）
+    if restore_target {
+        if let Some(target_hwnd) = session.target_window_hwnd {
+            if ActiveAppResolver::restore_foreground_window(target_hwnd) {
+                // 前台转移经跨线程消息往返异步落地（目标窗口线程处理
+                // WM_ACTIVATE），立即停屏（前台窗移出屏幕）会打断转移、
+                // 前台清空成 NULL——还原退化为碰运气。等激活落地再停屏，
+                // 上限一拍
+                let deadline = Instant::now() + RESTORE_SETTLE_MAX;
+                while Instant::now() < deadline {
+                    if ActiveAppResolver::current_foreground_hwnd() == Some(target_hwnd) {
+                        break;
+                    }
+                    thread::sleep(Duration::from_millis(10));
+                }
+            }
+        }
+    }
     if let Some(win) = app.search.upgrade() {
         // 记录原位后停屏到屏幕外而非 Slint hide（同 hide_for_editor）：
         // hide→show 周期会清空窗口表面，下次显示出现透明空壳
@@ -306,11 +336,6 @@ pub fn hide(app: &App, restore_target: bool) {
         }
         win.window()
             .set_position(slint::PhysicalPosition::new(-32000, -32000));
-    }
-    if restore_target {
-        if let Some(target_hwnd) = session.target_window_hwnd {
-            ActiveAppResolver::restore_foreground_window(target_hwnd);
-        }
     }
     app.state.set_search_session(Default::default());
     // 未消费的预置伸缩闸随会话清理：不得泄漏到下一次打开的落地
@@ -403,11 +428,11 @@ pub fn restore_after_editor(app: &App) {
     win.set_enter_offset(0.0);
     overlay::after_show_focusable(hwnd);
     apply_material(app, &win, hwnd);
-    app.state.begin_search_activation();
+    let epoch = app.state.begin_search_activation();
     // 失焦自动关闭的监视随激活重启：旧壳是常驻 Focused(false) 监听按
     // is_search_active 门控，编辑器返回后依然生效；本实现的轮询线程
     // 生命周期与会话绑定，必须在此重新拉起（边沿触发不会误判首拍失焦）
-    begin_focus_watcher(app);
+    begin_focus_watcher(app, epoch);
     info!("从 Editor 返回 Search");
 }
 
@@ -507,14 +532,20 @@ fn reset_session_state(app: &App) {
 }
 
 /// 焦点监视（对齐旧版 searchFocusWatcher）：上一拍还在前台、这一拍丢失
-/// 且光标不在窗口内 → 关闭且不还原目标。边沿触发：焦点从未拿到时不误关
-fn begin_focus_watcher(app: &App) {
+/// 且光标不在窗口内 → 关闭且不还原目标。边沿触发：焦点从未拿到时不误关。
+/// `epoch` 是本次会话的代际：watcher 的退出检查（is_search_active）落在
+/// sleep 醒后，若新会话已重新激活，旧 watcher 会误接管新会话——代际
+/// 不匹配即退出，只监控自己启动的那一代
+fn begin_focus_watcher(app: &App, epoch: u64) {
     let app_for_watch = app.clone();
     thread::spawn(move || {
         let mut was_foreground = false;
         loop {
             thread::sleep(Duration::from_millis(FOCUS_WATCH_INTERVAL_MS));
-            if app_for_watch.core().is_quitting() || !app_for_watch.state.is_search_active() {
+            if app_for_watch.core().is_quitting()
+                || !app_for_watch.state.is_search_active()
+                || app_for_watch.state.search_session_epoch() != epoch
+            {
                 return;
             }
             let hwnd = app_for_watch.state.search_hwnd.load(Ordering::SeqCst);
@@ -1733,10 +1764,10 @@ pub fn wire(app: &App) {
     {
         let app_cb = app.clone();
         win.on_key_close(move || {
-            // 设置窗标签区进入的会话：用户仍停在设置窗（未失焦），关闭须
-            // 把前台还给目标；常规路径失焦自关，用户点击处已持有前台
-            let restore = app_cb.state.search_session().restore_on_close;
-            hide(&app_cb, restore);
+            // Esc 是键盘路径，关闭时前台在搜索窗自己手上，停屏后键盘焦点
+            // 须显式还给会话目标（对齐旧壳 hideSearch 恒走 restore_target）；
+            // 失焦自关不经此回调——用户点击处已持有前台，无需抢回
+            hide(&app_cb, true);
         });
     }
 

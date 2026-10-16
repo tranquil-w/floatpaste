@@ -3,7 +3,7 @@
 //! 所有窗口操作都经由 `slint::invoke_from_event_loop` 回到事件循环线程，
 //! 这里只承载跨线程可安全访问的会话/缓存数据（Send + Sync）。
 
-use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use floatpaste_core::domain::clip_item::ClipItemSummary;
@@ -17,13 +17,10 @@ pub struct TargetSession {
     pub target_focus_hwnd: Option<isize>,
 }
 
-/// 搜索会话：打开时捕获的回贴目标窗口。
-/// restore_on_close：从设置窗标签区进入的会话置 true——该路径用户仍停留
-/// 在设置窗（未失焦），Esc 关闭时须把前台显式还给目标，否则出现前台真空档。
+/// 搜索会话：打开时捕获的回贴目标窗口（上屏/Esc/快捷键关闭时恢复其前台）
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SearchSession {
     pub target_window_hwnd: Option<isize>,
-    pub restore_on_close: bool,
 }
 
 /// 编辑会话：正在编辑的条目与关闭后的返回目标（对齐旧版 EditorSession）
@@ -44,6 +41,7 @@ pub struct SharedState {
     pub tooltip_hwnd: AtomicIsize,
     pub tray_menu_hwnd: AtomicIsize,
     search_active: AtomicBool,
+    search_epoch: AtomicU64,
     pub search_hwnd: AtomicIsize,
     search_session: Mutex<SearchSession>,
     pub editor_hwnd: AtomicIsize,
@@ -73,6 +71,7 @@ impl SharedState {
             tooltip_hwnd: AtomicIsize::new(0),
             tray_menu_hwnd: AtomicIsize::new(0),
             search_active: AtomicBool::new(false),
+            search_epoch: AtomicU64::new(0),
             search_hwnd: AtomicIsize::new(0),
             search_session: Mutex::new(SearchSession::default()),
             editor_hwnd: AtomicIsize::new(0),
@@ -122,8 +121,17 @@ impl SharedState {
         self.search_active.load(Ordering::SeqCst)
     }
 
-    pub fn begin_search_activation(&self) {
+    pub fn begin_search_activation(&self) -> u64 {
         self.search_active.store(true, Ordering::SeqCst);
+        // 会话代际：每次激活递增，焦点看门狗据此识别「自己启动的那一代」
+        // 会话——上一代 watcher 的退出检查落在 sleep 醒后，若新会话已把
+        // active 置回 true，旧 watcher 会误接管新会话并带着上一代的前台
+        // 状态误判失焦自关
+        self.search_epoch.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    pub fn search_session_epoch(&self) -> u64 {
+        self.search_epoch.load(Ordering::SeqCst)
     }
 
     pub fn end_search_activation(&self) {

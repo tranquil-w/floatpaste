@@ -166,6 +166,12 @@ pub fn apply_material(app: &App, hwnd: isize) -> bool {
 /// show 固定 SW_SHOW（无视 WS_EX_NOACTIVATE，激活窗口会打断宿主输入焦点
 /// 与 IME 组合），不用 Slint/Win32 的 show 显隐，收起只平移
 pub fn silent_assemble_parked<W: ComponentHandle>(win: &W, decorated: bool) -> Option<isize> {
+    // show 会激活自己（winit 对首窗外的 show 走 SW_SHOW，无视
+    // WS_EX_NOACTIVATE），先记下装配前的前台，装配完归还——停屏窗口
+    // 保持 Win32 可见，若不归还则前台滞留屏外窗口：启动时偷走用户
+    // 正在使用的窗口焦点，且此后「还原目标」语义会被污染（e2e 场景 8
+    // 前台污染链的源头）
+    let previous_foreground = ActiveAppResolver::current_foreground_hwnd();
     let _ = win.window().show();
     let hwnd = win32_ext::window_hwnd(win)?;
     win32_ext::apply_overlay_style(hwnd, true);
@@ -176,6 +182,7 @@ pub fn silent_assemble_parked<W: ComponentHandle>(win: &W, decorated: bool) -> O
     let _ = window_control::remove_window_system_menu(hwnd);
     win.window()
         .set_position(slint::PhysicalPosition::new(-32000, -32000));
+    surrender_startup_foreground(hwnd, previous_foreground);
     Some(hwnd)
 }
 
