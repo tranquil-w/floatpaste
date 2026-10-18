@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, ci/diag-256eca0]
   pull_request:
-    branches: [main]
+    branches: [main, ci/diag-256eca0]
 
 # 同一分支的并发运行只保留最新一次，取消进行中的旧运行
 concurrency:
