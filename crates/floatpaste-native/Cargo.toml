@@ -24,7 +24,7 @@ slint = { version = "1", default-features = false, features = [
 tracing = "0.1.41"
 tracing-appender = "0.2.3"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt"] }
-windows = { version = "0.61.3", features = [
+windows = { version = "0.62.2", features = [
   "Win32_Foundation",
   "Win32_Graphics_Dwm",
   "Win32_Graphics_Gdi",
@@ -39,7 +39,7 @@ windows = { version = "0.61.3", features = [
 [dev-dependencies]
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 # 仅测试用剪贴板原生 API（锁死探测）；与主依赖同版本，Cargo 对测试构建取 feature 并集
-windows = { version = "0.61.3", features = ["Win32_System_DataExchange"] }
+windows = { version = "0.62.2", features = ["Win32_System_DataExchange"] }
 
 [build-dependencies]
 embed-resource = "3"
