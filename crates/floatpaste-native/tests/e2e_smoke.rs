@@ -479,6 +479,10 @@ fn app_e2e_smoke_flow() {
         let mut settings = UserSetting::default();
         settings.history_limit = HISTORY_LIMIT;
         settings.picker_position_mode = PickerPositionMode::LastPosition;
+        // 录入断言以「复制」为驱动，采集来源进程取决于运行宿主：CI 的测试
+        // 进程由终端拉起、前台即终端，默认排除表含终端——不清空会让
+        // marker 撞排除被静默过滤，录入链路在 CI 上必失败
+        settings.excluded_apps.clear();
         repository.save_settings(&settings).unwrap();
         repository
             .save_picker_window_state(&StoredWindowPosition {
