@@ -10,8 +10,8 @@
 </p>
 
 <p align="center">
-  <a href="../../releases"><img src="https://img.shields.io/github/v/release/tranquil-w/floatpaste?style=flat-square&label=%E5%8F%91%E7%89%88" alt="Release"/></a>
-  <a href="../../actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/tranquil-w/floatpaste/ci.yml?branch=main&style=flat-square&label=CI" alt="CI"/></a>
+  <a href="https://github.com/tranquil-w/floatpaste/releases"><img src="https://img.shields.io/github/v/release/tranquil-w/floatpaste?style=flat-square&label=%E5%8F%91%E7%89%88" alt="Release"/></a>
+  <a href="https://github.com/tranquil-w/floatpaste/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/tranquil-w/floatpaste/ci.yml?branch=main&style=flat-square&label=CI" alt="CI"/></a>
   <img src="https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-Windows%2010%2F11%20x64-blue?style=flat-square" alt="Platform"/>
   <img src="https://img.shields.io/badge/%E6%B8%B2%E6%9F%93-Rust%20%2B%20Slint%20%E8%BD%AF%E4%BB%B6%E6%B8%B2%E6%9F%93-orange?style=flat-square" alt="Stack"/>
 </p>
@@ -42,7 +42,7 @@
 
 ## 📥 安装
 
-从 [Releases](../../releases) 下载最新版本：
+从 [Releases](https://github.com/tranquil-w/floatpaste/releases) 下载最新版本：
 
 - **安装包**（Inno Setup）
 - **便携版** zip，解压即用
@@ -51,21 +51,12 @@
 
 ## 🔨 从源码构建
 
-```bash
-cargo run -p floatpaste-native     # 运行（debug）
-cargo test                         # 全部测试
-cargo build --release -p floatpaste-native
-```
-
-WSL 环境下用 `./scripts/win-cargo test` 转发到 Windows 工具链。发版由 tag 驱动 GitHub Actions 产出安装包与便携包。
+开发环境、运行与测试命令见 [开发与贡献](CONTRIBUTING.md)。
 
 ## 📚 文档
 
-- [架构概览](docs/architecture.md) — 结构、行为规格与关键文件索引
-- [无焦点速贴窗口架构与防坑指南](docs/no-focus-picker.md) — 窗口时序与 Win32 坑位
-- [主题系统设计](docs/theme-system.md) — 三层 token 与对比度规则
-- [编辑窗口行为规格](docs/editor-window.md) — 标签面板与自管滚动的交互规格
-- [文档地图](docs/README.md) · [发布流程](docs/release/process.md)
+- [文档地图](docs/README.md) — 按问题查找架构、行为规格、测试与决策依据
+- [术语表](CONTEXT.md) · [发布流程](docs/release/process.md)
 
 ## 📄 License
 

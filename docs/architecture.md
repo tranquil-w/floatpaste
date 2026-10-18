@@ -1,124 +1,72 @@
 # FloatPaste 架构概览
 
-> 活文档：描述当前架构与关键行为规格，随实现更新；失真视同 bug。
-> 术语以根目录 [CONTEXT.md](../CONTEXT.md) 为准；窗口时序与坑位细节见
-> [无焦点速贴窗口架构与防坑指南](no-focus-picker.md)，颜色体系见[主题系统设计](theme-system.md)。
+本文说明模块边界、主要数据流和窗口职责，帮助定位改动入口。领域术语见 [CONTEXT.md](../CONTEXT.md)，行为细节由 [运行行为与数据约定](runtime-behavior.md) 和各专题维护。
 
-## 产品定位与设计原则
+## 产品约束
 
-FloatPaste 是 Windows 桌面剪贴板工具，核心价值不是"保存很多剪贴内容"，而是**在不打断当前工作窗口的前提下，快速找回并重新粘贴历史内容**。
+- Windows 10/11 x64 桌面剪贴板工具，业务数据保存在本机，剪贴内容不发送给外部服务。
+- 速贴优先保持目标应用的输入焦点；自由文本搜索、编辑和设置由正常获焦窗口承担。
+- Rust 单进程、Slint 软件渲染，平台集成直接使用 Win32。
 
-- **不抢焦点优先于功能完备**：速贴唤起 → 选择 → 上屏这条主链路尽量不碰目标窗口焦点；复杂输入、深度搜索、编辑一律进有焦点的窗口。
-- **速贴与管理分离**：速贴只做快速选择与上屏；搜索/编辑/设置在正常获焦窗口中完成。
-- **本地优先**：数据全部在本机，不向外部服务发送剪贴内容。
-- **平台特化**：仅支持 Windows 10/11 x64，剪贴板监听、键鼠钩子、无焦点窗口等直接使用 Win32 原生实现，不为跨平台妥协。
+## 模块与依赖
 
-## 总体结构
+Cargo workspace 包含两个 crate：
 
-Cargo workspace 双 crate：
+| 模块 | 职责与依赖约束 |
+|------|----------------|
+| `floatpaste-core/domain` | 纯数据与业务概念，不依赖基础设施 |
+| `floatpaste-core/repository` | rusqlite 数据访问、FTS5 与数据库迁移 |
+| `floatpaste-core/services` | 业务规则编排，仅依赖 domain/repository |
+| `floatpaste-core/platform/windows` | 剪贴板、快捷键、单实例、窗口控制等 Win32 集成，通过回调暴露事件，不反向依赖窗口框架 |
+| `floatpaste-core/theme.rs` | 色板、语义 token 派生与对比度校正 |
+| `floatpaste-native/src` | 窗口会话与回调装配；各窗口提供 `wire()`，`main.rs` 负责启动顺序与模块接线 |
+| `floatpaste-native/ui` | Slint 界面与共享主题全局 |
 
-```text
-floatpaste-core（与 GUI 无关的共享核心）
-  domain/        纯数据与业务概念（clip_item / settings / search_session / editor_session …）
-  repository/    rusqlite 数据访问（SQLite + FTS5 与迁移）
-  services/      业务规则编排（clip / history / search / normalize / dedup / privacy / retention /
-                 paste_support / picker_position / image_storage / image_decode /
-                 tag / time_format / clip_display）
-  platform/windows/  Win32 原生集成（clipboard_monitor / session_keyboard / mouse_monitor /
-                 hotkey / window_control / active_app / single_instance …，回调向 UI 暴露事件）
-  theme.rs       色板 / 强调色 / 语义 token 派生与对比度校正
+core 不依赖 Slint；不依赖 Slint 类型的纯逻辑（如展示格式化）放在 core，以便脱离 GUI 测试。
 
-floatpaste-native（唯一桌面壳，Slint 软件渲染）
-  src/           窗口会话模块（各带 wire() 绑定回调），main.rs 只管启动顺序与接线
-  ui/*.slint     各窗口界面与 Theme 全局
+## 主要数据流
+
+```mermaid
+flowchart LR
+    Clipboard[Windows 剪贴板] --> Monitor[Win32 监听]
+    Monitor --> Services[core 业务服务]
+    Services --> Repository[SQLite / FTS5 / 图片文件]
+    Services --> Session[native 窗口会话]
+    UI[Slint 界面回调] --> Session
+    Session --> Services
+    Session --> Paste[上屏编排]
+    Paste --> Clipboard
+    Paste --> Target[恢复目标窗口并注入 Ctrl+V]
 ```
 
-分层约束：core 不依赖 Slint；platform 不反向依赖窗口框架；不依赖 Slint 类型的纯逻辑下沉 core（如 `clip_display`），保证无 GUI 即可测试。
+平台回调和后台结果转发到事件循环后更新窗口属性与模型；缩略图跨线程传原始像素，Slint 图像在 UI 线程创建。
 
-## 窗口与职责
+## 窗口职责
 
 | 窗口 | 焦点 | 职责 |
 |------|------|------|
-| 速贴 Picker | 无焦点（`WS_EX_NOACTIVATE`） | 最近活跃列表（文本/图片缩略图/文件摘要）、会话键导航、收藏、确认上屏；不提供自由文本输入 |
-| 搜索 Search | 正常获焦 | FTS5 全文搜索 + 类型/标签筛选（可由设置页标签区跳转预置）、防抖、触底分页、两段式删除、进编辑器 |
-| 编辑 Editor | 正常获焦 | 条目文本编辑（脏状态与关闭确认）+ 标签管理；从速贴或搜索进入，关闭返回来源窗口 |
-| 设置 Settings | 正常获焦 | 设置分区（通用/行为/外观/快捷键/排除应用/标签等），防抖自动保存 + 运行时联动；标签区承担标签管理（重命名/合并/删除/计数跳转） |
-| 悬浮气泡 Tooltip | 无焦点、点击穿透 | 行悬停预览（文本摘要/图片大图），400ms 延迟、屏幕边缘自适应定位，全局单例 |
-| 托盘 | — | 打开速贴/搜索/设置、暂停与恢复监听、退出 |
+| 速贴 | 无焦点 | 最近条目、会话键导航、收藏与上屏 |
+| 搜索窗口 | 正常获焦 | 全文搜索、类型/标签筛选、分页、收藏、两段式删除与进入编辑 |
+| 编辑窗口 | 正常获焦 | 当前条目的内容编辑与标签管理，关闭返回来源窗口 |
+| 设置窗口 | 正常获焦 | 设置保存与运行时联动、排除应用、标签管理 |
+| 悬浮气泡 | 无焦点、点击穿透 | 条目预览与提示 |
+| 托盘 | — | 打开窗口、暂停/恢复监听与退出 |
 
-五窗口单进程共享一个事件循环，启动即建且全程常驻：速贴/搜索/悬浮气泡屏外停屏、按需上屏（`overlay.rs`）；编辑/设置窗隐藏式停屏——Win32 真隐藏 + 平移屏外，Slint 端保持「已显示」，显隐走真实 `SW_SHOW`/`SW_HIDE`，任务栏按钮生灭由可见性驱动（样式恒定，不在常驻窗口上翻转 TOOLWINDOW：任务栏按窗口首次可见时的样式做上/不上分类，事后翻转修正不可靠）。搜索窗关闭（Esc/快捷键/上屏）先把前台还原给打开时捕获的会话目标、再停屏——先停屏会令系统把前台转让给下一 z 序窗口，本应用失去前台身份后还原会被前台锁拒绝；失焦自关不还原（用户点击处已持有前台）。
+五窗口启动即建，共享事件循环。速贴、搜索窗口与悬浮气泡平时停在屏外；编辑与设置窗口通过 Win32 真隐藏进入停屏，Slint 侧保持窗口存活。显隐、前台归还、置顶和定位约束统一见 [无焦点速贴指南](no-focus-picker.md)。
 
-## 关键行为规格
+## 改动入口
 
-### 剪贴监听与入库
+Rust 文件路径相对于对应 crate 的 `src/`；Slint 界面位于 native 的 `ui/`：
 
-- 三类条目：文本（原文/预览/搜索文本/来源应用）、图片（PNG 直传与 DIB、缩略图、哈希去重）、文件（路径列表/数量/总大小）。
-- 同 hash（未删除）内容刷新既有条目并置顶，不重复插入；入库防抖由事件驱动监听（`AddClipboardFormatListener`）与自写回过滤（3 秒抑制窗）承担。
-- 排除应用名单、暂停监听、自写回抑制（上屏写剪贴板不再入库）。
+| 改动范围 | 主要入口 | 当前约束 |
+|----------|----------|----------|
+| 录入、去重、搜索与标签 | core 的 `services/`、`repository/sqlite_repository.rs` | [运行行为与数据约定](runtime-behavior.md) |
+| 启动、日志与共享状态 | native 的 `main.rs`、`system.rs`、`app_state.rs` | [开发与诊断](../CONTRIBUTING.md) |
+| 窗口与上屏 | native 的 `picker.rs`、`search.rs`、`overlay.rs`、`paste_flow.rs` | [窗口时序与防坑](no-focus-picker.md) |
+| 会话键与窗口外点击 | core 的 `platform/windows/session_keyboard.rs`（RegisterHotKey）、`mouse_monitor.rs`（LL 鼠标钩子） | [窗口时序与防坑](no-focus-picker.md) |
+| 插入符定位 | core 的 `platform/windows/picker_position.rs`、`uia_caret.rs`、`services/picker_position_service.rs` | [窗口时序与防坑](no-focus-picker.md) |
+| 编辑交互 | native 的 `editor.rs` 与 `ui/editor.slint` | [编辑窗口规格](editor-window.md) |
+| 主题与材质 | core 的 `theme.rs`、`backdrop.rs`；native 的 `theme_bridge.rs`、`overlay.rs` | [主题系统](theme-system.md) |
+| 自启与提权 | core 的 `launch_mode.rs`、`platform/windows/startup.rs`、`elevated_task.rs` | [运行行为与数据约定](runtime-behavior.md) |
 
-### 搜索排序
-
-- `recent_desc`：`COALESCE(last_used_at, created_at) DESC`，再按 `created_at DESC`。
-- `relevance_desc`：收藏与带标签条目加权置前，其次 `search_text` 子串命中，再按 FTS5 `bm25 ASC`，最后同 `recent_desc` 的时间序。
-- 空关键词强制 `recent_desc`；收藏是独立筛选条件、不在速贴置顶，但在 `relevance_desc` 中有加权。
-- 操作按钮与输入暂停提示显示当前配置的会话键，设置保存后即时更新；无历史条目时根据监听状态引导复制或恢复监听。
-
-### 上屏执行
-
-- 速贴负责"选择"，上屏细节统一在 `paste_flow.rs` / `services/paste_support.rs` 收口：写入剪贴板 → 恢复目标窗口 → `SendInput` 注入 Ctrl+V；可选恢复原剪贴板内容。
-- 条目 Enter 上屏本体（文本/图片数据/文件列表），Shift+Enter 次级上屏为路径文本：图片上屏所在路径、文件上屏逐行路径列表（`PasteOption.as_path_text`）。未能自动粘贴时通过托盘提示原因；开启恢复原剪贴板时引导重试，关闭时提示手动 Ctrl+V。
-- 管理员目标（UIPI）：目标窗口以管理员运行且本应用未提权时，按键注入会被静默丢弃。上屏前检测（`elevation.rs` TokenElevation），命中则照常写入剪贴板、还原目标焦点，仅跳过必然无效的注入；写入成功后经托盘气泡一次性说明（每进程一次，速贴/搜索窗口零 UI）。开启恢复原剪贴板时仅引导管理员重启，关闭时另提示手动 Ctrl+V。
-
-### 跨窗口数据一致性
-
-- 标签词汇与列表数据以「窗口打开/会话刷新时刻」为准，不做跨窗推送：设置页的标签改动在其他窗口下次打开或编辑后刷新时反映，不以事件总线同步。
-- 设置窗标签区点击「条目数」跳转搜索窗是该原则下唯一的管理跨窗入口：预置该标签筛选（先与当前词汇求交集，标签已不存在则落到默认视图），首开与快捷键打开同一条上屏链、落地后底边锚定收缩到内容高度；会话已打开时直接切筛选、不隐藏重开。
-
-### 开机自启与提权启动
-
-- 提权是对一次性动作：设置页「以管理员身份重启」（未提权时显示）→ UAC 确认 → 经 `runas` 重启（新实例等旧实例释放单实例互斥量后接管）；重启后即拥有管理员权限。
-- 任务计划程序是开机自启的唯一载体（`elevated_task.rs` COM ITaskService）：任务存在 = 「开机自启」开；任务 RunLevel（HIGHEST/LUA）= 「始终以管理员身份运行」开。该勾选仅提权运行时可更改；勾选后每次启动均带管理员权限——登录自启走 HIGHEST 任务免 UAC；手动启动（asInvoker manifest 不触发 UAC）由启动期自检兜底（`launch_mode::needs_elevated_relaunch`，托盘就绪后执行，透传 `--silent` 等原参数）。
-- 启动期提权自检：预期提权而实际未提权时，经 UAC 重入自身（复用 `--elevated-relaunch` 闭环，本进程走退出收尾后让位，提权新实例接管）；UAC 被取消则本次以普通权限运行，托盘气泡说明一次。带 `--elevated-relaunch` 参数的启动不再自检，防 UAC 异常时无限弹窗。
-- 任务 ACL 仅授予 SYSTEM/Administrators/任务所属用户：非提权进程可查询/删除/重建自己的任务，只有注册 HIGHEST 任务需要提权（进程已提权时直接注册；删除另有 `--remove-elevated-autostart` UAC 兜底）。Run 键自启已退役，启动时无条件清理存量条目。
-- 同步时机：启动时与设置保存后（后台线程串行执行，`query` 快照幂等跳过已达形态）；同步失败回滚对应开关并提示。触发器延迟 3s 等 Explorer 就绪；任务名带用户名避免多用户冲突。
-
-## 数据模型
-
-SQLite（`%APPDATA%\com.floatpaste\floatpaste.db`）+ FTS5：`clip_items`（条目主表）、`clip_items_fts`（全文索引）、`settings`、`excluded_apps`、`tags`、`clip_item_tags`（条目-标签关联）。表结构与字段以 `repository` 的迁移与 `schema.rs` 为唯一来源，不在此复述。
-
-存储策略：文本进库；图片以 PNG 存数据目录 `images/` 子目录；文件条目只记路径引用；删除为软删除。标签只经由条目关联成立：全量替换、重命名与物理删除路径上失去全部关联的标签行随之清理（孤儿清理）；仅被软删条目引用的标签保留——软删即保留期缓冲，清理不得改为 join `clip_items` 过滤，否则破坏恢复语义。
-
-## 关键文件索引
-
-**floatpaste-native（壳）**
-
-- 启动装配：`src/main.rs`、`system.rs`
-- 窗口会话：`picker.rs`、`search.rs`、`editor.rs`、`settings.rs`（各含 `wire()`）
-- 悬停预览 `tooltip.rs`；托盘菜单（Slint 自绘、跟随主题）`tray_menu.rs`；停屏与上屏 `overlay.rs`；上屏编排 `paste_flow.rs`；托盘图标与转发 `tray.rs`
-- 缩略图缓存 `thumbnails.rs`；主题桥 `theme_bridge.rs`；共享状态 `app_state.rs`；Win32 辅助 `win32_ext.rs`
-
-**floatpaste-core（核心域）**
-
-- 监听：`platform/windows/clipboard_monitor.rs`、`image_clipboard.rs`、`file_clipboard.rs`
-- 会话键盘（LL 钩子）`session_keyboard.rs`；外击关闭（LL 鼠标钩子）`mouse_monitor.rs`
-- 窗口手势（拖拽/八方向拉伸）`window_control.rs`；前台与焦点 `active_app.rs`
-- 定位 `picker_position.rs`（含插入符探测，UI Automation 兜底见 `uia_caret.rs`）+ `services/picker_position_service.rs`；开始菜单同屏共存（宿主识别与几何）`start_menu.rs`；热键 `hotkey.rs`；单实例 `single_instance.rs`；自启 `startup.rs`
-- 提权检测与 runas 启动 `elevation.rs`；管理员自启任务 `elevated_task.rs`（COM ITaskService）
-- 仓储 `repository/sqlite_repository.rs`；展示格式化 `services/clip_display.rs`；主题 `theme.rs`
-
-## 已知实现取舍
-
-- 无焦点体验依赖 Win32 焦点恢复、低级键鼠钩子与热键注册时序；速贴/搜索/悬浮气泡显隐走「屏外停屏 + 上屏移动」，避免 `ShowWindow` 焦点副作用与首帧闪烁。
-- 头部拖拽与八方向拉伸用非模态手势（Slint 事件驱动 down/move/up），规避系统模态循环吞掉指针抬起。
-- Slint 软件渲染单进程多窗；`slint::Image` 非 `Send`，缩略图跨线程只传原始像素。
-- 插入符定位分两层：先 `GetGUIThreadInfo`（只对调用 `CreateCaret` 的原生控件有效），失败再走 UI Automation 的 TextPattern（Chromium/Electron、WinUI 等自绘插入符的应用），两层都不可得才回退鼠标定位。UIA 侧的关键约束：折叠判定用 `CompareEndpoints` 端点比较而非矩形空判、展开粒度按「字符→词→行→段」逐级放大、拒绝「整元素大小」的几何（`covers_element`）与跨元素边界的多块几何（`single_rect`）；边界插入符（行尾/文末/软换行）的展开会跳到「下一个单元」，改取上一条视觉行的末端（`previous_line_rect`）；范围几何全空的字段级焦点（空输入框、Obsidian 内联标题）由 `field_rect_anchor` 用焦点元素框底边中心兜底（限客户区真子矩形）；焦点元素没有任何 TextPattern 时下钻后代搜文本框（两级条件从紧到松、事务超时 300ms 护栏、候选不再二次下钻），UIA 定位最终失败时补采一次诊断现场输出 debug 日志——细节与实测样例见[无焦点速贴防坑指南](no-focus-picker.md)「坑六」。
-- 窗口生命周期与置顶的坑位结论（500ms 置顶守护、销毁重开两段式收尾等）统一见[无焦点速贴防坑指南](no-focus-picker.md)。
-
-## 运行与调试
-
-构建、测试、版本号命令见 [AGENTS.md](../AGENTS.md)（唯一命令来源）；本节只记调试要点：
-
-- 日志：按天滚动 `%APPDATA%\com.floatpaste\logs\floatpaste-native.log`，最多保留 15 个文件；主目录不可用时写入 `%TEMP%\FloatPaste\logs`。默认日志不包含窗口标题或 UIA 元素名称，设置 `FLOATPASTE_DIAGNOSTIC_LOG=1` 后启用这些文本字段以协助定位问题。窗口生命周期以 `session_id` 标识，上屏异步操作同时记录 `session_id` 与 `operation_id`；日志队列丢弃计数每 30 秒汇总，异常日志包含线程名与堆栈。
-- 静默启动：`--silent`；二次启动经单实例命名事件唤醒已有实例的速贴后退出
-- tag 驱动的自动发布、交付产物验收与说明生成见 [release/process.md](release/process.md)
-- WSL 开发用 `./scripts/win-cargo test` 转发 Windows 工具链
+重要方案的背景和取舍由 [文档地图中的 ADR](README.md#决策依据) 索引；测试与发布分别见 [测试体系](testing.md) 和 [发布流程](release/process.md)。
