@@ -136,7 +136,10 @@ fn decode_png_bytes(png_bytes: &[u8]) -> Result<DecodedImage, AppError> {
         .read_info()
         .map_err(|error| AppError::Message(format!("读取 PNG 图片失败: {error}")))?;
 
-    let mut rgba = vec![0; reader.output_buffer_size()];
+    let buffer_size = reader
+        .output_buffer_size()
+        .ok_or_else(|| AppError::Message("图片尺寸超出支持范围".to_string()))?;
+    let mut rgba = vec![0; buffer_size];
     let info = reader
         .next_frame(&mut rgba)
         .map_err(|error| AppError::Message(format!("解码 PNG 图片失败: {error}")))?;
