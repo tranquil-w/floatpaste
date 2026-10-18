@@ -13,3 +13,13 @@ pub mod search_service;
 
 pub mod tag_service;
 pub mod time_format;
+
+pub(crate) fn digest_to_hex(bytes: impl Iterator<Item = u8>) -> String {
+    use std::fmt::Write as _;
+
+    let mut encoded = String::with_capacity(64);
+    for byte in bytes {
+        write!(&mut encoded, "{byte:02x}").expect("writing to String cannot fail");
+    }
+    encoded
+}
