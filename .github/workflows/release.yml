@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 拉取完整历史
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -37,7 +37,7 @@ jobs:
       contents: write
     steps:
       - name: 拉取代码
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: 下载变更清单
         uses: actions/download-artifact@v4
