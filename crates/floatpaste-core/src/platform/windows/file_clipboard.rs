@@ -75,7 +75,7 @@ fn clipboard_format_available(format: u32) -> Result<bool, AppError> {
             -1 => Ok(false),
             0 => Err(AppError::Clipboard(format!(
                 "检查 CF_HDROP 剪贴板格式失败: {}",
-                WindowsError::from_win32()
+                WindowsError::from_thread()
             ))),
             other => Err(AppError::Clipboard(format!(
                 "检查 CF_HDROP 剪贴板格式返回了未知结果: {other}"

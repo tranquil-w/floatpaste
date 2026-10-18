@@ -72,7 +72,7 @@ fn preferred_image_clipboard_format(png_format: u32) -> Result<Option<u32>, AppE
             -1 => Ok(None),
             0 => Err(AppError::Clipboard(format!(
                 "检查图片剪贴板格式失败: {}",
-                WindowsError::from_win32()
+                WindowsError::from_thread()
             ))),
             other => Err(AppError::Clipboard(format!(
                 "检查图片剪贴板格式返回了未知结果: {other}"
@@ -86,7 +86,7 @@ fn png_clipboard_format() -> Result<u32, AppError> {
     if format == 0 {
         return Err(AppError::Clipboard(format!(
             "注册 PNG 剪贴板格式失败: {}",
-            WindowsError::from_win32()
+            WindowsError::from_thread()
         )));
     }
 
