@@ -8,7 +8,7 @@
 
 | 命令 | 说明 |
 |------|------|
-| `cargo run -p floatpaste-native` | 启动桌面应用（debug） |
+| `cargo run -p floatpaste-native --bin floatpaste` | 启动桌面应用（debug） |
 | `cargo test` | 运行全部 Rust 测试（覆盖 `floatpaste-core` 与 `floatpaste-native`，含端到端） |
 | `cargo test -p floatpaste-native --test e2e_smoke` | 单跑真进程端到端（运行十余秒；期间短暂占用全局快捷键并读写系统剪贴板；体系见 [docs/testing.md](docs/testing.md)） |
 | `cargo build --release -p floatpaste-native` | 发布构建 |
