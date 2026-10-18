@@ -77,13 +77,15 @@ pub fn schedule_clipboard_restore(
     core: &CoreState,
     snapshot: ClipboardSnapshot,
     owner_hwnd: Option<isize>,
+    session_id: u64,
+    operation_id: u64,
 ) -> Result<(), AppError> {
     suppress_clipboard_snapshot(core, &snapshot)?;
 
     thread::spawn(move || {
         thread::sleep(Duration::from_millis(550));
         if let Err(error) = restore_clipboard_snapshot(snapshot, owner_hwnd) {
-            warn!("恢复剪贴板失败: {error}");
+            warn!(session_id, operation_id, error = %error, "恢复剪贴板失败");
         }
     });
 
@@ -306,7 +308,7 @@ pub fn paste_failure_hint(restore_clipboard: bool) -> &'static str {
 }
 
 /// 向前台窗口注入一次 Ctrl+V；返回注入是否成功。
-pub fn trigger_ctrl_v() -> bool {
+pub fn trigger_ctrl_v(session_id: u64, operation_id: u64) -> bool {
     unsafe {
         let mut inputs: [INPUT; 4] = std::mem::zeroed();
         inputs[0].r#type = INPUT_KEYBOARD;
@@ -327,7 +329,10 @@ pub fn trigger_ctrl_v() -> bool {
 
         let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
         if sent != 4 {
-            warn!("SendInput 只发送了 {sent} 个键盘事件");
+            warn!(
+                session_id,
+                operation_id, sent, "SendInput 未发送完整的 Ctrl+V 键盘事件"
+            );
         }
         sent == 4
     }

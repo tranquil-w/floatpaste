@@ -911,8 +911,10 @@ fn failure_trace(element: &IUIAutomationElement, drilldown: &DrilldownRecord) ->
     if let Ok(control_type) = unsafe { element.CurrentControlType() } {
         parts.push(format!("ControlType={}", control_type.0));
     }
-    if let Ok(name) = unsafe { element.CurrentName() } {
-        parts.push(format!("Name='{}'", log_label(&name.to_string())));
+    if diagnostic_text_enabled() {
+        if let Ok(name) = unsafe { element.CurrentName() } {
+            parts.push(format!("Name='{}'", log_label(&name.to_string())));
+        }
     }
     if let Ok(rect) = unsafe { element.CurrentBoundingRectangle() } {
         parts.push(format!(
@@ -955,14 +957,22 @@ fn candidate_label(element: &IUIAutomationElement) -> String {
     let class = unsafe { element.CachedClassName() }
         .map(|value| value.to_string())
         .unwrap_or_default();
-    let name = unsafe { element.CachedName() }
-        .map(|value| value.to_string())
-        .unwrap_or_default();
-    format!(
-        "ClassName='{}' Name='{}'",
-        log_label(&class),
-        log_label(&name)
-    )
+    if diagnostic_text_enabled() {
+        let name = unsafe { element.CachedName() }
+            .map(|value| value.to_string())
+            .unwrap_or_default();
+        format!(
+            "ClassName='{}' Name='{}'",
+            log_label(&class),
+            log_label(&name)
+        )
+    } else {
+        format!("ClassName='{}'", log_label(&class))
+    }
+}
+
+fn diagnostic_text_enabled() -> bool {
+    std::env::var_os("FLOATPASTE_DIAGNOSTIC_LOG").is_some_and(|value| value == "1")
 }
 
 /// 成功路径的锚点日志：贴错位置时锚点的来源与坐标是定位问题的唯一线索，

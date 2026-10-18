@@ -68,6 +68,7 @@ fn main() {
     // 退出码报告结果。必须先于单实例检查——旧实例正持锁等待本进程结果
     let args: Vec<String> = std::env::args().collect();
     if let Some(exit_code) = run_elevated_sidecar(&args) {
+        drop(_log_guard);
         std::process::exit(exit_code);
     }
 
@@ -556,8 +557,17 @@ fn install_panic_hook() {
         } else {
             "非字符串载荷".to_string()
         };
-        tracing::error!("panic 于 {location}: {payload}");
-        eprintln!("panic 于 {location}: {payload}");
+        let thread = std::thread::current();
+        let thread_name = thread.name().unwrap_or("unnamed");
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        tracing::error!(
+            thread = thread_name,
+            location,
+            payload,
+            backtrace = %backtrace,
+            "panic"
+        );
+        eprintln!("panic 于 {location}: {payload}\n{backtrace}");
     }));
 }
 

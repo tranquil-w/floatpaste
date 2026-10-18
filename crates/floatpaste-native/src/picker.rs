@@ -195,13 +195,17 @@ pub fn activate(app: &App) {
         ActiveAppResolver::current_foreground_focus_target()
     };
     let session = TargetSession {
+        session_id: crate::app_state::next_session_id(),
         target_window_hwnd: focus_target.window_hwnd,
         target_focus_hwnd: focus_target.focus_hwnd,
     };
     app.state.set_picker_session(session);
     info!(
-        "显示 Picker，hwnd={hwnd}, target_window={:?}, target_focus={:?}",
-        session.target_window_hwnd, session.target_focus_hwnd
+        session_id = session.session_id,
+        hwnd,
+        target_window = ?session.target_window_hwnd,
+        target_focus = ?session.target_focus_hwnd,
+        "显示 Picker"
     );
 
     // 空态快捷键提示跟随当前设置（用户改过热键后提示不失效）
@@ -328,7 +332,10 @@ pub fn hide(app: &App, restore_target: bool) {
 
     app.state.end_picker_activation();
     tooltip::cancel(app);
-    info!("隐藏 Picker");
+    info!(
+        session_id = app.state.picker_session().session_id,
+        "隐藏 Picker"
+    );
 
     if restore_target {
         let session = app.state.picker_session();
@@ -392,7 +399,10 @@ pub fn hide_for_editor(app: &App) {
     app.state.end_picker_activation();
     stop_topmost_guard();
     tooltip::cancel(app);
-    info!("隐藏 Picker（进入编辑器）");
+    info!(
+        session_id = app.state.picker_session().session_id,
+        "隐藏 Picker（进入编辑器）"
+    );
 }
 
 /// 主快捷键命中：活跃则关闭并恢复目标，否则打开。
@@ -440,6 +450,7 @@ pub fn restore_after_editor(app: &App, target: TargetSession) {
     );
 
     app.state.set_picker_session(target);
+    info!(session_id = target.session_id, "从编辑器恢复 Picker");
     // 出现滑入准备：同 activate，停屏期无动画重置内容偏移，暖首帧即起步态
     win.set_enter_animated(false);
     win.set_enter_offset(4.0);

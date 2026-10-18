@@ -88,18 +88,19 @@ pub fn current_cursor_point() -> Result<ScreenPoint, AppError> {
 ///
 /// 两条路的结果都要过「像不像真实插入符」的校验（见 [`usable_probe`]）
 pub fn caret_point_for_window(hwnd: isize) -> Result<Anchor, AppError> {
-    let (process, title) = window_identity(hwnd);
-    tracing::debug!("定位目标 进程={process} 标题='{title}'");
+    let process = window_process_name(hwnd);
+    if diagnostic_text_enabled() {
+        tracing::debug!("定位目标 进程={process} 标题='{}'", window_title(hwnd));
+    } else {
+        tracing::debug!("定位目标 进程={process}");
+    }
 
     usable_probe("Win32 线程插入符", win32_caret_point(hwnd))
         .or_else(|| usable_probe("UI Automation", caret_point_via_uia(hwnd)))
         .ok_or_else(|| AppError::Message("目标窗口未暴露可用的插入符位置".to_string()))
 }
 
-/// 定位目标的身份：进程名 + 窗口标题（截断 40 字符）。定位日志只有坐标时
-/// 对不上「当时的软件」，靠这一行把日志与测试场景关联起来；读不到的字段
-/// 留空，不因此产生新的失败
-fn window_identity(hwnd: isize) -> (String, String) {
+fn window_process_name(hwnd: isize) -> String {
     let hwnd = HWND(hwnd as *mut _);
 
     let mut process = String::new();
@@ -130,17 +131,25 @@ fn window_identity(hwnd: isize) -> (String, String) {
         }
     }
 
-    let mut title = String::new();
+    process
+}
+
+fn window_title(hwnd: isize) -> String {
+    let hwnd = HWND(hwnd as *mut _);
     let mut buffer = [0u16; 128];
     let length = unsafe { GetWindowTextW(hwnd, &mut buffer) };
     if length > 0 {
-        title = String::from_utf16_lossy(&buffer[..length as usize])
+        String::from_utf16_lossy(&buffer[..length as usize])
             .chars()
             .take(40)
-            .collect();
+            .collect()
+    } else {
+        String::new()
     }
+}
 
-    (process, title)
+fn diagnostic_text_enabled() -> bool {
+    std::env::var_os("FLOATPASTE_DIAGNOSTIC_LOG").is_some_and(|value| value == "1")
 }
 
 /// 插入符行高的合理上限（物理像素）。真实文本行 ~10-60px，超过它说明
@@ -251,8 +260,7 @@ pub fn work_area_from_point(point: ScreenPoint) -> Result<ScreenRect, AppError> 
 /// 时返回拒绝访问（会话切换/显示器栈重初始化、断连 RDP 会话），此时以
 /// 主屏居中兜底，窗口仍能落位而不是消失
 pub fn primary_monitor_work_area() -> Result<ScreenRect, AppError> {
-    let monitor =
-        unsafe { MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY) };
+    let monitor = unsafe { MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY) };
     if monitor.0.is_null() {
         return Err(AppError::Message("未找到主显示器".to_string()));
     }
@@ -260,7 +268,9 @@ pub fn primary_monitor_work_area() -> Result<ScreenRect, AppError> {
     monitor_work_area(monitor)
 }
 
-fn monitor_work_area(monitor: windows::Win32::Graphics::Gdi::HMONITOR) -> Result<ScreenRect, AppError> {
+fn monitor_work_area(
+    monitor: windows::Win32::Graphics::Gdi::HMONITOR,
+) -> Result<ScreenRect, AppError> {
     let mut monitor_info = MONITORINFO {
         cbSize: size_of::<MONITORINFO>() as u32,
         ..Default::default()
@@ -295,8 +305,14 @@ mod tests {
     #[test]
     fn primary_monitor_work_area_returns_valid_rect() {
         let work = primary_monitor_work_area().expect("主屏工作区应可读");
-        assert!(work.right > work.left && work.bottom > work.top, "工作区矩形应非空: {work:?}");
-        assert!(work.left <= 0 && work.top <= 0, "主屏工作区左上角应贴原点: {work:?}");
+        assert!(
+            work.right > work.left && work.bottom > work.top,
+            "工作区矩形应非空: {work:?}"
+        );
+        assert!(
+            work.left <= 0 && work.top <= 0,
+            "主屏工作区左上角应贴原点: {work:?}"
+        );
     }
 
     #[test]

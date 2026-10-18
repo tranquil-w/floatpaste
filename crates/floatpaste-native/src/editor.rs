@@ -116,6 +116,7 @@ pub fn open_from_picker(app: &App, item_id: String) {
         app,
         EditorSession {
             item_id,
+            session_id: target.session_id,
             return_to: 0,
             target_window_hwnd: target.target_window_hwnd,
             target_focus_hwnd: target.target_focus_hwnd,
@@ -133,6 +134,7 @@ pub fn open_from_search(app: &App, item_id: String) {
         app,
         EditorSession {
             item_id,
+            session_id: target.session_id,
             return_to: 1,
             target_window_hwnd: target.target_window_hwnd,
             target_focus_hwnd: None,
@@ -153,13 +155,19 @@ fn show_editor(app: &App, session: EditorSession, anchor: Option<HostAnchor>) {
     app.state.set_editor_session(Some(session.clone()));
     let Some(win) = app.editor.upgrade() else {
         app.state.set_editor_session(None);
-        warn!("编辑窗口尚未就绪，无法打开编辑器");
+        warn!(
+            session_id = session.session_id,
+            "编辑窗口尚未就绪，无法打开编辑器"
+        );
         return;
     };
     refresh_edit_key_parts(app, &win);
     let hwnd = app.state.editor_hwnd.load(Ordering::SeqCst);
     if hwnd == 0 {
-        warn!("编辑窗口 HWND 尚未就绪，无法打开编辑器");
+        warn!(
+            session_id = session.session_id,
+            "编辑窗口 HWND 尚未就绪，无法打开编辑器"
+        );
         app.state.set_editor_session(None);
         return;
     }
@@ -196,7 +204,7 @@ fn show_editor(app: &App, session: EditorSession, anchor: Option<HostAnchor>) {
     };
     // 数据就绪：停屏期属性更新不渲染，warm 时一次成帧
     load_session(app, &win, &session.item_id);
-    info!("打开 Editor，item={}", session.item_id);
+    info!(session_id = session.session_id, item_id = %session.item_id, "打开 Editor");
 
     // 上屏序列（对齐设置窗）：SW_SHOW → 重挂材质 → 暖帧 → 移动上屏 →
     // 抢前台。按钮生灭由真实可见性驱动（样式从创建起不变，任务栏在
@@ -517,7 +525,12 @@ pub fn close_editor(app: &App, source: &str) {
         return;
     };
     // 关闭来源诊断：排查「编辑窗闪开即关」（打开后亚秒级返回速贴）
-    info!("关闭 Editor，source={source}, dirty={}", win.get_is_dirty());
+    info!(
+        session_id = ?app.state.editor_session().map(|session| session.session_id),
+        source,
+        dirty = win.get_is_dirty(),
+        "关闭 Editor"
+    );
     win.set_close_confirm_open(false);
     win.set_error_text("".into());
     // 位置记忆须在停屏前读取
@@ -632,6 +645,7 @@ fn hide_and_restore_source(app: &App) {
         0 => picker::restore_after_editor(
             app,
             TargetSession {
+                session_id: session.session_id,
                 target_window_hwnd: session.target_window_hwnd,
                 target_focus_hwnd: session.target_focus_hwnd,
             },

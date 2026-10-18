@@ -10,9 +10,16 @@ use floatpaste_core::domain::clip_item::ClipItemSummary;
 use floatpaste_core::domain::settings::UserSetting;
 use floatpaste_core::state::CoreState;
 
+static NEXT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
+
+pub fn next_session_id() -> u64 {
+    NEXT_SESSION_ID.fetch_add(1, Ordering::Relaxed)
+}
+
 /// 速贴会话：显示时捕获的目标窗口（粘贴/关闭时恢复其前台与焦点）
 #[derive(Debug, Clone, Copy, Default)]
 pub struct TargetSession {
+    pub session_id: u64,
     pub target_window_hwnd: Option<isize>,
     pub target_focus_hwnd: Option<isize>,
 }
@@ -20,6 +27,7 @@ pub struct TargetSession {
 /// 搜索会话：打开时捕获的回贴目标窗口（上屏/Esc/快捷键关闭时恢复其前台）
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SearchSession {
+    pub session_id: u64,
     pub target_window_hwnd: Option<isize>,
 }
 
@@ -27,6 +35,7 @@ pub struct SearchSession {
 #[derive(Debug, Clone, Default)]
 pub struct EditorSession {
     pub item_id: String,
+    pub session_id: u64,
     /// 0=速贴 1=搜索
     pub return_to: u8,
     pub target_window_hwnd: Option<isize>,

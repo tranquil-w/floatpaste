@@ -184,11 +184,17 @@ fn open_inner(app: &App, preset_tags: Vec<String>) {
 
     // 先捕获回贴目标再显示（此刻前台还是用户正在用的窗口）
     let target = ActiveAppResolver::current_foreground_window_handle();
-    app.state.set_search_session(SearchSession {
+    let session = SearchSession {
+        session_id: crate::app_state::next_session_id(),
         target_window_hwnd: target,
-    });
+    };
+    app.state.set_search_session(session);
     let epoch = app.state.begin_search_activation();
-    info!("打开 Search，target_window={target:?}");
+    info!(
+        session_id = session.session_id,
+        target_window = ?target,
+        "打开 Search"
+    );
 
     let Some(win) = app.search.upgrade() else {
         app.state.end_search_activation();
@@ -340,7 +346,7 @@ pub fn hide(app: &App, restore_target: bool) {
     app.state.set_search_session(Default::default());
     // 未消费的预置伸缩闸随会话清理：不得泄漏到下一次打开的落地
     PRESET_RESIZE.with(|flag| flag.set(false));
-    info!("隐藏 Search，会话已清理");
+    info!(session_id = session.session_id, "隐藏 Search，会话已清理");
 }
 
 /// 键盘交给速贴面板（对齐 SEARCH_INPUT_SUSPEND_EVENT）
@@ -392,13 +398,17 @@ pub fn hide_for_editor(app: &App) {
         win.window()
             .set_position(slint::PhysicalPosition::new(-32000, -32000));
     }
-    info!("隐藏 Search（进入编辑器）");
+    info!(
+        session_id = app.state.search_session().session_id,
+        "隐藏 Search（进入编辑器）"
+    );
 }
 
 /// 从编辑器返回搜索：仅恢复窗口可见性与焦点，**不发会话开始**
 /// （对齐 restore_search_after_editor）——保留进入编辑器时的选中、
 /// 关键词与滚动位置，自然衔接原上下文
 pub fn restore_after_editor(app: &App) {
+    let session = app.state.search_session();
     let hwnd = app.state.search_hwnd.load(Ordering::SeqCst);
     if hwnd == 0 {
         return;
@@ -423,6 +433,7 @@ pub fn restore_after_editor(app: &App) {
     if let Err(error) = window_control::restore_window_and_focus(hwnd) {
         warn!("搜索窗口恢复焦点失败: {error}");
     }
+    info!(session_id = session.session_id, "从编辑器恢复 Search");
     // 上屏即滑入（同 open）
     win.set_enter_animated(true);
     win.set_enter_offset(0.0);
@@ -1189,7 +1200,10 @@ fn execute_paste(app: &App, id: &str, option: PasteOption) -> Result<(), AppErro
 
     let core = app.core().clone();
     let id = id.to_string();
+    let session_id = session.session_id;
+    let operation_id = paste_flow::next_paste_operation_id();
     thread::spawn(move || {
+        let started = Instant::now();
         let failure = match session.target_window_hwnd {
             Some(target_hwnd) => {
                 thread::sleep(RESTORE_DELAY);
@@ -1199,8 +1213,8 @@ fn execute_paste(app: &App, id: &str, option: PasteOption) -> Result<(), AppErro
                 if ActiveAppResolver::restore_foreground_window_with_focus(target_hwnd, None) {
                     if !admin_target {
                         thread::sleep(INJECT_DELAY);
-                        if !paste_support::trigger_ctrl_v() {
-                            warn!("搜索回贴 Ctrl+V 注入失败");
+                        if !paste_support::trigger_ctrl_v(session_id, operation_id) {
+                            warn!(session_id, operation_id, "搜索回贴 Ctrl+V 注入失败");
                             Some("未能自动粘贴。")
                         } else {
                             None
@@ -1209,23 +1223,53 @@ fn execute_paste(app: &App, id: &str, option: PasteOption) -> Result<(), AppErro
                         None
                     }
                 } else {
-                    warn!("搜索回贴恢复目标窗口失败");
+                    warn!(session_id, operation_id, "搜索回贴恢复目标窗口失败");
                     Some("未能切回目标窗口。")
                 }
             }
             None => {
-                warn!("搜索会话没有可恢复的目标窗口");
+                warn!(session_id, operation_id, "搜索会话没有可恢复的目标窗口");
                 Some("未找到需要粘贴的窗口。")
             }
         };
         if let Some(snapshot) = previous_clipboard {
-            let _ = paste_support::schedule_clipboard_restore(&core, snapshot, owner_hwnd);
+            if let Err(error) = paste_support::schedule_clipboard_restore(
+                &core,
+                snapshot,
+                owner_hwnd,
+                session_id,
+                operation_id,
+            ) {
+                warn!(session_id, operation_id, error = %error, "搜索上屏后安排剪贴板恢复失败");
+            }
         }
-        let _ = core.repository.mark_used(&id);
+        if let Err(error) = core.repository.mark_used(&id) {
+            warn!(session_id, operation_id, error = %error, "搜索上屏后更新条目使用时间失败");
+        }
+        if let Some(reason) = &failure {
+            warn!(
+                operation_id,
+                session_id,
+                outcome = "failed",
+                reason,
+                elapsed_ms = started.elapsed().as_millis(),
+                "搜索上屏流程失败"
+            );
+        } else {
+            info!(
+                operation_id,
+                session_id,
+                outcome = "success",
+                elapsed_ms = started.elapsed().as_millis(),
+                "搜索上屏流程完成"
+            );
+        }
         if let Some(reason) = failure.filter(|_| !admin_target) {
-            let _ = slint::invoke_from_event_loop(move || {
+            if let Err(error) = slint::invoke_from_event_loop(move || {
                 crate::tray::notify_failure(&format!("{reason}{failure_hint}"));
-            });
+            }) {
+                warn!(session_id, operation_id, error = %error, "搜索上屏结果回传 UI 失败");
+            }
         }
     });
     Ok(())
