@@ -16,6 +16,7 @@ use slint::{ComponentHandle, Model, VecModel};
 use tracing::{info, warn};
 
 use floatpaste_core::domain::clip_item::ClipItemDetail;
+use floatpaste_core::domain::error::AppError;
 use floatpaste_core::platform::windows::active_app::ActiveAppResolver;
 use floatpaste_core::platform::windows::picker_position::{
     work_area_from_point, ScreenPoint, ScreenRect,
@@ -222,6 +223,11 @@ fn show_editor(app: &App, session: EditorSession, anchor: Option<HostAnchor>) {
 
 /// 载入条目详情并填充界面（同步读库：单条查询延迟可忽略，省去加载态）
 fn load_session(app: &App, win: &EditorWindow, item_id: &str) {
+    win.set_is_text(false);
+    win.set_draft_text("".into());
+    win.set_saved_text("".into());
+    win.set_item_missing(false);
+    win.set_load_failed(false);
     win.set_error_text("".into());
     win.set_notice_text("".into());
     win.set_image_loading(false);
@@ -233,7 +239,10 @@ fn load_session(app: &App, win: &EditorWindow, item_id: &str) {
         Err(error) => {
             warn!("读取条目详情失败: {error}");
             win.set_has_session(true);
-            win.set_item_missing(true);
+            match error {
+                AppError::ItemNotFound => win.set_item_missing(true),
+                _ => win.set_load_failed(true),
+            }
             focus_loaded(win);
             return;
         }
@@ -458,7 +467,7 @@ pub fn save(app: &App) {
             // UI 侧 saved-text 必须同步回写，否则 is-dirty（draft!=saved）
             // 恒为真，保存后 Esc 仍会弹"未保存"确认框
             win.set_saved_text(draft.into());
-            show_notice(app, "已保存当前修改");
+            show_notice(app, "文本已保存");
             win.set_error_text("".into());
             refresh_lists(app);
         }
@@ -922,6 +931,14 @@ pub fn wire(app: &App) {
     refresh_edit_key_parts(app, &win);
 
     let app_cb = app.clone();
+    win.on_retry_clicked(move || {
+        if let (Some(win), Some(session)) = (app_cb.editor.upgrade(), app_cb.state.editor_session())
+        {
+            load_session(&app_cb, &win, &session.item_id);
+        }
+    });
+
+    let app_cb = app.clone();
     win.on_text_edited(move |text| {
         text_edited(&app_cb, text.as_str());
     });
@@ -1040,6 +1057,55 @@ pub fn wire(app: &App) {
         window_close_requested(&app_cb);
         slint::CloseRequestResponse::KeepWindowShown
     });
+}
+
+#[cfg(test)]
+pub(crate) mod load_error_tests {
+    use super::*;
+
+    /// 复用编辑后刷新段的临时库与窗口，不触碰系统剪贴板。
+    pub(crate) fn run(app: &App, win: &EditorWindow, path: &std::path::Path, item_id: &str) {
+        app.state.set_editor_session(Some(EditorSession {
+            item_id: item_id.into(),
+            ..Default::default()
+        }));
+        wire(app);
+        load_session(app, win, item_id);
+        assert!(win.get_is_text());
+
+        // 无记录与数据库读取错误必须进入不同状态；错误不能留下旧草稿可保存。
+        win.set_draft_text("未保存的旧草稿".into());
+        load_session(app, win, "missing-item");
+        assert!(win.get_item_missing());
+        assert!(!win.get_load_failed());
+        assert!(!win.get_is_dirty());
+        assert!(!win.get_is_text());
+
+        let connection = rusqlite::Connection::open(path).unwrap();
+        connection
+            .execute(
+                "UPDATE clip_items SET file_count = 'invalid' WHERE id = ?1",
+                [item_id],
+            )
+            .unwrap();
+        load_session(app, win, item_id);
+        assert!(!win.get_item_missing());
+        assert!(win.get_load_failed());
+        assert!(!win.get_is_text());
+
+        connection
+            .execute(
+                "UPDATE clip_items SET file_count = 0 WHERE id = ?1",
+                [item_id],
+            )
+            .unwrap();
+        win.invoke_retry_clicked();
+        assert!(!win.get_load_failed());
+        assert!(!win.get_item_missing());
+        assert!(win.get_is_text());
+        assert!(!win.get_draft_text().is_empty());
+        app.state.set_editor_session(None);
+    }
 }
 
 #[cfg(test)]

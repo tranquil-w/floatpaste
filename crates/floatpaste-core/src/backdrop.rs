@@ -25,6 +25,28 @@ pub const BLUR_RADIUS_LOGICAL: f32 = 30.0;
 /// 0.85+ 浅色塌到 9 阶，快照取色实测）
 pub const ACRYLIC_TINT_ALPHA: f32 = 0.80;
 
+/// Acrylic 叠色：深色只在暗背景加入最多 5% 白色亮度底。
+/// 模糊后的背景亮度从 30 到 130 时渐退提亮，避免亮背景叠出白雾；
+/// 固定透底比例，保留背景色相。浅色直接使用主题 tint。
+pub fn tint_acrylic(px: &mut [u8], rgb: [u8; 3], is_dark: bool) {
+    if !is_dark {
+        tint_opaque(px, rgb, ACRYLIC_TINT_ALPHA);
+        return;
+    }
+    let dark_tint = rgb.map(|c| (c as f32 * 0.95 + 255.0 * 0.05).round());
+    for pixel in px.chunks_exact_mut(4) {
+        let brightness =
+            0.2126 * pixel[0] as f32 + 0.7152 * pixel[1] as f32 + 0.0722 * pixel[2] as f32;
+        let lift = 1.0 - ((brightness - 30.0) / 100.0).clamp(0.0, 1.0);
+        for c in 0..3 {
+            let tint = rgb[c] as f32 + (dark_tint[c] - rgb[c] as f32) * lift;
+            pixel[c] = (pixel[c] as f32 * (1.0 - ACRYLIC_TINT_ALPHA) + tint * ACRYLIC_TINT_ALPHA)
+                .round() as u8;
+        }
+        pixel[3] = 255;
+    }
+}
+
 /// Mica 档速贴烘焙的 tint alpha（明暗同值）。Mica 材质本身不透明
 /// （壁纸取色染色，不透窗口背后的内容），可激活窗侧 DWM Mica 即如此；
 /// 速贴的近似 = 近不透明的烘焙底：92% tint 盖住模糊底图，只留 8% 色
@@ -300,6 +322,29 @@ mod tests {
         assert_eq!(px[1], 128);
         assert_eq!(px[3], 255, "tint 后应不透明");
         assert_eq!(px[7], 255);
+    }
+
+    #[test]
+    fn acrylic_preserves_dark_background_and_reduces_haze_on_bright_background() {
+        let rgb = [24, 25, 27];
+        let mut px = [30, 30, 30, 255, 112, 160, 170, 255];
+        tint_acrylic(&mut px, rgb, true);
+        assert_eq!(&px[..4], &[35, 36, 36, 255], "暗部接近搜索窗口的中性灰底");
+        assert_eq!(&px[4..], &[42, 52, 56, 255], "偏亮彩底不叠白色提亮");
+
+        let mut previous = [0; 3];
+        for gray in 0..=255u8 {
+            let mut pixel = [gray, gray, gray, 0];
+            tint_acrylic(&mut pixel, rgb, true);
+            assert!((0..3).all(|c| pixel[c] >= previous[c]), "灰阶渐变不得反转");
+            previous.copy_from_slice(&pixel[..3]);
+        }
+
+        let mut light = [112, 160, 170, 0];
+        let mut expected = light;
+        tint_acrylic(&mut light, [255; 3], false);
+        tint_opaque(&mut expected, [255; 3], ACRYLIC_TINT_ALPHA);
+        assert_eq!(light, expected, "浅色 Acrylic 保持原有叠色");
     }
 
     #[test]

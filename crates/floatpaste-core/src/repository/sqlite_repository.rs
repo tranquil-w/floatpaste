@@ -230,9 +230,7 @@ impl SqliteRepository {
                 map_summary_row,
             )
             .map_err(|error| match error {
-                rusqlite::Error::QueryReturnedNoRows => {
-                    AppError::Message("未找到对应剪贴记录".to_string())
-                }
+                rusqlite::Error::QueryReturnedNoRows => AppError::ItemNotFound,
                 other => AppError::Sqlite(other),
             })
     }
@@ -252,9 +250,7 @@ impl SqliteRepository {
         statement
             .query_row([id], map_detail_row)
             .map_err(|error| match error {
-                rusqlite::Error::QueryReturnedNoRows => {
-                    AppError::Message("未找到对应剪贴记录".to_string())
-                }
+                rusqlite::Error::QueryReturnedNoRows => AppError::ItemNotFound,
                 other => AppError::Sqlite(other),
             })
     }
@@ -477,7 +473,7 @@ impl SqliteRepository {
                 |row| row.get::<_, i64>(0),
             )? > 0;
             if !exists {
-                return Err(AppError::Message("未找到对应剪贴记录".to_string()));
+                return Err(AppError::ItemNotFound);
             }
 
             transaction.execute("DELETE FROM clip_item_tags WHERE item_id = ?1", [id])?;

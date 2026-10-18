@@ -489,7 +489,7 @@ component ToggleRow inherits Rectangle {
     // 圆角对齐卡圆角（首末行贴卡缘，悬停底即卡角）
     border-radius: Metrics.radius-sm;
     background: ta.has-hover && !root.disabled
-        ? Theme.fg-default.with-alpha(Theme.is-dark ? 0.06 : 0.04) : transparent;
+        ? Theme.hover-bg : transparent;
     animate background { duration: Motion.dur-color; easing: Motion.ease; }
     ta := TouchArea {
         enabled: !root.disabled;
@@ -598,7 +598,7 @@ component SectionHeader inherits Rectangle {
             font-weight: Metrics.weight-semibold;
             horizontal-alignment: left;
         }
-        Text {
+        if (root.description != ""): Text {
             text: root.description;
             color: Theme.fg-muted;
             font-size: Metrics.text-xs;
@@ -708,7 +708,7 @@ component TagRow inherits Rectangle {
             border-color: Theme.border-default;
             opacity: rename-ta.pressed ? 0.85 : 1.0;
             background: rename-ta.has-hover
-                ? Theme.fg-default.with-alpha(Theme.is-dark ? 0.06 : 0.04) : transparent;
+                ? Theme.hover-bg : transparent;
             animate background { duration: Motion.dur-color; easing: Motion.ease; }
             Text {
                 text: "重命名";
@@ -732,7 +732,7 @@ component TagRow inherits Rectangle {
             border-color: Theme.border-default;
             opacity: del-ta.pressed ? 0.85 : 1.0;
             background: del-ta.has-hover
-                ? Theme.fg-default.with-alpha(Theme.is-dark ? 0.06 : 0.04) : transparent;
+                ? Theme.hover-bg : transparent;
             animate background { duration: Motion.dur-color; easing: Motion.ease; }
             Text {
                 text: "删除";
@@ -776,13 +776,13 @@ component TagRow inherits Rectangle {
             }
         }
         if (root.row-data.state == 1 && root.row-data.conflict): Text {
-            text: "与现有标签同名，保存后将合并";
+            text: "将合并到标签「" + root.draft + "」";
             color: Theme.fg-subtle;
             font-size: Metrics.text-xs;
             vertical-alignment: center;
         }
         if (root.row-data.state == 1): Rectangle {
-            width: 48px;
+            width: root.row-data.conflict ? 80px : 48px;
             height: 28px;
             border-radius: Metrics.radius-lg;
             opacity: save-tag-ta.pressed ? 0.85 : 1.0;
@@ -790,7 +790,7 @@ component TagRow inherits Rectangle {
                 ? Theme.accent-hover : Theme.accent-emphasis;
             animate background { duration: Motion.dur-color; easing: Motion.ease; }
             Text {
-                text: "保存";
+                text: root.row-data.conflict ? "合并标签" : "保存";
                 color: Theme.fg-on-emphasis;
                 font-size: Metrics.text-xs;
                 font-weight: Metrics.weight-semibold;
@@ -809,7 +809,7 @@ component TagRow inherits Rectangle {
             border-color: Theme.border-default;
             opacity: cancel-rename-ta.pressed ? 0.85 : 1.0;
             background: cancel-rename-ta.has-hover
-                ? Theme.fg-default.with-alpha(Theme.is-dark ? 0.06 : 0.04) : transparent;
+                ? Theme.hover-bg : transparent;
             animate background { duration: Motion.dur-color; easing: Motion.ease; }
             Text {
                 text: "取消";
@@ -834,7 +834,7 @@ component TagRow inherits Rectangle {
                 vertical-alignment: center;
             }
             if (root.row-data.count > 0): Text {
-                text: "将从 " + root.row-data.count + " 个条目中移除该标签。";
+                text: "移除 " + root.row-data.count + " 个条目上的标签，条目内容保留。";
                 color: Theme.fg-subtle;
                 font-size: Metrics.text-xs;
                 wrap: word-wrap;
@@ -870,7 +870,7 @@ component TagRow inherits Rectangle {
             border-color: Theme.border-default;
             opacity: cancel-del-ta.pressed ? 0.85 : 1.0;
             background: cancel-del-ta.has-hover
-                ? Theme.fg-default.with-alpha(Theme.is-dark ? 0.06 : 0.04) : transparent;
+                ? Theme.hover-bg : transparent;
             animate background { duration: Motion.dur-color; easing: Motion.ease; }
             Text {
                 text: "取消";
@@ -1312,7 +1312,7 @@ export component SettingsWindow inherits Window {
                             background: root.active-section == idx
                                 ? Theme.layer-fill
                                 : (nav-ta.has-hover
-                                    ? Theme.fg-default.with-alpha(Theme.is-dark ? 0.05 : 0.03)
+                                    ? Theme.hover-bg
                                     : transparent);
                             animate background { duration: Motion.dur-color; easing: Motion.ease; }
                             nav-ta := TouchArea {
@@ -1411,12 +1411,11 @@ export component SettingsWindow inherits Window {
                                 spacing: 8px;
                                 SectionHeader {
                                     title: "通用";
-                                    description: "调整历史容量与速贴列表承载范围，平衡性能和浏览密度。";
                                 }
                                 RowGroup {
                                     SettingRow {
-                                        title: "历史上限";
-                                        description: "超出后自动清理最早的条目。";
+                                        title: "历史保留数量";
+                                        description: "定期清理超出上限的未收藏条目，优先保留最近复制或粘贴的内容。收藏条目不计入上限。";
                                         Rectangle {
                                             width: 96px;
                                             NumberInput {
@@ -1430,8 +1429,8 @@ export component SettingsWindow inherits Window {
                                 }
                                 RowGroup {
                                     SettingRow {
-                                        title: "速贴面板条目数";
-                                        description: "速贴面板一次可滚动浏览的条目数，数字快捷键只覆盖前 9 条。";
+                                        title: "速贴条目数";
+                                        description: "速贴中最多可浏览的条目数。启用数字快捷键时，1–9 对应前 9 条。";
                                         Rectangle {
                                             width: 96px;
                                             NumberInput {
@@ -1453,7 +1452,7 @@ export component SettingsWindow inherits Window {
                                 spacing: 8px;
                                 SectionHeader {
                                     title: "行为";
-                                    description: "控制开机启动、监听状态、上屏与速贴面板显示位置。";
+                                    description: "设置启动方式、剪贴监听与上屏行为。";
                                 }
                                 RowGroup {
                                     ToggleRow {
@@ -1465,7 +1464,7 @@ export component SettingsWindow inherits Window {
                                     RowDivider { }
                                     ToggleRow {
                                         title: "开机时静默启动";
-                                        description: "启动后不主动打断当前工作流。";
+                                        description: "开机启动时在后台运行，不主动打开速贴。";
                                         checked: root.silent-on-startup;
                                         disabled: !root.launch-on-startup;
                                         nested: true;
@@ -1544,7 +1543,7 @@ export component SettingsWindow inherits Window {
                                 RowGroup {
                                     ToggleRow {
                                         title: "上屏后恢复剪贴板";
-                                        description: "上屏完成后恢复原有剪贴板内容，减少对当前工作流的干扰。";
+                                        description: "上屏后恢复此前的剪贴板内容；未能自动粘贴时也会恢复。";
                                         checked: root.restore-clipboard;
                                         toggled(checked) => { root.restore-clipboard-toggled(checked); }
                                     }
@@ -1578,16 +1577,16 @@ export component SettingsWindow inherits Window {
                                 RowGroup {
                                     // 速贴窗口显示位置
                                     SettingRow {
-                                        title: "速贴面板显示位置";
-                                        description: ["默认推荐，速贴面板会贴近当前鼠标所在位置弹出。",
-                                            "保留上次拖动或关闭时的位置；首次使用会落在屏幕中心。",
-                                            "优先跟随当前输入光标；如果系统拿不到光标位置，会退回鼠标位置。"][root.position-mode];
+                                        title: "速贴显示位置";
+                                        description: ["在鼠标附近打开速贴。",
+                                            "记住上次拖动或关闭时的位置，首次使用时在屏幕中央打开。",
+                                            "在输入光标附近打开速贴，无法获取输入光标时跟随鼠标。"][root.position-mode];
                                         Rectangle {
                                             width: seg-position.width;
                                             seg-position := Segmented {
                                                 x: 0;
                                                 y: (parent.height - self.height) / 2;
-                                                options: ["鼠标位置", "上次关闭时的位置", "光标所在位置"];
+                                                options: ["鼠标附近", "记住上次位置", "输入光标附近"];
                                                 value <=> root.position-mode;
                                                 selected(idx) => { root.position-mode-selected(idx); }
                                             }
@@ -1604,7 +1603,6 @@ export component SettingsWindow inherits Window {
                                 spacing: 8px;
                                 SectionHeader {
                                     title: "外观";
-                                    description: "管理界面主题与背景材质，保证日常使用观感一致。";
                                 }
                                 RowGroup {
                                     // 界面模式
@@ -1632,15 +1630,15 @@ export component SettingsWindow inherits Window {
                                     // 烘焙毛玻璃、以 tint 深浅分档
                                     SettingRow {
                                         title: "背景材质";
-                                        description: ["全部窗口使用不透明实底。",
-                                            "窗口透出以桌面壁纸染色的 Mica 材质底；速贴面板为近实底的沉稳色面。",
-                                            "窗口透出带模糊的 Acrylic 毛玻璃；速贴面板为通透的毛玻璃。"][root.window-material];
+                                        description: ["背景不透明。",
+                                            "柔和的壁纸色彩背景，速贴接近不透明。",
+                                            "半透明的毛玻璃背景。"][root.window-material];
                                         Rectangle {
                                             width: seg-material.width;
                                             seg-material := Segmented {
                                                 x: 0;
                                                 y: (parent.height - self.height) / 2;
-                                                options: ["无", "Mica", "Acrylic"];
+                                                options: ["纯色", "Mica", "Acrylic"];
                                                 value <=> root.window-material;
                                                 selected(idx) => { root.window-material-selected(idx); }
                                             }
@@ -1664,7 +1662,7 @@ export component SettingsWindow inherits Window {
                                                 font-weight: Metrics.weight-medium;
                                             }
                                             Text {
-                                                text: "配色方案来自经过验证的公开色板，明暗模式均保证可读性。";
+                                                text: "选择喜欢的配色，预览随浅色或深色模式变化。";
                                                 color: Theme.fg-muted;
                                                 font-size: Metrics.text-xs;
                                                 wrap: word-wrap;
@@ -1820,13 +1818,13 @@ export component SettingsWindow inherits Window {
                                 spacing: 8px;
                                 SectionHeader {
                                     title: "快捷键";
-                                    description: "全局唤起与会话动作键位均可自定义；此处展示全部键位，冲突时不会保存。";
+                                    description: "自定义全局快捷键与列表操作快捷键。编辑窗口的 Ctrl+S 和 Esc 为固定键位。";
                                 }
                                 RowGroup {
                                     // 速贴唤起（旧版右列 w-56 = 224px 固定宽）
                                     SettingRow {
-                                        title: "速贴唤起";
-                                        description: "全局唤出速贴面板的组合键。";
+                                        title: "打开速贴";
+                                        description: "在任意应用中打开或收起速贴。";
                                         Rectangle {
                                             width: 224px;
                                             sc1-ctrl := VerticalLayout {
@@ -1862,7 +1860,7 @@ export component SettingsWindow inherits Window {
                                     RowDivider { }
                                     ToggleRow {
                                         title: "Win+V 唤起速贴";
-                                        description: "接管系统 Win+V：开启后 Win+V 与上方快捷键一样唤起速贴面板，系统剪贴板历史同时停用。需重启资源管理器生效；关闭开关并重启资源管理器即恢复系统默认。";
+                                        description: "用 Win+V 打开速贴，同时停用系统剪贴板历史。开启或关闭均需重启资源管理器。";
                                         checked: root.winv-enabled;
                                         nested: true;
                                         toggled(checked) => { root.winv-toggled(checked); }
@@ -1874,7 +1872,7 @@ export component SettingsWindow inherits Window {
                                     // 对齐；冲突提示在框下
                                     row-sc2 := SettingRow {
                                         title: "搜索窗口";
-                                        description: "为搜索窗口单独保留一组更适合检索场景的快捷键。";
+                                        description: "在任意应用中打开或收起搜索窗口，可单独停用。";
                                         Rectangle {
                                             width: 46px + 16px + 224px;
                                             sc2-ctrl := VerticalLayout {
@@ -2000,7 +1998,7 @@ export component SettingsWindow inherits Window {
                                 RowGroup {
                                     ToggleRow {
                                         title: "数字键 1-9 直达";
-                                        description: "速贴面板打开时按 1-9 直接上屏对应条目。数字键是无修饰的全局快捷键，若与其他软件冲突可关闭。";
+                                        description: "速贴打开时，按 1–9 上屏对应条目。与其他应用的数字键冲突时可关闭。";
                                         checked: root.picker-digit-enabled;
                                         toggled(checked) => { root.picker-digit-toggled(checked); }
                                     }
@@ -2010,7 +2008,7 @@ export component SettingsWindow inherits Window {
                                     // 编辑窗口迭代中一并处理）
                                     SettingRow {
                                         title: "编辑窗口保存";
-                                        description: "保存正在编辑的内容（关闭时未保存会先询问）。";
+                                        description: "保存文本修改；关闭时若文本未保存，会先询问。标签更改自动保存。";
                                         Rectangle {
                                             width: 120px;
                                             HorizontalLayout {
@@ -2028,7 +2026,7 @@ export component SettingsWindow inherits Window {
                                 RowGroup {
                                     SettingRow {
                                         title: "编辑窗口关闭";
-                                        description: "关闭编辑窗口返回原面板。";
+                                        description: "关闭编辑窗口，返回速贴或搜索窗口。";
                                         Rectangle {
                                             width: 120px;
                                             HorizontalLayout {
@@ -2062,13 +2060,13 @@ export component SettingsWindow inherits Window {
                                         padding-bottom: 12px;
                                         spacing: 2px;
                                         Text {
-                                            text: "排除指定进程";
+                                            text: "不保存这些应用的复制内容";
                                             color: Theme.fg-default;
                                             font-size: Metrics.text-sm;
                                             font-weight: Metrics.weight-medium;
                                         }
                                         Text {
-                                            text: "每行填写一个可执行文件名，来自这些应用的复制内容不会进入历史。建议填写完整进程名，避免误伤其他应用。";
+                                            text: "每行填写一个程序文件名，建议包含 .exe，例如 KeePass.exe。";
                                             color: Theme.fg-muted;
                                             font-size: Metrics.text-xs;
                                             wrap: word-wrap;
@@ -2216,7 +2214,7 @@ export component SettingsWindow inherits Window {
                                 RowGroup {
                                     SettingRow {
                                         title: "项目主页";
-                                        description: "查看源码、提交问题与发版说明。";
+                                        description: "查看源码、提交问题或阅读发版说明。";
                                         Rectangle {
                                             width: about-page-btn.width;
                                             about-page-btn := Rectangle {
@@ -2352,7 +2350,7 @@ export component SettingsWindow inherits Window {
                                         }
                                     }
                                     Rectangle {
-                                        width: 104px;
+                                        width: winv-restart-text.preferred-width + 24px;
                                         height: 36px;
                                         border-radius: Metrics.radius-md;
                                         opacity: winv-dlg-restart-ta.pressed ? 0.85 : 1.0;
@@ -2363,8 +2361,8 @@ export component SettingsWindow inherits Window {
                                             mouse-cursor: default;
                                             clicked() => { root.winv-dialog-restart(); }
                                         }
-                                        Text {
-                                            text: "立即重启";
+                                        winv-restart-text := Text {
+                                            text: root.winv-enabled ? "恢复并重启资源管理器" : "启用并重启资源管理器";
                                             color: Theme.fg-on-emphasis;
                                             font-size: Metrics.text-sm;
                                             font-weight: Metrics.weight-semibold;

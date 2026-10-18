@@ -42,9 +42,10 @@ use windows::{
             HiDpi::GetDpiForWindow,
             WindowsAndMessaging::{
                 CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, EnumWindows,
-                FindWindowW, GetForegroundWindow, GetWindowRect, GetWindowTextW, IsWindowVisible,
-                PeekMessageW, RegisterClassW, ShowWindow, TranslateMessage, UnregisterClassW, MSG,
-                PM_REMOVE, SW_SHOW, WINDOW_EX_STYLE, WNDCLASSW, WS_OVERLAPPEDWINDOW,
+                GetForegroundWindow, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId,
+                IsWindowVisible, PeekMessageW, RegisterClassW, ShowWindow, TranslateMessage,
+                UnregisterClassW, MSG, PM_REMOVE, SW_SHOW, WINDOW_EX_STYLE, WNDCLASSW,
+                WS_OVERLAPPEDWINDOW,
             },
         },
     },
@@ -162,33 +163,26 @@ fn monitoring_paused(db_path: &Path) -> bool {
 
 /// 速贴显隐是「屏内/屏外停屏」语义而非 SW_HIDE：隐藏=平移到 (-32000,-32000)，
 /// Win32 可见性恒真。以窗口左上角是否落在屏内判定面板开合
-fn picker_onscreen() -> bool {
-    let title: Vec<u16> = PICKER_TITLE
-        .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect();
-    unsafe {
-        match FindWindowW(PCWSTR::null(), PCWSTR::from_raw(title.as_ptr())) {
-            Ok(hwnd) if !hwnd.is_invalid() => {
-                let mut rect = RECT::default();
-                GetWindowRect(hwnd, &mut rect).is_ok()
-                    && rect.left > OFFSCREEN_THRESHOLD
-                    && rect.top > OFFSCREEN_THRESHOLD
-            }
-            _ => false,
-        }
-    }
+fn picker_onscreen(process_id: u32) -> bool {
+    onscreen_window(PICKER_TITLE, process_id).is_some()
 }
 
-struct SearchEnumState {
+struct WindowEnumState {
+    title: &'static str,
+    process_id: u32,
     found: Option<(isize, RECT)>,
 }
 
-unsafe extern "system" fn enum_onscreen_search_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
-    let state = &mut *(lparam.0 as *mut SearchEnumState);
+unsafe extern "system" fn enum_onscreen_window_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    let state = &mut *(lparam.0 as *mut WindowEnumState);
+    let mut process_id = 0;
+    GetWindowThreadProcessId(hwnd, Some(&mut process_id));
+    if process_id != state.process_id {
+        return BOOL::from(true);
+    }
     let mut text = [0u16; 64];
     let len = GetWindowTextW(hwnd, &mut text);
-    if len > 0 && String::from_utf16_lossy(&text[..len as usize]) == SEARCH_TITLE {
+    if len > 0 && String::from_utf16_lossy(&text[..len as usize]) == state.title {
         let mut rect = RECT::default();
         // 屏内过滤必须叠加可见性：winit 预建的隐藏窗口自进程启动起就停在
         // 级联默认位（CI 实测 top 130~156），矩形上过得了停屏位阈值；不看
@@ -197,6 +191,7 @@ unsafe extern "system" fn enum_onscreen_search_proc(hwnd: HWND, lparam: LPARAM) 
         // 却已拿默认位 130 失败）。装配后的搜索窗走 Slint show + 停屏平移，
         // Win32 恒可见，可见性过滤不影响正常路径
         if GetWindowRect(hwnd, &mut rect).is_ok()
+            && rect.left > OFFSCREEN_THRESHOLD
             && rect.top > OFFSCREEN_THRESHOLD
             && IsWindowVisible(hwnd).as_bool()
         {
@@ -207,18 +202,24 @@ unsafe extern "system" fn enum_onscreen_search_proc(hwnd: HWND, lparam: LPARAM) 
     BOOL::from(true)
 }
 
-/// 屏内搜索窗的句柄与几何。双实例并存（主场景实例 + 搜索窗场景实例）时
-/// 存在同标题的停屏搜索窗，FindWindowW 返回哪个不确定，必须枚举并按
-/// 屏内过滤；找不到（尚未打开/已停屏）返回 None
-fn onscreen_search_window() -> Option<(isize, RECT)> {
-    let mut state = SearchEnumState { found: None };
+/// 按进程、标题与屏内可见性查找，隔离日常实例及同场景的其他被测实例。
+fn onscreen_window(title: &'static str, process_id: u32) -> Option<(isize, RECT)> {
+    let mut state = WindowEnumState {
+        title,
+        process_id,
+        found: None,
+    };
     unsafe {
         let _ = EnumWindows(
-            Some(enum_onscreen_search_proc),
+            Some(enum_onscreen_window_proc),
             LPARAM(&mut state as *mut _ as isize),
         );
     }
     state.found
+}
+
+fn onscreen_search_window(process_id: u32) -> Option<(isize, RECT)> {
+    onscreen_window(SEARCH_TITLE, process_id)
 }
 
 /// 搜索窗在自身 DPI 下的满高（物理像素）：窗口逻辑 max 620px，首开无
@@ -529,6 +530,7 @@ fn app_e2e_smoke_flow() {
         original_text: original_text.clone(),
         data_root: data_root.clone(),
     };
+    let picker_pid = cleanup.child.as_ref().unwrap().id();
 
     // ── 场景 1：保留清理接线（启动 → 延迟 → 首轮溢出清理）──
     cleanup.assert_running("保留清理");
@@ -557,7 +559,9 @@ fn app_e2e_smoke_flow() {
         wait_until(Duration::from_secs(10), Duration::from_millis(200), || {
             active_full_text_exists(&db_path, &marker)
         }),
-        "复制文本后应经剪贴板监听录入"
+        "复制文本后应经剪贴板监听录入；当前前台进程={:?}，剪贴板仍为测试内容={}",
+        floatpaste_core::platform::windows::active_app::ActiveAppResolver::current_foreground_process_name(),
+        clipboard.get_text().is_ok_and(|text| text == marker)
     );
 
     // ── 场景 3：重复复制去重（bump 置顶而非新增）──
@@ -605,17 +609,15 @@ fn app_e2e_smoke_flow() {
     cleanup.assert_running("唤醒面板");
     wake_via_second_launch(&envs);
     assert!(
-        wait_until(
-            Duration::from_secs(10),
-            Duration::from_millis(150),
-            picker_onscreen
-        ),
+        wait_until(Duration::from_secs(10), Duration::from_millis(150), || {
+            picker_onscreen(picker_pid)
+        }),
         "唤醒事件后速贴面板应落位屏内"
     );
     wake_via_second_launch(&envs);
     assert!(
         wait_until(Duration::from_secs(10), Duration::from_millis(150), || {
-            !picker_onscreen()
+            !picker_onscreen(picker_pid)
         }),
         "再次唤醒应切换关闭面板（平移回屏外停屏位）"
     );
@@ -688,11 +690,9 @@ fn app_e2e_smoke_flow() {
     cleanup.assert_running("收藏切换");
     wake_via_second_launch(&envs);
     assert!(
-        wait_until(
-            Duration::from_secs(10),
-            Duration::from_millis(150),
-            picker_onscreen
-        ),
+        wait_until(Duration::from_secs(10), Duration::from_millis(150), || {
+            picker_onscreen(picker_pid)
+        }),
         "收藏场景前置：唤醒事件后速贴面板应落位屏内"
     );
     let assert_favorited = |text: &str, expected: bool, stage: &str| {
@@ -725,7 +725,7 @@ fn app_e2e_smoke_flow() {
     wake_via_second_launch(&envs);
     assert!(
         wait_until(Duration::from_secs(10), Duration::from_millis(150), || {
-            !picker_onscreen()
+            !picker_onscreen(picker_pid)
         }),
         "收藏场景收尾：应关闭面板（平移回屏外停屏位）"
     );
@@ -771,6 +771,7 @@ fn app_e2e_smoke_flow() {
             original_text: None,
             data_root: search_root,
         };
+        let search_pid = search_cleanup.child.as_ref().unwrap().id();
 
         // 场景 8 前置：目标窗口持前台后再开窗，被测实例捕获的会话目标即它。
         // 无人值守会话拿不到前台（前台锁定策略）时场景 8 整段跳过
@@ -796,24 +797,24 @@ fn app_e2e_smoke_flow() {
         // 屏内落位（首开无历史基线：起步高度=满高，按光标所在工作区居中）
         assert!(
             wait_until(Duration::from_secs(10), Duration::from_millis(150), || {
-                onscreen_search_window().is_some()
+                onscreen_search_window(search_pid).is_some()
             }),
             "搜索窗应落位屏内"
         );
-        let (hwnd, _) = onscreen_search_window().unwrap();
+        let (hwnd, _) = onscreen_search_window(search_pid).unwrap();
         let full_height = search_window_full_height(hwnd);
         let baseline_top = expected_search_top_at_full_height(full_height);
 
         // 落地收缩到 3 行：起步满高 620 逻辑，落地整档更矮（阈值 550 逻辑）
         assert!(
             wait_until(Duration::from_secs(10), Duration::from_millis(150), || {
-                onscreen_search_window()
+                onscreen_search_window(search_pid)
                     .map(|(_, rect)| (rect.bottom - rect.top) < full_height * 550 / 620)
                     .unwrap_or(false)
             }),
             "矮数据集落地后搜索窗高度应收缩到满高以下"
         );
-        let (_, shrunk) = onscreen_search_window().unwrap();
+        let (_, shrunk) = onscreen_search_window(search_pid).unwrap();
         assert_eq!(
             shrunk.top, baseline_top,
             "落地收缩不得移动上边沿（顶边锚定，保持开窗居中基准）"
@@ -849,7 +850,7 @@ fn app_e2e_smoke_flow() {
             );
             assert!(
                 wait_until(Duration::from_secs(5), Duration::from_millis(100), || {
-                    onscreen_search_window().is_none()
+                    onscreen_search_window(search_pid).is_none()
                 }),
                 "Esc 后搜索窗应停屏（平移回屏外）"
             );
@@ -898,7 +899,7 @@ fn app_e2e_smoke_flow() {
         );
         assert!(
             wait_until(Duration::from_secs(10), Duration::from_millis(150), || {
-                onscreen_search_window().is_some()
+                onscreen_search_window(search_pid).is_some()
             }),
             "删除场景前置：搜索窗应落位屏内"
         );
@@ -907,7 +908,7 @@ fn app_e2e_smoke_flow() {
         let full = search_window_full_height(hwnd);
         assert!(
             wait_until(Duration::from_secs(10), Duration::from_millis(150), || {
-                onscreen_search_window()
+                onscreen_search_window(search_pid)
                     .map(|(_, rect)| (rect.bottom - rect.top) < full * 550 / 620)
                     .unwrap_or(false)
             }),

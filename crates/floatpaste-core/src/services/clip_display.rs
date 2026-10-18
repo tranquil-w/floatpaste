@@ -6,6 +6,33 @@
 use crate::domain::clip_item::ClipItemSummary;
 use crate::services::time_format::format_relative_time_or_unused;
 
+/// 无结果时优先解释关键词与筛选，再根据监听状态引导下一步。
+/// 动作码：0=无，1=清除关键词，2=清除筛选。
+pub fn search_empty_state(
+    keyword: &str,
+    has_filters: bool,
+    monitoring_paused: bool,
+) -> (String, String, i32) {
+    let (title, description, action) = if !keyword.trim().is_empty() {
+        ("未找到匹配条目", "尝试调整搜索关键词", 1)
+    } else if has_filters {
+        ("当前筛选下暂无条目", "尝试切换其他筛选或复制更多内容", 2)
+    } else if monitoring_paused {
+        (
+            "监听已暂停",
+            "在托盘菜单中恢复监听后，新复制的内容才会保存。",
+            0,
+        )
+    } else {
+        (
+            "暂无剪贴板条目",
+            "复制文本、图片或文件后，会显示在这里。",
+            0,
+        )
+    };
+    (title.into(), description.into(), action)
+}
+
 /// 类型徽章文案（对齐旧版 getClipTypeLabel）：文件类按「文件/文件夹」
 /// 组成细分，目录数以文件数为上限（脏数据兜底）。
 pub fn clip_type_label(item: &ClipItemSummary) -> String {
@@ -85,8 +112,20 @@ pub fn format_file_size(bytes: Option<i64>) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_meta, clip_type_label, format_file_size};
+    use super::{build_meta, clip_type_label, format_file_size, search_empty_state};
     use crate::domain::clip_item::ClipItemSummary;
+
+    #[test]
+    fn empty_state_prioritizes_keyword_then_filters_before_monitoring() {
+        assert_eq!(search_empty_state(" abc ", true, true).2, 1);
+        assert_eq!(search_empty_state("", true, true).2, 2);
+        let paused = search_empty_state("", false, true);
+        assert_eq!(paused.0, "监听已暂停");
+        assert_eq!(paused.2, 0);
+        let ready = search_empty_state("  ", false, false);
+        assert_eq!(ready.0, "暂无剪贴板条目");
+        assert_eq!(ready.2, 0);
+    }
 
     fn item_of(kind: &str, file_count: i32, directory_count: i32) -> ClipItemSummary {
         ClipItemSummary {

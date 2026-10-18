@@ -29,7 +29,6 @@ pub struct PaletteScale {
     pub danger: &'static str,
     pub warning: &'static str,
     pub done: &'static str,
-    pub favorite: &'static str,
 }
 
 /// 默认预设：Radix Colors slate 中性阶 + 色相阶（slate.css / slate-dark.css）
@@ -48,7 +47,6 @@ const DEFAULT_LIGHT: PaletteScale = PaletteScale {
     danger: "#e5484d",
     warning: "#f76b15",
     done: "#8e4ec6",
-    favorite: "#f76b15",
 };
 
 const DEFAULT_DARK: PaletteScale = PaletteScale {
@@ -66,7 +64,6 @@ const DEFAULT_DARK: PaletteScale = PaletteScale {
     danger: "#ec5d5e",
     warning: "#ff801f",
     done: "#9a5cd0",
-    favorite: "#ff801f",
 };
 
 /// Catppuccin Latte / Mocha（catppuccin/palette v1.8）
@@ -85,7 +82,6 @@ const CATPPUCCIN_LIGHT: PaletteScale = PaletteScale {
     danger: "#d20f39",
     warning: "#df8e1d",
     done: "#8839ef",
-    favorite: "#df8e1d",
 };
 
 const CATPPUCCIN_DARK: PaletteScale = PaletteScale {
@@ -103,7 +99,6 @@ const CATPPUCCIN_DARK: PaletteScale = PaletteScale {
     danger: "#f38ba8",
     warning: "#f9e2af",
     done: "#cba6f7",
-    favorite: "#f9e2af",
 };
 
 /// Tokyo Night day / night（folke/tokyonight.nvim 官方 hex）
@@ -122,7 +117,6 @@ const TOKYO_NIGHT_LIGHT: PaletteScale = PaletteScale {
     danger: "#f52a65",
     warning: "#b15c00",
     done: "#9854f1",
-    favorite: "#b15c00",
 };
 
 const TOKYO_NIGHT_DARK: PaletteScale = PaletteScale {
@@ -140,7 +134,6 @@ const TOKYO_NIGHT_DARK: PaletteScale = PaletteScale {
     danger: "#f7768e",
     warning: "#e0af68",
     done: "#9d7cd8",
-    favorite: "#e0af68",
 };
 
 /// 预设 id（与设置 themePreset 字段对应）
@@ -553,14 +546,15 @@ pub struct ThemeTokens {
     /// 拉开亮度差），深色取 canvas_default（近黑，层底变亮会整体发灰）
     pub card_layer: &'static str,
 
-    /// 浮起卡面（速贴行卡）：浅色取 surface 纯白，深色取 canvas_subtle
-    /// 微亮——深色 surface 亮灰卡实测发灰发闷，用户否决。卡亮于底一档
-    /// 才浮得起；设置窗卡片不走本 token（半透明层填充，见 settings.slint）
-    pub card_face: &'static str,
+    /// 浮起卡面：浅色取 surface；深色须略亮于 canvas，原色阶低于
+    /// canvas 时由 canvas 向 surface 派生，避免实卡出现凹陷层次。
+    pub card_face: String,
 
     pub fg_default: String,
     pub fg_muted: String,
     pub fg_subtle: String,
+    /// 列表来源、时间与溢出计数，按卡面、玻璃与交互背景独立校正。
+    pub fg_metadata: String,
     pub fg_on_emphasis: String,
 
     pub accent_fg: String,
@@ -576,6 +570,10 @@ pub struct ThemeTokens {
     /// （速贴同款前景通道），强调色不铺选中大底
     pub selected_bg_rgb: [u8; 3],
     pub selected_bg_alpha: f32,
+
+    /// 中性悬停叠层：正文墨色，浅色压暗 4% / 深色提亮 6%。
+    pub hover_bg_rgb: [u8; 3],
+    pub hover_bg_alpha: f32,
 
     /// 材质窗统一玻璃层：可激活窗（搜索/编辑/设置）的窗根直铺这层
     /// （单层，各窗观感一致），前景（文字/卡片）坐其上；材质不可用
@@ -602,7 +600,8 @@ pub struct ThemeTokens {
     pub done_subtle_rgb: [u8; 3],
     pub done_subtle_alpha: f32,
 
-    pub favorite: &'static str,
+    /// 收藏独立使用金色，与警告色区分，并校正到实际表面的图标对比度。
+    pub favorite: String,
     pub shadow_color: [u8; 3],
 
     /// 文本选区/IME 组合词高亮：深色 = canvas 向强调色混 0.32 的实底
@@ -622,6 +621,15 @@ pub struct ThemeTokens {
 pub const CONTRAST_TARGETS: (f64, f64, f64) = (5.5, 4.5, 3.0);
 
 const LIGHT_INK_ON_EMPHASIS: &str = "#FFFFFF";
+
+/// 半透明叠层的最终颜色；alpha 量化与 theme_bridge 的 RGBA 编码一致。
+fn over_hex(rgb: [u8; 3], alpha: f32, base: &str) -> String {
+    let base = hex_to_rgb_channels(base);
+    let a = (alpha.clamp(0.0, 1.0) * 255.0).round() / 255.0;
+    let out: [u8; 3] =
+        std::array::from_fn(|i| (rgb[i] as f32 * a + base[i] as f32 * (1.0 - a)).round() as u8);
+    format!("#{:02X}{:02X}{:02X}", out[0], out[1], out[2])
+}
 
 fn hex_to_rgb_channels(hex: &str) -> [u8; 3] {
     parse_hex(hex).map_or([0, 0, 0], |rgb| {
@@ -676,21 +684,78 @@ pub fn derive_tokens(preset_id: &str, theme_accent: &str, resolved: ResolvedThem
     // alpha 即增量档位：浅 0.12 ≈ 恒定 -12% 亮度，深 0.16 ≈ 恒定 +30（0-255）
     let selected_bg_rgb = hex_to_rgb_channels(&ink);
     let selected_bg_alpha = if is_light { 0.12 } else { 0.16 };
-    let accent_hover = mix_colors(
-        &emphasis,
-        if is_light { "#000000" } else { "#ffffff" },
-        if is_light { 0.12 } else { 0.14 },
-    );
+    // 实底按钮两种模式均轻压暗，保证悬停时白字的对比度不下降。
+    let accent_hover = mix_colors(&emphasis, "#000000", 0.12);
+
+    let card_face = if is_light {
+        scale.surface.to_string()
+    } else if relative_luminance(scale.canvas_subtle) > relative_luminance(scale.canvas) {
+        scale.canvas_subtle.to_string()
+    } else {
+        mix_colors(scale.canvas, scale.surface, 0.40)
+    };
+    let hover_bg_rgb = hex_to_rgb_channels(&ink);
+    let hover_bg_alpha = if is_light { 0.04 } else { 0.06 };
+    let material_layer_rgb = hex_to_rgb_channels(if is_light {
+        scale.surface
+    } else {
+        scale.canvas
+    });
+
+    // 元信息与图标按实际表面校正：实卡、徽章、悬停/选中，以及从
+    // 黑色到白色的 Acrylic 取材边界。正文与窗底维持各自的色阶。
+    let mut surfaces = vec![
+        scale.canvas.to_string(),
+        card_face.clone(),
+        scale.inset.to_string(),
+    ];
+    for background in [[0, 0, 0], [112, 160, 170], [255, 255, 255]] {
+        let mut pixel = [background[0], background[1], background[2], 255];
+        crate::backdrop::tint_acrylic(&mut pixel, material_layer_rgb, !is_light);
+        let glass = format!("#{:02X}{:02X}{:02X}", pixel[0], pixel[1], pixel[2]);
+        surfaces.push(over_hex(
+            if is_light {
+                hex_to_rgb_channels(&card_face)
+            } else {
+                hover_bg_rgb
+            },
+            if is_light { 0.70 } else { 0.05 },
+            &glass,
+        ));
+    }
+    let hover_surfaces: Vec<_> = surfaces
+        .iter()
+        .map(|base| over_hex(hover_bg_rgb, hover_bg_alpha, base))
+        .collect();
+    surfaces.extend(hover_surfaces);
+    surfaces.push(over_hex(selected_bg_rgb, selected_bg_alpha, scale.canvas));
+    let mut metadata = ink_subtle.clone();
+    for base in &surfaces {
+        metadata = ensure_contrast(&metadata, base, subtle_target);
+    }
 
     let status_fg = |base: &str| -> (String, [u8; 3]) {
-        let fg = ensure_contrast(base, scale.canvas, subtle_target);
+        let mut fg = ensure_contrast(base, scale.canvas, subtle_target);
         let channels = hex_to_rgb_channels(&fg);
+        // 固定半透明填色，再相对最终合成底校正前景，避免文字与彩底
+        // 同步变亮/变暗而始终达不到目标对比度。
+        for surface in [scale.canvas, card_face.as_str(), scale.inset] {
+            fg = ensure_contrast(
+                &fg,
+                &over_hex(channels, status_alpha as f32, surface),
+                subtle_target,
+            );
+        }
         (fg, channels)
     };
     let (success_fg, success_rgb) = status_fg(scale.success);
     let (danger_fg, danger_rgb) = status_fg(scale.danger);
     let (warning_fg, warning_rgb) = status_fg(scale.warning);
     let (done_fg, done_rgb) = status_fg(scale.done);
+    let mut favorite = if is_light { "#967100" } else { "#D5B642" }.to_string();
+    for base in &surfaces {
+        favorite = ensure_contrast(&favorite, base, border_target);
+    }
 
     ThemeTokens {
         is_dark: !is_light,
@@ -703,15 +768,12 @@ pub fn derive_tokens(preset_id: &str, theme_accent: &str, resolved: ResolvedThem
         } else {
             scale.canvas
         },
-        card_face: if is_light {
-            scale.surface
-        } else {
-            scale.canvas_subtle
-        },
+        card_face,
 
         fg_default: ink.clone(),
         fg_muted: ink_muted,
         fg_subtle: ink_subtle,
+        fg_metadata: metadata,
         fg_on_emphasis: LIGHT_INK_ON_EMPHASIS.to_string(),
 
         accent_fg: accent_fg.clone(),
@@ -721,12 +783,10 @@ pub fn derive_tokens(preset_id: &str, theme_accent: &str, resolved: ResolvedThem
         accent_subtle_alpha: subtle_alpha as f32,
         selected_bg_rgb,
         selected_bg_alpha,
+        hover_bg_rgb,
+        hover_bg_alpha,
 
-        material_layer_rgb: hex_to_rgb_channels(if is_light {
-            scale.surface
-        } else {
-            scale.canvas
-        }),
+        material_layer_rgb,
         // 明暗同 0.70：玻璃感与前景可读的平衡点。透得更多（如 0.62）
         // 会被壁纸染色整窗泛色，勿放开
         material_layer_alpha: 0.70,
@@ -749,7 +809,7 @@ pub fn derive_tokens(preset_id: &str, theme_accent: &str, resolved: ResolvedThem
         done_subtle_rgb: done_rgb,
         done_subtle_alpha: status_alpha as f32,
 
-        favorite: scale.favorite,
+        favorite,
         // 深色下阴影必须用黑色，否则窗口阴影会变成一圈白光
         shadow_color: if is_light {
             hex_to_rgb_channels(&ink)
@@ -804,27 +864,14 @@ mod tests {
         assert_eq!(tokens.canvas_default, "#f9f9fb");
     }
 
-    /// 半透明 rgb 叠到 base（hex）上的合成色，转回 hex 供对比计算
-    fn over_hex(rgb: [u8; 3], alpha: f32, base: &str) -> String {
-        let b = parse_hex(base).expect("base 应为合法 hex");
-        let a = alpha as f64;
-        let mix = |fg: u8, bg: f64| (fg as f64 * a + bg * 255.0 * (1.0 - a)).round() as u8;
-        format!(
-            "#{:02x}{:02x}{:02x}",
-            mix(rgb[0], b.r),
-            mix(rgb[1], b.g),
-            mix(rgb[2], b.b)
-        )
-    }
-
-    /// 门禁：全预设 × 明暗 × 强调色安全列表（含迁移 hex 样本），
-    /// 实底强调白字、选中行墨字、文本选区三组对比逐项达标
+    /// 门禁：全预设 × 明暗 × 强调色（含默认与迁移值），按实际合成表面
+    /// 检查主按钮、元信息、状态文字、收藏图标和卡片层级。
     #[test]
     fn gate_derived_tokens_meet_contrast() {
         let accents: Vec<&str> = ACCENT_CHOICES
             .iter()
             .map(|choice| choice.id)
-            .chain(["#8250df"])
+            .chain(["default", "#8250df"])
             .collect();
         for preset_id in THEME_PRESET_IDS {
             for resolved in [ResolvedTheme::Light, ResolvedTheme::Dark] {
@@ -836,6 +883,21 @@ mod tests {
                         "{}",
                         label("emphasis")
                     );
+                    assert!(
+                        contrast_ratio(&tokens.fg_on_emphasis, &tokens.accent_hover)
+                            >= contrast_ratio(&tokens.fg_on_emphasis, &tokens.accent_emphasis),
+                        "{}",
+                        label("emphasis-hover")
+                    );
+                    if tokens.is_dark {
+                        assert!(
+                            relative_luminance(&tokens.card_face)
+                                > relative_luminance(tokens.canvas_default)
+                                && contrast_ratio(&tokens.card_face, tokens.canvas_default) >= 1.05,
+                            "{}",
+                            label("raised-card")
+                        );
+                    }
                     // 选中底是半透明叠层（ink@α over 玻璃/窗底）：文字对比
                     // 与可见度都按合成到 canvas 后的实际色算——渲染时
                     // 行底就是这层合成结果
@@ -860,6 +922,101 @@ mod tests {
                         "{}",
                         label("selection")
                     );
+
+                    let mut backgrounds = vec![
+                        tokens.canvas_default.to_string(),
+                        tokens.card_face.clone(),
+                        tokens.canvas_inset.to_string(),
+                    ];
+                    for background in [[0, 0, 0], [30, 30, 30], [112, 160, 170], [255, 255, 255]] {
+                        let mut px = [background[0], background[1], background[2], 255];
+                        crate::backdrop::tint_acrylic(
+                            &mut px,
+                            tokens.material_layer_rgb,
+                            tokens.is_dark,
+                        );
+                        let glass = format!("#{:02X}{:02X}{:02X}", px[0], px[1], px[2]);
+                        backgrounds.push(over_hex(
+                            hex_to_rgb_channels(if tokens.is_dark {
+                                &tokens.fg_default
+                            } else {
+                                &tokens.card_face
+                            }),
+                            if tokens.is_dark { 0.05 } else { 0.70 },
+                            &glass,
+                        ));
+                    }
+                    let hovered: Vec<_> = backgrounds
+                        .iter()
+                        .map(|bg| {
+                            let hover = over_hex(tokens.hover_bg_rgb, tokens.hover_bg_alpha, bg);
+                            assert_eq!(
+                                relative_luminance(&hover) > relative_luminance(bg),
+                                tokens.is_dark,
+                                "{}",
+                                label("hover-direction")
+                            );
+                            hover
+                        })
+                        .collect();
+                    backgrounds.extend(hovered);
+                    backgrounds.push(selected);
+                    assert_ne!(
+                        tokens.favorite,
+                        tokens.warning_fg,
+                        "{}",
+                        label("favorite-warning")
+                    );
+                    for bg in backgrounds {
+                        assert!(
+                            contrast_ratio(&tokens.fg_metadata, &bg) >= 4.5,
+                            "{} on {bg}",
+                            label("metadata")
+                        );
+                        assert!(
+                            contrast_ratio(&tokens.favorite, &bg) >= 3.0,
+                            "{} on {bg}",
+                            label("favorite")
+                        );
+                    }
+                    for bg in [
+                        tokens.canvas_default,
+                        tokens.card_face.as_str(),
+                        tokens.canvas_inset,
+                    ] {
+                        for (role, fg, rgb, alpha) in [
+                            (
+                                "success",
+                                &tokens.success_fg,
+                                tokens.success_subtle_rgb,
+                                tokens.success_subtle_alpha,
+                            ),
+                            (
+                                "danger",
+                                &tokens.danger_fg,
+                                tokens.danger_subtle_rgb,
+                                tokens.danger_subtle_alpha,
+                            ),
+                            (
+                                "warning",
+                                &tokens.warning_fg,
+                                tokens.warning_subtle_rgb,
+                                tokens.warning_subtle_alpha,
+                            ),
+                            (
+                                "done",
+                                &tokens.done_fg,
+                                tokens.done_subtle_rgb,
+                                tokens.done_subtle_alpha,
+                            ),
+                        ] {
+                            assert!(
+                                contrast_ratio(fg, &over_hex(rgb, alpha, &bg)) >= 4.5,
+                                "{} on {bg}",
+                                label(role)
+                            );
+                        }
+                    }
                 }
             }
         }

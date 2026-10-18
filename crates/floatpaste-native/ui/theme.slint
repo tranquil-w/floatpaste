@@ -14,8 +14,7 @@ export global Theme {
     // 承托卡片的层底（速贴面板）：浅取 canvas-subtle 灰、深取
     // canvas 近黑（深色层底变亮整体发灰）；浮起卡浮在这层上
     in-out property <color> card-layer;
-    // 浮起卡面（速贴行卡）：浅取 surface 纯白、深取 canvas-subtle
-    // 微亮（深色 surface 亮灰卡发灰被否）
+    // 浮起卡面（速贴行卡）：浅取 surface，深色由 Rust 保证亮于承托层
     in-out property <color> card-face;
     // 材质窗统一玻璃层：可激活窗（搜索/编辑/设置）的窗根直铺这层
     // （单层，各窗一致），明暗同 alpha（深压噪点、浅压白雾），rgb 取
@@ -35,6 +34,7 @@ export global Theme {
     in-out property <color> fg-default;
     in-out property <color> fg-muted;
     in-out property <color> fg-subtle;
+    in-out property <color> fg-metadata;
     in-out property <color> fg-on-emphasis;
 
     // 强调
@@ -45,6 +45,8 @@ export global Theme {
     // 选中行/选中项中性底：正文墨色低 alpha 半透明叠层
     // （浅 0.12 压暗 / 深 0.16 提亮），选中感由恒定亮度偏移 + 左缘 3px 强调条承载
     in-out property <color> selected-bg;
+    // 中性悬停统一叠层：浅压暗 / 深提亮，不随底图翻转反馈方向
+    in-out property <color> hover-bg;
 
     // 边框
     in-out property <color> border-default;

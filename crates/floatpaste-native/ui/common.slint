@@ -115,7 +115,7 @@ export component WindowTitleBar inherits Rectangle {
         height: parent.height;
         // 按压瞬变淡出（无渐变：按下即显、松开即回），hover 保持原生瞬变
         opacity: btn-min-ta.pressed ? 0.85 : 1.0;
-        background: btn-min-ta.has-hover ? Theme.canvas-subtle : transparent;
+        background: btn-min-ta.has-hover ? Theme.hover-bg : transparent;
         btn-min-ta := TouchArea {
             mouse-cursor: default;
             clicked => { root.minimize-requested(); }
@@ -140,7 +140,7 @@ export component WindowTitleBar inherits Rectangle {
         width: 46px;
         height: parent.height;
         opacity: btn-max-ta.pressed ? 0.85 : 1.0;
-        background: btn-max-ta.has-hover ? Theme.canvas-subtle : transparent;
+        background: btn-max-ta.has-hover ? Theme.hover-bg : transparent;
         btn-max-ta := TouchArea {
             mouse-cursor: default;
             clicked => { root.max-toggle-requested(); }

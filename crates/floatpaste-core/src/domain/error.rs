@@ -2,6 +2,8 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum AppError {
+    #[error("未找到对应条目")]
+    ItemNotFound,
     #[error("数据库错误: {0}")]
     Sqlite(#[from] rusqlite::Error),
     #[error("IO 错误: {0}")]

@@ -61,12 +61,13 @@ floatpaste-native（唯一桌面壳，Slint 软件渲染）
 - `recent_desc`：`COALESCE(last_used_at, created_at) DESC`，再按 `created_at DESC`。
 - `relevance_desc`：收藏与带标签条目加权置前，其次 `search_text` 子串命中，再按 FTS5 `bm25 ASC`，最后同 `recent_desc` 的时间序。
 - 空关键词强制 `recent_desc`；收藏是独立筛选条件、不在速贴置顶，但在 `relevance_desc` 中有加权。
+- 操作按钮与输入暂停提示显示当前配置的会话键，设置保存后即时更新；无历史条目时根据监听状态引导复制或恢复监听。
 
 ### 上屏执行
 
 - 速贴负责"选择"，上屏细节统一在 `paste_flow.rs` / `services/paste_support.rs` 收口：写入剪贴板 → 恢复目标窗口 → `SendInput` 注入 Ctrl+V；可选恢复原剪贴板内容。
-- 条目 Enter 上屏本体（文本/图片数据/文件列表），Shift+Enter 次级上屏为路径文本：图片上屏所在路径、文件上屏逐行路径列表（`PasteOption.as_path_text`）；注入失败提示手动粘贴。
-- 管理员目标（UIPI）：目标窗口以管理员运行且本应用未提权时，按键注入会被静默丢弃。上屏前检测（`elevation.rs` TokenElevation），命中则照常写入剪贴板、还原目标焦点，仅跳过必然无效的注入，并经托盘气泡一次性说明（每进程一次，速贴/搜索窗口零 UI）。
+- 条目 Enter 上屏本体（文本/图片数据/文件列表），Shift+Enter 次级上屏为路径文本：图片上屏所在路径、文件上屏逐行路径列表（`PasteOption.as_path_text`）。未能自动粘贴时通过托盘提示原因；开启恢复原剪贴板时引导重试，关闭时提示手动 Ctrl+V。
+- 管理员目标（UIPI）：目标窗口以管理员运行且本应用未提权时，按键注入会被静默丢弃。上屏前检测（`elevation.rs` TokenElevation），命中则照常写入剪贴板、还原目标焦点，仅跳过必然无效的注入；写入成功后经托盘气泡一次性说明（每进程一次，速贴/搜索窗口零 UI）。开启恢复原剪贴板时仅引导管理员重启，关闭时另提示手动 Ctrl+V。
 
 ### 跨窗口数据一致性
 

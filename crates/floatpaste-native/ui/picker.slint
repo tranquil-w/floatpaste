@@ -7,7 +7,7 @@
 //   相对时间、收藏星标、标签行（常显，行高不随选中变化）
 // - 交互：单击选中 / 双击上屏 / 悬停 400ms 预览（Rust 调度）
 // - 键盘全程不经窗口焦点（LL 键盘钩子会话），窗口本身不抢焦点
-import { Theme, Metrics, Motion } from "theme.slint";
+import { Theme, Metrics, Motion, SoftShadow } from "theme.slint";
 import { AppMark } from "common.slint";
 
 export struct ClipRow {
@@ -171,33 +171,26 @@ component ClipRowCard inherits Rectangle {
     // PanelGeometry.row-frame
     border-radius: Metrics.radius-lg;
 
-    // 浮起下投影（自绘）：软件渲染的 draw_box_shadow 是空实现（slint
-    // 1.18.1 内 // TODO，通用柔影见 theme.slint SoftShadow）。行卡是
-    // 半透玻璃卡，SoftShadow 的实心层不能垫在卡下（透射会把卡面压暗
-    // 一档），改用「卡底以下 2px 裁剪窗 + 两个整卡形状向下错位 1px/
-    // 2px 的圆角垫底」：与卡重叠的上侧被窗裁掉（半透卡零透射），
-    // 露出的暗带端点随卡片圆角自然内收——直角底带会在圆角处冒线头
+    // 实卡四周铺柔影，避免把投影挤成下沿横线。玻璃卡只保留下方
+    // 6px 的衰减尾部，卡面下方的实心影层必须裁掉，防止透射染黑。
+    // 实卡影形向内收窄并下移，减轻左右与上缘；下沿位置保持不变。
+    property <length> shadow-inset: glass-card ? 0px : 1.5px;
     Rectangle {
         x: PanelGeometry.row-inset;
-        y: root.height - PanelGeometry.row-inset;
+        y: glass-card ? root.height - PanelGeometry.row-inset : PanelGeometry.row-inset;
         width: root.width - 2 * PanelGeometry.row-inset;
-        height: 2px;
-        clip: true;
-        Rectangle {
-            x: 0;
-            y: 2 * PanelGeometry.row-inset + 1px - root.height;
-            width: parent.width;
-            height: root.height - 2 * PanelGeometry.row-inset;
-            border-radius: Metrics.radius-lg;
-            background: Theme.shadow-color.with-alpha(0.14);
-        }
-        Rectangle {
-            x: 0;
-            y: 2 * PanelGeometry.row-inset + 2px - root.height;
-            width: parent.width;
-            height: root.height - 2 * PanelGeometry.row-inset;
-            border-radius: Metrics.radius-lg;
-            background: Theme.shadow-color.with-alpha(0.08);
+        height: glass-card ? 6px : root.height - 2 * PanelGeometry.row-inset;
+        clip: glass-card;
+        SoftShadow {
+            x: root.shadow-inset;
+            y: glass-card ? 2 * PanelGeometry.row-inset - root.height : root.shadow-inset;
+            width: parent.width - 2 * root.shadow-inset;
+            height: root.height - 2 * PanelGeometry.row-inset - root.shadow-inset;
+            radius: Metrics.radius-lg;
+            layers: 6;
+            step: 0.75px;
+            offset-y: 1px;
+            alpha: 0.10;
         }
     }
 
@@ -222,18 +215,17 @@ component ClipRowCard inherits Rectangle {
                     ? Theme.fg-default.with-alpha(0.05)
                     : Theme.card-face.with-alpha(0.70))
                 : Theme.card-face;
-            // 非玻璃态行卡（实底/Mica 实底烘焙）与浅色白面板同色，1px
-            // 细描边分层（玻璃态靠投影与彩底对比，不描边）；选中 2px
-            // 墨框为顶层环，z 序在其上
+            // 实卡用完整细描边保住轮廓，不让分层仅依赖屏幕的近白色差；
+            // 玻璃卡靠半透卡面分层。选中墨框由顶层环承载。
             border-width: glass-card ? 0 : 1px;
-            border-color: Theme.border-subtle;
+            border-color: Theme.border-muted;
 
             // 悬停覆盖层：声明在内容之前垫底（选中无底色变化，
             // 强调全部由外层墨色边框 + 字重承载）；悬停 = 墨色微叠层
             Rectangle {
                 border-radius: Metrics.radius-lg;
                 background: item-ta.has-hover && !selected
-                    ? Theme.fg-default.with-alpha(Theme.is-dark ? 0.06 : 0.04)
+                    ? Theme.hover-bg
                     : transparent;
             }
             // 兜底裁剪：字体度量与渲染器行高存在细微差异时，
@@ -326,7 +318,7 @@ component ClipRowCard inherits Rectangle {
                             // 类型 chip 同款静默档，选中仅提亮一档
                             background: selected
                                 ? Theme.canvas-default
-                                : (item-ta.has-hover ? Theme.canvas-inset : Theme.canvas-subtle);
+                                : Theme.canvas-subtle;
                             HorizontalLayout {
                                 padding-left: Metrics.space-1;
                                 padding-right: Metrics.space-1;
@@ -364,7 +356,7 @@ component ClipRowCard inherits Rectangle {
 
                         Text {
                             text: data.source-app;
-                            color: selected ? Theme.fg-muted : Theme.fg-subtle;
+                            color: Theme.fg-metadata;
                             font-size: Metrics.text-meta;
                             font-weight: Metrics.weight-medium;
                             vertical-alignment: center;
@@ -375,7 +367,7 @@ component ClipRowCard inherits Rectangle {
 
                     Text {
                         text: data.time-text;
-                        color: selected ? Theme.fg-muted : Theme.fg-subtle;
+                        color: Theme.fg-metadata;
                         font-size: Metrics.text-meta;
                         font-weight: Metrics.weight-medium;
                         vertical-alignment: center;
@@ -412,7 +404,7 @@ component ClipRowCard inherits Rectangle {
                     }
                     if (data.tag-more > 0): Text {
                         text: "+" + data.tag-more;
-                        color: Theme.fg-subtle;
+                        color: Theme.fg-metadata;
                         font-size: Metrics.text-meta;
                         vertical-alignment: center;
                     }
@@ -471,7 +463,7 @@ export component QuickPasteWindow inherits Window {
     // ── 数据 ──
     in-out property <[ClipRow]> rows;
     in-out property <int> selected: 0;
-    in-out property <string> empty-shortcut: "Ctrl+Q";
+    in property <bool> monitoring-paused: false;
     in-out property <bool> digit-shortcuts-enabled: true;
     in-out property <bool> loading: false;
     in-out property <bool> load-failed: false;
@@ -538,13 +530,12 @@ export component QuickPasteWindow inherits Window {
         // 面板底二态：自绘模糊底图（blur-active，唤起时烘焙的不透明
         // 模糊+tint 图，Acrylic 档 0.80 / Mica 档 0.92 近实底，圆角已
         // 烘焙进图 alpha——软渲 clip 不按圆角裁剪 slint#4176，靠图自
-        // 身圆角规避）；其余回实底（深 card-layer 近黑 / 浅 surface
-        // 白——canvas-subtle 灰在无模糊时成主色显灰闷，白底 + 行卡细
-        // 描边是 Win11 关透明的列表形态语言）。透明窗底不能裸透，两种
+        // 身圆角规避）；其余回实底（深 card-layer 近黑 / 浅 canvas-default
+        // 近白），以轻微底差、完整描边和柔影承托白卡。透明窗底不能裸透，两种
         // 形态都必须有底
         background: root.blur-active
             ? transparent
-            : Theme.is-dark ? Theme.card-layer : Theme.surface;
+            : Theme.is-dark ? Theme.card-layer : Theme.canvas-default;
         border-radius: Metrics.radius-lg;
         border-width: PanelGeometry.card-border;
         border-color: Theme.border-window;
@@ -666,7 +657,7 @@ export component QuickPasteWindow inherits Window {
                         height: 30px;
                         horizontal-stretch: 0;
                         opacity: retry-ta.pressed ? 0.85 : 1.0;
-                        background: retry-ta.has-hover ? Theme.canvas-subtle : transparent;
+                        background: retry-ta.has-hover ? Theme.hover-bg : transparent;
                         animate background { duration: Motion.dur-color; easing: Motion.ease; }
                         retry-ta := TouchArea {
                             clicked => { root.retry-clicked(); }
@@ -689,13 +680,15 @@ export component QuickPasteWindow inherits Window {
                     alignment: center;
                     spacing: Metrics.space-1;
                     Text {
-                        text: "暂无剪贴板条目";
+                        text: root.monitoring-paused ? "监听已暂停" : "暂无剪贴板条目";
                         color: Theme.fg-muted;
                         font-size: Metrics.text-sm;
                         horizontal-alignment: center;
                     }
                     Text {
-                        text: "复制内容后按 " + root.empty-shortcut + " 打开此面板";
+                        text: root.monitoring-paused
+                            ? "在托盘菜单中恢复监听后，新复制的内容才会保存。"
+                            : "复制文本、图片或文件后，会显示在这里。";
                         color: Theme.fg-subtle;
                         font-size: Metrics.text-xs;
                         horizontal-alignment: center;

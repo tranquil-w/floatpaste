@@ -40,7 +40,7 @@ fn write_full_tokens(theme: &Theme, tokens: &ThemeTokens) {
     theme.set_canvas_inset(hex_color(tokens.canvas_inset));
     theme.set_surface(hex_color(tokens.surface));
     theme.set_card_layer(hex_color(tokens.card_layer));
-    theme.set_card_face(hex_color(tokens.card_face));
+    theme.set_card_face(hex_color(&tokens.card_face));
     theme.set_material_layer(rgba_color(
         tokens.material_layer_rgb,
         tokens.material_layer_alpha,
@@ -48,6 +48,7 @@ fn write_full_tokens(theme: &Theme, tokens: &ThemeTokens) {
     theme.set_fg_default(hex_color(&tokens.fg_default));
     theme.set_fg_muted(hex_color(&tokens.fg_muted));
     theme.set_fg_subtle(hex_color(&tokens.fg_subtle));
+    theme.set_fg_metadata(hex_color(&tokens.fg_metadata));
     theme.set_fg_on_emphasis(hex_color(&tokens.fg_on_emphasis));
     theme.set_accent_fg(hex_color(&tokens.accent_fg));
     theme.set_accent_emphasis(hex_color(&tokens.accent_emphasis));
@@ -57,6 +58,7 @@ fn write_full_tokens(theme: &Theme, tokens: &ThemeTokens) {
         tokens.accent_subtle_alpha,
     ));
     theme.set_selected_bg(rgba_color(tokens.selected_bg_rgb, tokens.selected_bg_alpha));
+    theme.set_hover_bg(rgba_color(tokens.hover_bg_rgb, tokens.hover_bg_alpha));
     theme.set_border_default(hex_color(&tokens.border_default));
     theme.set_border_window(hex_color(&tokens.border_window));
     theme.set_border_muted(hex_color(tokens.border_muted));
@@ -80,7 +82,7 @@ fn write_full_tokens(theme: &Theme, tokens: &ThemeTokens) {
     theme.set_warning_emphasis(hex_color(tokens.warning_emphasis));
     theme.set_done_fg(hex_color(&tokens.done_fg));
     theme.set_done_subtle(rgba_color(tokens.done_subtle_rgb, tokens.done_subtle_alpha));
-    theme.set_favorite(hex_color(tokens.favorite));
+    theme.set_favorite(hex_color(&tokens.favorite));
     theme.set_shadow_color(rgba_color(tokens.shadow_color, 1.0));
     theme.set_selection_fg(hex_color(&tokens.selection_fg));
     theme.set_selection_bg(hex_color(&tokens.selection_bg));
@@ -93,6 +95,7 @@ fn write_tooltip_tokens(theme: &Theme, tokens: &ThemeTokens) {
     theme.set_fg_default(hex_color(&tokens.fg_default));
     theme.set_fg_muted(hex_color(&tokens.fg_muted));
     theme.set_fg_subtle(hex_color(&tokens.fg_subtle));
+    theme.set_fg_metadata(hex_color(&tokens.fg_metadata));
     theme.set_border_muted(hex_color(tokens.border_muted));
     theme.set_shadow_color(rgba_color(tokens.shadow_color, 1.0));
 }

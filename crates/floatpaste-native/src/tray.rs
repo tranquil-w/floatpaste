@@ -122,10 +122,6 @@ unsafe fn remove_icon(hwnd: HWND) {
     TRAY_HWND.store(0, Ordering::SeqCst);
 }
 
-/// 管理员目标提示气泡文案（szInfo 定长 128 UTF-16，控制在限量内）
-const ADMIN_TARGET_INFO: &str =
-    "目标窗口以管理员权限运行，FloatPaste 无法向其自动粘贴。内容已在剪贴板，可手动 Ctrl+V；或在设置中开启「以管理员身份运行」。";
-
 /// 启动期提权自检未获确认（UAC 取消）的气泡文案
 const ELEVATION_DECLINED_INFO: &str =
     "已开启「始终以管理员身份运行」，但本次启动未获得管理员权限（UAC 未确认）。向管理员窗口的自动粘贴将无法生效；重新打开 FloatPaste 并确认即可。";
@@ -169,8 +165,15 @@ pub fn notify_failure(info: &str) {
 }
 
 /// 管理员目标无法自动回贴时的一次性说明
-pub fn notify_admin_target() {
-    notify_failure(ADMIN_TARGET_INFO);
+pub fn notify_admin_target(restore_clipboard: bool) {
+    let manual_hint = if restore_clipboard {
+        ""
+    } else {
+        floatpaste_core::services::paste_support::paste_failure_hint(false)
+    };
+    notify_failure(&format!(
+        "目标应用以管理员身份运行，无法自动粘贴。{manual_hint}请在设置中选择「以管理员身份重启」后重试。"
+    ));
 }
 
 /// 启动期提权自检未获确认（用户在 UAC 中取消）时的一次性说明

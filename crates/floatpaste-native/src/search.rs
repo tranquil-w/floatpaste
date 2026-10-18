@@ -46,7 +46,7 @@ use crate::picker::{self, App};
 use crate::thumbnails;
 use crate::tooltip::{self, HoverHost};
 use crate::win32_ext;
-use crate::{SearchGeometry, SearchRow, SearchTagChip, SearchWindow};
+use crate::{SearchActionKeys, SearchGeometry, SearchRow, SearchTagChip, SearchWindow};
 
 /// 单页条数（对齐旧版 SEARCH_PAGE_SIZE）
 const PAGE_SIZE: u32 = 50;
@@ -496,6 +496,7 @@ fn position_centered_on_cursor(hwnd: isize, width_px: i32, height_px: i32) -> bo
 /// 会话开始重置（对齐 SEARCH_SESSION_START）：关键词/筛选/选中/错误
 /// 全部归零，行模型清空进入加载态；滚动回顶由紧随的 run_query 统一负责
 fn reset_session_state(app: &App) {
+    refresh_copy(app);
     let Some(win) = app.search.upgrade() else {
         return;
     };
@@ -1082,49 +1083,36 @@ fn flatten_preview_newlines(text: &str) -> String {
 
 /* ───────────────── 空状态与错误 ───────────────── */
 
+pub fn refresh_copy(app: &App) {
+    let keys = app.state.current_settings().session_keys;
+    app.with_search(|win| {
+        win.set_action_keys(SearchActionKeys {
+            confirm: keys.confirm.into(),
+            confirm_as_file: keys.confirm_as_file.into(),
+            open_editor: keys.open_editor.into(),
+            toggle_favorite: keys.toggle_favorite.into(),
+            dismiss: keys.dismiss.into(),
+            delete_entry: keys.delete_entry.into(),
+        });
+    });
+    update_empty_state(app);
+}
+
 fn update_empty_state(app: &App) {
-    let settings = app.state.current_settings();
-    let open_hint =
-        if settings.search_shortcut_enabled && !settings.search_shortcut.trim().is_empty() {
-            format!("复制内容后使用 {} 打开此窗口", settings.search_shortcut)
-        } else {
-            "复制内容后即可在此查看".to_string()
-        };
     let (keyword, filter, tags_len) = QUERY.with(|state| {
         let state = state.borrow();
         (state.keyword.clone(), state.filter, state.tags.len())
     });
-    let (title, description, action) = empty_state(&keyword, filter, tags_len, &open_hint);
+    let (title, description, action) = floatpaste_core::services::clip_display::search_empty_state(
+        &keyword,
+        filter != 0 || tags_len > 0,
+        app.state.current_settings().pause_monitoring,
+    );
     app.with_search(|win| {
         win.set_empty_title(title.into());
         win.set_empty_description(description.into());
         win.set_empty_action(action);
     });
-}
-
-/// 空状态三分支（对齐 EMPTY_STATES）：有关键词 → 未找到匹配；有筛选 →
-/// 筛选下暂无；否则 → 全空 + 打开方式提示
-fn empty_state(
-    keyword: &str,
-    filter: u32,
-    tags_len: usize,
-    open_hint: &str,
-) -> (String, String, i32) {
-    if !keyword.trim().is_empty() {
-        return (
-            "未找到匹配条目".to_string(),
-            "尝试调整搜索关键词".to_string(),
-            1,
-        );
-    }
-    if filter != 0 || tags_len > 0 {
-        return (
-            "当前筛选下暂无条目".to_string(),
-            "尝试切换其他筛选或复制更多内容".to_string(),
-            2,
-        );
-    }
-    ("暂无剪贴板条目".to_string(), open_hint.to_string(), 0)
 }
 
 /* ───────────────── 条目动作 ───────────────── */
@@ -1169,7 +1157,7 @@ fn paste_item(app: &App, item: &ClipItemSummary, as_path_text: bool) {
 
 /// 上屏流（对齐 PasteExecutor 搜索分支）：趁搜索窗口可见写剪贴板 →
 /// 隐藏并还原会话目标 → 90ms → 恢复前台 → 60ms → 注入 Ctrl+V →
-/// 调度快照恢复 → mark_used。窗口已隐藏，结果消息无处展示（对齐旧版）
+/// 调度快照恢复 → mark_used。失败提示经托盘通知呈现。
 fn execute_paste(app: &App, id: &str, option: PasteOption) -> Result<(), AppError> {
     let detail = app.core().repository.get_item_detail(id)?;
     let session = app.state.search_session();
@@ -1177,10 +1165,6 @@ fn execute_paste(app: &App, id: &str, option: PasteOption) -> Result<(), AppErro
     // 管理员目标：照常写入剪贴板并还原目标焦点（用户可手动 Ctrl+V），
     // 仅跳过必然无效的按键注入，经托盘气泡一次性说明
     let admin_target = paste_flow::paste_target_requires_elevation(session.target_window_hwnd);
-    if admin_target {
-        paste_flow::notify_admin_target_once(app);
-    }
-
     let previous_clipboard = paste_support::capture_snapshot_if_needed(&option)?;
     let mut clipboard =
         arboard::Clipboard::new().map_err(|error| AppError::Clipboard(error.to_string()))?;
@@ -1197,12 +1181,16 @@ fn execute_paste(app: &App, id: &str, option: PasteOption) -> Result<(), AppErro
         owner_hwnd,
     )?;
 
+    if admin_target {
+        paste_flow::notify_admin_target_once(app, option.restore_clipboard_after_paste);
+    }
+    let failure_hint = paste_support::paste_failure_hint(option.restore_clipboard_after_paste);
     hide(app, true);
 
     let core = app.core().clone();
     let id = id.to_string();
     thread::spawn(move || {
-        match session.target_window_hwnd {
+        let failure = match session.target_window_hwnd {
             Some(target_hwnd) => {
                 thread::sleep(RESTORE_DELAY);
                 if core.is_quitting() {
@@ -1213,18 +1201,32 @@ fn execute_paste(app: &App, id: &str, option: PasteOption) -> Result<(), AppErro
                         thread::sleep(INJECT_DELAY);
                         if !paste_support::trigger_ctrl_v() {
                             warn!("搜索回贴 Ctrl+V 注入失败");
+                            Some("未能自动粘贴。")
+                        } else {
+                            None
                         }
+                    } else {
+                        None
                     }
                 } else {
                     warn!("搜索回贴恢复目标窗口失败");
+                    Some("未能切回目标窗口。")
                 }
             }
-            None => warn!("搜索会话没有可恢复的目标窗口"),
-        }
+            None => {
+                warn!("搜索会话没有可恢复的目标窗口");
+                Some("未找到需要粘贴的窗口。")
+            }
+        };
         if let Some(snapshot) = previous_clipboard {
             let _ = paste_support::schedule_clipboard_restore(&core, snapshot, owner_hwnd);
         }
         let _ = core.repository.mark_used(&id);
+        if let Some(reason) = failure.filter(|_| !admin_target) {
+            let _ = slint::invoke_from_event_loop(move || {
+                crate::tray::notify_failure(&format!("{reason}{failure_hint}"));
+            });
+        }
     });
     Ok(())
 }
@@ -1837,34 +1839,6 @@ mod tests {
     }
 
     #[test]
-    fn empty_state_picks_branch_by_keyword_then_filters() {
-        assert_eq!(
-            empty_state("  abc ", 0, 0, "提示"),
-            ("未找到匹配条目".into(), "尝试调整搜索关键词".into(), 1)
-        );
-        assert_eq!(
-            empty_state("", 2, 0, "提示"),
-            (
-                "当前筛选下暂无条目".into(),
-                "尝试切换其他筛选或复制更多内容".into(),
-                2
-            )
-        );
-        assert_eq!(
-            empty_state("", 0, 1, "提示"),
-            (
-                "当前筛选下暂无条目".into(),
-                "尝试切换其他筛选或复制更多内容".into(),
-                2
-            )
-        );
-        assert_eq!(
-            empty_state("", 0, 0, "提示"),
-            ("暂无剪贴板条目".into(), "提示".into(), 0)
-        );
-    }
-
-    #[test]
     fn preview_newlines_flatten_to_spaces() {
         assert_eq!(flatten_preview_newlines("a\r\nb\nc"), "a b c");
         assert_eq!(flatten_preview_newlines("无换行"), "无换行");
@@ -2112,6 +2086,7 @@ pub(crate) mod refresh_after_editor_tests {
 
         let win = SearchWindow::new().expect("实例化搜索窗失败");
         win.window().set_size(slint::LogicalSize::new(780.0, 620.0));
+        let editor_win = crate::EditorWindow::new().expect("实例化编辑窗失败");
         let repository = SqliteRepository::new(&db_path).unwrap();
         let core = CoreState::new(
             repository,
@@ -2124,13 +2099,22 @@ pub(crate) mod refresh_after_editor_tests {
             tooltip: Default::default(),
             tray_menu: Default::default(),
             search: win.as_weak(),
-            editor: Default::default(),
+            editor: editor_win.as_weak(),
             settings: Default::default(),
         };
 
         // 串行前段（scroll_reset_tests）在 thread_local QUERY 留下筛选
         // 状态；等价新会话打开前的重置，保证本段从干净查询态起步
         reset_session_state(&app);
+
+        // 提示随设置更新，不能继续显示编译时的默认键位。
+        let mut settings = app.state.current_settings();
+        settings.session_keys.confirm = "Alt+Enter".into();
+        settings.session_keys.dismiss = "Ctrl+Escape".into();
+        app.core().update_settings(settings).unwrap();
+        refresh_copy(&app);
+        assert_eq!(win.get_action_keys().confirm, "Alt+Enter");
+        assert_eq!(win.get_action_keys().dismiss, "Ctrl+Escape");
 
         // 前置等价 bug 现场：搜索窗已建而 chips 未加载（编辑器路径不
         // 经过会话打开，无从加载）
@@ -2172,5 +2156,6 @@ pub(crate) mod refresh_after_editor_tests {
             vec!["新标签".to_string()],
             "行卡应显示新标签"
         );
+        crate::editor::load_error_tests::run(&app, &editor_win, &db_path, &item_id);
     }
 }

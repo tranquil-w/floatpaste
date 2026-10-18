@@ -71,7 +71,7 @@ export component TrayMenuWindow inherits Window {
                 height: root.row-height;
                 border-radius: Metrics.radius-sm;
                 background: row-ta.has-hover
-                    ? Theme.fg-default.with-alpha(Theme.is-dark ? 0.08 : 0.06)
+                    ? Theme.hover-bg
                     : transparent;
                 opacity: row-ta.pressed ? 0.85 : 1.0;
 

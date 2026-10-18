@@ -296,13 +296,12 @@ fn file_paths_text(paths: &[String]) -> String {
     paths.join("\r\n")
 }
 
-/// 中文类型标签，用于拼装用户可见的粘贴结果消息。
-pub fn clip_type_label(value: &str) -> &'static str {
-    match value {
-        "text" => "文本内容",
-        "image" => "图片内容",
-        "file" => "文件列表",
-        _ => "剪贴板内容",
+/// 恢复原剪贴板时不引导手动粘贴，避免用户粘贴到此前的内容。
+pub fn paste_failure_hint(restore_clipboard: bool) -> &'static str {
+    if restore_clipboard {
+        "请重新打开速贴或搜索窗口重试。"
+    } else {
+        "内容已复制，请切换到需要粘贴的窗口后按 Ctrl+V。"
     }
 }
 
@@ -336,14 +335,13 @@ pub fn trigger_ctrl_v() -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{clip_type_label, file_paths_text};
+    use super::{file_paths_text, paste_failure_hint};
 
     #[test]
-    fn clip_type_label_maps_known_and_unknown_types() {
-        assert_eq!(clip_type_label("text"), "文本内容");
-        assert_eq!(clip_type_label("image"), "图片内容");
-        assert_eq!(clip_type_label("file"), "文件列表");
-        assert_eq!(clip_type_label("other"), "剪贴板内容");
+    fn manual_paste_hint_requires_preserving_the_selected_content() {
+        assert!(paste_failure_hint(false).contains("Ctrl+V"));
+        assert!(!paste_failure_hint(true).contains("Ctrl+V"));
+        assert!(!paste_failure_hint(true).contains("内容已复制"));
     }
 
     #[test]

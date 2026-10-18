@@ -93,6 +93,7 @@ export component EditorWindow inherits Window {
     // ── 会话与数据（Rust 接管）──
     in-out property <bool> has-session: false;
     in-out property <bool> item-missing: false;
+    in-out property <bool> load-failed: false;
     in-out property <bool> is-text: false;
     // 引导键帽（"编辑内容"会话键，含 "+" 分隔符），Rust 按当前设置注入
     in-out property <[string]> edit-key-parts: ["Ctrl", "+", "Enter"];
@@ -147,6 +148,7 @@ export component EditorWindow inherits Window {
     callback button-hint(string, length, length); // 按钮 tooltip（悬浮气泡 simple 模式）
     callback button-hint-left();
     callback save-requested();
+    callback retry-clicked();
     callback request-close();
     callback close-discard();
     callback close-save();
@@ -308,7 +310,7 @@ export component EditorWindow inherits Window {
                     VerticalLayout {
                         spacing: 6px;
                         Text {
-                            text: "选择一个文本条目开始编辑";
+                            text: "选择一个条目开始查看或编辑";
                             color: Theme.fg-muted;
                             font-size: Metrics.text-sm;
                             horizontal-alignment: center;
@@ -317,7 +319,7 @@ export component EditorWindow inherits Window {
                             alignment: center;
                             spacing: 4px;
                             Text {
-                                text: "在速贴面板或搜索窗口中选中文本条目后按";
+                                text: "在速贴或搜索窗口中选中条目后按";
                                 color: Theme.fg-subtle;
                                 font-size: Metrics.text-xs;
                                 vertical-alignment: center;
@@ -338,14 +340,39 @@ export component EditorWindow inherits Window {
                     }
                 }
 
-                // 条目缺失
-                if (root.has-session && root.item-missing): Text {
-                    y: (parent.height - self.height) / 2;
+                // 条目缺失与读取失败分别呈现，读取失败可在当前会话重试。
+                if (root.has-session && (root.item-missing || root.load-failed)): VerticalLayout {
                     width: parent.width;
-                    text: "未找到对应条目";
-                    color: Theme.fg-muted;
-                    font-size: Metrics.text-sm;
-                    horizontal-alignment: center;
+                    height: parent.height;
+                    alignment: center;
+                    spacing: 12px;
+                    Text {
+                        text: root.item-missing ? "未找到对应条目" : "条目加载失败";
+                        color: Theme.fg-muted;
+                        font-size: Metrics.text-sm;
+                        horizontal-alignment: center;
+                    }
+                    if (root.load-failed): HorizontalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 88px;
+                            height: 32px;
+                            border-radius: Metrics.radius-md;
+                            border-width: 1px;
+                            border-color: Theme.border-default;
+                            background: retry-ta.has-hover ? Theme.hover-bg : transparent;
+                            Text {
+                                text: "重新加载";
+                                color: Theme.fg-default;
+                                font-size: Metrics.text-sm;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                            retry-ta := TouchArea {
+                                clicked => { root.retry-clicked(); }
+                            }
+                        }
+                    }
                 }
 
                 // 会话内容（visible 而非 if：tag-input/edit-input 需要被
@@ -354,7 +381,7 @@ export component EditorWindow inherits Window {
                 // Rectangle，子元素 width/height 显式 100%，不占布局位）
                 // Rectangle 的子元素同样不自动铺满，显式全屏 + 旧版 mt-2.5 行距
                 VerticalLayout {
-                    visible: root.has-session && !root.item-missing;
+                    visible: root.has-session && !root.item-missing && !root.load-failed;
                     width: parent.width;
                     height: parent.height;
                     spacing: 8px;
@@ -468,7 +495,7 @@ export component EditorWindow inherits Window {
                                         border-radius: Metrics.radius-pill;
                                         border-width: 1px;
                                         border-color: add-ta.has-hover ? Theme.border-default : Theme.border-subtle;
-                                        background: add-ta.has-hover ? Theme.canvas-default : transparent;
+                                        background: add-ta.has-hover ? Theme.hover-bg : transparent;
                                         animate background { duration: Motion.dur-color; easing: Motion.ease; }
                                         animate border-color { duration: Motion.dur-color; easing: Motion.ease; }
                                         add-ta := TouchArea {
@@ -497,6 +524,12 @@ export component EditorWindow inherits Window {
                                 }
                             }
                         }
+                    }
+
+                    Text {
+                        text: "标签更改会自动保存";
+                        color: Theme.fg-subtle;
+                        font-size: Metrics.text-xs;
                     }
 
                     // ── 内容弹性区（旧版 flex-1：吃掉头部与标签区以外的
@@ -736,8 +769,12 @@ export component EditorWindow inherits Window {
                                 border-width: 1px;
                                 border-color: Theme.border-default;
                                 opacity: open-img-ta.pressed ? 0.85 : 1.0;
-                                background: open-img-ta.has-hover ? Theme.canvas-subtle : Theme.canvas-default;
-                                animate background { duration: Motion.dur-color; easing: Motion.ease; }
+                                background: Theme.canvas-default;
+                                Rectangle {
+                                    border-radius: Metrics.radius-pill;
+                                    background: open-img-ta.has-hover ? Theme.hover-bg : transparent;
+                                    animate background { duration: Motion.dur-color; easing: Motion.ease; }
+                                }
                                 open-img-ta := TouchArea {
                                     mouse-cursor: pointer;
                                     clicked => { root.open-externally(root.image-path); }
@@ -863,7 +900,7 @@ export component EditorWindow inherits Window {
                                 }
                             }
                             Text {
-                                text: "未保存";
+                                text: "文本未保存";
                                 color: Theme.warning-fg;
                                 font-size: Metrics.text-xs;
                                 font-weight: Metrics.weight-medium;
@@ -891,7 +928,7 @@ export component EditorWindow inherits Window {
                             border-width: 1px;
                             border-color: Theme.border-default;
                             opacity: close-ta.pressed ? 0.85 : 1.0;
-                            background: close-ta.has-hover ? Theme.canvas-default : transparent;
+                            background: close-ta.has-hover ? Theme.hover-bg : transparent;
                             animate background { duration: Motion.dur-color; easing: Motion.ease; }
                             close-ta := TouchArea {
                                 mouse-cursor: default;
@@ -915,7 +952,7 @@ export component EditorWindow inherits Window {
                             }
                         }
                         save-btn := Rectangle {
-                            width: 68px;
+                            width: 88px;
                             height: 32px;
                             border-radius: Metrics.radius-md;
                             // 旧版 disabled:opacity-50：整键（底+字）半透明；
@@ -932,7 +969,7 @@ export component EditorWindow inherits Window {
                                 clicked => { root.save-requested(); }
                                 changed has-hover => {
                                     if (self.has-hover) {
-                                        root.button-hint("保存（Ctrl+S）",
+                                        root.button-hint("保存文本（Ctrl+S）",
                                             save-btn.absolute-position.x,
                                             save-btn.absolute-position.y + save-btn.height + 4px);
                                     } else {
@@ -941,7 +978,7 @@ export component EditorWindow inherits Window {
                                 }
                             }
                             Text {
-                                text: "保存";
+                                text: "保存文本";
                                 color: Theme.fg-on-emphasis;
                                 font-size: Metrics.text-sm;
                                 font-weight: Metrics.weight-semibold;
@@ -1108,7 +1145,7 @@ export component EditorWindow inherits Window {
                             for tag-name[i] in root.tags: Rectangle {
                                 height: 32px;
                                 border-radius: Metrics.radius-md;
-                                background: sel-ta.has-hover ? Theme.canvas-subtle : transparent;
+                                background: sel-ta.has-hover ? Theme.hover-bg : transparent;
                                 sel-ta := TouchArea {
                                     // 隐藏态必须禁用：与 panel-input/sug-ta 同理，
                                     // opacity 0 的已选行仍参与鼠标命中，会吃掉
@@ -1252,13 +1289,13 @@ export component EditorWindow inherits Window {
                             padding: 24px;
                             spacing: 8px;
                             Text {
-                                text: "有未保存的修改";
+                                text: "有未保存的文本修改";
                                 color: Theme.fg-default;
                                 font-size: 18px;
                                 font-weight: Metrics.weight-semibold;
                             }
                             Text {
-                                text: "保存修改还是放弃并关闭？";
+                                text: "关闭前是否保存文本？标签更改已自动保存。";
                                 color: Theme.fg-muted;
                                 font-size: Metrics.text-sm;
                                 wrap: word-wrap;
@@ -1268,20 +1305,20 @@ export component EditorWindow inherits Window {
                                 spacing: 8px;
                                 alignment: end;
                                 dlg-cancel := Rectangle {
-                                    width: 64px;
+                                    width: 80px;
                                     height: 36px;
                                     border-radius: Metrics.radius-md;
                                     border-width: 1px;
                                     border-color: Theme.border-default;
                                     opacity: dlg-cancel-ta.pressed ? 0.85 : 1.0;
-                                    background: dlg-cancel-ta.has-hover ? Theme.canvas-subtle : transparent;
+                                    background: dlg-cancel-ta.has-hover ? Theme.hover-bg : transparent;
                                     animate background { duration: Motion.dur-color; easing: Motion.ease; }
                                     dlg-cancel-ta := TouchArea {
                                         mouse-cursor: default;
                                         clicked => { root.confirm-cancel(); }
                                     }
                                     Text {
-                                        text: "取消";
+                                        text: "继续编辑";
                                         color: Theme.fg-default;
                                         font-size: Metrics.text-sm;
                                         horizontal-alignment: center;
@@ -1289,20 +1326,20 @@ export component EditorWindow inherits Window {
                                     }
                                 }
                                 dlg-discard := Rectangle {
-                                    width: 88px;
+                                    width: 112px;
                                     height: 36px;
                                     border-radius: Metrics.radius-md;
                                     border-width: 1px;
                                     border-color: Theme.border-default;
                                     opacity: dlg-discard-ta.pressed ? 0.85 : 1.0;
-                                    background: dlg-discard-ta.has-hover ? Theme.canvas-subtle : transparent;
+                                    background: dlg-discard-ta.has-hover ? Theme.hover-bg : transparent;
                                     animate background { duration: Motion.dur-color; easing: Motion.ease; }
                                     dlg-discard-ta := TouchArea {
                                         mouse-cursor: default;
                                         clicked => { root.close-discard(); }
                                     }
                                     Text {
-                                        text: "放弃修改";
+                                        text: "放弃文本修改";
                                         color: Theme.danger-fg;
                                         font-size: Metrics.text-sm;
                                         horizontal-alignment: center;

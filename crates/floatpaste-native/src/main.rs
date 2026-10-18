@@ -730,6 +730,7 @@ pub(crate) fn sync_global_hotkeys(app: &App) {
 #[test]
 fn l2_headless_ui_contracts() {
     settings_scroll_tests::run();
+    settings::copy_contract_tests::run();
     search::scroll_reset_tests::run();
     search::refresh_after_editor_tests::run();
     tray_menu::headless_contract_tests::run();

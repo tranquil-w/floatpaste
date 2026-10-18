@@ -205,7 +205,7 @@ pub fn activate(app: &App) {
     );
 
     // 空态快捷键提示跟随当前设置（用户改过热键后提示不失效）
-    win.set_empty_shortcut(settings.shortcut.clone().into());
+    win.set_monitoring_paused(settings.pause_monitoring);
 
     // 主题随设置刷新（设置可能在后台被改变）
     let resolved = theme::resolve_theme(settings.theme_mode.clone(), theme::system_prefers_dark());
@@ -578,7 +578,7 @@ pub fn set_selected(app: &App, index: usize) {
 fn refresh_list_reset(app: &App, settings: &floatpaste_core::domain::settings::UserSetting) {
     app.state.set_selected_id(None);
     if let Some(win) = app.picker.upgrade() {
-        win.set_empty_shortcut(settings.shortcut.clone().into());
+        win.set_monitoring_paused(settings.pause_monitoring);
         win.set_digit_shortcuts_enabled(settings.picker_digit_shortcuts_enabled);
         win.set_loading(false);
     }
@@ -890,15 +890,6 @@ pub fn confirm(app: &App, index: usize, as_path_text: bool) {
     }
 }
 
-/// 粘贴结果回写（paste_flow 后台线程经 invoke 调用）。
-/// 上屏异步完成时面板多半已隐藏，面板内提示无人看见——失败改走托盘
-/// 通知，成功无提示（内容贴进目标窗口即反馈）
-pub fn report_paste_outcome(success: bool, message: &str) {
-    if !success {
-        crate::tray::notify_failure(message);
-    }
-}
-
 /// 收藏当前选中（对齐 toggleFavoriteSelection：成功后刷新列表并提示）
 pub fn toggle_favorite(app: &App) {
     let index = current_index(app);
@@ -992,7 +983,7 @@ fn resolve_window_position(
 /// 均为自绘烘焙毛玻璃、以 tint 深浅分档——Mica 档
 /// [`backdrop::MICA_TINT_ALPHA`]=0.92 近不透明（Mica 材质本身不透明，
 /// 行卡走不透明实卡），Acrylic 档 [`backdrop::ACRYLIC_TINT_ALPHA`]
-/// =0.80（行卡半透玻璃卡），「无」档实底。烘焙抓屏失败（锁屏/会话
+/// =0.80（深色 tint 提亮，行卡半透玻璃卡），「无」档实底。烘焙抓屏失败（锁屏/会话
 /// 切换）回实底。每次唤起重烘焙，明暗自愈
 fn prepare_picker_backdrop(
     app: &App,
@@ -1081,7 +1072,11 @@ fn prepare_blur_backdrop(
         w,
         h,
     );
-    backdrop::tint_opaque(&mut rgba, tokens.material_layer_rgb, tint_alpha);
+    if win.get_material_active() {
+        backdrop::tint_opaque(&mut rgba, tokens.material_layer_rgb, tint_alpha);
+    } else {
+        backdrop::tint_acrylic(&mut rgba, tokens.material_layer_rgb, tokens.is_dark);
+    }
     let corner = (win.global::<PanelGeometry>().get_card_radius() * scale).round() as usize;
     backdrop::bake_round_corners(&mut rgba, w, h, corner);
     let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(w as u32, h as u32);

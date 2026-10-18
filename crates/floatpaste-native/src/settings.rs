@@ -54,14 +54,14 @@ const SESSION_KEY_DEFS: [(&str, &str); 8] = [
     ("上屏", "把选中条目粘贴到目标应用。"),
     (
         "粘贴为图片路径 / 文件路径",
-        "次级上屏：图片上屏为所在路径，文件上屏为逐行路径列表（均作为文本）。",
+        "将图片的保存路径或文件路径粘贴为文本；多个文件的路径逐行排列。",
     ),
-    ("编辑内容", "打开编辑窗口修改条目文本与标签。"),
+    ("编辑内容", "打开编辑窗口，修改文本或管理标签。"),
     ("收藏 / 取消收藏", "切换选中条目的收藏状态。"),
     ("关闭 / 取消", "收起速贴面板或搜索窗口。"),
-    ("向上选择", "选中项上移一条，按住可连发。"),
-    ("向下选择", "选中项下移一条，按住可连发。"),
-    ("删除条目", "删除选中条目（仅搜索窗口，需二次确认）。"),
+    ("向上选择", "选中上一条，按住可连续选择。"),
+    ("向下选择", "选中下一条，按住可连续选择。"),
+    ("删除条目", "删除选中条目（仅搜索窗口，再按一次确认）。"),
 ];
 
 const STATUS_IDLE: i32 = 0;
@@ -234,15 +234,15 @@ pub fn wire(app: &App) {
             // 单向绑定 winv-enabled，Rust 不写则开关视觉保持旧值——
             // 取消即无痕回弹，开关状态与实际生效状态始终一致
             if checked {
-                win.set_winv_dialog_title("重启资源管理器后生效".into());
+                win.set_winv_dialog_title("启用 Win+V 唤起速贴？".into());
                 win.set_winv_dialog_body(
-                    "开启后 Win+V 将唤起速贴面板，系统剪贴板历史同时停用。需立即重启资源管理器，期间任务栏与桌面会短暂消失并自动恢复；取消则不开启。"
+                    "Win+V 将打开速贴，同时停用系统剪贴板历史。启用时会重启资源管理器，任务栏与桌面会短暂消失并自动恢复。"
                         .into(),
                 );
             } else {
-                win.set_winv_dialog_title("重启资源管理器恢复系统".into());
+                win.set_winv_dialog_title("恢复系统 Win+V？".into());
                 win.set_winv_dialog_body(
-                    "关闭后需立即重启资源管理器，系统 Win+V 与剪贴板历史才会恢复，期间任务栏与桌面会短暂消失并自动恢复；取消则保持接管。"
+                    "Win+V 将恢复打开系统剪贴板历史。恢复时会重启资源管理器，任务栏与桌面会短暂消失并自动恢复。"
                         .into(),
                 );
             }
@@ -1026,7 +1026,7 @@ fn schedule_save(app: &App) {
     if shortcut_conflict(&win) {
         win.set_status_kind(STATUS_BLOCKED);
         win.set_status_reasons("快捷键冲突".into());
-        win.set_search_shortcut_hint("与主快捷键相同，请换一组组合；冲突时不会保存。".into());
+        win.set_search_shortcut_hint("与「打开速贴」快捷键相同，请换一组；修改尚未保存。".into());
         return;
     }
     if let Some(reason) = session_conflict_reason(&win) {
@@ -1105,6 +1105,8 @@ fn flush_pending_save(app: &App) {
 /// 托盘菜单文案右键现建，无需推送刷新。
 pub fn apply_side_effects(app: &App) {
     let settings = app.state.current_settings();
+    crate::search::refresh_copy(app);
+    app.with_picker(|win| win.set_monitoring_paused(settings.pause_monitoring));
     crate::sync_global_hotkeys(app);
     // 自启任务同步（后台线程，串行锁防并发重建；失败异步回滚开关）
     spawn_autostart_sync(app, true);
@@ -1203,18 +1205,18 @@ pub fn on_explorer_restarted(app: &App) {
 }
 
 /// 全局快捷键注册失败的用户可见反馈（1409=组合被其他程序占用）。
-/// 空串 = 该键位注册正常。含 Win 修饰的组合为系统保留，按接管开关
-/// 状态给出针对性指引而非笼统的「请换一组」
+/// 空串 = 该键位注册正常。Win+V 被系统占用时按接管开关状态给出指引。
 fn refresh_hotkey_status_hints(win: &SettingsWindow, failures: &[(u32, u32)]) {
-    let uses_win = |text: &str| {
-        floatpaste_core::platform::windows::hotkey::parse_hotkey(text).is_some_and(|spec| spec.win)
+    let uses_winv = |text: &str| {
+        floatpaste_core::platform::windows::hotkey::parse_hotkey(text)
+            == floatpaste_core::platform::windows::hotkey::parse_hotkey("Win+V")
     };
     let text_for = |id: u32, text: &str| {
         failures
             .iter()
             .find(|(failed_id, _)| *failed_id == id)
             .map(|(_, code)| {
-                if *code == crate::ERROR_HOTKEY_OCCUPIED && uses_win(text) {
+                if *code == crate::ERROR_HOTKEY_OCCUPIED && uses_winv(text) {
                     if win.get_winv_enabled() {
                         "Win+V 为系统保留组合，接管尚未生效：重启资源管理器后即可使用（见下方「Win+V 唤起速贴」）。".to_string()
                     } else {
@@ -1245,7 +1247,7 @@ fn rebuild_preview_models(win: &SettingsWindow, settings: &UserSetting, resolved
         .position(|id| *id == settings.theme_preset)
         .unwrap_or(0);
     let preset_names = [
-        ("默认", "低色度中性灰基调，跨设备观感最稳定。"),
+        ("默认", "简洁的中性灰配色。"),
         ("Catppuccin", "柔和低饱和的社区配色，亮暗为 Latte / Mocha。"),
         ("Tokyo Night", "蓝墨夜色风格，亮暗为 day / night。"),
     ];
@@ -1421,7 +1423,7 @@ fn update_tag_conflict(win: &SettingsWindow, index: usize, text: &str) {
         && trimmed != name
         && tag_names(win)
             .iter()
-            .any(|other| other.to_lowercase() == trimmed.to_lowercase());
+            .any(|other| other != &name && other.to_lowercase() == trimmed.to_lowercase());
     let model = win.get_tag_rows();
     if index < model.row_count() {
         if let Some(mut row) = model.row_data(index) {
@@ -1671,4 +1673,41 @@ fn start_notice_timer(app: &App, search: bool) {
         }
     });
     NOTICE_TIMER.with(|slot| *slot.borrow_mut() = Some(timer));
+}
+
+#[cfg(test)]
+pub(crate) mod copy_contract_tests {
+    use super::*;
+
+    pub(crate) fn run() {
+        let win = SettingsWindow::new().expect("实例化设置窗失败");
+        let failures = [(crate::HOTKEY_ID_MAIN, crate::ERROR_HOTKEY_OCCUPIED)];
+        win.set_shortcut("Win+Q".into());
+        refresh_hotkey_status_hints(&win, &failures);
+        assert!(!win.get_main_hotkey_status().contains("Win+V"));
+        assert!(win.get_main_hotkey_status().contains("占用"));
+
+        win.set_shortcut("Win+V".into());
+        refresh_hotkey_status_hints(&win, &failures);
+        assert!(win.get_main_hotkey_status().contains("Win+V"));
+        assert!(win.get_main_hotkey_status().contains("先开启"));
+        win.set_winv_enabled(true);
+        refresh_hotkey_status_hints(&win, &failures);
+        assert!(win.get_main_hotkey_status().contains("重启资源管理器"));
+
+        win.set_tag_rows(slint::ModelRc::new(VecModel::from(vec![
+            crate::TagRowData {
+                name: "Work".into(),
+                ..Default::default()
+            },
+            crate::TagRowData {
+                name: "Life".into(),
+                ..Default::default()
+            },
+        ])));
+        update_tag_conflict(&win, 0, "work");
+        assert!(!win.get_tag_rows().row_data(0).unwrap().conflict);
+        update_tag_conflict(&win, 0, "life");
+        assert!(win.get_tag_rows().row_data(0).unwrap().conflict);
+    }
 }

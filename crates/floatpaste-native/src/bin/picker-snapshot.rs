@@ -8,6 +8,8 @@
 //!   （模糊→tint→圆角），预览自绘模糊底图与行卡半透观感
 //! - mica[=alpha]：同 blur 但 tint 近不透明 + 行卡实卡（Mica 档观感），
 //!   alpha 缺省取代码内 MICA_TINT_ALPHA
+//! - backdrop=#RRGGBB：用指定纯色替代合成彩底，校准不同背景下的材质
+//! - preset=<id>：使用指定风格预设（默认 default）
 //!
 //! 输出 `.artifacts/snapshot/picker-<mode>-<tag>.png`（不入 Git）。
 //! 实底形态快照按中灰蓝桌面色合成材质残透，近似真机观感。
@@ -90,6 +92,8 @@ fn synthetic_backdrop(
     tint_rgb: [u8; 3],
     tint_alpha: f32,
     is_light: bool,
+    use_mica: bool,
+    background: Option<[u8; 3]>,
     w: u32,
     h: u32,
 ) -> slint::Image {
@@ -147,12 +151,21 @@ fn synthetic_backdrop(
             }
         }
     }
+    if let Some(rgb) = background {
+        for pixel in px.chunks_exact_mut(4) {
+            pixel[..3].copy_from_slice(&rgb);
+        }
+    }
     let radius = (picker.global::<PanelGeometry>().get_card_radius()
         * picker.window().scale_factor())
     .round() as usize;
     floatpaste_core::backdrop::blur_rgba(&mut px, full_w, full_h, m);
     let mut px = floatpaste_core::backdrop::crop(&px, full_w, full_h, m, m, w, h);
-    floatpaste_core::backdrop::tint_opaque(&mut px, tint_rgb, tint_alpha);
+    if use_mica {
+        floatpaste_core::backdrop::tint_opaque(&mut px, tint_rgb, tint_alpha);
+    } else {
+        floatpaste_core::backdrop::tint_acrylic(&mut px, tint_rgb, !is_light);
+    }
     floatpaste_core::backdrop::bake_round_corners(&mut px, w, h, radius);
     let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(w as u32, h as u32);
     buf.make_mut_bytes().copy_from_slice(&px);
@@ -167,9 +180,16 @@ fn main() {
         .and_then(|s| s.parse().ok())
         .unwrap_or(f32::NAN);
     let is_light = mode == "light";
+    let background = std::env::args().find_map(|a| {
+        a.strip_prefix("backdrop=").map(|hex| {
+            let color = hex_color(hex);
+            [color.red(), color.green(), color.blue()]
+        })
+    });
 
+    let preset = std::env::args().find_map(|a| a.strip_prefix("preset=").map(str::to_owned));
     let tokens = derive_tokens(
-        "default",
+        preset.as_deref().unwrap_or("default"),
         "default",
         if is_light {
             ResolvedTheme::Light
@@ -194,16 +214,18 @@ fn main() {
     theme.set_canvas_inset(hex_color(tokens.canvas_inset));
     theme.set_surface(hex_color(tokens.surface));
     theme.set_card_layer(hex_color(tokens.card_layer));
-    theme.set_card_face(hex_color(tokens.card_face));
+    theme.set_card_face(hex_color(&tokens.card_face));
     theme.set_fg_default(hex_color(&tokens.fg_default));
     theme.set_fg_muted(hex_color(&tokens.fg_muted));
     theme.set_fg_subtle(hex_color(&tokens.fg_subtle));
+    theme.set_fg_metadata(hex_color(&tokens.fg_metadata));
     theme.set_accent_fg(hex_color(&tokens.accent_fg));
     theme.set_accent_subtle(rgba_color(
         tokens.accent_subtle_rgb,
         tokens.accent_subtle_alpha,
     ));
     theme.set_selected_bg(rgba_color(tokens.selected_bg_rgb, tokens.selected_bg_alpha));
+    theme.set_hover_bg(rgba_color(tokens.hover_bg_rgb, tokens.hover_bg_alpha));
     theme.set_border_default(hex_color(&tokens.border_default));
     theme.set_border_window(hex_color(&tokens.border_window));
     theme.set_border_muted(hex_color(tokens.border_muted));
@@ -212,7 +234,7 @@ fn main() {
         tokens.danger_subtle_rgb,
         tokens.danger_subtle_alpha,
     ));
-    theme.set_favorite(hex_color(tokens.favorite));
+    theme.set_favorite(hex_color(&tokens.favorite));
     theme.set_shadow_color(rgba_color(tokens.shadow_color, 1.0));
 
     let rows: Vec<ClipRow> = vec![
@@ -242,6 +264,8 @@ fn main() {
                 floatpaste_core::backdrop::ACRYLIC_TINT_ALPHA
             }),
             is_light,
+            use_mica,
+            background,
             360,
             420,
         ));
@@ -262,7 +286,7 @@ fn main() {
     let snap = picker.window().take_snapshot().unwrap();
     let (w, h) = (snap.width(), snap.height());
 
-    let desk = [122u8, 139, 153];
+    let desk = background.unwrap_or([122u8, 139, 153]);
     let mut out = image::RgbaImage::new(w, h);
     for (px, src) in out.pixels_mut().zip(snap.as_slice().iter()) {
         let a = src.a as u32;

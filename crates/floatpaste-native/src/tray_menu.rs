@@ -68,8 +68,8 @@ fn monitoring_menu_label(paused: bool) -> &'static str {
 
 fn menu_items(paused: bool) -> Vec<&'static str> {
     vec![
-        "打开速贴面板",
-        "打开搜索",
+        "打开速贴",
+        "打开搜索窗口",
         "打开设置",
         monitoring_menu_label(paused),
         "退出",
@@ -265,7 +265,7 @@ pub(crate) mod headless_contract_tests {
         win.window().set_size(slint::LogicalSize::new(200.0, 220.0));
 
         // 宽度标尺与渲染同引擎：CJK 菜单项必有实质自然宽
-        let width = win.invoke_measure_item_width("打开速贴面板".into());
+        let width = win.invoke_measure_item_width("打开搜索窗口".into());
         assert!(width > 60.0, "菜单项自然宽度度量应非零（实测 {width}）");
 
         // 行命中：第 3 行竖直中心（±行内 padding 4px 不出 36px 行带）

@@ -39,9 +39,9 @@ pub fn paste_target_requires_elevation(target_window_hwnd: Option<isize>) -> boo
 }
 
 /// 管理员目标提示节流：托盘气泡每进程只发一次，不重复打扰
-pub fn notify_admin_target_once(app: &App) {
+pub fn notify_admin_target_once(app: &App, restore_clipboard: bool) {
     if app.state.mark_admin_target_notified() {
-        crate::tray::notify_admin_target();
+        crate::tray::notify_admin_target(restore_clipboard);
     }
 }
 
@@ -52,10 +52,6 @@ pub fn paste_item(app: &App, id: &str, option: PasteOption) -> Result<(), AppErr
     // 仅跳过必然无效的按键注入，经托盘气泡一次性说明
     let admin_target = option.paste_to_target
         && paste_target_requires_elevation(app.state.picker_session().target_window_hwnd);
-    if admin_target {
-        notify_admin_target_once(app);
-    }
-
     let previous_clipboard = paste_support::capture_snapshot_if_needed(&option)?;
     let mut clipboard = Clipboard::new().map_err(|error| AppError::Clipboard(error.to_string()))?;
 
@@ -70,7 +66,10 @@ pub fn paste_item(app: &App, id: &str, option: PasteOption) -> Result<(), AppErr
         owner_hwnd,
     )?;
 
-    let clip_type_label = paste_support::clip_type_label(&detail.r#type);
+    if admin_target {
+        notify_admin_target_once(app, option.restore_clipboard_after_paste);
+    }
+    let failure_hint = paste_support::paste_failure_hint(option.restore_clipboard_after_paste);
 
     if !option.paste_to_target {
         app.core().repository.mark_used(id)?;
@@ -101,37 +100,32 @@ pub fn paste_item(app: &App, id: &str, option: PasteOption) -> Result<(), AppErr
                 ) {
                     // 目标是搜索窗口：把输入焦点还给搜索框（对齐原版
                     // resume_search_input_if_target）
-                    if target_hwnd == app_for_result.state.search_hwnd.load(
-                        std::sync::atomic::Ordering::SeqCst,
-                    ) {
+                    if target_hwnd
+                        == app_for_result
+                            .state
+                            .search_hwnd
+                            .load(std::sync::atomic::Ordering::SeqCst)
+                    {
                         let app_for_resume = app_for_result.clone();
                         let _ = slint::invoke_from_event_loop(move || {
                             search::resume_input(&app_for_resume);
                         });
                     }
                     if admin_target {
-                        (false, format!(
-                            "已将{clip_type_label}写入系统剪贴板；目标窗口以管理员权限运行，无法自动粘贴。"
-                        ))
+                        (false, "目标应用以管理员身份运行，无法自动粘贴。")
                     } else {
                         thread::sleep(INJECT_DELAY);
                         if paste_support::trigger_ctrl_v() {
-                            (true, format!("已将{clip_type_label}写入系统剪贴板，并上屏到目标窗口。"))
+                            (true, "")
                         } else {
-                            (false, format!(
-                                "已将{clip_type_label}写入系统剪贴板，但系统按键注入失败。你仍可手动执行 Ctrl+V。"
-                            ))
+                            (false, "未能自动粘贴。")
                         }
                     }
                 } else {
-                    (false, format!(
-                        "已将{clip_type_label}写入系统剪贴板，但未能恢复到原目标窗口。你仍可手动执行 Ctrl+V。"
-                    ))
+                    (false, "未能切回目标窗口。")
                 }
             }
-            None => (false, format!(
-                "已将{clip_type_label}写入系统剪贴板，但当前没有可恢复的目标窗口句柄。你仍可手动执行 Ctrl+V。"
-            )),
+            None => (false, "未找到需要粘贴的窗口。"),
         };
 
         if let Some(snapshot) = previous_clipboard {
@@ -141,7 +135,9 @@ pub fn paste_item(app: &App, id: &str, option: PasteOption) -> Result<(), AppErr
         let _ = core.repository.mark_used(&id);
 
         let _ = slint::invoke_from_event_loop(move || {
-            picker::report_paste_outcome(success, &message);
+            if !success && !admin_target {
+                crate::tray::notify_failure(&format!("{message}{failure_hint}"));
+            }
             picker::notify_pasted(&app_for_result);
         });
     });

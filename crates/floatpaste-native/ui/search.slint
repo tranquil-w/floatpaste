@@ -93,7 +93,7 @@ component IconButton inherits Rectangle {
     // canvas-subtle 同源会几乎不可见
     background: root.armed ? Theme.danger-subtle
         : (btn-ta.has-hover
-            ? (root.danger-hover ? Theme.danger-subtle : Theme.fg-default.with-alpha(0.1))
+            ? (root.danger-hover ? Theme.danger-subtle : Theme.hover-bg)
             : transparent);
     // 危险悬停时图标同步转危险色（旧版 hover:text-pg-danger-fg）
     out property <color> glyph-color: btn-ta.has-hover && root.danger-hover
@@ -132,7 +132,7 @@ component FilterChip inherits Rectangle {
     height: 24px;
     border-radius: Metrics.radius-md;
     background: root.active ? Theme.accent-subtle
-        : (chip-ta.has-hover ? Theme.canvas-subtle : transparent);
+        : (chip-ta.has-hover ? Theme.hover-bg : transparent);
     animate background { duration: Motion.dur-color; easing: Motion.ease; }
     HorizontalLayout {
         padding-left: 10px;
@@ -160,7 +160,7 @@ component TagChip inherits Rectangle {
     height: 24px;
     border-radius: Metrics.radius-pill;
     background: root.active ? Theme.accent-subtle
-        : (chip-ta.has-hover ? Theme.canvas-subtle : transparent);
+        : (chip-ta.has-hover ? Theme.hover-bg : transparent);
     animate background { duration: Motion.dur-color; easing: Motion.ease; }
     HorizontalLayout {
         padding-left: 10px;
@@ -216,8 +216,18 @@ component TypeGlyph inherits Rectangle {
 }
 
 // ── 行卡片：恒定行高；选中只换高亮/左条/操作条浮层，不展开 ──
+export struct SearchActionKeys {
+    confirm: string,
+    confirm-as-file: string,
+    open-editor: string,
+    toggle-favorite: string,
+    dismiss: string,
+    delete-entry: string,
+}
+
 component SearchRowCard inherits Rectangle {
     in property <SearchRow> data;
+    in property <SearchActionKeys> action-keys;
     in property <bool> selected;
     in property <length> preview-width; // 基础预览宽（未扣选中预留/未扣 pr-1）
     in property <bool> delete-armed;
@@ -271,14 +281,11 @@ component SearchRowCard inherits Rectangle {
     }
 
     border-radius: Metrics.radius-lg;
-    // hover 与选中底都是恒定半透明：材质时透 backdrop，无材质时叠窗底
-    // 实色（观感仅略淡，无害）——省去向行组件穿材质门控。选中底为纯墨
-    // 低 alpha（token 自带），亮度增量恒定、不随桌面亮度漂移——不透明
-    // 固定色在亮桌面玻璃上会与底趋零乃至反转。
+    // 悬停与选中均叠加中性墨色：浅压暗 / 深提亮，保持背景变化时的方向。
     // 底色不设动画：键盘导航是高频交互，渐隐会让上一个选中项闪一拍
     // 强调色（Motion 频率纪律）
     background: root.selected ? Theme.selected-bg
-        : (root.hovered ? Theme.canvas-subtle.with-alpha(0.62) : transparent);
+        : (root.hovered ? Theme.hover-bg : transparent);
 
     // 选中条：独立 3px 竖条，定长 24px 垂直居中——行高随内容可变，
     // 定长在多行行高下保持一致，且恒落在直线段内不碰上下圆角
@@ -388,9 +395,8 @@ component SearchRowCard inherits Rectangle {
                 Text {
                     width: parent.width;
                     text: data.meta;
-                    // 中性选中底上 fg-subtle 仍偏弱（~3.8:1）：选中态
-                    // 切 fg-muted，与速贴窗元信息行同规
-                    color: root.selected ? Theme.fg-muted : Theme.fg-subtle;
+                    // 元信息按卡面与交互底色独立校正。
+                    color: Theme.fg-metadata;
                     font-size: Metrics.text-xs;
                     wrap: word-wrap;
                     vertical-alignment: top;
@@ -444,7 +450,7 @@ component SearchRowCard inherits Rectangle {
                     }
                     if (data.tag-more > 0): Text {
                         text: "+" + data.tag-more;
-                        color: Theme.fg-subtle;
+                        color: Theme.fg-metadata;
                         font-size: 11px;
                         vertical-alignment: center;
                     }
@@ -497,7 +503,8 @@ component SearchRowCard inherits Rectangle {
                         // 粘贴：首位动作的双叠圆角方块图形
                         paste-btn := IconButton {
                             icon-color: Theme.fg-default;
-                            hint: "粘贴（Enter）";
+                            hint: (data.kind == 0 ? "粘贴为文本" : data.kind == 1 ? "粘贴为图片" : "粘贴为文件")
+                                + "（" + root.action-keys.confirm + "）";
                             clicked => { root.paste(); }
                             hover(t, x, y) => { root.button-hint(t, x, y); }
                             hover-left => { root.button-hint-left(); }
@@ -519,8 +526,8 @@ component SearchRowCard inherits Rectangle {
                         // 行会空出一个按钮宽；悬停态经 root.sec-hover 桥接
                         if (data.kind != 0): IconButton {
                             hint: data.kind == 1
-                                ? "粘贴为图片路径（Shift+Enter）"
-                                : "粘贴为文件路径（Shift+Enter）";
+                                ? "粘贴为图片路径（" + root.action-keys.confirm-as-file + "）"
+                                : "粘贴为文件路径（" + root.action-keys.confirm-as-file + "）";
                             clicked => { root.paste-as-path(); }
                             hover(t, x, y) => { root.button-hint(t, x, y); }
                             hover-left => { root.button-hint-left(); }
@@ -543,7 +550,7 @@ component SearchRowCard inherits Rectangle {
                         // 编辑键：全类型通用（编辑器支持文本/图片/文件），
                         // 与键盘 Ctrl+Enter 同一入口
                         edit-btn := IconButton {
-                            hint: "编辑内容（Ctrl+Enter）";
+                            hint: "编辑内容（" + root.action-keys.open-editor + "）";
                             clicked => { root.edit(); }
                             hover(t, x, y) => { root.button-hint(t, x, y); }
                             hover-left => { root.button-hint-left(); }
@@ -560,7 +567,8 @@ component SearchRowCard inherits Rectangle {
                         }
                         fav-btn := IconButton {
                             icon-color: data.favorited ? Theme.favorite : Theme.fg-default;
-                            hint: data.favorited ? "取消收藏（Ctrl+Space）" : "收藏（Ctrl+Space）";
+                            hint: (data.favorited ? "取消收藏" : "收藏")
+                                + "（" + root.action-keys.toggle-favorite + "）";
                             clicked => { root.toggle-favorite(); }
                             hover(t, x, y) => { root.button-hint(t, x, y); }
                             hover-left => { root.button-hint-left(); }
@@ -580,7 +588,8 @@ component SearchRowCard inherits Rectangle {
                             armed: root.delete-armed;
                             icon-color: root.delete-armed ? Theme.danger-fg : Theme.fg-muted;
                             danger-hover: true;
-                            hint: "删除（Del）";
+                            hint: (root.delete-armed ? "再次点击或按键确认删除" : "删除条目")
+                                + "（" + root.action-keys.delete-entry + "）";
                             clicked => { root.delete-armed-request(); }
                             hover(t, x, y) => { root.button-hint(t, x, y); }
                             hover-left => { root.button-hint-left(); }
@@ -623,6 +632,7 @@ export component SearchWindow inherits Window {
 
     // ── 数据（Rust 接管）──
     in-out property <[SearchRow]> rows;
+    in property <SearchActionKeys> action-keys;
     in-out property <int> selected: 0;
     in-out property <string> keyword;
     in-out property <bool> input-suspended: false;
@@ -875,7 +885,8 @@ export component SearchWindow inherits Window {
                                         width: parent.width;
                                         horizontal-alignment: left;
                                         text: root.input-suspended
-                                            ? "键盘已交给速贴面板，按 Esc 返回" : "开始键入…";
+                                            ? "正在操作速贴，按 " + root.action-keys.dismiss + " 返回搜索"
+                                            : "搜索剪贴板内容…";
                                         color: Theme.fg-subtle;
                                         font-size: 17px;
                                         vertical-alignment: center;
@@ -894,7 +905,7 @@ export component SearchWindow inherits Window {
                                         height: 28px;
                                         border-radius: Metrics.radius-pill;
                                         opacity: clear-ta.pressed ? 0.85 : 1.0;
-                                        background: clear-ta.has-hover ? Theme.canvas-subtle : transparent;
+                                        background: clear-ta.has-hover ? Theme.hover-bg : transparent;
                                         animate background { duration: Motion.dur-color; easing: Motion.ease; }
                                         clear-ta := TouchArea {
                                             clicked => {
@@ -942,7 +953,9 @@ export component SearchWindow inherits Window {
 
                                 // 条目计数（加载中隐藏）
                                 if (root.show-result-count): Text {
-                                    text: root.result-count + "/" + root.result-total + " 条";
+                                    text: root.result-count < root.result-total
+                                        ? "共 " + root.result-total + " 条，已加载 " + root.result-count + " 条"
+                                        : "共 " + root.result-total + " 条";
                                     color: Theme.fg-subtle;
                                     font-size: Metrics.text-xs;
                                     vertical-alignment: center;
@@ -1106,7 +1119,7 @@ export component SearchWindow inherits Window {
                                         border-width: 1px;
                                         border-color: Theme.border-default;
                                         opacity: retry-ta.pressed ? 0.85 : 1.0;
-                                        background: retry-ta.has-hover ? Theme.canvas-subtle : transparent;
+                                        background: retry-ta.has-hover ? Theme.hover-bg : transparent;
                                         animate background { duration: Motion.dur-color; easing: Motion.ease; }
                                         retry-ta := TouchArea {
                                             clicked => { root.retry-clicked(); }
@@ -1153,7 +1166,7 @@ export component SearchWindow inherits Window {
                                         border-width: 1px;
                                         border-color: Theme.border-default;
                                         opacity: empty-ta.pressed ? 0.85 : 1.0;
-                                        background: empty-ta.has-hover ? Theme.canvas-subtle : transparent;
+                                        background: empty-ta.has-hover ? Theme.hover-bg : transparent;
                                         animate background { duration: Motion.dur-color; easing: Motion.ease; }
                                         empty-ta := TouchArea {
                                             clicked => {
@@ -1182,6 +1195,7 @@ export component SearchWindow inherits Window {
                                 spacing: 0px;
                                 for row[i] in root.rows: SearchRowCard {
                                     data: row;
+                                    action-keys: root.action-keys;
                                     selected: i == root.selected;
                                     preview-width: root.preview-width-no-thumb;
                                     delete-armed: root.delete-armed-row == i;
