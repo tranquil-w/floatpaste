@@ -61,11 +61,11 @@
 
 | 类型 | 名称 | 内容 |
 |------|------|------|
-| Secret | `RELEASE_NOTES_API_KEY` | 标准 API 的访问密钥 |
+| `release-notes` Environment Secret | `RELEASE_NOTES_API_KEY` | 标准 API 的访问密钥 |
 | Variable | `RELEASE_NOTES_API_URL` | 完整 HTTPS Chat Completions 接口 URL |
 | Variable | `RELEASE_NOTES_MODEL` | 该接口支持的模型标识 |
 
-三项全部配置后启用模型改写，仅发送筛选后的提交摘要与正文。未配置、请求超时、接口失败或输出格式不符合要求时，使用按规则筛选分组的提交摘要；模型失败须输出工作流警告，不阻断已经通过验收的版本发布。破坏性变化原文不交给模型改写。
+`release-notes` Environment 仅允许 `v*` tag 部署，要求仓库所有者批准，并禁止管理员绕过；Key 只存放在此环境中。tag 发布工作流在开始前暂停等待批准，通过后才运行验收并在生成说明时调用模型。PR 和手动演练使用不含 Key 的 `release-preview` 环境，始终采用规则生成的说明。三项配置齐全且存在普通用户可见变化时才调用模型，仅发送筛选后的提交摘要与正文。未配置、请求超时、接口失败或输出格式不符合要求时，使用按规则筛选分组的提交摘要；模型失败须输出工作流警告，不阻断已经通过验收的版本发布。破坏性变化原文不交给模型改写。
 
 ## 演练与失败处理
 
