@@ -80,6 +80,12 @@ Rust 改动后，保证 `cargo test` 与 `cargo build -p floatpaste-native` 通�
 
 ---
 
+## 发布入口
+
+- 执行版本发布或修改发布流程前，阅读并遵循 [发布流程](docs/release/process.md)。
+
+---
+
 ## 提交与 Pull Request 规范
 
 ### 提交信息

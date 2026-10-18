@@ -120,5 +120,5 @@ SQLite（`%APPDATA%\com.floatpaste\floatpaste.db`）+ FTS5：`clip_items`（条�
 
 - 日志：按天滚动 `%APPDATA%\com.floatpaste\logs\floatpaste-native.log`，最多保留 15 个文件；主目录不可用时写入 `%TEMP%\FloatPaste\logs`。默认日志不包含窗口标题或 UIA 元素名称，设置 `FLOATPASTE_DIAGNOSTIC_LOG=1` 后启用这些文本字段以协助定位问题。窗口生命周期以 `session_id` 标识，上屏异步操作同时记录 `session_id` 与 `operation_id`；日志队列丢弃计数每 30 秒汇总，异常日志包含线程名与堆栈。
 - 静默启动：`--silent`；二次启动经单实例命名事件唤醒已有实例的速贴后退出
-- 发版流程见 [release/process.md](release/process.md)
+- tag 驱动的自动发布、交付产物验收与说明生成见 [release/process.md](release/process.md)
 - WSL 开发用 `./scripts/win-cargo test` 转发 Windows 工具链
