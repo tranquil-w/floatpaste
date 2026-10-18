@@ -132,7 +132,7 @@ unsafe fn setup_monitor_window(
         ..Default::default()
     };
     if RegisterClassW(&class) == 0 {
-        return Err(WindowsError::from_win32());
+        return Err(WindowsError::from_thread());
     }
 
     let context = Box::into_raw(Box::new(MonitorContext {
