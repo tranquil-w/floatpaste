@@ -249,20 +249,10 @@ pub struct CustomThemeColors {
 
 /// 用户设置结构
 ///
-/// # 快捷键格式说明
+/// # 快捷键
 ///
-/// - **主快捷键**：用于打开 Picker 窗口
+/// - **主快捷键**：用于打开速贴
 /// - **搜索窗口快捷键**：用于全局打开搜索窗口
-///
-/// # 示例
-///
-/// ```ignore
-/// use crate::domain::settings::UserSetting;
-///
-/// let settings = UserSetting::default();
-/// assert_eq!(settings.shortcut, "Ctrl+Q");
-/// assert_eq!(settings.search_shortcut, "Alt+S");
-/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(default)]
