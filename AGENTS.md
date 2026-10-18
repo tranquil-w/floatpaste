@@ -1,110 +1,23 @@
 # Repository Guidelines
 
-## 项目结构与模块组织
+## 开发入口
 
-- `crates/floatpaste-core/` - 业务、数据与 Windows 平台共享核心。不依赖 Slint 的业务与纯逻辑一律落这里
-- `crates/floatpaste-native/` - 唯一桌面壳（Slint 软件渲染）。窗口、会话与回调装配在此实现
-
-core 内部分层约束：
-
-- `domain` - 纯数据与业务概念，不依赖任何基础设施
-- `repository` - rusqlite 数据访问
-- `services` - 业务规则编排，仅依赖 domain/repository
-- `platform` - Win32 原生集成（剪贴板、监听、快捷键、单实例等），通过回调向 UI 层暴露事件，不反向依赖任何窗口框架
-
-native 壳内约定：
-
-- `src/` 各窗口模块自带 `wire()` 绑定回调，`main.rs` 只负责启动顺序与模块间接线
-- 不依赖 Slint 类型的纯逻辑（格式化、计算）下沉 core（如 `core::clip_display`），保证无 GUI 依赖即可测试
-
-### 其他目录
-- `docs/` - 文档，平铺（仅 `release/` 保留子目录）；地图见 [docs/README.md](docs/README.md)
-- `CONTEXT.md` - 领域术语表，术语以这里为准
-- `packaging/` - Inno 安装包脚本
-- `scripts/` - 版本号、发版说明、图标生成等辅助脚本
-- `.artifacts/` - 迭代计划、发版草稿等临时产物（不入 Git）
-
----
+- 开发环境、命令、代码风格和贡献要求遵循 [CONTRIBUTING.md](CONTRIBUTING.md)。
+- 实现前按改动范围阅读 [架构概览](docs/architecture.md)、[运行行为](docs/runtime-behavior.md) 与 [文档地图](docs/README.md) 中的对应专题。
+- Rust 改动执行贡献指南要求的测试与构建；测试分层、隔离与驱动钩子遵循 [测试体系](docs/testing.md)。
+- 执行版本发布或修改发布流程前，阅读并遵循 [发布流程](docs/release/process.md)。
 
 ## 文档规则
 
-- docs/ 只保留当前有价值且可预见长期有参考价值的文档，失去价值即移除（历史在 git 提交记录中）；计划、路线图、调研草稿等临时物放 `.artifacts/`，不进 Git
-- 提交行为或结构变更时，同一改动内更新对应活文档（architecture.md / no-focus-picker.md / theme-system.md），文档与实现不一致视同 bug
-- 设计与决策文档平铺编号为 `docs/adr-NNNN-<slug>.md`，状态写文件头部 frontmatter：`proposed`（调研/提案中）/ `accepted` / `rejected` / `superseded by adr-NNNN`；状态变更只改头不改正文，被拒方案原位保留
-- 立项写 adr 需同时满足：难以逆转、无上下文会费解、存在真实取舍；三条缺一就不值得单独立项
-- 文档与界面文案统一使用 `CONTEXT.md` 术语表的命名
+- `docs/` 保留有明确当前用途且具备持续维护价值的文档；内容失真时先修正，重复时合并独有事实，职责不符时迁移，没有保留价值时删除。
+- 文档平铺于 `docs/`，文件名使用英文 kebab-case；仅 `release/` 保留流程与模板子目录。计划、路线图、候选功能与调研草稿放 `.artifacts/`，不入 Git。
+- 文档与界面文案统一使用 [CONTEXT.md](CONTEXT.md) 术语；提交行为或结构变更时，同一改动更新对应活文档并修复入站链接和文档地图。
+- 架构概览维护模块边界、依赖方向与主要数据流；现行行为和防坑细节放对应专题。相同事实指定一个维护位置，其他入口用摘要和链接。
+- 规范类文档只写应遵循的规则及理由；操作历史放对话或提交记录。故障排查区分症状、证据、假设、恢复条件，不把单次观察写成普遍保证。
+- ADR 立项需同时满足难以逆转、无上下文会费解、存在真实取舍；小范围设计理由就近写在架构或专题文档中。
+- ADR 平铺编号为 `docs/adr-NNNN-<slug>.md`，状态写 frontmatter：`proposed` / `accepted` / `rejected` / `superseded by adr-NNNN`。proposed 随讨论完善；accepted 保留当时正文，后续决策变化通过新 ADR 与状态关联表达；rejected 和 superseded 原位保留。
+- 现行约束以活文档和实现为准，ADR 用于解释决策依据；在文档地图中关联两者。迁移或精简前核对独有事实、前提、例外、时序与回退条件的去向。
 
----
+## Agent 协作
 
-## 构建、测试与开发命令
-
-| 命令 | 说明 |
-|------|------|
-| `cargo run -p floatpaste-native` | 启动桌面应用（debug） |
-| `cargo test` | 运行全部 Rust 测试（覆盖 `floatpaste-core` 与 `floatpaste-native`，含端到端） |
-| `cargo test -p floatpaste-native --test e2e_smoke` | 单跑真进程端到端（运行十余秒；期间短暂占用全局快捷键并读写系统剪贴板；体系见 [docs/testing.md](docs/testing.md)） |
-| `cargo build --release -p floatpaste-native` | 发布构建 |
-| `cargo run -p floatpaste-native --bin picker-snapshot -- <light\|dark> <tag> [hover-y] [blur]` | 无头渲染速贴观感快照到 `.artifacts/snapshot/`（诊断工具，不模拟桌面输入）；`blur` 合成彩底走烘焙管线，预览玻璃底图与行卡半透 |
-| `node scripts/bump-version.mjs <版本>` | 同步升级 package.json / native Cargo.toml / Cargo.lock |
-
-`package.json` 仅保留版本号（发版 tag 校验用）与 `test:rust` 等价入口，不含任何依赖。
-
-### 环境限制（WSL）
-
-本项目依赖 Windows 原生 API（剪贴板、系统托盘、全局快捷键）。
-在 WSL 中开发时，统一使用仓库内脚本转发到 Windows 工具链执行：
-
-| 推荐命令 | 说明 |
-|------|------|
-| `./scripts/win-cargo test` | 使用 Windows `cargo.exe` 执行 Rust 测试 |
-
-Rust 改动后，保证 `cargo test` 与 `cargo build -p floatpaste-native` 通过。
-
----
-
-## 代码风格与命名约定
-
-### Rust
-- 遵循 `rustfmt` 默认格式
-- 模块与函数：`snake_case`
-- 类型：`PascalCase`
-- 提交信息与文档保持中文，避免无关样式改动
-
----
-
-## 测试指南
-
-- 主要工作流以真进程 e2e 兜底（录入、去重、面板开关、搜索、收藏、两段式删除等）；单元测试只保留 e2e 不可达的部分——纯函数边界、错误路径、持久化格式兼容、平台契约，不写与 e2e 重复的端到端行为断言（分层见 [docs/testing.md](docs/testing.md)）
-- 新增 e2e 驱动钩子走命名事件模式（`single_instance.rs` 的 `listen_test_*` / `signal_test_*`），触发与真实入口相同的处理终点，仅绕过按键分发/模态菜单层
-- 单元测试就近写在模块内，或放入所属 crate 的 `tests/` 目录；测试名应描述行为，例如：`ingest_text_skips_self_write`
-
----
-
-## 发布入口
-
-- 执行版本发布或修改发布流程前，阅读并遵循 [发布流程](docs/release/process.md)。
-
----
-
-## 提交与 Pull Request 规范
-
-### 提交信息
-- 以中文摘要为主，可带简短前缀
-- 推荐前缀：`feat:`、`fix:`、`doc:` 等
-- 或直接使用简洁中文动宾句
-- 示例：`doc: 重构剪贴板监听模块`
-
-### PR 描述
-- 说明用户可见变化
-- 列出涉及模块
-- 提供手动验证步骤
-- 关联相关文档或问题
-- 界面改动请附截图或录屏
-- 若修改数据库、快捷键或系统权限，需说明迁移与回退影响
-
----
-
-## Agent 协作说明
-
-- 仓库内代理协作统一使用中文
-- 生成文档、提交信息与评审说明时保持中文
+- 仓库内代理协作、生成文档、提交信息与评审说明统一使用中文。

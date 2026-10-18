@@ -11,9 +11,9 @@
 1. **五窗启动即建**：`main.rs` 启动即创建全部窗口（速贴/搜索/编辑/设置/悬浮气泡）。速贴/搜索/悬浮气泡平时屏外停屏、按需上屏（`overlay.rs`）；编辑/设置窗隐藏式停屏——Win32 真隐藏 + 平移屏外，Slint 端保持「已显示」，显隐走真实 `SW_SHOW`/`SW_HIDE`，任务栏按钮生灭由可见性驱动。全部窗口常驻，避免动态建窗的时序坑（见坑一、坑八）。
 2. **智能定位策略**：根据设置优先贴近鼠标、上次关闭位置或目标窗口插入符位置，并在超出工作区时自动回收至可见区域。
 3. **Win32 无焦点显示**：通过 `WS_EX_NOACTIVATE` 与无激活上屏避免抢占焦点，并在必要时立即恢复目标窗口。
-4. **会话期键盘接管**：速贴显示期间由 `session_keyboard.rs` 经 RegisterHotKey 在专用线程上注册并转发会话按键（LL 钩子方案已被系统静默摘钩问题淘汰，勿回退），主快捷键与会话控制互不冲突，方向键支持长按连发。
+4. **会话期键盘接管**：速贴显示期间由 `session_keyboard.rs` 经 RegisterHotKey 在专用线程上注册并转发会话按键（低级键盘钩子存在系统静默摘钩风险，不用于会话键分发），主快捷键与会话控制互不冲突，方向键支持长按连发。
 5. **会话退出兜底**：低级鼠标钩子监听窗口外点击自动关闭，Esc 或再按主快捷键关闭并归还焦点；搜索窗口经独立热键或托盘菜单唤起。
-6. **悬浮气泡**：独立轻量窗口显示条目预览（图片大图或文本摘要），跟随鼠标位置并自适应屏幕边缘定位，点击穿透。
+6. **悬浮气泡**：全局单例轻量窗口，悬停 400ms 后显示条目预览（图片大图或文本摘要），跟随鼠标位置并自适应屏幕边缘定位，点击穿透。
 
 启动时先在事件循环内完成窗口句柄、样式、主题与表面装配，再注册全局快捷键。`hotkey.rs` 在报告注册结果前建立消息队列；重注册先同步注销并回收旧线程，避免组合键释放与新注册竞争。快捷键回调只向事件循环转发，转发失败与消息循环异常必须落日志；禁止在热键线程回调内调用注册或停止操作，以免等待自身退出。
 
@@ -34,23 +34,23 @@
 ```mermaid
 sequenceDiagram
     participant User as 用户
-    participant Hook as OS 键盘钩子线程
+    participant HotkeyThread as RegisterHotKey 消息线程
     participant Hotkey as hotkey.rs 回调
     participant Picker as picker.rs 会话
     participant Win32 as Win32 API
     participant Mouse as mouse_monitor
     participant Target as 目标输入软件
 
-    User->>Hook: 按下主快捷键（默认 Ctrl+Q）
-    Hook->>Hotkey: 触发回调
-    Hotkey->>Hotkey: 转发主线程，不在钩子线程做事
+    User->>HotkeyThread: 按下主快捷键（默认 Ctrl+Q）
+    HotkeyThread->>Hotkey: 触发回调
+    Hotkey->>Hotkey: 转发事件循环，不在热键线程操作窗口
     Hotkey->>Picker: show_session()
     Picker->>Win32: GetForegroundWindow()
     Win32-->>Picker: 返回 Target HWND
     Picker->>Win32: 无激活上屏（屏外 → 目标位置）
     Picker->>Win32: 尝试恢复 Target 焦点
     Picker->>Mouse: begin_session()
-    Picker->>Hook: session_keyboard 接管会话键
+    Picker->>HotkeyThread: session_keyboard 接管会话键
     Picker-->>User: 速贴无焦点浮现
 ```
 
@@ -65,17 +65,17 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant User as 用户
-    participant Hook as OS 键盘钩子线程
+    participant HotkeyThread as RegisterHotKey 消息线程
     participant Picker as picker.rs 会话
     participant Paste as paste_flow
     participant Win32 as Win32 API
     participant Target as 目标输入软件
 
-    User->>Hook: 在速贴中按 Enter 或数字键
-    Hook->>Picker: 会话键事件
+    User->>HotkeyThread: 在速贴中按 Enter 或数字键
+    HotkeyThread->>Picker: 会话键事件
     Picker->>Paste: confirm(item)
     Paste->>Paste: 写入系统剪贴板（文本/图片/文件路径）
-    Picker->>Picker: 隐藏 + 结束钩子 + 延迟 90ms
+    Picker->>Picker: 停屏 + 结束键盘接管和鼠标钩子 + 延迟 90ms
     Paste->>Win32: SetForegroundWindow(Target HWND)
     Paste->>Win32: SendInput 模拟 Ctrl+V
 ```
@@ -94,11 +94,11 @@ sequenceDiagram
 
 - **现象**：动态创建窗口后立即修改无焦点样式/位置，内容区渲染异常（Tauri 时期表现为 WebView2 白屏或只剩边框；winit 下表现为首帧闪烁、边框暖屏）。
 - **原因**：窗口创建、渲染首帧、Win32 样式修改都堆叠在冷启动阶段，打断渲染器初始化时序。
-- **解决方案**：速贴/搜索/悬浮气泡启动即建，显隐走屏外停屏与位置切换（`overlay.rs`），不调用会触发销毁的 `hide()`；编辑/设置窗启动即建、隐藏即销毁并两段式重建；动态建窗只保留为异常兜底路径。
+- **解决方案**：速贴/搜索/悬浮气泡启动即建，显隐走屏外停屏与位置切换（`overlay.rs`），不调用会触发销毁的 `hide()`；编辑/设置窗保持常驻，通过 Win32 真隐藏与屏外位置控制可见性，Slint 表面保持存活（见坑十）。
 
 ### 坑二：热键回调线程里做重活，容易死锁或丢键
 
-- **现象**（历史）：在快捷键回调内立即注销热键/操作窗口，第二次唤起或关闭时卡死（Tauri global-shortcut 插件持注册表锁与主线程互等）；钩子线程做耗时事会被系统摘钩或吞按键。
+- **风险**：在快捷键回调内注销热键可能等待自身线程退出；回调内操作窗口或执行耗时任务也会阻塞后续事件处理。
 - **解决方案**：热键与钩子回调只做"转发"——回调线程尽快返回，窗口与会话操作回主线程执行（`hotkey.rs` 独立线程收 `RegisterHotKey` 消息）。
 
 ### 坑三：隐藏窗口后立即恢复焦点，容易触发窗口竞态
@@ -146,7 +146,7 @@ sequenceDiagram
 - **下钻后代**（焦点元素没有任何 TextPattern 时）：部分应用把 UIA 焦点报在无 TextPattern 的容器/窗口根上，真正的文本编辑框在其后代里，此时对文本框调 `GetCaretRange`，provider 给出的就是真实插入符。触发条件是焦点元素**既无 TextPattern2 也无 TextPattern**——焦点元素自己有 TextPattern 但几何拿不到的（如 Obsidian 空搜索框）不下钻（焦点已在文本元素上，下钻无意义），照旧走字段框兜底。搜索用 `FindFirstBuildCache(TreeScope_Descendants)`，条件两级从紧到松：先「`HasKeyboardFocus` 且支持 TextPattern」的 AND 条件，搜不到再放宽为只「支持 TextPattern」；**焦点元素自身搜不到候选时再从窗口根元素搜一遍**（反直觉点 12：VS Code 的 EditContext 宿主条带自身无文本后代，窗口根的文档元素才有实时光标行选区）。候选的 ClassName/Name 经 CacheRequest 随查找一次带回，读取零额外跨进程往返。命中候选后复用同一套定位（GetCaretRange → GetSelection → 字段框兜底），字段框的「客户区真子矩形」守卫继续生效；候选不再二次下钻（候选已按支持 TextPattern 筛过，病态 provider 上再下钻只会把搜索递归下去）。护栏：下钻是跨进程扫树且发生在开窗路径上，UIA 客户端创建时同步 `SetTransactionTimeout(300ms)`（事务默认超时可达数十秒，与连接超时 150ms 一起收紧），provider 卡顿不拖死开窗。
 - **失败现场日志**：UIA 定位最终失败时补采一轮轻量现场、一次 `tracing::debug!` 输出——焦点元素的 ClassName、ControlType（数值）、Name（截断 40 字符、控制字符折空格）、CurrentBoundingRectangle，TextPattern2/TextPattern 有无，支持 TextPattern 时的选区数量与首选区是否折叠，下钻是否触发及命中的候选摘要。只在失败路径执行，成功路径零开销。
 - **仍读不到的情形**（此时照旧回退鼠标）：目标窗口已不是前台窗口（UIA 的「焦点元素」是全局概念，此时读到的是别的窗口的插入符，故直接判失败）；焦点元素是 Chromium 的 IME 输入捕获窗（`IHWindowClass`，按类名判，反直觉点 14）；自绘光标且不实现 TextPattern 的应用（部分终端、游戏）；提权窗口与当前进程跨完整性级别（UIPI 拒绝 UIA 调用）。
-- **剩余缺口**（下钻后代已实现，以下情形仍读不到，照旧回退鼠标或字段框兜底）：搜索条件只认「支持 TextPattern」的后代，provider 不报告 TextPattern 可用性的自绘文本框（部分终端、游戏）下钻也找不到；`FindFirstBuildCache` 只取条件命中的**第一个**候选，同一窗口有多个文本框时可能选中错误的那个（第一级「HasKeyboardFocus」条件尽量压低概率）；候选命中后范围几何与字段框守卫都不过的，仍回退鼠标。
+- **剩余缺口**（以下情形仍读不到，回退鼠标或字段框兜底）：搜索条件只认「支持 TextPattern」的后代，provider 不报告 TextPattern 可用性的自绘文本框（部分终端、游戏）下钻也找不到；`FindFirstBuildCache` 只取条件命中的**第一个**候选，同一窗口有多个文本框时可能选中错误的那个（第一级「HasKeyboardFocus」条件尽量压低概率）；候选命中后范围几何与字段框守卫都不过的，仍回退鼠标。
 
 ### 坑七：透明窗口圆角穿帮（背景遮挡与外阴影裁切）
 
@@ -156,31 +156,31 @@ sequenceDiagram
 - **现行方案**：窗口设为全透明，卡片圆角与描边由 Slint 自绘内收；投影用 `DwmExtendFrameIntoClientArea` 底部 1px 造系统投影（`win32_ext.rs`），不依赖超出窗界的外阴影。
 - **快速排查**：临时去掉阴影类样式，尖角立即消失即为外阴影裁切；再交叉核对窗口透明与背景色设置。
 
-### 坑八：winit 置顶与窗口生命周期耦合（近期最重要）
+### 坑八：winit 置顶与窗口生命周期耦合
 
-- **现象**：① 置顶位有两类失效——winit 异步样式重排/系统操作把 `WS_EX_TOPMOST` 剥掉，或另一个置顶窗口在速贴之后抬升（topmost 带内后来者在上有权盖住速贴）；惰性建窗时期还出现过搜索窗缺席（销毁而非隐藏）连带剥掉速贴置顶且简单重抬不可靠，这是该改造整体回退的原因之一。② 编辑/设置窗启用 `SLINT_DESTROY_WINDOW_ON_HIDE`（关闭即回收帧缓冲）后，重开必须走两段式收尾（延迟恢复边框/暖屏/前台，约 50ms），否则样式异常。
+- **现象**：置顶位有两类失效——winit 异步样式重排/系统操作把 `WS_EX_TOPMOST` 剥掉，或另一个置顶窗口在速贴之后抬升（topmost 带内后来者在上有权盖住速贴）。
 - **置顶约束**：速贴、搜索、悬浮气泡与托盘菜单必须在 Slint `Window` 上声明 `always-on-top: true`，让 winit 内部窗口层级与 Win32 置顶操作保持一致；不要只靠外部 `SetWindowPos(HWND_TOPMOST)`，否则样式重排会按普通窗口状态覆盖置顶位。会话期置顶守护（`picker.rs` 的 `TOPMOST_GUARD`）在速贴激活期间每 500ms 检查置顶位，失效即重抬，会话结束停表，仅在事件循环线程触达。
 - **原因**：winit 对置顶/激活状态的管理与窗口存活及异步样式重排耦合；窗口销毁会连带撤销关联状态，销毁重建则丢失首建时建立的 Win32 修饰。
-- **教训**：「编辑/设置窗惰性首建」的改造曾整体回退，现行五窗启动即建、全程常驻：速贴/搜索/悬浮气泡 winit 窗口常驻（显隐不调 `hide()`），编辑/设置窗隐藏式停屏（Win32 真隐藏 + 平移屏外，见坑十）。
+- **生命周期约束**：五窗启动即建、全程常驻；速贴/搜索/悬浮气泡显隐不调 Slint `hide()`，编辑/设置窗隐藏式停屏（Win32 真隐藏 + 平移屏外，见坑十）。
 - **对停靠面板的约束**：任何新增常驻窗口形态（见 [ADR-0002](adr-0002-picker-docked-mode.md)）都先在本坑结论上做 spike，验证不回退内存优化成果。
 
-### 坑九：FRAMECHANGED 的 SetWindowPos 缺 NOACTIVATE 会激活 NOACTIVATE 窗口（近期最重要）
+### 坑九：FRAMECHANGED 的 SetWindowPos 缺 NOACTIVATE 会激活 NOACTIVATE 窗口
 
 - **现象**：tooltip/速贴每次上屏，宿主窗口边框微微闪烁一下；无其他窗口聚焦时速贴面板自身被莫名抬成前台。高频采样 `GetForegroundWindow` 可见前台翻转「宿主 → tooltip → 宿主」两组——`WS_EX_NOACTIVATE` 挂着也拦不住。每次「抢—还」都是宿主激活状态翻转，DWM 随之重画边框，即「边框微微闪烁」。
 - **原因**：`window_control::remove_window_system_menu` 的 `SetWindowPos` 带 `SWP_FRAMECHANGED` 但缺 `SWP_NOACTIVATE`，缺省激活语义对 NOACTIVATE 窗口依然生效——`WS_EX_NOACTIVATE` 只拦鼠标点击激活，拦不住程序化激活。又因 winit 会异步把 `WS_SYSMENU` 带回窗口样式，每次剥除都有净变化、每次都把浮层抬成前台；该调用在 tooltip 的 `present` 同步段与 `after_show` 的 50ms 兜底里各跑一次，恰对应观测到的两组「抢—还」。winit 样式重置的落地时序不定，`WS_SYSMENU` 是否被带回决定剥除有无净变化，故现象时隐时现。
 - **解决方案**：① 样式类 `SetWindowPos` 一律显式带 `SWP_NOACTIVATE`（`remove_window_system_menu` 即此类，一处约束全体浮层受益）；② 停屏浮层的几何变更走 `window_control` 的裸 `SetWindowPos`（`set_window_bounds` / `set_window_position_no_activate` / `set_window_size_no_activate`），不经 Slint/winit 的窗口几何 API——框架会附带 flags 重排、异步投递等额外语义，停屏浮层需要单一确定的「只动几何、绝不激活」。归还前台的前台策略（`overlay.rs` 的 `ForegroundPolicy`）保留作防御，正常路径不再触发。
-- **教训**：黑盒对照实验（「框架路径 vs 裸 API 路径」重放）会被并发因素混淆——本案曾把激活归因于 Slint 的 `set_position`/`set_size`（实测 winit 这些 API 底层全带 `SWP_NOACTIVATE`），真凶是同路径上的样式剥除。进程内插桩（逐调用打前台快照）才能把翻转钉到具体调用，定性结论以此为凭。
+- **排查方法**：黑盒对照实验（框架路径与裸 API 路径重放）可能被并发因素混淆；逐调用记录前台快照，区分几何变更和样式剥除的影响，再定位发生激活的具体 API。
 
-### 坑十：任务栏按首次可见时的样式分类，事后翻 TOOLWINDOW 修正不可靠（近期最重要）
+### 坑十：任务栏按首次可见时的样式分类，事后翻 TOOLWINDOW 修正不可靠
 
 - **现象**：编辑/设置窗用「常驻可见（停屏屏外）+ TOOLWINDOW 开关」控制任务栏按钮生灭：首开按钮缺席、第二次起才出现；把 TOOLWINDOW 挂载提前到首次 show 之前后，恶化为首开与后续**全部**无按钮。重发 `WM_SETICON`、补写类图标、把按钮创建挪到窗口线程空闲时刻，均无效——与图标查询、窗口线程忙闲全无关。
 - **原因**：任务栏（Win11）在窗口**首次可见的瞬间**按当时的扩展样式做「上/不上任务栏」一次性分类，之后对常驻可见窗口翻样式位的重分类不可靠。首秀瞬间带 TOOLWINDOW → 被归入「跳过任务栏」且长期不修正（永远无按钮）；首秀瞬间裸样式 → 分类为上任务栏，但按钮创建被随即到达的 TOOLWINDOW 中止，模型带伤（首开无按钮，首次激活后才修复）。另注：winit 会在 `set_visible` 等路径全量重写样式位（`apply_diff` 的 `SetWindowLongW(GWL_EXSTYLE)`），show 前手工挂的样式随时可能被冲掉。
 - **解决方案**：弃样式翻转，按钮生灭由真实可见性驱动（`win32_ext::set_window_visible` 的 `SW_SHOWNOACTIVATE`/`SW_HIDE`）：扩展样式从创建起恒为普通 `APPWINDOW`；装配时 show 前写图标并移屏外（首次可见发生在屏外、形态已终），show 后立即隐藏进入停屏；打开/关闭走真实显隐。隐藏对 Slint 不可见（Slint 保持「已显示」，表面存活；winit 的 wndproc 不处理 `WM_SHOWWINDOW`，外部 SW_HIDE 无副作用）。
-- **教训**：让窗口的**首次可见即最终形态**（样式、图标、位置），运行期只动可见性不动样式；「第一次坏、第二次好」的时序差异优先怀疑 shell 侧首次分类/缓存，而非窗口侧状态。症状描述需先核对到「按钮存在与否」还是「按钮内容对错」，两者是不同链路（本案四轮排查有三轮花在了误读症状上）。
+- **约束与排查**：让窗口的**首次可见即最终形态**（样式、图标、位置），运行期只动可见性不动样式；「第一次坏、第二次好」时检查 shell 侧首次分类与窗口侧状态。先区分按钮存在与否和按钮内容是否正确，两者是不同链路。
 
 ### 坑十一：无焦点窗拿不到 DWM Acrylic 的玻璃感——模糊是激活态特权，Acrylic 档速贴自绘烘焙
 
 - **现象**：速贴挂 `DWMWA_SYSTEMBACKDROP_TYPE=Acrylic`：从未激活的窗口挂载恒平色；激活过再失活的窗口只剩「无模糊的半透明」——条纹振幅实验（8px 周期黑白条纹垫底测列均值振幅）：激活态 8.4（模糊涂抹）/ 失活态 29.1（条纹锐利透出）。Acrylic 的高斯模糊只在激活态渲染，热键唤起的速贴（NOACTIVATE 常态失活）永远没有玻璃感。SWCA accent（`ACCENT_ENABLE_ACRYLICBLURBEHIND`）在 Win11 上挂载成功也不产生模糊（仅剩 tint），从未激活窗上该调用直接失败。
 - **原因**：Win11 DWM 的 Acrylic 模糊是激活态特权（失活窗口走廉价合成路径：保留半透明采样、去掉模糊）；SWCA accent 老管线在 Win11 上被系统收紧。正确出路是「自己画模糊」而非「换条 DWM 管线」。
-- **解决方案**：速贴模糊底自绘（`core::backdrop` 纯逻辑 + `platform::windows::screen_capture` 抓屏）：每次唤起在移回屏内前（窗口尚停屏，抓不到自己），抓取目标位屏幕区域（BitBlt+CAPTUREBLT，四周外扩一个模糊半径，范围钳到虚拟桌面——桌面之外 BitBlt 填不透明黑，贴屏边唤起会把黑边糊进底图，钳制侧的 clamp 随之落在屏幕边界）→ 三遍 box blur 近似高斯（半径 30 逻辑 px × 缩放因子，饱和玻璃档——半径过小时复杂背景高对比结构只糊边不成雾，留下一团团可辨识色斑）→ 裁回窗口尺寸（边缘模糊吃到窗外内容，滑窗图像边界 clamp 会让四边比中心更「实」）→ `material-layer` 同源 tint（圆角烘焙进图 alpha，规避软渲 clip 不按圆角裁剪 slint#4176）→ `blur-backdrop` Image 铺 card 底（z 序最底层）。抓屏失败（锁屏/会话切换）回实底。烘焙服务设置项「背景材质」的 Mica/Acrylic 两档，分派收口在 `picker::prepare_picker_backdrop`（每次唤起现读设置），以 tint 深浅分档：Acrylic 档 tint=`backdrop::ACRYLIC_TINT_ALPHA` 0.80、深色 tint 仅在暗背景提亮、随背景变亮渐退，以兼顾暗部层次与亮背景去白雾、行卡半透玻璃卡；具体分层与投影约束见 [主题系统](theme-system.md)；Mica 档 tint=`backdrop::MICA_TINT_ALPHA` 0.92 近不透明（Mica 材质本身不透明）、行卡不透明实卡细描边（玻璃卡叠此实底塌层）；「无」档实底（浅 `canvas-default` 近白面板 + `surface` 白卡 + 完整描边与柔影，深 card-layer 近黑）。可激活窗口（搜索/编辑/设置）的档位分流见 adr-0005。已知限制：底图是唤起瞬间的静态快照，背后内容动态变化不跟随（瞬态面板可接受）；会话中改明暗主题，在屏底图 tint 不实时跟随（下次唤起重烘焙自愈）。
+- **解决方案**：速贴模糊底自绘（`core::backdrop` 纯逻辑 + `platform::windows::screen_capture` 抓屏）：每次唤起在移回屏内前（窗口尚停屏，抓不到自己），抓取目标位屏幕区域（BitBlt+CAPTUREBLT，四周外扩一个模糊半径，范围钳到虚拟桌面——桌面之外 BitBlt 填不透明黑，贴屏边唤起会把黑边糊进底图，钳制侧的 clamp 随之落在屏幕边界）→ 三遍 box blur 近似高斯（半径 30 逻辑 px × 缩放因子，饱和玻璃档——半径过小时复杂背景高对比结构只糊边不成雾，留下一团团可辨识色斑）→ 裁回窗口尺寸（边缘模糊吃到窗外内容，滑窗图像边界 clamp 会让四边比中心更「实」）→ `material-layer` 同源 tint（圆角烘焙进图 alpha，规避软渲 clip 不按圆角裁剪 slint#4176）→ `blur-backdrop` Image 铺 card 底（z 序最底层）。抓屏失败（锁屏/会话切换）回实底。烘焙服务设置项「背景材质」的 Mica/Acrylic 两档，分派收口在 `picker::prepare_picker_backdrop`（每次唤起现读设置），以 tint 深浅分档：Acrylic 档 tint=`backdrop::ACRYLIC_TINT_ALPHA` 0.80、深色 tint 仅在暗背景提亮、随背景变亮渐退，以兼顾暗部层次与亮背景去白雾、行卡半透玻璃卡；具体分层与投影约束见 [主题系统](theme-system.md)；Mica 档 tint=`backdrop::MICA_TINT_ALPHA` 0.92 近不透明（Mica 材质本身不透明）、行卡不透明实卡细描边（玻璃卡叠此实底塌层）；「无」档实底（浅 `canvas-default` 近白面板 + `surface` 白卡 + 完整描边与柔影，深 card-layer 近黑）。可激活窗口（搜索/编辑/设置）的档位分流见 [主题系统](theme-system.md)，决策依据见 [ADR-0005](adr-0005-window-material.md)。已知限制：底图是唤起瞬间的静态快照，背后内容动态变化不跟随（瞬态面板可接受）；会话中改明暗主题，在屏底图 tint 不实时跟随（下次唤起重烘焙自愈）。
 - **教训**：判读「材质活不活」必须区分两个维度——透底（白黑垫底差分）与模糊（条纹振幅），只测差分会把「无模糊的半透明」误判为活；竞品效果归因要落到实现层（玻璃感可能来自网页层自画而非系统材质）；无焦点窗的观感需求最终要靠自绘兜底。另：黑白两轮差分判据对「条纹垫底」失效（两种条纹模糊后均值同为 50% 灰，差分恒 0），垫底判据用整块纯色、模糊判据用条纹，两种图案别混用。
