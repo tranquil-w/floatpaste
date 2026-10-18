@@ -1,5 +1,6 @@
 use std::fs;
 
+use super::digest_to_hex;
 use sha2::{Digest, Sha256};
 use tracing::debug;
 
@@ -18,7 +19,7 @@ impl NormalizeService {
 
         let normalized_text = normalize_text_for_indexing(text);
         let preview = text.chars().take(120).collect::<String>();
-        let hash = format!("{:x}", Sha256::digest(normalized_text.as_bytes()));
+        let hash = digest_to_hex(Sha256::digest(normalized_text.as_bytes()).iter().copied());
 
         Some(NewClipTextItem {
             normalized: NormalizedClipText {
@@ -67,7 +68,7 @@ impl NormalizeService {
             "{:?}{:?}{:?}{:?}{:?}",
             content_hash, width, height, format, file_size
         );
-        let hash = format!("{:x}", Sha256::digest(hash_input.as_bytes()));
+        let hash = digest_to_hex(Sha256::digest(hash_input.as_bytes()).iter().copied());
 
         Some(NewClipImageItem {
             normalized: NormalizedClipImage {
@@ -110,7 +111,7 @@ impl NormalizeService {
             .join(" ");
 
         let hash_input = format!("{:?}{:?}{:?}", file_paths, directory_count, total_size);
-        let hash = format!("{:x}", Sha256::digest(hash_input.as_bytes()));
+        let hash = digest_to_hex(Sha256::digest(hash_input.as_bytes()).iter().copied());
 
         Some(NewClipFileItem {
             normalized: NormalizedClipFile {
@@ -284,8 +285,6 @@ fn normalize_text_for_indexing(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use sha2::{Digest, Sha256};
-
     use super::NormalizeService;
 
     #[test]
@@ -296,7 +295,7 @@ mod tests {
         assert_eq!(item.normalized.search_text, "hello world");
         assert_eq!(
             item.normalized.hash,
-            format!("{:x}", Sha256::digest("Hello WORLD".as_bytes()))
+            "149b2dc47770cda1d6b08470b95b620303572835fb6bb66ca78a3d5c24b80919"
         );
     }
 

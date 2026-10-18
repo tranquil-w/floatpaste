@@ -4,6 +4,7 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
+use super::digest_to_hex;
 use png::{BitDepth, ColorType, Decoder, Encoder, Transformations};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -73,7 +74,7 @@ impl ImageStorage {
 
         Ok(PreparedImage {
             png_bytes,
-            content_hash: format!("{:x}", hasher.finalize()),
+            content_hash: digest_to_hex(hasher.finalize().iter().copied()),
             width,
             height,
             image_format: PNG_FORMAT.to_string(),
