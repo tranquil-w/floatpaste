@@ -4,10 +4,11 @@
 //! 直接使用。所有快捷键在同一线程注册并接收 `WM_HOTKEY`，触发时以快捷键
 //! id 回调；回调在快捷键线程上执行，需自行转发到 UI 线程。
 
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Mutex;
+use std::thread::JoinHandle;
 
 use tracing::{error, info};
-use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+use windows::Win32::Foundation::{GetLastError, LPARAM, WPARAM};
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     RegisterHotKey, UnregisterHotKey, HOT_KEY_MODIFIERS, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT,
@@ -15,12 +16,34 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::WM_HOTKEY;
 use windows::Win32::UI::WindowsAndMessaging::{
-    DispatchMessageW, GetMessageW, PostThreadMessageW, TranslateMessage, MSG, WM_QUIT,
+    DispatchMessageW, GetMessageW, PeekMessageW, PostThreadMessageW, TranslateMessage, MSG,
+    PM_NOREMOVE, WM_QUIT,
 };
 
 use crate::domain::error::AppError;
 
-static HOTKEY_THREAD_ID: AtomicU32 = AtomicU32::new(0);
+struct HotkeyThread {
+    id: u32,
+    handle: JoinHandle<()>,
+}
+
+static HOTKEY_THREAD: Mutex<Option<HotkeyThread>> = Mutex::new(None);
+
+/// 持锁完成注销与回收后才能启动下一轮，避免旧线程与新注册争用组合键。
+fn stop_thread(slot: &mut Option<HotkeyThread>) -> Result<(), AppError> {
+    if let Some(thread) = slot.as_ref() {
+        if !thread.handle.is_finished() {
+            // 投递失败仅剩「线程恰好在此间隙退出」一种解释，join 才是退出真相
+            let _ = unsafe { PostThreadMessageW(thread.id, WM_QUIT, WPARAM(0), LPARAM(0)) };
+        }
+    }
+    if let Some(thread) = slot.take() {
+        if thread.handle.join().is_err() {
+            return Err(AppError::Message("全局快捷键线程异常退出".to_string()));
+        }
+    }
+    Ok(())
+}
 
 /// 一组全局快捷键的修饰键与虚拟键码。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -112,18 +135,24 @@ pub struct HotkeyOutcome {
 /// 在专用线程上注册一批全局快捷键并进入消息循环。
 ///
 /// `specs` 为 `(id, 描述)` 列表，触发时以 id 调用 `on_trigger`。
+/// 替换注册前同步回收旧线程；回调只做事件转发，不可在回调内注册或停止热键。
 /// 至少一个 id 注册成功即进入消息循环；全部失败时线程直接退出并清理。
 /// 线程启动失败/超时返回 `Err`。
 pub fn register_hotkeys(
     specs: Vec<(u32, HotkeySpec)>,
     on_trigger: impl Fn(u32) + Send + 'static,
 ) -> Result<HotkeyOutcome, AppError> {
+    let mut slot = HOTKEY_THREAD.lock()?;
+    stop_thread(&mut slot)?;
     if specs.is_empty() {
         return Ok(HotkeyOutcome::default());
     }
 
     let (ready_tx, ready_rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || unsafe {
+    let handle = std::thread::Builder::new().name("hotkey".into()).spawn(move || unsafe {
+        // 确认消息队列存在后才报告就绪，首个停止/触发消息即可投递。
+        let mut message = MSG::default();
+        let _ = PeekMessageW(&mut message, None, 0, 0, PM_NOREMOVE);
         let mut outcome = HotkeyOutcome::default();
         for (id, spec) in &specs {
             match RegisterHotKey(None, *id as i32, modifiers_mask(spec), spec.vk) {
@@ -137,57 +166,60 @@ pub fn register_hotkeys(
             }
         }
 
-        // 全部失败：无线程驻留必要，直接退出（无孤儿注册残留）
         let registered_count = outcome.registered.len();
         let failed_count = outcome.failed.len();
-        if registered_count == 0 {
-            let _ = ready_tx.send(outcome);
-            return;
-        }
-
-        HOTKEY_THREAD_ID.store(GetCurrentThreadId(), Ordering::SeqCst);
-        let _ = ready_tx.send(outcome);
-        info!("全局快捷键已注册（{registered_count} 组，{failed_count} 组失败）");
-
-        let mut message = MSG::default();
-        loop {
-            let result = GetMessageW(&mut message, None, 0, 0);
-            if result.0 <= 0 {
-                break;
+        let thread_id = GetCurrentThreadId();
+        // 等待方超时/退出时也要注销，不能留下无人管理的热键线程。
+        if ready_tx.send((thread_id, outcome)).is_ok() && registered_count > 0 {
+            info!("全局快捷键已注册（{registered_count} 组，{failed_count} 组失败，线程 id={thread_id}）");
+            loop {
+                let result = GetMessageW(&mut message, None, 0, 0);
+                if result.0 == -1 {
+                    error!("全局快捷键消息循环失败，线程 id={thread_id}: {:?}", GetLastError());
+                    break;
+                }
+                if result.0 == 0 {
+                    break;
+                }
+                if message.message == WM_HOTKEY {
+                    on_trigger(message.wParam.0 as u32);
+                }
+                let _ = TranslateMessage(&message);
+                DispatchMessageW(&message);
             }
-            if message.message == WM_HOTKEY {
-                // wParam 即注册时的 id
-                on_trigger(message.wParam.0 as u32);
-            }
-            let _ = TranslateMessage(&message);
-            DispatchMessageW(&message);
         }
 
         for (id, _) in &specs {
-            let _ = UnregisterHotKey(Some(HWND::default()), *id as i32);
+            let _ = UnregisterHotKey(None, *id as i32);
         }
-        HOTKEY_THREAD_ID.store(0, Ordering::SeqCst);
-    });
+        info!("全局快捷键线程已退出，线程 id={thread_id}");
+    })?;
 
-    let outcome = ready_rx
+    let (id, outcome) = ready_rx
         .recv_timeout(std::time::Duration::from_secs(5))
         .map_err(|_| AppError::Message("等待全局快捷键初始化超时".to_string()))?;
+    if outcome.registered.is_empty() {
+        let _ = handle.join();
+    } else {
+        *slot = Some(HotkeyThread { id, handle });
+    }
     Ok(outcome)
 }
 
-/// 请求快捷键线程退出并注销全部快捷键，幂等。
+/// 等待快捷键线程退出并注销全部快捷键，幂等；返回后可立即注册相同组合。
 pub fn stop_hotkeys() {
-    let thread_id = HOTKEY_THREAD_ID.swap(0, Ordering::SeqCst);
-    if thread_id != 0 {
-        unsafe {
-            let _ = PostThreadMessageW(thread_id, WM_QUIT, WPARAM(0), LPARAM(0));
-        }
+    let result = HOTKEY_THREAD
+        .lock()
+        .map_err(AppError::from)
+        .and_then(|mut slot| stop_thread(&mut slot));
+    if let Err(error) = result {
+        error!("停止全局快捷键失败: {error}");
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_hotkey, HotkeySpec};
+    use super::*;
 
     fn spec(ctrl: bool, alt: bool, shift: bool, win: bool, vk: u32) -> HotkeySpec {
         HotkeySpec {
@@ -234,5 +266,50 @@ mod tests {
         assert_eq!(parse_hotkey("Ctrl+Alt"), None);
         assert_eq!(parse_hotkey("Alt+Q+X"), None);
         assert_eq!(parse_hotkey("Alt+键"), None);
+    }
+
+    #[test]
+    fn stop_releases_hotkeys_before_immediate_reregistration() {
+        use std::time::Duration;
+
+        struct Cleanup;
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                stop_hotkeys();
+            }
+        }
+        let _cleanup = Cleanup;
+        let shortcut = parse_hotkey("Ctrl+Alt+Shift+F23").unwrap();
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let outcome = register_hotkeys(vec![(1, shortcut)], move |_| {
+            entered_tx.send(()).unwrap();
+            // 暂停回调，让停止请求必然先于旧线程的注销，固定调度竞态。
+            let _ = release_rx.recv_timeout(Duration::from_secs(2));
+        })
+        .unwrap();
+        assert_eq!(outcome.registered, vec![1]);
+        let thread_id = HOTKEY_THREAD.lock().unwrap().as_ref().unwrap().id;
+        unsafe { PostThreadMessageW(thread_id, WM_HOTKEY, WPARAM(1), LPARAM(0)) }.unwrap();
+        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            let _ = release_tx.send(());
+        });
+
+        stop_hotkeys();
+        let (trigger_tx, trigger_rx) = std::sync::mpsc::channel();
+        let outcome = register_hotkeys(vec![(1, shortcut)], move |id| {
+            let _ = trigger_tx.send(id);
+        })
+        .unwrap();
+        release.join().unwrap();
+        assert_eq!(outcome.failed, vec![], "停止返回后旧组合必须已经释放");
+        assert_eq!(outcome.registered, vec![1]);
+        let thread_id = HOTKEY_THREAD.lock().unwrap().as_ref().unwrap().id;
+        unsafe { PostThreadMessageW(thread_id, WM_HOTKEY, WPARAM(1), LPARAM(0)) }.unwrap();
+        assert_eq!(trigger_rx.recv_timeout(Duration::from_secs(2)).unwrap(), 1);
+        stop_hotkeys();
+        stop_hotkeys();
     }
 }

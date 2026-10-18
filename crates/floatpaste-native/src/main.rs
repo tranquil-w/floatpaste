@@ -457,6 +457,9 @@ fn main() {
         // 不主动泵一次呈现，上屏首帧会是透明的
         win32_ext::warm_surface(app_for_init.state.picker_hwnd.load(Ordering::SeqCst));
         win32_ext::warm_surface(app_for_init.state.search_hwnd.load(Ordering::SeqCst));
+
+        // 窗口句柄、主题与表面齐备后才接受热键，冷启动不依赖先打开设置。
+        sync_global_hotkeys(&app_for_init);
     });
 
     // ── 剪贴板监听：录入成功后同步刷新速贴列表与搜索结果 ──
@@ -478,9 +481,6 @@ fn main() {
     // ── 历史保留策略：定期回收软删记录、按 history_limit 压缩未收藏历史 ──
     floatpaste_core::services::retention_service::RetentionService::start(state.core.clone());
 
-    // ── 全局快捷键：主快捷键切换速贴，搜索快捷键切换搜索窗口；
-    //    托盘常驻（设置窗口「打开设置」左键单击与右键菜单）──
-    sync_global_hotkeys(&app);
     // 启动时同步一次自启任务（Run 键存量迁移 + 任务缺失自愈；不弹 UAC，
     // 缺提权任务时留待用户改动设置时确认）
     settings::spawn_autostart_sync(&app, false);
@@ -600,9 +600,9 @@ fn run_elevated_sidecar(args: &[String]) -> Option<i32> {
 }
 
 /// 注册全局快捷键（主快捷键=速贴开关，搜索快捷键=搜索开关，Win+V 接管
-/// 开启时追加速贴唤起入口）。设置保存后的重注册复用此函数：旧热键线程
-/// 的注销是异步的（stop 后须等其消息循环退出才释放组合键），注册失败按
-/// 150ms 重试三次；末次仍有失败的 id 记入 state 供设置页展示
+/// 开启时追加速贴唤起入口）。设置保存后的重注册复用此函数：注册层同步
+/// 注销并回收旧线程；外部占用导致的注册失败按 150ms 最多重试三次，
+/// 末次仍有失败的 id 记入 state 供设置页展示
 /// （1409=组合被其他程序占用，用户可见反馈）。
 pub(crate) fn sync_global_hotkeys(app: &App) {
     let settings = app.state.current_settings();
@@ -664,12 +664,11 @@ pub(crate) fn sync_global_hotkeys(app: &App) {
     let mut last_failures: Vec<(u32, u32)> = Vec::new();
     let mut last_hard_error = false;
     for attempt in 0..3 {
-        hotkey::stop_hotkeys();
         let app_for_hotkey = app.clone();
         let on_trigger = move |id: u32| {
             tracing::info!("命中全局快捷键 id={id}");
             let app = app_for_hotkey.clone();
-            let _ = slint::invoke_from_event_loop(move || {
+            let result = slint::invoke_from_event_loop(move || {
                 // 不做命中防抖：MOD_NOREPEAT 已在注册层过滤按住连发，
                 // 人工连按每击必响应（开/关由击数次序决定）
                 if id == HOTKEY_ID_SEARCH {
@@ -679,6 +678,9 @@ pub(crate) fn sync_global_hotkeys(app: &App) {
                     picker::toggle(&app);
                 }
             });
+            if let Err(error) = result {
+                tracing::error!("全局快捷键 id={id} 转发到事件循环失败: {error}");
+            }
         };
         match hotkey::register_hotkeys(specs.clone(), on_trigger) {
             Ok(outcome) if outcome.failed.is_empty() => {
@@ -687,8 +689,8 @@ pub(crate) fn sync_global_hotkeys(app: &App) {
                 break;
             }
             Ok(outcome) => {
-                // 部分失败：可用热键照常工作；重试等旧线程退出释放
-                // 组合键（新一轮 stop 已在循环头执行），末次结果记录。
+                // 部分失败：可用热键照常工作；重试等待外部组合键释放，
+                // 每轮由注册层同步替换旧线程，末次结果记录。
                 // 连续两轮失败集相同 = 非瞬态（如系统未释放 Win+V），
                 // 不再空转第三轮
                 if outcome.failed == last_failures {

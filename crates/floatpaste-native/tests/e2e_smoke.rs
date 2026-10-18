@@ -614,6 +614,19 @@ fn app_e2e_smoke_flow() {
         }),
         "唤醒事件后速贴面板应落位屏内"
     );
+    // 坐标与 WS_VISIBLE 不能证明用户看得到面板：后台冷启动时必须持续
+    // 位于置顶带，不能只在 SetWindowPos 后短暂带位、随样式重排落回底部。
+    let mut topmost_samples = 0;
+    assert!(
+        wait_until(Duration::from_secs(3), Duration::from_millis(50), || {
+            let topmost = onscreen_window(PICKER_TITLE, picker_pid).is_some_and(|(hwnd, _)| {
+                floatpaste_core::platform::windows::window_control::is_topmost(hwnd)
+            });
+            topmost_samples = if topmost { topmost_samples + 1 } else { 0 };
+            topmost_samples >= 6
+        }),
+        "未打开设置的冷启动速贴应持续置顶，不能只有屏内几何而被其他窗口遮挡"
+    );
     wake_via_second_launch(&envs);
     assert!(
         wait_until(Duration::from_secs(10), Duration::from_millis(150), || {

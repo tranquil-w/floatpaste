@@ -147,8 +147,12 @@ pub fn set_window_topmost_no_activate(hwnd: isize) -> bool {
             SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
         )
     };
-    tracing::debug!("set_window_topmost hwnd={hwnd} ok={}", result.is_ok());
-    result.is_ok()
+    let topmost = is_topmost(hwnd);
+    tracing::debug!(
+        "set_window_topmost hwnd={hwnd} ok={} topmost={topmost}",
+        result.is_ok()
+    );
+    result.is_ok() && topmost
 }
 
 /// 查询窗口是否仍带 WS_EX_TOPMOST 位（速贴会话期守护：位被剥即会被

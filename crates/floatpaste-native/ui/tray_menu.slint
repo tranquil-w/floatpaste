@@ -6,6 +6,7 @@ import { Theme, Metrics, Motion, SoftShadow } from "theme.slint";
 
 export component TrayMenuWindow inherits Window {
     no-frame: true;
+    always-on-top: true;
     background: transparent;
     title: "FloatPaste · 托盘菜单";
     // Rust 在打开前按内容度量设置物理尺寸

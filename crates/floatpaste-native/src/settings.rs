@@ -84,30 +84,12 @@ thread_local! {
     /// explorer 重启后延迟补注册 Win+V 的单发定时器（广播早于系统
     /// 释放热键完成，等一站再注册）
     static EXPLORER_RESYNC_TIMER: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
-    /// 退出快捷键录制后恢复全局热键的单发定时器（录制期间反注册的
-    /// 旧热键线程异步注销，立即重注册会撞 1409 重试卡 UI）
-    static HOTKEY_RESUME_TIMER: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
 }
 
 struct ScrollAnim {
     from: f32,
     to: f32,
     started_at: std::time::Instant,
-}
-
-/// 退出快捷键录制后恢复全局热键：反注册是异步的（旧热键线程消息循环
-/// 退出才释放组合），延迟一站重注册避免同组合立即撞 1409 重试卡 UI。
-/// 之后的防抖保存仍会走 apply_side_effects 幂等重注册；等待期间重新
-/// 进入录制则由回调丢弃此定时器
-fn schedule_hotkey_resume(app: &App) {
-    let app_resume = app.clone();
-    let timer = slint::Timer::default();
-    timer.start(
-        slint::TimerMode::SingleShot,
-        Duration::from_millis(250),
-        move || crate::sync_global_hotkeys(&app_resume),
-    );
-    HOTKEY_RESUME_TIMER.with(|slot| *slot.borrow_mut() = Some(timer));
 }
 
 impl Clone for ScrollAnim {
@@ -137,10 +119,9 @@ pub fn wire(app: &App) {
         let app_cb = app.clone();
         win.on_any_recording_changed(move |recording| {
             if recording {
-                HOTKEY_RESUME_TIMER.with(|slot| *slot.borrow_mut() = None);
                 floatpaste_core::platform::windows::hotkey::stop_hotkeys();
             } else {
-                schedule_hotkey_resume(&app_cb);
+                crate::sync_global_hotkeys(&app_cb);
             }
         });
     }
