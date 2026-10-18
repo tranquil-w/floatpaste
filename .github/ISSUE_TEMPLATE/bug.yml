@@ -1,0 +1,66 @@
+name: 缺陷报告
+description: 报告软件的异常行为
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！提交前请先升级到[最新版本](https://github.com/tranquil-w/floatpaste/releases)确认问题仍存在。
+
+  - type: input
+    id: version
+    attributes:
+      label: 应用版本
+      description: 设置窗口「关于」页中查看
+      placeholder: 例如 0.10.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Windows 版本
+      options:
+        - Windows 11
+        - Windows 10
+        - 其他
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 按顺序描述如何触发问题
+      placeholder: |
+        1. 复制 …
+        2. 按 Ctrl+Q 唤起速贴面板 …
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期行为
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志
+      description: 文件资源管理器地址栏输入 `%APPDATA%\com.floatpaste\logs`，把相关日志文件拖进此框上传
+      render: shell
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: 截图 / 录屏
+      description: 界面问题请附截图或录屏

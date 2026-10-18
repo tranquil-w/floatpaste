@@ -1,0 +1,18 @@
+version: 2
+
+updates:
+  # Rust crate 依赖；不分组——Slint/winit 等跨版本行为敏感，按依赖逐个开 PR 保持回退粒度
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+
+  # GitHub Actions 版本
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(ci)"
