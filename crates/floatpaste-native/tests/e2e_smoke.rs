@@ -8,7 +8,7 @@
 //! 事件开关速贴面板、命名事件驱动托盘「切换监听」「打开搜索」与搜索窗
 //! Esc 关闭（key-close 回调，与按键经键位解析后的终点相同）的处理路径；
 //! 断言落在隔离库（只读连接）与窗口几何/前台归属上。
-//! 上屏注入（SendInput）依赖注入环境是否放行，按验收纪律留给用户实测。
+//! 上屏注入（SendInput）依赖交互桌面与目标应用，不属于此冒烟测试的覆盖范围。
 //!
 //! 单测试函数串行推进：系统剪贴板、全局热键、速贴窗口都是会话级全局
 //! 资源，不可并行。运行期间被测实例会短暂占用 Ctrl+Q/Alt+S 并读写
@@ -355,7 +355,11 @@ impl Drop for FocusTargetGuard {
 }
 
 fn spawn_instance(envs: &[(&str, String)], silent: bool) -> Child {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_floatpaste"));
+    // 发布验收复用同一业务链路，直接启动安装后或解压后的交付程序。
+    let executable = std::env::var_os("FLOATPASTE_E2E_EXE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_floatpaste")));
+    let mut command = Command::new(executable);
     command
         .envs(envs.iter().cloned())
         .stdin(Stdio::null())
@@ -454,6 +458,10 @@ fn app_e2e_smoke_flow() {
     // 前置：环境剪贴板已锁死/被长占用时跳过（探测时序保证责任不在
     // 被测物，见 clipboard_unusable_before_start）
     if clipboard_unusable_before_start() {
+        assert!(
+            std::env::var("FLOATPASTE_E2E_STRICT").as_deref() != Ok("1"),
+            "发布验收要求实际执行 E2E；系统剪贴板不可用，禁止跳过后发布"
+        );
         eprintln!(
             "跳过 e2e_smoke：系统剪贴板被外部进程持续占用（~1.2 秒内无法打开，\n\
              大概率已被锁死——外部进程持有剪贴板不释放或死在临界区，重试无法\n\
@@ -794,6 +802,11 @@ fn app_e2e_smoke_flow() {
         // 无人值守会话拿不到前台（前台锁定策略）时场景 8 整段跳过
         let focus_target = FocusTargetGuard::acquire();
         if focus_target.is_none() {
+            if std::env::var("GITHUB_ACTIONS").as_deref() == Ok("true") {
+                println!(
+                    "::warning::当前 runner 无交互前台；焦点还原未覆盖，其他 E2E 场景继续执行"
+                );
+            }
             eprintln!(
                 "[e2e] 3 秒内未取得前台目标窗口（无人值守会话前台锁定策略），\n\
                  跳过 Esc 关闭焦点还原断言段；几何断言不受影响"

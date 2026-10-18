@@ -1,23 +1,15 @@
-# FloatPaste {{version}} 发布说明
+# FloatPaste {{version}}
 
 发布日期：{{date}}
 
 {{changelog}}
 
-## 手动验证建议
+## 下载
 
-<!-- 按本轮改动补充验证步骤，发布前删除本注释 -->
+- [安装版](https://github.com/{{repository}}/releases/download/{{version}}/FloatPaste_{{version_number}}_x64-setup.exe)：适合常规安装与升级。
+- [便携版](https://github.com/{{repository}}/releases/download/{{version}}/FloatPaste-{{version}}-windows-x64-portable.zip)：解压后运行 `floatpaste.exe`。
+- [SHA256 校验文件](https://github.com/{{repository}}/releases/download/{{version}}/SHA256SUMS.txt)。
 
-## 已知限制
+支持 Windows 10 / 11 x64。程序未签名，首次运行可能出现 Windows 风险提示。
 
-- 当前仅支持 Windows 10 / Windows 11 x64
-- 未做代码签名，首次运行可能出现系统风险提示
-
-## 反馈格式
-
-- 目标应用：
-- 操作步骤：
-- 实际结果：
-- 预期结果：
-- 是否稳定复现：
-- 附件：录屏 / 截图 / 日志片段
+[反馈问题](https://github.com/{{repository}}/issues/new/choose)
