@@ -96,20 +96,25 @@
 //!     全收会把锚点甩到编辑器/搜索部件的旧选区上。确证的空文本字段插入符
 //!     必然在文本起点，范围路径在入口整段短路，直接走字段框左沿。
 //!
-//! 客户端按线程缓存：COM 对象不能跨公寓共享，而探测固定发生在事件循环
-//! 线程上，缓存即等价于复用 UIA 的跨进程连接（连接一旦建立，后续调用
-//! 不再受连接超时约束）。
+//! 客户端按线程缓存：COM 对象不能跨公寓共享。探测跑在专用线程
+//! （`uia-probe`）上，客户端缓存在该线程，等价于复用 UIA 的跨进程连接
+//! （连接一旦建立，后续调用不再受连接超时约束）。移到专用线程是为了给
+//! 开窗路径一个**硬上限**：provider 隔久变冷时单次往返能阻塞到秒级，
+//! 主线程只等 [`UIA_PROBE_WAIT`]，超时回退鼠标位置。
 
 use std::cell::RefCell;
 use std::ffi::c_void;
 use std::mem::size_of;
+use std::sync::{mpsc, OnceLock};
+use std::time::Duration;
 
 use windows::core::{Interface, BOOL};
 use windows::Win32::Foundation::{HWND, POINT, RECT};
 use windows::Win32::Graphics::Gdi::ClientToScreen;
 use windows::Win32::System::{
     Com::{
-        CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, SAFEARRAY,
+        CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED,
+        COINIT_MULTITHREADED, SAFEARRAY,
     },
     Ole::{SafeArrayAccessData, SafeArrayDestroy, SafeArrayUnaccessData},
     Variant::VARIANT,
@@ -130,14 +135,21 @@ use crate::domain::error::AppError;
 use super::active_app::ActiveAppResolver;
 use super::picker_position::{Anchor, ScreenPoint, MAX_CARET_LINE_HEIGHT};
 
-/// 连接超时：UIA 要跨进程连 provider，目标卡死时不设上限就会拖住事件循环
-/// （定位在开窗路径上同步执行）。连接建立后被客户端缓存，后续调用不再受限
+/// 连接超时：UIA 要跨进程连 provider，目标卡死时不设上限就会拖住探测
+/// （连接建立后被客户端缓存，后续调用不再受连接超时约束）
 const UIA_CONNECTION_TIMEOUT_MS: u32 = 150;
 
 /// 事务超时：后代下钻的 `FindFirstBuildCache` 一次会发起多个 provider 往返，
-/// 每个往返各算一个事务，默认超时以数十秒计，provider 一卡顿就把开窗路径
-/// 拖死。与连接超时一起在客户端创建时收紧
+/// 每个往返各算一个事务，默认超时以数十秒计，provider 一卡顿就拖死整条探测。
+/// 与连接超时一起在客户端创建时收紧
 const UIA_TRANSACTION_TIMEOUT_MS: u32 = 300;
+
+/// 整条探测链的等待上限。单项超时（连接 150ms / 事务 300ms）只限一次调用，
+/// provider 隔久变冷时每次往返都可能逼近超时，几十次叠加仍能到秒级（实测
+/// ChatGPT 空闲半小时后首次探测 1.45s，紧接着的下一次只要 27ms）。面板显示
+/// 不能等它：主线程最多等这么久，超时即回退鼠标位置。取值盖住热态正常探测
+/// （实测 p99≈102ms），只拦冷态离群值
+const UIA_PROBE_WAIT: Duration = Duration::from_millis(250);
 
 /// 失败现场日志的单字段上限：UIA 的 Name 可能是整段文档文本，截断防刷屏
 const LOG_FIELD_CHARS: usize = 40;
@@ -163,8 +175,85 @@ thread_local! {
 /// 目标窗口焦点元素的插入符锚点（下沿中点 + 插入符行高）。
 ///
 /// 前置条件是目标窗口**仍是前台窗口**：UIA 的「焦点元素」是全局概念，
-/// 目标不是前台时读到的会是别的窗口的插入符，宁可不给
+/// 目标不是前台时读到的会是别的窗口的插入符，宁可不给（前台条件在派发前
+/// 与探测线程上各查一次，后者拦住派发间隙里的前台切换）
+///
+/// 探测跑在专用线程上、主线程只等 [`UIA_PROBE_WAIT`]：provider 隔久变冷时
+/// 单次往返可能阻塞到秒级（实测 1.45s），同步跑在开窗路径上就是「空闲后
+/// 第一次打开很慢」。超时即回退鼠标位置，面板不必等 provider 醒过来；
+/// 专用线程常驻，UIA 客户端与其跨进程连接照旧复用
 pub fn caret_point_via_uia(target_hwnd: isize) -> Result<Anchor, AppError> {
+    if ActiveAppResolver::current_foreground_hwnd() != Some(target_hwnd) {
+        return Err(AppError::Message("目标窗口已不是前台窗口".to_string()));
+    }
+
+    let Some(sender) = probe_worker() else {
+        return Err(AppError::Message("UIA 探测线程不可用".to_string()));
+    };
+    let (reply_tx, reply_rx) = mpsc::sync_channel(1);
+    // 请求通道零容量（rendezvous）：只有探测线程正等在 recv 上时才交得出去。
+    // 失败即上一次探测还在跑，直接回退鼠标，不排队叠加等待
+    if sender
+        .try_send(ProbeRequest {
+            target_hwnd,
+            reply: reply_tx,
+        })
+        .is_err()
+    {
+        return Err(AppError::Message("UIA 探测线程正忙".to_string()));
+    }
+
+    match reply_rx.recv_timeout(UIA_PROBE_WAIT) {
+        Ok(Ok(anchor)) => Ok(anchor),
+        Ok(Err(error)) => Err(AppError::Message(error)),
+        Err(_) => {
+            tracing::debug!(
+                "UIA 探测超出 {}ms 等待上限，回退鼠标位置",
+                UIA_PROBE_WAIT.as_millis()
+            );
+            Err(AppError::Message("UIA 探测超时".to_string()))
+        }
+    }
+}
+
+struct ProbeRequest {
+    target_hwnd: isize,
+    reply: mpsc::SyncSender<Result<Anchor, String>>,
+}
+
+/// 探测线程的请求入口。通道零容量（rendezvous）：探测进行中 `try_send`
+/// 必然失败，这正是「线程忙、本次回退鼠标」的判据——不需要额外忙标志，
+/// 线程 panic 也不会永久卡在忙。首次调用时创建线程
+static PROBE_SLOT: OnceLock<Option<mpsc::SyncSender<ProbeRequest>>> = OnceLock::new();
+
+fn probe_worker() -> Option<&'static mpsc::SyncSender<ProbeRequest>> {
+    PROBE_SLOT
+        .get_or_init(|| {
+            let (tx, rx) = mpsc::sync_channel::<ProbeRequest>(0);
+            std::thread::Builder::new()
+                .name("uia-probe".into())
+                .spawn(move || {
+                    // MTA：探测线程没有消息泵，STA 的跨公寓调用依赖隐藏窗口
+                    // 消息队列，泵不出消息会让 provider 调用悬住。MTA 不需要
+                    // 消息泵，且 CUIAutomation 注册为 Both，可直接创建
+                    let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+                    while let Ok(request) = rx.recv() {
+                        let result = probe_caret_on_current_thread(request.target_hwnd)
+                            .map_err(|error| error.to_string());
+                        // 主线程已超时离开时接收端已丢弃，发送失败即结束
+                        let _ = request.reply.send(result);
+                    }
+                })
+                .ok()?;
+            Some(tx)
+        })
+        .as_ref()
+}
+
+/// 探测本体：在探测线程上执行，客户端按线程缓存复用跨进程连接
+fn probe_caret_on_current_thread(target_hwnd: isize) -> Result<Anchor, AppError> {
+    // 派发到执行之间前台可能已切换：焦点元素是全局概念，目标不再是前台
+    // 时读到的是别家窗口的插入符，宁可回退鼠标
     if ActiveAppResolver::current_foreground_hwnd() != Some(target_hwnd) {
         return Err(AppError::Message("目标窗口已不是前台窗口".to_string()));
     }
@@ -188,20 +277,18 @@ pub fn caret_point_via_uia(target_hwnd: isize) -> Result<Anchor, AppError> {
 
     let client = window_client_rect(target_hwnd);
     let attempt = caret_anchor(&element, client, window_root.as_ref());
-    match attempt.anchor {
-        Some(anchor) => Ok(anchor),
-        None => {
-            // 定位最终失败：补采一轮轻量现场、一次输出——新应用出问题时
-            // 诊断不用从零开始；成功路径完全不碰这里
-            tracing::debug!(
-                "UIA 插入符定位失败现场: {}",
-                failure_trace(&element, &attempt.drilldown)
-            );
-            Err(AppError::Message(
-                "焦点元素未暴露可用的插入符几何".to_string(),
-            ))
-        }
-    }
+    let Some(anchor) = attempt.anchor else {
+        // 定位最终失败：补采一轮轻量现场、一次输出——新应用出问题时
+        // 诊断不用从零开始；成功路径完全不碰这里
+        tracing::debug!(
+            "UIA 插入符定位失败现场: {}",
+            failure_trace(&element, &attempt.drilldown)
+        );
+        return Err(AppError::Message(
+            "焦点元素未暴露可用的插入符几何".to_string(),
+        ));
+    };
+    Ok(anchor)
 }
 
 /// 目标窗口客户区的屏幕坐标（UIA 的元素矩形是屏幕物理像素，同一坐标系才可比）
@@ -1044,8 +1131,9 @@ unsafe fn take_bounding_rectangles(array: *mut SAFEARRAY) -> Vec<f64> {
     values
 }
 
-// 供同层模块复用（开始菜单几何探测）：定位固定发生在事件循环线程，
-// 共享即共享这份线程缓存客户端与超时设置
+// 供同层模块复用（开始菜单几何探测，跑在事件循环线程上）：共享这份线程
+// 缓存客户端与超时设置。插入符探测不再走这里——它在 uia-probe 线程上
+// 另建一份客户端
 pub(super) fn uia_client() -> Result<IUIAutomation, AppError> {
     UIA_CLIENT.with(|slot| {
         slot.borrow_mut()
@@ -1056,9 +1144,9 @@ pub(super) fn uia_client() -> Result<IUIAutomation, AppError> {
 }
 
 fn create_uia_client() -> Result<IUIAutomation, AppError> {
-    // winit 建窗时已 OleInitialize（STA）：同线程重复初始化返回 S_FALSE，
-    // 线程已在 MTA 时返回 RPC_E_CHANGED_MODE——两种情况下 COM 都可用，
-    // 不计较具体返回值
+    // 调用线程可能已由 winit 做 STA 初始化（同线程重复初始化返回 S_FALSE），
+    // 也可能在 MTA（返回 RPC_E_CHANGED_MODE，探测线程就是这种）——两种
+    // 情况下 CUIAutomation8 都可用，不计较具体返回值
     let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
 
     // 必须用 CUIAutomation8：v1 的 CUIAutomation 不支持 IUIAutomation2，
@@ -1582,5 +1670,32 @@ mod tests {
         );
 
         assert_eq!(log_label("第一行\n第二行\t第三行"), "第一行 第二行 第三行");
+    }
+
+    /// 探测进行中主线程必须立刻回退而不是排队：请求通道是零容量 rendezvous，
+    /// 探测线程忙着处理上一条时交不出去，调用方据此回退鼠标（排队会让这次
+    /// 唤起凭空多等一轮完整探测）
+    #[test]
+    fn probe_channel_refuses_requests_while_worker_is_busy() {
+        let (tx, rx) = std::sync::mpsc::sync_channel::<u32>(0);
+        let (busy_tx, busy_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let worker = std::thread::spawn(move || {
+            // 首次 recv 由 send 的阻塞握手唤醒：此后线程处于「正在探测」
+            let first = rx.recv().expect("首条请求应被接收");
+            busy_tx.send(()).unwrap();
+            let _ = release_rx.recv();
+            first
+        });
+
+        tx.send(7).expect("线程空转时请求应被接受");
+        busy_rx.recv().expect("探测线程应已进入忙碌态");
+        assert!(
+            tx.try_send(8).is_err(),
+            "探测进行中不应接受新请求（否则排队叠加等待）"
+        );
+
+        release_tx.send(()).unwrap();
+        assert_eq!(worker.join().expect("探测线程不应 panic"), 7);
     }
 }
