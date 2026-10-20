@@ -936,7 +936,7 @@ mod tests {
                             tokens.is_dark,
                         );
                         let glass = format!("#{:02X}{:02X}{:02X}", px[0], px[1], px[2]);
-                        backgrounds.push(over_hex(
+                        let card = over_hex(
                             hex_to_rgb_channels(if tokens.is_dark {
                                 &tokens.fg_default
                             } else {
@@ -944,7 +944,16 @@ mod tests {
                             }),
                             if tokens.is_dark { 0.05 } else { 0.70 },
                             &glass,
-                        ));
+                        );
+                        if !tokens.is_dark {
+                            assert!(
+                                relative_luminance(&card) > relative_luminance(&glass)
+                                    && contrast_ratio(&card, &glass) >= 1.10,
+                                "{} on {background:?}: {card} / {glass}",
+                                label("acrylic-card-visibility")
+                            );
+                        }
+                        backgrounds.push(card);
                     }
                     let hovered: Vec<_> = backgrounds
                         .iter()

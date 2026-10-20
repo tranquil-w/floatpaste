@@ -20,17 +20,18 @@ pub const BLUR_RADIUS_LOGICAL: f32 = 30.0;
 
 /// Acrylic 档速贴烘焙的 tint alpha（明暗同值）：比可激活窗侧的
 /// material-layer 0.70（ADR 锁定勿放开）更实一档。速贴底图是唤起
-/// 瞬间的静态快照，更实的 tint 稀释静态背景的杂色存在感；此档同时
-/// 是半透玻璃卡的分层甜点（卡底合成差浅色 ~33 / 深色 ~11 灰阶，
-/// 0.85+ 浅色塌到 9 阶，快照取色实测）
+/// 瞬间的静态快照，更实的 tint 稀释静态背景的杂色存在感；卡片与
+/// 承托层的亮度差由 tint_acrylic 的明暗叠色分别保证。
 pub const ACRYLIC_TINT_ALPHA: f32 = 0.80;
 
 /// Acrylic 叠色：深色只在暗背景加入最多 5% 白色亮度底。
 /// 模糊后的背景亮度从 30 到 130 时渐退提亮，避免亮背景叠出白雾；
-/// 固定透底比例，保留背景色相。浅色直接使用主题 tint。
+/// 固定透底比例，保留背景色相。浅色 tint 混入 10% 黑色，给白色
+/// 半透卡面留出亮度余量，避免白背景上白叠白导致层次消失。
 pub fn tint_acrylic(px: &mut [u8], rgb: [u8; 3], is_dark: bool) {
     if !is_dark {
-        tint_opaque(px, rgb, ACRYLIC_TINT_ALPHA);
+        let light_tint = rgb.map(|c| (c as f32 * 0.90).round() as u8);
+        tint_opaque(px, light_tint, ACRYLIC_TINT_ALPHA);
         return;
     }
     let dark_tint = rgb.map(|c| (c as f32 * 0.95 + 255.0 * 0.05).round());
@@ -339,12 +340,6 @@ mod tests {
             assert!((0..3).all(|c| pixel[c] >= previous[c]), "灰阶渐变不得反转");
             previous.copy_from_slice(&pixel[..3]);
         }
-
-        let mut light = [112, 160, 170, 0];
-        let mut expected = light;
-        tint_acrylic(&mut light, [255; 3], false);
-        tint_opaque(&mut expected, [255; 3], ACRYLIC_TINT_ALPHA);
-        assert_eq!(light, expected, "浅色 Acrylic 保持原有叠色");
     }
 
     #[test]
