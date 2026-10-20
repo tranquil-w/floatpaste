@@ -111,7 +111,7 @@ sequenceDiagram
 
 - **现象**：速贴不抢焦点后，应用内收不到可靠的失焦/点击事件。
 - **原因**：窗口级事件只覆盖自身客户区，无法覆盖整个桌面坐标系，也无法判断点击落在别的应用窗口上。
-- **解决方案**：`mouse_monitor.rs` 用 `WH_MOUSE_LL` 捕获鼠标按下，结合 `GetWindowRect` 判断点击点是否在速贴边界外；落在外部则异步关闭。
+- **解决方案**：`mouse_monitor.rs` 用 `WH_MOUSE_LL` 捕获鼠标按下，结合 `GetWindowRect` 判断点击点是否在速贴边界外；落在外部则异步关闭。命中矩形按窗口的柔影留边内缩（`begin_session` 的 `inset`）：那圈透明区在 Win32 里仍属窗口、会吞点击，按可见卡片判定才不会在阴影上点出「没反应」（见坑十二）
 
 ### 坑五：多窗口切换的清理逻辑分散，容易顺序不一致
 
@@ -155,7 +155,7 @@ sequenceDiagram
 - **现象**：透明无框窗口四周出现直角尖角，与圆角卡片冲突。
 - **原因**：两类问题叠加——① 窗口背景未完全透明，实色填掉了圆角外的区域；② 外阴影超出窗口边界被系统裁切，四角最明显。
 - **关键结论**：圆角"变尖"不一定是圆角失效，先区分"背景遮挡"还是"外阴影裁切"。
-- **现行方案**：窗口设为全透明，卡片圆角与描边由 Slint 自绘内收；投影用 `DwmExtendFrameIntoClientArea` 底部 1px 造系统投影（`win32_ext.rs`），不依赖超出窗界的外阴影。
+- **现行方案**：窗口设为全透明，卡片圆角与描边由 Slint 自绘内收；投影与圆角一律在窗口内自绘——窗口四周留出柔影留边，`SoftShadow` 垫在卡下，留边里的透明区即可承载对称投影。不挂 DWM 系统投影（`disable_dwm_shadow`）：winit 无边框窗的样式里仍留着 `WS_CAPTION/WS_THICKFRAME`，DWM 会按窗口框画出上薄下厚的系统投影，与对称柔影冲突（见坑十二）。
 - **快速排查**：临时去掉阴影类样式，尖角立即消失即为外阴影裁切；再交叉核对窗口透明与背景色设置。
 
 ### 坑八：winit 置顶与窗口生命周期耦合
@@ -184,5 +184,13 @@ sequenceDiagram
 
 - **现象**：速贴挂 `DWMWA_SYSTEMBACKDROP_TYPE=Acrylic`：从未激活的窗口挂载恒平色；激活过再失活的窗口只剩「无模糊的半透明」——条纹振幅实验（8px 周期黑白条纹垫底测列均值振幅）：激活态 8.4（模糊涂抹）/ 失活态 29.1（条纹锐利透出）。Acrylic 的高斯模糊只在激活态渲染，热键唤起的速贴（NOACTIVATE 常态失活）永远没有玻璃感。SWCA accent（`ACCENT_ENABLE_ACRYLICBLURBEHIND`）在 Win11 上挂载成功也不产生模糊（仅剩 tint），从未激活窗上该调用直接失败。
 - **原因**：Win11 DWM 的 Acrylic 模糊是激活态特权（失活窗口走廉价合成路径：保留半透明采样、去掉模糊）；SWCA accent 老管线在 Win11 上被系统收紧。正确出路是「自己画模糊」而非「换条 DWM 管线」。
-- **解决方案**：速贴模糊底自绘（`core::backdrop` 纯逻辑 + `platform::windows::screen_capture` 抓屏）：每次唤起在移回屏内前（窗口尚停屏，抓不到自己），抓取目标位屏幕区域（BitBlt+CAPTUREBLT，四周外扩一个模糊半径，范围钳到虚拟桌面——桌面之外 BitBlt 填不透明黑，贴屏边唤起会把黑边糊进底图，钳制侧的 clamp 随之落在屏幕边界）→ 三遍 box blur 近似高斯（半径 30 逻辑 px × 缩放因子，饱和玻璃档——半径过小时复杂背景高对比结构只糊边不成雾，留下一团团可辨识色斑）→ 裁回窗口尺寸（边缘模糊吃到窗外内容，滑窗图像边界 clamp 会让四边比中心更「实」）→ `material-layer` 同源 tint（圆角烘焙进图 alpha，规避软渲 clip 不按圆角裁剪 slint#4176）→ `blur-backdrop` Image 铺 card 底（z 序最底层）。抓屏失败（锁屏/会话切换）回实底。烘焙服务设置项「背景材质」的 Mica/Acrylic 两档，分派收口在 `picker::prepare_picker_backdrop`（每次唤起现读设置），以 tint 深浅分档：Acrylic 档 tint=`backdrop::ACRYLIC_TINT_ALPHA` 0.80、深色 tint 仅在暗背景提亮、随背景变亮渐退，以兼顾暗部层次与亮背景去白雾、行卡半透玻璃卡；具体分层与投影约束见 [主题系统](theme-system.md)；Mica 档 tint=`backdrop::MICA_TINT_ALPHA` 0.92 近不透明（Mica 材质本身不透明）、行卡不透明实卡细描边（玻璃卡叠此实底塌层）；「无」档实底（浅 `canvas-default` 近白面板 + `surface` 白卡 + 完整描边与柔影，深 card-layer 近黑）。可激活窗口（搜索/编辑/设置）的档位分流见 [主题系统](theme-system.md)，决策依据见 [ADR-0005](adr-0005-window-material.md)。已知限制：底图是唤起瞬间的静态快照，背后内容动态变化不跟随（瞬态面板可接受）；会话中改明暗主题，在屏底图 tint 不实时跟随（下次唤起重烘焙自愈）。
+- **解决方案**：速贴模糊底自绘（`core::backdrop` 纯逻辑 + `platform::windows::screen_capture` 抓屏）：每次唤起在移回屏内前（窗口尚停屏，抓不到自己），抓取目标位屏幕区域（BitBlt+CAPTUREBLT，四周外扩一个模糊半径，范围钳到虚拟桌面——桌面之外 BitBlt 填不透明黑，贴屏边唤起会把黑边糊进底图，钳制侧的 clamp 随之落在屏幕边界）→ 三遍 box blur 近似高斯（半径 30 逻辑 px × 缩放因子，饱和玻璃档——半径过小时复杂背景高对比结构只糊边不成雾，留下一团团可辨识色斑）→ 裁回卡片尺寸（边缘模糊吃到卡外内容，滑窗图像边界 clamp 会让四边比中心更「实」）→ `material-layer` 同源 tint（圆角烘焙进图 alpha，规避软渲 clip 不按圆角裁剪 slint#4176）→ `blur-backdrop` Image 铺 card 底（z 序最底层）。抓屏失败（锁屏/会话切换）回实底。烘焙服务设置项「背景材质」的 Mica/Acrylic 两档，分派收口在 `picker::prepare_picker_backdrop`（每次唤起现读设置），以 tint 深浅分档：Acrylic 档 tint=`backdrop::ACRYLIC_TINT_ALPHA` 0.80、深色 tint 仅在暗背景提亮、随背景变亮渐退，以兼顾暗部层次与亮背景去白雾、行卡半透玻璃卡；具体分层与投影约束见 [主题系统](theme-system.md)；Mica 档 tint=`backdrop::MICA_TINT_ALPHA` 0.92 近不透明（Mica 材质本身不透明）、行卡不透明实卡细描边（玻璃卡叠此实底塌层）；「无」档实底（浅 `canvas-default` 近白面板 + `surface` 白卡 + 完整描边与柔影，深 card-layer 近黑）。可激活窗口（搜索/编辑/设置）的档位分流见 [主题系统](theme-system.md)，决策依据见 [ADR-0005](adr-0005-window-material.md)。已知限制：底图是唤起瞬间的静态快照，背后内容动态变化不跟随（瞬态面板可接受）；会话中改明暗主题，在屏底图 tint 不实时跟随（下次唤起重烘焙自愈）。
 - **教训**：判读「材质活不活」必须区分两个维度——透底（白黑垫底差分）与模糊（条纹振幅），只测差分会把「无模糊的半透明」误判为活；竞品效果归因要落到实现层（玻璃感可能来自网页层自画而非系统材质）；无焦点窗的观感需求最终要靠自绘兜底。另：黑白两轮差分判据对「条纹垫底」失效（两种条纹模糊后均值同为 50% 灰，差分恒 0），垫底判据用整块纯色、模糊判据用条纹，两种图案别混用。
+
+### 坑十二：浮层四周的「大片阴影」来自 DWM 而非自绘柔影
+
+- **现象**：速贴面板四周可见一圈很淡的投影，上侧最窄、下侧最大、左右对称，整体上窄下宽（截图取灰度实测：上 ~11px、左右 ~21–29px、下 ~65px，与背景仅差 4–10 灰阶，深色桌面下极易漏看）。
+- **原因**：winit 的「无边框」并不产生 `WS_POPUP`——它保留 `WS_CAPTION | WS_THICKFRAME`，只在 `WM_NCCALCSIZE` 里吃掉非客户区（实测速贴 `style=0x16C40000`）。只要这两个样式位在，DWM 就按标准窗口绘制投影，而系统投影天然上薄下厚。与 Slint 行卡的 `SoftShadow` 无关：行卡柔影被 `card.clip: true` 裁在窗内，出不了窗口。
+- **判别方式**：读 `GetWindowLongPtrW(GWL_STYLE)` 看 `WS_CAPTION/WS_THICKFRAME` 是否在位；再沿窗口四边取灰度剖面，系统投影呈现「上薄下厚」，自绘柔影呈对称衰减。不要只看窗口是否 `no-frame`——Slint 的 `no-frame` 只影响 winit 的 `MARKER_DECORATIONS`。
+- **现行方案**：浮层投影一律自绘。窗口四周留 `PanelGeometry.shadow-margin`（12px）透明留边，卡片内缩同等距离，留边内垫 `SoftShadow`；`overlay::silent_assemble_parked` 对停屏浮层显式 `disable_dwm_shadow`（`DWMWA_NCRENDERING_POLICY = DWMNCRP_DISABLED`），不再依赖「不调用 extend frame 就没有投影」这个错误前提。
+- **几何换算约束**：窗口尺寸 = 卡片 + 2×留边。定位与工作区约束、`set_window_min_size`、拉伸下限、抓屏烘焙范围（只覆盖卡片）、`mouse_monitor` 命中矩形（内缩留边，见坑四）都按**卡片**口径换算，窗口原点 = 卡片原点 − 留边。持久化几何存卡片口径（位置取卡片左上角、尺寸取卡片尺寸），否则下次重现会整体偏移一圈留边。拉伸手柄贴卡片矩形，不能留在窗口边上——那里的手柄落在透明区里，看得见的卡边反而抓不到。

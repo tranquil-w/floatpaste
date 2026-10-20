@@ -165,7 +165,12 @@ pub fn apply_material(app: &App, hwnd: isize) -> bool {
 /// 停屏保持 Win32 可见、隐藏期正常重绘，移上屏即完整内容。winit 对二次
 /// show 固定 SW_SHOW（无视 WS_EX_NOACTIVATE，激活窗口会打断宿主输入焦点
 /// 与 IME 组合），不用 Slint/Win32 的 show 显隐，收起只平移
-pub fn silent_assemble_parked<W: ComponentHandle>(win: &W, decorated: bool) -> Option<isize> {
+///
+/// 不挂 DWM 投影与系统圆角：停屏浮层（速贴/tooltip/托盘菜单）的投影与
+/// 圆角都是窗口内自绘（各自 slint 的 SoftShadow + 四周留边）。DWM 只按
+/// 窗口框绘制上薄下厚的投影、并给窗口（而非卡片）加圆角，两者都会与
+/// 自绘的对称柔影冲突
+pub fn silent_assemble_parked<W: ComponentHandle>(win: &W) -> Option<isize> {
     // show 会激活自己（winit 对首窗外的 show 走 SW_SHOW，无视
     // WS_EX_NOACTIVATE），先记下装配前的前台，装配完归还——停屏窗口
     // 保持 Win32 可见，若不归还则前台滞留屏外窗口：启动时偷走用户
@@ -175,10 +180,10 @@ pub fn silent_assemble_parked<W: ComponentHandle>(win: &W, decorated: bool) -> O
     let _ = win.window().show();
     let hwnd = win32_ext::window_hwnd(win)?;
     win32_ext::apply_overlay_style(hwnd, true);
-    if decorated {
-        win32_ext::apply_dwm_shadow(hwnd);
-        win32_ext::apply_dwm_rounded_corners(hwnd);
-    }
+    // winit 的无边框窗样式里仍留着 WS_CAPTION/WS_THICKFRAME（靠
+    // WM_NCCALCSIZE 吃掉非客户区），DWM 据此照常绘制上薄下厚的系统
+    // 投影。浮层投影一律自绘，显式关闭系统投影
+    win32_ext::disable_dwm_shadow(hwnd);
     let _ = window_control::remove_window_system_menu(hwnd);
     win.window()
         .set_position(slint::PhysicalPosition::new(-32000, -32000));

@@ -4,6 +4,11 @@
 //! 左/右/中键（含非客户区）按下时若命中点在面板窗口矩形之外，
 //! 触发回调（由调用方关闭面板；是否还原前台由调用方决定，外击场景
 //! 用户点击处已取得焦点，不再还原），事件本身放行。
+//!
+//! 命中矩形按 `inset` 内缩：浮层窗口比可见卡片四周各留一圈透明柔影
+//! 留边（见各窗 slint 的 SoftShadow），那圈透明区在 Win32 里仍属窗口、
+//! 会吞掉点击。按可见卡片判定，点留边即关闭面板，不留「点了没反应」
+//! 的死区
 
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 
@@ -18,6 +23,8 @@ use tracing::error;
 
 static MONITOR_WINDOW: AtomicIsize = AtomicIsize::new(0);
 static HOOK_ACTIVE: AtomicBool = AtomicBool::new(false);
+/// 命中矩形四周内缩量（物理像素）：可见卡片之外的透明柔影留边不算面板内
+static MONITOR_INSET: AtomicIsize = AtomicIsize::new(0);
 
 pub type OutsideClickCallback = Box<dyn Fn() + Send + Sync>;
 static OUTSIDE_CLICK_CALLBACK: std::sync::Mutex<Option<OutsideClickCallback>> =
@@ -27,9 +34,11 @@ thread_local! {
     static HOOK_HANDLE: std::cell::RefCell<Option<HHOOK>> = const { std::cell::RefCell::new(None) };
 }
 
-/// 开始监听：picker_hwnd 为面板窗口句柄，外击时调用 callback（钩子线程上触发）
-pub fn begin_session(picker_hwnd: isize, callback: OutsideClickCallback) {
+/// 开始监听：picker_hwnd 为面板窗口句柄，外击时调用 callback（钩子线程上触发）。
+/// `inset` 为命中矩形四周内缩（物理像素），用于排除窗口的透明柔影留边
+pub fn begin_session(picker_hwnd: isize, inset: i32, callback: OutsideClickCallback) {
     MONITOR_WINDOW.store(picker_hwnd, Ordering::SeqCst);
+    MONITOR_INSET.store(inset.max(0) as isize, Ordering::SeqCst);
     if let Ok(mut slot) = OUTSIDE_CLICK_CALLBACK.lock() {
         *slot = Some(callback);
     }
@@ -54,6 +63,7 @@ pub fn begin_session(picker_hwnd: isize, callback: OutsideClickCallback) {
 pub fn end_session() {
     HOOK_ACTIVE.store(false, Ordering::SeqCst);
     MONITOR_WINDOW.store(0, Ordering::SeqCst);
+    MONITOR_INSET.store(0, Ordering::SeqCst);
     HOOK_HANDLE.with(|handle| {
         if let Some(hook) = handle.borrow_mut().take() {
             unsafe {
@@ -103,7 +113,10 @@ fn click_is_outside_picker(lparam: LPARAM) -> bool {
 
     let hook_struct = unsafe { &*(lparam.0 as *const MSLLHOOKSTRUCT) };
     let pt: &POINT = &hook_struct.pt;
-    pt.x < rect.left || pt.x > rect.right || pt.y < rect.top || pt.y > rect.bottom
+    let inset = MONITOR_INSET.load(Ordering::SeqCst) as i32;
+    let (left, top) = (rect.left + inset, rect.top + inset);
+    let (right, bottom) = (rect.right - inset, rect.bottom - inset);
+    pt.x < left || pt.x > right || pt.y < top || pt.y > bottom
 }
 
 /// 供测试查询监听是否装载

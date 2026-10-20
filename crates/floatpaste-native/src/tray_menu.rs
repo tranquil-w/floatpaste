@@ -217,11 +217,19 @@ fn dpi_at_cursor() -> f32 {
     win32_ext::window_dpi(hwnd.0 as isize) as f32 / 96.0
 }
 
-/// 外击收起（WH_MOUSE_LL 会话）+ Esc 收起（会话热键）。回调都转投事件循环
+/// 外击收起（WH_MOUSE_LL 会话）+ Esc 收起（会话热键）。回调都转投事件循环。
+/// 命中矩形内缩柔影留边（菜单窗同样四周留边，留边内是透明区）
 fn begin_dismiss_sessions(app: &App, hwnd: isize) {
     let app_cb = app.clone();
+    // 留边按光标所在屏的 DPI 折算（菜单锚在光标处，自身窗口 DPI 是停屏位的）
+    let inset = app
+        .tray_menu
+        .upgrade()
+        .map(|win| (win.get_shadow_margin() * dpi_at_cursor()).round() as i32)
+        .unwrap_or(0);
     mouse_monitor::begin_session(
         hwnd,
+        inset,
         Box::new(move || {
             let app = app_cb.clone();
             let _ = slint::invoke_from_event_loop(move || {

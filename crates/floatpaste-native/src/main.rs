@@ -354,7 +354,7 @@ fn main() {
         let editor_win = app_for_init.editor.upgrade();
         let settings_win = app_for_init.settings.upgrade();
 
-        if let Some(hwnd) = overlay::silent_assemble_parked(&tooltip_win, false) {
+        if let Some(hwnd) = overlay::silent_assemble_parked(&tooltip_win) {
             app_for_init
                 .state
                 .tooltip_hwnd
@@ -365,7 +365,7 @@ fn main() {
         }
         // 托盘菜单：无焦点停屏浮层（同 tooltip 装配；柔影为窗口内自绘，
         // 不挂 DWM 阴影），打开/关闭走 tray_menu 模块
-        if let Some(hwnd) = overlay::silent_assemble_parked(&tray_menu_win, false) {
+        if let Some(hwnd) = overlay::silent_assemble_parked(&tray_menu_win) {
             app_for_init
                 .state
                 .tray_menu_hwnd
@@ -403,8 +403,10 @@ fn main() {
 
         // 速贴装配（屏外停屏）：模糊底为唤起时自绘烘焙（core::backdrop），
         // 不挂 DWM SystemBackdrop（Acrylic 模糊是激活态特权，无焦点窗
-        // 拿不到玻璃感）
-        match overlay::silent_assemble_parked(&picker_win, true) {
+        // 拿不到玻璃感）；投影同为窗口内自绘柔影（picker.slint SoftShadow
+        // + 四周留边），不挂系统投影——DWM 只按窗口框画上薄下厚的投影，
+        // 与面板观感不符
+        match overlay::silent_assemble_parked(&picker_win) {
             Some(hwnd) => {
                 app_for_init.state.picker_hwnd.store(hwnd, Ordering::SeqCst);
             }

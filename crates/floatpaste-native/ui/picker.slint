@@ -27,6 +27,10 @@ export struct ClipRow {
 // ── 面板结构几何：slint 布局与 Rust 首帧兜底共用的常量，禁双边手抄 ──
 // Rust 读取经 global::<PanelGeometry>()；改这里即同时改变布局与裁排
 export global PanelGeometry {
+    // 窗口四周柔影留边：窗口比卡片四周各大一份，投影画在留边里（系统
+    // DWM 投影上窄下宽且不对称，面板投影改自绘，见 SoftShadow）。Rust
+    // 定窗口尺寸、定位、烘焙底图与持久化几何都按此换算
+    out property <length> shadow-margin: 12px;
     out property <length> card-border: 1px;                // 窗口卡片 1px 边框（两侧共 2px）
     out property <length> scroll-slot: 10px;               // 列表右侧滚动槽
     out property <length> list-pad-left: 14px;             // 原版 grid pl-[14px]
@@ -458,8 +462,10 @@ export component QuickPasteWindow inherits Window {
     always-on-top: true;
     background: transparent;
     title: "FloatPaste · 速贴";
-    preferred-width: 360px;
-    preferred-height: 420px;
+    // 卡片设计尺寸；窗口另加四周柔影留边（PanelGeometry.shadow-margin），
+    // Rust 定窗口尺寸与定位时同源换算
+    preferred-width: 360px + 2 * PanelGeometry.shadow-margin;
+    preferred-height: 420px + 2 * PanelGeometry.shadow-margin;
 
     // ── 数据 ──
     in-out property <[ClipRow]> rows;
@@ -527,7 +533,28 @@ export component QuickPasteWindow inherits Window {
     in-out property <length> enter-offset: 0px;
     in-out property <bool> enter-animated: true;
 
-    card := Rectangle {
+        // ── 面板柔影（窗口留边内自绘，工程量见 PanelGeometry.shadow-margin）──
+        // 不用系统投影：DWM 只按窗口框绘制「上薄下厚」的投影（顶部几乎
+        // 无影、底部可达 60px+），与面板的浮层语言不一致。这里与
+        // tooltip / 托盘菜单同款：窗口四周留出留边，SoftShadow 垫在卡下。
+        // 留边内无实卡遮挡，柔影可见；卡片自绘圆角由卡自身承担
+        SoftShadow {
+            x: PanelGeometry.shadow-margin;
+            y: PanelGeometry.shadow-margin;
+            width: parent.width - 2 * PanelGeometry.shadow-margin;
+            height: parent.height - 2 * PanelGeometry.shadow-margin;
+            layers: 10;
+            step: 1px;
+            offset-y: 2px;
+            radius: Metrics.radius-lg;
+            alpha: 0.10;
+        }
+
+        card := Rectangle {
+            x: PanelGeometry.shadow-margin;
+            y: PanelGeometry.shadow-margin;
+            width: parent.width - 2 * PanelGeometry.shadow-margin;
+            height: parent.height - 2 * PanelGeometry.shadow-margin;
         // 面板底二态：自绘模糊底图（blur-active，唤起时烘焙的不透明
         // 模糊+tint 图，Acrylic 档 0.80 / Mica 档 0.92 近实底，圆角已
         // 烘焙进图 alpha——软渲 clip 不按圆角裁剪 slint#4176，靠图自
@@ -771,99 +798,109 @@ export component QuickPasteWindow inherits Window {
         }
 
         // ── 拉伸手柄（最顶层，几何对齐原版 PICKER_RESIZE_HANDLES）──
-        // 北向两条（避开顶部中央拖拽区；右条右缘让位右上关闭按钮）
-        ResizeHandle {
-            direction: 0;
-            x: 12px;
-            y: 0;
-            width: (parent.width - 24px) / 2 - 36px;
-            height: 8px;
-            started => { root.resize-started(0); }
-            drag-moved => { root.resize-moved(); }
-            finished => { root.resize-finished(); }
-        }
-        ResizeHandle {
-            direction: 0;
-            x: 12px + (parent.width - 24px) / 2 + 36px;
-            y: 0;
-            // 右缘止于关闭按钮左缘（46px 按钮区不响应拉伸，同原生窗控）
-            width: (parent.width - 24px) / 2 - 36px - 34px;
-            height: 8px;
-            started => { root.resize-started(0); }
-            drag-moved => { root.resize-moved(); }
-            finished => { root.resize-finished(); }
-        }
-        ResizeHandle {
-            direction: 1;
-            x: 12px;
-            y: parent.height - 8px;
-            width: parent.width - 24px;
-            height: 8px;
-            started => { root.resize-started(1); }
-            drag-moved => { root.resize-moved(); }
-            finished => { root.resize-finished(); }
-        }
-        ResizeHandle {
-            direction: 2;
-            x: 0;
-            y: 12px;
-            width: 4px;
-            height: parent.height - 24px;
-            started => { root.resize-started(2); }
-            drag-moved => { root.resize-moved(); }
-            finished => { root.resize-finished(); }
-        }
-        ResizeHandle {
-            direction: 3;
-            x: parent.width - 4px;
-            y: 12px;
-            width: 4px;
-            height: parent.height - 24px;
-            started => { root.resize-started(3); }
-            drag-moved => { root.resize-moved(); }
-            finished => { root.resize-finished(); }
-        }
-        ResizeHandle {
-            direction: 4;
-            x: 0;
-            y: 0;
-            width: 16px;
-            height: 16px;
-            started => { root.resize-started(4); }
-            drag-moved => { root.resize-moved(); }
-            finished => { root.resize-finished(); }
-        }
-        ResizeHandle {
-            direction: 5;
-            // NE 角让位右上关闭按钮，退守按钮左侧（原 width-16px 位置
-            // 整块落在按钮命中区内，点击会变拉伸而非关闭）
-            x: parent.width - 46px - 16px;
-            y: 0;
-            width: 16px;
-            height: 16px;
-            started => { root.resize-started(5); }
-            drag-moved => { root.resize-moved(); }
-            finished => { root.resize-finished(); }
-        }
-        ResizeHandle {
-            direction: 6;
-            x: 0;
-            y: parent.height - 16px;
-            width: 16px;
-            height: 16px;
-            started => { root.resize-started(6); }
-            drag-moved => { root.resize-moved(); }
-            finished => { root.resize-finished(); }
-        }
-        ResizeHandle {
-            direction: 7;
-            x: parent.width - 16px;
-            y: parent.height - 16px;
-            width: 16px;
-            height: 16px;
-            started => { root.resize-started(7); }
-            drag-moved => { root.resize-moved(); }
-            finished => { root.resize-finished(); }
+        // 手柄容器贴**卡片**矩形：窗口四周多出柔影留边，用户看得见、
+        // 会去抓的是卡边；留在窗口边上的手柄会落在透明留边里，看得见的
+        // 边反而抓不到。容器内坐标与原版一致
+        Rectangle {
+            x: PanelGeometry.shadow-margin;
+            y: PanelGeometry.shadow-margin;
+            width: parent.width - 2 * PanelGeometry.shadow-margin;
+            height: parent.height - 2 * PanelGeometry.shadow-margin;
+
+            // 北向两条（避开顶部中央拖拽区；右条右缘让位右上关闭按钮）
+            ResizeHandle {
+                direction: 0;
+                x: 12px;
+                y: 0;
+                width: (parent.width - 24px) / 2 - 36px;
+                height: 8px;
+                started => { root.resize-started(0); }
+                drag-moved => { root.resize-moved(); }
+                finished => { root.resize-finished(); }
+            }
+            ResizeHandle {
+                direction: 0;
+                x: 12px + (parent.width - 24px) / 2 + 36px;
+                y: 0;
+                // 右缘止于关闭按钮左缘（46px 按钮区不响应拉伸，同原生窗控）
+                width: (parent.width - 24px) / 2 - 36px - 34px;
+                height: 8px;
+                started => { root.resize-started(0); }
+                drag-moved => { root.resize-moved(); }
+                finished => { root.resize-finished(); }
+            }
+            ResizeHandle {
+                direction: 1;
+                x: 12px;
+                y: parent.height - 8px;
+                width: parent.width - 24px;
+                height: 8px;
+                started => { root.resize-started(1); }
+                drag-moved => { root.resize-moved(); }
+                finished => { root.resize-finished(); }
+            }
+            ResizeHandle {
+                direction: 2;
+                x: 0;
+                y: 12px;
+                width: 4px;
+                height: parent.height - 24px;
+                started => { root.resize-started(2); }
+                drag-moved => { root.resize-moved(); }
+                finished => { root.resize-finished(); }
+            }
+            ResizeHandle {
+                direction: 3;
+                x: parent.width - 4px;
+                y: 12px;
+                width: 4px;
+                height: parent.height - 24px;
+                started => { root.resize-started(3); }
+                drag-moved => { root.resize-moved(); }
+                finished => { root.resize-finished(); }
+            }
+            ResizeHandle {
+                direction: 4;
+                x: 0;
+                y: 0;
+                width: 16px;
+                height: 16px;
+                started => { root.resize-started(4); }
+                drag-moved => { root.resize-moved(); }
+                finished => { root.resize-finished(); }
+            }
+            ResizeHandle {
+                direction: 5;
+                // NE 角让位右上关闭按钮，退守按钮左侧（原 width-16px 位置
+                // 整块落在按钮命中区内，点击会变拉伸而非关闭）
+                x: parent.width - 46px - 16px;
+                y: 0;
+                width: 16px;
+                height: 16px;
+                started => { root.resize-started(5); }
+                drag-moved => { root.resize-moved(); }
+                finished => { root.resize-finished(); }
+            }
+            ResizeHandle {
+                direction: 6;
+                x: 0;
+                y: parent.height - 16px;
+                width: 16px;
+                height: 16px;
+                started => { root.resize-started(6); }
+                drag-moved => { root.resize-moved(); }
+                finished => { root.resize-finished(); }
+            }
+            ResizeHandle {
+                direction: 7;
+                x: parent.width - 16px;
+                y: parent.height - 16px;
+                width: 16px;
+                height: 16px;
+                started => { root.resize-started(7); }
+                drag-moved => { root.resize-moved(); }
+                finished => { root.resize-finished(); }
+            }
         }
 
         // ── 排版度量标尺：与列表预览同款排版属性，不可见不挡输入 ──

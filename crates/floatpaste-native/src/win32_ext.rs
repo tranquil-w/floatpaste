@@ -7,6 +7,7 @@ use slint::ComponentHandle;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{
     DwmExtendFrameIntoClientArea, DwmSetWindowAttribute, DWMSBT_MAINWINDOW, DWMSBT_TRANSIENTWINDOW,
+    DWMNCRENDERINGPOLICY, DWMNCRP_DISABLED, DWMWA_NCRENDERING_POLICY,
     DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE,
     DWMWCP_ROUND, DWM_SYSTEMBACKDROP_TYPE, DWM_WINDOW_CORNER_PREFERENCE,
 };
@@ -223,7 +224,9 @@ pub fn set_window_visible(hwnd: isize, visible: bool) {
 }
 
 /// 给无边框窗口挂系统悬浮阴影（原版 Tauri shadow(true) 的等效）：
-/// DWM 非客户区渲染 + 1px 底部外框即可让合成器绘制标准投影
+/// DWM 非客户区渲染 + 1px 底部外框即可让合成器绘制标准投影。
+///
+/// 自绘柔影的浮层不要用它：改用 [`disable_dwm_shadow`]
 pub fn apply_dwm_shadow(hwnd: isize) {
     let hwnd = HWND(hwnd as *mut _);
     let margins = MARGINS {
@@ -234,6 +237,27 @@ pub fn apply_dwm_shadow(hwnd: isize) {
     };
     unsafe {
         let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
+    }
+}
+
+/// 关闭 DWM 非客户区渲染，即关掉系统窗口投影。
+///
+/// winit 的「无边框」只是用 WM_NCCALCSIZE 吃掉非客户区，样式里仍留着
+/// WS_CAPTION/WS_THICKFRAME（实测 `style=0x16C40000`），DWM 因此照常
+/// 按窗口框绘制标准投影——上缘几乎无影、下缘最长最浓（实测底部 ~65px、
+/// 顶部 ~11px），与自绘柔影的对称语言冲突，且它画在窗口矩形之外、
+/// 会盖过柔影留边。自绘柔影的浮层（速贴/tooltip/托盘菜单）显式关闭，
+/// 投影全部由 slint 的 SoftShadow 在留边内承担
+pub fn disable_dwm_shadow(hwnd: isize) {
+    let hwnd = HWND(hwnd as *mut _);
+    let policy = DWMNCRP_DISABLED;
+    unsafe {
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_NCRENDERING_POLICY,
+            &policy as *const DWMNCRENDERINGPOLICY as *const _,
+            std::mem::size_of::<DWMNCRENDERINGPOLICY>() as u32,
+        );
     }
 }
 

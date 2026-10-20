@@ -150,16 +150,12 @@ pub fn activate(app: &App) {
         // 重置状态后走完整显示流程，避免后续打开沦为空操作
         if window_control::is_window_visible(hwnd) {
             // 尺寸不动：用窗口当前实测尺寸（Slint 的 size() 即物理像素，
-            // 不要再乘缩放因子，乘了约束用的尺寸会虚大）
-            let size = win.window().size();
-            if let Some(point) = resolve_window_position(app, &settings, size, None) {
-                window_control::set_window_bounds(
-                    hwnd,
-                    point.x,
-                    point.y,
-                    size.width as i32,
-                    size.height as i32,
-                );
+            // 不要再乘缩放因子，乘了约束用的尺寸会虚大）。工作区约束按
+            // **卡片**尺寸算——要对齐工作区的是用户看得见的卡边，不是
+            // 含柔影留边的透明窗口边
+            let card = card_physical_size(&win, win.window().size());
+            if let Some(point) = resolve_window_position(app, &settings, card, None) {
+                place_window_at_card(&win, hwnd, point, card);
             }
             // 该路径绕过 after_show：置顶与守护需自行保证
             window_control::set_window_topmost_no_activate(hwnd);
@@ -172,18 +168,16 @@ pub fn activate(app: &App) {
         mouse_monitor::end_session();
     }
 
-    // 恢复记忆尺寸（无记忆则按设计尺寸与当前缩放折算为物理像素）。
-    // 这一组尺寸必须原样带到定位环节——首开时窗口刚请求过 resize，
+    // 恢复记忆的**卡片**尺寸（无记忆则按设计尺寸与当前缩放折算为物理
+    // 像素）。这一组尺寸必须原样带到定位环节——首开时窗口刚请求过 resize，
     // 此时回读窗口尺寸拿到的是装配期旧值，用它算约束必然错位
-    let size = resolve_physical_size(app, win.window().scale_factor());
+    let card_size = resolve_physical_size(app, win.window().scale_factor());
+    let size = window_physical_size(&win, card_size);
     // 停屏态定尺寸走裸 SetWindowPos（单一确定的「只动几何、绝不激活」，
     // 不经 Slint/winit 的窗口 API 附带语义），见 window_control 注释
     window_control::set_window_size_no_activate(hwnd, size.width as i32, size.height as i32);
-    window_control::set_window_min_size(
-        hwnd,
-        (PICKER_MIN_WIDTH as f32 * win.window().scale_factor()) as i32,
-        (PICKER_MIN_HEIGHT as f32 * win.window().scale_factor()) as i32,
-    );
+    let (min_width, min_height) = min_window_size(&win);
+    window_control::set_window_min_size(hwnd, min_width, min_height);
 
     // 开始菜单开着时速贴压不过它（shell 表面在更高 z-order 带内），定位
     // 服务会把落位改到开始菜单旁边（开始菜单保持打开）；这里跳过把
@@ -246,21 +240,16 @@ pub fn activate(app: &App) {
 
     // 定位解析先行：抓屏烘焙模糊底图要在移回屏内之前完成（窗口尚在
     // 屏外，背后区域抓不到面板自己）；定位失败保持停屏位并回实底
-    let position = resolve_window_position(app, &settings, size, session.target_window_hwnd);
+    let position = resolve_window_position(app, &settings, card_size, session.target_window_hwnd);
     match position {
         Some(point) => {
-            prepare_picker_backdrop(app, &win, point, size, &tokens);
+            // 烘焙只覆盖卡片区：底图 Image 铺满 card（100%），不含柔影留边
+            prepare_picker_backdrop(app, &win, point, card_size, &tokens);
             // 上屏前先暖表面：停屏窗口收不到自发 WM_PAINT，同步泵一次
             // 呈现，让底图与最新列表的首帧在屏外落盘——移回屏上的第
             // 一帧即完整内容，既不透明也不闪旧列表
             win32_ext::warm_surface(hwnd);
-            window_control::set_window_bounds(
-                hwnd,
-                point.x,
-                point.y,
-                size.width as i32,
-                size.height as i32,
-            );
+            place_window_at_card(&win, hwnd, point, card_size);
             win32_ext::force_full_repaint(hwnd);
         }
         None => {
@@ -309,20 +298,7 @@ pub fn hide(app: &App, restore_target: bool) {
     session_keyboard::end_session();
     mouse_monitor::end_session();
 
-    if let Some(rect) = (hwnd != 0)
-        .then(|| win32_ext::physical_rect(hwnd))
-        .flatten()
-    {
-        let geometry = WindowGeometry {
-            x: rect.left,
-            y: rect.top,
-            width: (rect.right - rect.left).max(0) as u32,
-            height: (rect.bottom - rect.top).max(0) as u32,
-        };
-        if let Some(stored) = PickerPositionService::capture_window_position(geometry) {
-            let _ = app.core().repository.save_picker_window_state(&stored);
-        }
-    }
+    save_window_geometry(app, &win, hwnd);
 
     // 停屏到屏幕外而非 Slint hide（同 hide_for_editor）：hide→show 周期中
     // winit 清空窗口表面且 Slint 脏区跟踪失效，下次显示会出现透明空壳；
@@ -378,20 +354,7 @@ pub fn hide_for_editor(app: &App) {
     session_keyboard::end_session();
     mouse_monitor::end_session();
 
-    if let Some(rect) = (hwnd != 0)
-        .then(|| win32_ext::physical_rect(hwnd))
-        .flatten()
-    {
-        let geometry = WindowGeometry {
-            x: rect.left,
-            y: rect.top,
-            width: (rect.right - rect.left).max(0) as u32,
-            height: (rect.bottom - rect.top).max(0) as u32,
-        };
-        if let Some(stored) = PickerPositionService::capture_window_position(geometry) {
-            let _ = app.core().repository.save_picker_window_state(&stored);
-        }
-    }
+    save_window_geometry(app, &win, hwnd);
 
     // 停屏到屏幕外（Windows 坐标下限），不用隐藏
     win.window()
@@ -439,15 +402,13 @@ pub fn restore_after_editor(app: &App, target: TargetSession) {
     }
     let settings = app.state.current_settings();
 
-    // 恢复记忆尺寸（无记忆则按设计尺寸与当前缩放折算），同 activate：
-    // 尺寸与定位取自同一组数，不回读窗口
-    let size = resolve_physical_size(app, win.window().scale_factor());
+    // 恢复记忆的**卡片**尺寸（无记忆则按设计尺寸与当前缩放折算），同
+    // activate：尺寸与定位取自同一组数，不回读窗口
+    let card_size = resolve_physical_size(app, win.window().scale_factor());
+    let size = window_physical_size(&win, card_size);
     window_control::set_window_size_no_activate(hwnd, size.width as i32, size.height as i32);
-    window_control::set_window_min_size(
-        hwnd,
-        (PICKER_MIN_WIDTH as f32 * win.window().scale_factor()) as i32,
-        (PICKER_MIN_HEIGHT as f32 * win.window().scale_factor()) as i32,
-    );
+    let (min_width, min_height) = min_window_size(&win);
+    window_control::set_window_min_size(hwnd, min_width, min_height);
 
     app.state.set_picker_session(target);
     info!(session_id = target.session_id, "从编辑器恢复 Picker");
@@ -461,18 +422,12 @@ pub fn restore_after_editor(app: &App, target: TargetSession) {
 
     // 归位记忆位置 + 按档备底（同 activate：移回屏内前完成，背后
     // 区域抓不到面板自己），再暖表面让首帧在屏外落盘
-    let point = resolve_parked_position(app, size);
+    let point = resolve_parked_position(app, card_size);
     match point {
         Some(p) => {
-            prepare_picker_backdrop(app, &win, p, size, &tokens);
+            prepare_picker_backdrop(app, &win, p, card_size, &tokens);
             win32_ext::warm_surface(hwnd);
-            window_control::set_window_bounds(
-                hwnd,
-                p.x,
-                p.y,
-                size.width as i32,
-                size.height as i32,
-            );
+            place_window_at_card(&win, hwnd, p, card_size);
         }
         None => {
             warn!("速贴归位失败：记忆位置与光标锚点均不可得，窗口留在停屏位");
@@ -511,8 +466,16 @@ fn begin_input_session(app: &App, hwnd: isize, settings: &UserSetting) {
     // 外击关闭不还原前台：用户点击的位置已取得焦点，此时再把原目标
     // 拉回前台会被前台所有权检查拒绝，Windows 拒绝时闪烁目标窗口的
     // 任务栏按钮（Esc/主快捷键关闭仍走还原，见 hide）
+    // 命中矩形内缩柔影留边：留边是窗口里的透明区、由面板窗吞点击，
+    // 按可见卡片判定才不会在阴影上点出「没反应」
+    let inset = app
+        .picker
+        .upgrade()
+        .map(|win| shadow_margin_px(&win))
+        .unwrap_or(0);
     mouse_monitor::begin_session(
         hwnd,
+        inset,
         Box::new(move || {
             let app = app_for_mouse.clone();
             let _ = slint::invoke_from_event_loop(move || {
@@ -775,10 +738,12 @@ fn preview_avail_widths(win: &QuickPasteWindow) -> (f32, f32) {
     let geo = win.global::<PanelGeometry>();
     let chrome = 2.0 * geo.get_card_border() + geo.get_scroll_slot() + geo.get_preview_pad_h();
     let thumb_column = geo.get_thumb_size() + geo.get_thumb_gap();
-    // window().size() 为物理像素；度量标尺与布局都以逻辑像素运作
+    // window().size() 为物理像素；度量标尺与布局都以逻辑像素运作。
+    // 窗口含四周柔影留边，卡片宽要扣掉两侧留边再算内容宽
     let scale = win.window().scale_factor();
-    let panel_logical = win.window().size().width as f32 / scale;
-    let no_thumb = (panel_logical - chrome).max(40.0);
+    let card_logical =
+        win.window().size().width as f32 / scale - 2.0 * geo.get_shadow_margin();
+    let no_thumb = (card_logical - chrome).max(40.0);
     (no_thumb, (no_thumb - thumb_column).max(40.0))
 }
 
@@ -947,10 +912,13 @@ pub fn navigate(app: &App, up: bool) {
 
 /* ───────────────── 定位 ───────────────── */
 
-/// 本次上屏的窗口物理尺寸：有记忆用记忆（落盘的已是物理像素），无记忆按
-/// 设计尺寸与显示器缩放折算。定位与定尺寸必须取自同一组数——首开（或刚从
-/// 编辑器返回）时窗口尺寸是这里算出来、刚请求下去的值，回读窗口拿到的
-/// 还可能是装配期旧值
+/// 本次上屏的**卡片**物理尺寸：有记忆用记忆（落盘的已是物理像素），无记忆
+/// 按设计尺寸与显示器缩放折算。定位与定尺寸必须取自同一组数——首开（或刚
+/// 从编辑器返回）时尺寸是这里算出来、刚请求下去的值，回读窗口拿到的还可
+/// 能是装配期旧值。
+///
+/// 卡片尺寸是持久化与最小尺寸的口径；窗口另加四周柔影留边，见
+/// [`window_physical_size`]
 fn resolve_physical_size(app: &App, scale_factor: f32) -> slint::PhysicalSize {
     let (width, height) =
         PickerPositionService::resolve_window_size(&app.core().repository, scale_factor)
@@ -958,6 +926,83 @@ fn resolve_physical_size(app: &App, scale_factor: f32) -> slint::PhysicalSize {
             .flatten()
             .unwrap_or_else(|| default_window_size(scale_factor));
     slint::PhysicalSize::new(width, height)
+}
+
+/// 柔影留边（物理像素）：`PanelGeometry.shadow-margin` 的单一来源在
+/// slint，Rust 侧一律经此读取，不手抄数值
+fn shadow_margin_px(win: &QuickPasteWindow) -> i32 {
+    let logical = win.global::<PanelGeometry>().get_shadow_margin();
+    (logical * win.window().scale_factor()).round().max(0.0) as i32
+}
+
+/// 窗口物理尺寸 = 卡片 + 四周柔影留边。窗口比卡片大一圈，投影画在透
+/// 明留边里（自绘 SoftShadow，不挂 DWM 系统投影）
+fn window_physical_size(win: &QuickPasteWindow, card: slint::PhysicalSize) -> slint::PhysicalSize {
+    let margin = shadow_margin_px(win);
+    slint::PhysicalSize::new(
+        card.width + 2 * margin as u32,
+        card.height + 2 * margin as u32,
+    )
+}
+
+/// 物理窗口尺寸反推卡片尺寸（已知窗口实测尺寸时用，如会话恢复路径）
+fn card_physical_size(win: &QuickPasteWindow, window: slint::PhysicalSize) -> slint::PhysicalSize {
+    let margin = 2 * shadow_margin_px(win) as u32;
+    slint::PhysicalSize::new(
+        window.width.saturating_sub(margin),
+        window.height.saturating_sub(margin),
+    )
+}
+
+/// 读取并落盘当前**卡片**几何：位置取卡片左上角、尺寸取卡片尺寸。
+/// 窗口几何含四周柔影留边（透明区），直接落盘会让下次重现整体
+/// 平移一圈留边、且尺寸随留边定义漂移。留边是观感实现，不属于
+/// 用户感知的窗口几何
+fn save_window_geometry(app: &App, win: &QuickPasteWindow, hwnd: isize) {
+    let Some(rect) = (hwnd != 0).then(|| win32_ext::physical_rect(hwnd)).flatten() else {
+        return;
+    };
+    let margin = shadow_margin_px(win);
+    let geometry = WindowGeometry {
+        x: rect.left + margin,
+        y: rect.top + margin,
+        width: ((rect.right - rect.left).max(0) as u32).saturating_sub(2 * margin as u32),
+        height: ((rect.bottom - rect.top).max(0) as u32).saturating_sub(2 * margin as u32),
+    };
+    if let Some(stored) = PickerPositionService::capture_window_position(geometry) {
+        let _ = app.core().repository.save_picker_window_state(&stored);
+    }
+}
+
+/// 窗口最小尺寸（物理像素）：卡片下限（[`PICKER_MIN_WIDTH`] /
+/// [`PICKER_MIN_HEIGHT`]）加留边——拉伸下限约束的是卡片，不是含留边的窗口
+fn min_window_size(win: &QuickPasteWindow) -> (i32, i32) {
+    let scale = win.window().scale_factor();
+    let margin = 2 * shadow_margin_px(win);
+    (
+        (PICKER_MIN_WIDTH as f32 * scale).round() as i32 + margin,
+        (PICKER_MIN_HEIGHT as f32 * scale).round() as i32 + margin,
+    )
+}
+
+/// 按**卡片**左上角摆放窗口：窗口比卡片四周各大一份留边，实际窗口原点
+/// 是卡片原点向左上偏移留边。定位服务（PickerPositionService）全部以
+/// 「窗口/卡片在该点整块落在工作区内」为契约，换算收口在此一处
+fn place_window_at_card(
+    win: &QuickPasteWindow,
+    hwnd: isize,
+    card_point: ScreenPoint,
+    card_size: slint::PhysicalSize,
+) {
+    let margin = shadow_margin_px(win);
+    let window = window_physical_size(win, card_size);
+    window_control::set_window_bounds(
+        hwnd,
+        card_point.x - margin,
+        card_point.y - margin,
+        window.width as i32,
+        window.height as i32,
+    );
 }
 
 /// 按设置模式定位并上屏。窗口尺寸是定位的输入而非输出：速贴的三种模式
@@ -1239,16 +1284,16 @@ pub fn wire(app: &App) {
                 6 => ResizeDirection::SouthWest,
                 _ => ResizeDirection::SouthEast,
             };
-            let scale = app_cb
+            let (min_width, min_height) = app_cb
                 .picker
                 .upgrade()
-                .map(|win| win.window().scale_factor())
-                .unwrap_or(1.0);
+                .map(|win| min_window_size(&win))
+                .unwrap_or((PICKER_MIN_WIDTH as i32, PICKER_MIN_HEIGHT as i32));
             window_control::begin_window_gesture(
                 hwnd,
                 GestureMode::Resize(direction),
-                (PICKER_MIN_WIDTH as f32 * scale) as i32,
-                (PICKER_MIN_HEIGHT as f32 * scale) as i32,
+                min_width,
+                min_height,
             );
         });
     }
