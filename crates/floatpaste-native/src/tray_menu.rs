@@ -173,7 +173,13 @@ fn open(app: &App) {
         if let Some((x, y)) = resolve_position(physical_w, physical_h) {
             window_control::set_window_bounds(hwnd, x, y, physical_w, physical_h);
         }
-        overlay::after_show(hwnd, false, ForegroundPolicy::Keep, ForegroundPolicy::Keep);
+        overlay::after_show(
+            hwnd,
+            false,
+            ForegroundPolicy::Keep,
+            ForegroundPolicy::Keep,
+            || true,
+        );
         slint::Timer::single_shot(Duration::from_millis(16), move || {
             if let Some(win) = win_cb.upgrade() {
                 win.set_appear(true);

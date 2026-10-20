@@ -46,6 +46,7 @@ pub struct SharedState {
     pub core: CoreState,
     session: Mutex<TargetSession>,
     picker_active: AtomicBool,
+    picker_epoch: AtomicU64,
     pub picker_hwnd: AtomicIsize,
     pub tooltip_hwnd: AtomicIsize,
     pub tray_menu_hwnd: AtomicIsize,
@@ -76,6 +77,7 @@ impl SharedState {
             core,
             session: Mutex::new(TargetSession::default()),
             picker_active: AtomicBool::new(false),
+            picker_epoch: AtomicU64::new(0),
             picker_hwnd: AtomicIsize::new(0),
             tooltip_hwnd: AtomicIsize::new(0),
             tray_menu_hwnd: AtomicIsize::new(0),
@@ -104,8 +106,18 @@ impl SharedState {
         self.picker_active.load(Ordering::SeqCst)
     }
 
-    pub fn begin_picker_activation(&self) {
+    pub fn begin_picker_activation(&self) -> u64 {
         self.picker_active.store(true, Ordering::SeqCst);
+        // 编辑往返沿用 session_id，但每次显示都必须使旧异步回调失效。
+        self.picker_epoch.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    pub fn picker_session_epoch(&self) -> u64 {
+        self.picker_epoch.load(Ordering::SeqCst)
+    }
+
+    pub fn is_current_picker_activation(&self, epoch: u64) -> bool {
+        self.is_picker_active() && self.picker_session_epoch() == epoch && !self.core.is_quitting()
     }
 
     pub fn end_picker_activation(&self) {

@@ -285,7 +285,7 @@ fn finish_show(
         }
     }
     win32_ext::warm_surface(hwnd);
-    win32_ext::force_full_repaint(hwnd);
+    win32_ext::force_full_repaint(win);
 
     if let Err(error) = window_control::restore_window_and_focus(hwnd) {
         warn!("搜索窗口获取焦点失败: {error}");
@@ -421,7 +421,7 @@ pub fn restore_after_editor(app: &App) {
     win.set_enter_offset(4.0);
     // 上屏前先暖表面（同步泵一次 WM_PAINT 呈现），移回原位即有内容
     win32_ext::warm_surface(hwnd);
-    win32_ext::force_full_repaint(hwnd);
+    win32_ext::force_full_repaint(&win);
     if let Ok(mut slot) = PARKED_POSITION.lock() {
         if let Some((x, y)) = slot.take() {
             win.window()

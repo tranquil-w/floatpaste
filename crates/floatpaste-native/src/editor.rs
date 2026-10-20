@@ -214,7 +214,7 @@ fn show_editor(app: &App, session: EditorSession, anchor: Option<HostAnchor>) {
     win32_ext::set_window_visible(hwnd, true);
     win.set_material_active(overlay::apply_material(app, hwnd));
     win32_ext::warm_surface(hwnd);
-    win32_ext::force_full_repaint(hwnd);
+    win32_ext::force_full_repaint(&win);
     win.window()
         .set_position(slint::PhysicalPosition::new(x, y));
     // 从速贴打开时本进程不是前台（前台在目标应用上），裸

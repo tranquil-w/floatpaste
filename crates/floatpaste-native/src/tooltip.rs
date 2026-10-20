@@ -485,7 +485,7 @@ fn present(
             // 须把 tooltip 抬回置顶带顶部，宿主同为置顶会盖住它）
             let restore =
                 prev_foreground.map_or(ForegroundPolicy::Keep, ForegroundPolicy::RestoreIfStolen);
-            overlay::after_show(tooltip_hwnd, true, restore, ForegroundPolicy::Keep);
+            overlay::after_show(tooltip_hwnd, true, restore, ForegroundPolicy::Keep, || true);
             slint::Timer::single_shot(std::time::Duration::from_millis(16), move || {
                 if let Some(win) = win_cb.upgrade() {
                     win.set_appear(true);

@@ -46,6 +46,9 @@ use crate::tooltip;
 use crate::win32_ext;
 use crate::{ClipRow, PanelGeometry, QuickPasteWindow, SearchWindow, TooltipWindow};
 
+// debug 软件渲染冷帧较慢；发布构建保留短暂的屏外布局与呈现准备期。
+const REVEAL_DELAY_MS: u64 = if cfg!(debug_assertions) { 200 } else { 50 };
+
 /// 预览最多显示行数（对齐原版 line-clamp-4）
 const PREVIEW_MAX_LINES: usize = 4;
 /// 入库预览的字符截断上限（normalize_service 同值）：达到即认为原文更长
@@ -86,6 +89,7 @@ impl App {
 thread_local! {
     static TOPMOST_GUARD: std::cell::RefCell<Option<slint::Timer>> =
         const { std::cell::RefCell::new(None) };
+    static REVEAL_TIMER: slint::Timer = slint::Timer::default();
 }
 
 fn start_topmost_guard(app: &App) {
@@ -128,9 +132,6 @@ fn stop_topmost_guard() {
 
 /// 打开速贴面板（对齐 WindowCoordinator::activate_picker）
 pub fn activate(app: &App) {
-    // 互斥收口：托盘菜单开着时热键唤起，其键鼠会话（单例）即将被本会话
-    // 顶掉，先收菜单防浮层滞留
-    crate::tray_menu::close(app);
     let Some(win) = app.picker.upgrade() else {
         return;
     };
@@ -146,20 +147,31 @@ pub fn activate(app: &App) {
     }
 
     if app.state.is_picker_active() {
+        // 停屏窗口的 IsWindowVisible 仍为真；准备期重复打开不能提前落位。
+        if REVEAL_TIMER.with(slint::Timer::running) {
+            return;
+        }
         // 兜底：标志位与真实可见性脱节时（Win+D/多屏切换/被全屏应用抢占）
         // 重置状态后走完整显示流程，避免后续打开沦为空操作
         if window_control::is_window_visible(hwnd) {
             // 尺寸不动：用窗口当前实测尺寸（Slint 的 size() 即物理像素，
-            // 不要再乘缩放因子，乘了约束用的尺寸会虚大）。工作区约束按
-            // **卡片**尺寸算——要对齐工作区的是用户看得见的卡边，不是
-            // 含柔影留边的透明窗口边
-            let card = card_physical_size(&win, win.window().size());
-            if let Some(point) = resolve_window_position(app, &settings, card, None) {
-                place_window_at_card(&win, hwnd, point, card);
+            // 不要再乘缩放因子，乘了约束用的尺寸会虚大）
+            let size = win.window().size();
+            if let Some(point) = resolve_window_position(app, &settings, size, None) {
+                window_control::set_window_bounds(
+                    hwnd,
+                    point.x,
+                    point.y,
+                    size.width as i32,
+                    size.height as i32,
+                );
             }
             // 该路径绕过 after_show：置顶与守护需自行保证
             window_control::set_window_topmost_no_activate(hwnd);
             start_topmost_guard(app);
+            // close 会结束全局键鼠会话；重新装配以覆盖托盘菜单让位路径。
+            crate::tray_menu::close(app);
+            begin_input_session(app, hwnd, &settings);
             return;
         }
         warn!("Picker 标志位为激活但窗口实际不可见，重置状态后重新显示");
@@ -168,16 +180,21 @@ pub fn activate(app: &App) {
         mouse_monitor::end_session();
     }
 
-    // 恢复记忆的**卡片**尺寸（无记忆则按设计尺寸与当前缩放折算为物理
-    // 像素）。这一组尺寸必须原样带到定位环节——首开时窗口刚请求过 resize，
+    // 托盘菜单与速贴共用键鼠会话；完整打开前先让位。
+    crate::tray_menu::close(app);
+
+    // 恢复记忆尺寸（无记忆则按设计尺寸与当前缩放折算为物理像素）。
+    // 这一组尺寸必须原样带到定位环节——首开时窗口刚请求过 resize，
     // 此时回读窗口尺寸拿到的是装配期旧值，用它算约束必然错位
-    let card_size = resolve_physical_size(app, win.window().scale_factor());
-    let size = window_physical_size(&win, card_size);
+    let size = resolve_physical_size(app, win.window().scale_factor());
     // 停屏态定尺寸走裸 SetWindowPos（单一确定的「只动几何、绝不激活」，
     // 不经 Slint/winit 的窗口 API 附带语义），见 window_control 注释
     window_control::set_window_size_no_activate(hwnd, size.width as i32, size.height as i32);
-    let (min_width, min_height) = min_window_size(&win);
-    window_control::set_window_min_size(hwnd, min_width, min_height);
+    window_control::set_window_min_size(
+        hwnd,
+        (PICKER_MIN_WIDTH as f32 * win.window().scale_factor()) as i32,
+        (PICKER_MIN_HEIGHT as f32 * win.window().scale_factor()) as i32,
+    );
 
     // 开始菜单开着时速贴压不过它（shell 表面在更高 z-order 带内），定位
     // 服务会把落位改到开始菜单旁边（开始菜单保持打开）；这里跳过把
@@ -221,7 +238,7 @@ pub fn activate(app: &App) {
     // 材质底：唤起时按设置「背景材质」现读分派（Mica/Acrylic 均自绘
     // 烘焙、tint 分档 / 无实底，见 prepare_picker_backdrop）
 
-    app.state.begin_picker_activation();
+    let epoch = app.state.begin_picker_activation();
 
     // 重现（无激活 + 置顶，对齐原版 always_on_top）。窗口自启动起保持
     // Slint 可见（停屏态），这里只做最小化兜位恢复，不走 Slint show：
@@ -229,59 +246,96 @@ pub fn activate(app: &App) {
     // 根源。样式重挂与前台策略仍交 overlay 公共层处理
     let _ = window_control::show_window_no_activate(hwnd);
 
-    // 出现滑入准备：停屏期关动画重置内容偏移，暖首帧落盘的即 4px 起步态
-    // （见 picker.slint enter-offset 注释）
-    win.set_enter_animated(false);
-    win.set_enter_offset(4.0);
-
     // 会话开始：刷新列表、选中归零、滚回顶部、清空消息。放在上屏之前：
     // 列表重活（查询 + 逐行裁排）跑在停屏期间，上屏即最新内容
     refresh_list_reset(app, &settings);
 
     // 定位解析先行：抓屏烘焙模糊底图要在移回屏内之前完成（窗口尚在
     // 屏外，背后区域抓不到面板自己）；定位失败保持停屏位并回实底
-    let position = resolve_window_position(app, &settings, card_size, session.target_window_hwnd);
+    let position = resolve_window_position(app, &settings, size, session.target_window_hwnd);
     match position {
         Some(point) => {
-            // 烘焙只覆盖卡片区：底图 Image 铺满 card（100%），不含柔影留边
-            prepare_picker_backdrop(app, &win, point, card_size, &tokens);
-            // 上屏前先暖表面：停屏窗口收不到自发 WM_PAINT，同步泵一次
-            // 呈现，让底图与最新列表的首帧在屏外落盘——移回屏上的第
-            // 一帧即完整内容，既不透明也不闪旧列表
-            win32_ext::warm_surface(hwnd);
-            place_window_at_card(&win, hwnd, point, card_size);
-            win32_ext::force_full_repaint(hwnd);
+            prepare_picker_backdrop(app, &win, point, size, &tokens);
+            schedule_reveal(app, &win, hwnd, point, size, epoch);
         }
         None => {
             warn!("速贴定位失败：光标位置与工作区均不可得，窗口保持停屏位");
             win.set_blur_active(false);
+            hide(app, false);
         }
     }
+}
 
-    // 上屏即滑入：解锁动画归零，内容从 4px 滑到位（窗底不动，不露窗外）
-    win.set_enter_animated(true);
-    win.set_enter_offset(0.0);
+/// 两条显示路径共用准备期与收尾；等待时间只给事件循环渲染机会，不保证帧已完成。
+fn schedule_reveal(
+    app: &App,
+    win: &QuickPasteWindow,
+    hwnd: isize,
+    point: ScreenPoint,
+    size: slint::PhysicalSize,
+    epoch: u64,
+) {
+    win32_ext::force_full_repaint(win);
+    let app = app.clone();
+    REVEAL_TIMER.with(|timer| {
+        timer.start(
+            slint::TimerMode::SingleShot,
+            std::time::Duration::from_millis(REVEAL_DELAY_MS),
+            move || {
+                if !app.state.is_current_picker_activation(epoch) {
+                    return;
+                }
+                let Some(win) = app.picker.upgrade() else {
+                    return;
+                };
+                win32_ext::warm_surface(hwnd);
+                window_control::set_window_bounds(
+                    hwnd,
+                    point.x,
+                    point.y,
+                    size.width as i32,
+                    size.height as i32,
+                );
+                win32_ext::force_full_repaint(&win);
+                let target = app.state.picker_session().target_window_hwnd;
+                // 用户可在准备期切换前台；只纠正速贴自己偷走的焦点。
+                let restore =
+                    target.map_or(ForegroundPolicy::Keep, ForegroundPolicy::RestoreIfStolen);
+                let state = app.state.clone();
+                overlay::after_show(hwnd, false, restore, restore, move || {
+                    state.is_current_picker_activation(epoch)
+                });
+                start_topmost_guard(&app);
+                if target == Some(app.state.search_hwnd.load(Ordering::SeqCst)) {
+                    search::suspend_input(&app);
+                }
+                // LL 鼠标钩子由事件循环线程泵出，必须在重活完成且真实显示后安装。
+                begin_input_session(&app, hwnd, &app.state.current_settings());
+            },
+        );
+    });
+}
 
-    let immediate = session
-        .target_window_hwnd
-        .map_or(ForegroundPolicy::Keep, ForegroundPolicy::Restore);
-    let deferred = session
-        .target_window_hwnd
-        .map_or(ForegroundPolicy::Keep, ForegroundPolicy::RestoreIfStolen);
-    overlay::after_show(hwnd, false, immediate, deferred);
-    start_topmost_guard(app);
-
-    // 搜索窗口正被作为回贴目标（用户在搜索中按了主快捷键）：键盘交给
-    // 速贴会话，搜索侧输入框失焦、底栏切换为速贴键位（对齐
-    // SEARCH_INPUT_SUSPEND_EVENT 语义）
-    if session.target_window_hwnd == Some(app.state.search_hwnd.load(Ordering::SeqCst)) {
-        search::suspend_input(app);
+fn save_window_geometry(app: &App, hwnd: isize) {
+    // 准备期尚未落位，不能用 -32000 停屏坐标覆盖用户的几何记忆。
+    if !app.state.is_picker_active() || REVEAL_TIMER.with(slint::Timer::running) {
+        return;
     }
-
-    // 键鼠会话必须最后装配：LL 鼠标钩子回调由安装线程（事件循环）
-    // 泵出，列表查询与逐行裁排若在安装之后运行，会阻塞回调泵送、
-    // 造成全系统光标短暂冻结
-    begin_input_session(app, hwnd, &settings);
+    if let Some(rect) = (hwnd != 0)
+        .then(|| win32_ext::physical_rect(hwnd))
+        .flatten()
+        .filter(|rect| (rect.left, rect.top) != (-32000, -32000))
+    {
+        let geometry = WindowGeometry {
+            x: rect.left,
+            y: rect.top,
+            width: (rect.right - rect.left).max(0) as u32,
+            height: (rect.bottom - rect.top).max(0) as u32,
+        };
+        if let Some(stored) = PickerPositionService::capture_window_position(geometry) {
+            let _ = app.core().repository.save_picker_window_state(&stored);
+        }
+    }
 }
 
 /// 隐藏（对齐 WindowCoordinator::hide_picker + hide_picker_and_restore_target）
@@ -298,7 +352,8 @@ pub fn hide(app: &App, restore_target: bool) {
     session_keyboard::end_session();
     mouse_monitor::end_session();
 
-    save_window_geometry(app, &win, hwnd);
+    save_window_geometry(app, hwnd);
+    REVEAL_TIMER.with(slint::Timer::stop);
 
     // 停屏到屏幕外而非 Slint hide（同 hide_for_editor）：hide→show 周期中
     // winit 清空窗口表面且 Slint 脏区跟踪失效，下次显示会出现透明空壳；
@@ -315,57 +370,32 @@ pub fn hide(app: &App, restore_target: bool) {
 
     if restore_target {
         let session = app.state.picker_session();
-        let quitting = app.core().clone();
+        let epoch = app.state.picker_session_epoch();
         let app_for_resume = app.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(50));
-            if quitting.is_quitting() {
+        slint::Timer::single_shot(std::time::Duration::from_millis(50), move || {
+            if app_for_resume.core().is_quitting()
+                || app_for_resume.state.is_picker_active()
+                || app_for_resume.state.picker_session_epoch() != epoch
+            {
                 return;
             }
             if let Some(target_hwnd) = session.target_window_hwnd {
-                let _ = ActiveAppResolver::restore_foreground_window(target_hwnd);
-                // 目标是搜索窗口：把输入焦点还给搜索框（SEARCH_INPUT_RESUME）
-                if target_hwnd == app_for_resume.state.search_hwnd.load(Ordering::SeqCst) {
-                    let _ = slint::invoke_from_event_loop(move || {
+                let current = ActiveAppResolver::current_foreground_hwnd();
+                // 新窗口已取得前台时，不让关闭前的延迟恢复覆盖它。
+                if current.is_none() || current == Some(hwnd) || current == Some(target_hwnd) {
+                    let _ = ActiveAppResolver::restore_foreground_window(target_hwnd);
+                    if target_hwnd == app_for_resume.state.search_hwnd.load(Ordering::SeqCst) {
                         search::resume_input(&app_for_resume);
-                    });
+                    }
                 }
             }
         });
     }
 }
 
-/// 进入编辑器前的收起：会话/监视结束、几何记忆、停激活、收 tooltip。
-/// 隐藏**不能**走 Win32 SW_HIDE 或 Slint hide：
-/// - Slint hide 让适配层认为窗口已隐藏并停止渲染；
-/// - Win32 隐藏期间 winit 抑制重绘，且 Slint 不知道窗口经历过直接
-///   显隐——之后无论 Win32 还是 Slint 重现，都只会得到透明空壳。
-/// 因此改为把窗口平移到屏幕外：Slint 全程视为已显示、持续渲染，
-/// 表面内容始终有效，返回时移回原位即恢复
+/// 进入编辑器前复用收起流程，保留目标会话并让编辑器接管前台。
 pub fn hide_for_editor(app: &App) {
-    let Some(win) = app.picker.upgrade() else {
-        return;
-    };
-    let hwnd = app
-        .state
-        .picker_hwnd
-        .load(std::sync::atomic::Ordering::SeqCst);
-
-    session_keyboard::end_session();
-    mouse_monitor::end_session();
-
-    save_window_geometry(app, &win, hwnd);
-
-    // 停屏到屏幕外（Windows 坐标下限），不用隐藏
-    win.window()
-        .set_position(slint::PhysicalPosition::new(-32000, -32000));
-    app.state.end_picker_activation();
-    stop_topmost_guard();
-    tooltip::cancel(app);
-    info!(
-        session_id = app.state.picker_session().session_id,
-        "隐藏 Picker（进入编辑器）"
-    );
+    hide(app, false);
 }
 
 /// 主快捷键命中：活跃则关闭并恢复目标，否则打开。
@@ -386,8 +416,8 @@ pub fn toggle(app: &App) {
 /// 从编辑器返回速贴：恢复会话快捷键与外击关闭，窗口以无激活方式在
 /// 停屏前的原位重现，**故意不重置列表与选中**（对齐旧版
 /// restore_picker_after_editor 不发 SESSION_START，保留进入编辑器时的
-/// 上下文与滚动位置）。前台留在用户此前所在位置，键盘会话经 LL 钩子
-/// 接回，无需窗口持有焦点
+/// 上下文与滚动位置）。先归还目标前台，再延迟显示；会话键经
+/// RegisterHotKey 接回，无需窗口持有焦点
 pub fn restore_after_editor(app: &App, target: TargetSession) {
     let Some(win) = app.picker.upgrade() else {
         return;
@@ -400,53 +430,43 @@ pub fn restore_after_editor(app: &App, target: TargetSession) {
         warn!("速贴窗口 HWND 尚未就绪，无法从编辑器返回");
         return;
     }
+    // 编辑期间也可能被主快捷键再次唤起；先停屏，避免抓到面板自己。
+    if app.state.is_picker_active() {
+        hide(app, false);
+    }
     let settings = app.state.current_settings();
+    crate::tray_menu::close(app);
 
-    // 恢复记忆的**卡片**尺寸（无记忆则按设计尺寸与当前缩放折算），同
-    // activate：尺寸与定位取自同一组数，不回读窗口
-    let card_size = resolve_physical_size(app, win.window().scale_factor());
-    let size = window_physical_size(&win, card_size);
+    // 恢复记忆尺寸（无记忆则按设计尺寸与当前缩放折算），同 activate：
+    // 尺寸与定位取自同一组数，不回读窗口
+    let size = resolve_physical_size(app, win.window().scale_factor());
     window_control::set_window_size_no_activate(hwnd, size.width as i32, size.height as i32);
-    let (min_width, min_height) = min_window_size(&win);
-    window_control::set_window_min_size(hwnd, min_width, min_height);
+    window_control::set_window_min_size(
+        hwnd,
+        (PICKER_MIN_WIDTH as f32 * win.window().scale_factor()) as i32,
+        (PICKER_MIN_HEIGHT as f32 * win.window().scale_factor()) as i32,
+    );
 
     app.state.set_picker_session(target);
+    let epoch = app.state.begin_picker_activation();
     info!(session_id = target.session_id, "从编辑器恢复 Picker");
-    // 出现滑入准备：同 activate，停屏期无动画重置内容偏移，暖首帧即起步态
-    win.set_enter_animated(false);
-    win.set_enter_offset(4.0);
 
-    // 主题 token 先算（tint 烘焙与后段 apply_theme 共用）
-    let resolved = theme::resolve_theme(settings.theme_mode.clone(), theme::system_prefers_dark());
-    let tokens = theme::derive_tokens(&settings.theme_preset, &settings.theme_accent, resolved);
-
-    // 归位记忆位置 + 按档备底（同 activate：移回屏内前完成，背后
-    // 区域抓不到面板自己），再暖表面让首帧在屏外落盘
-    let point = resolve_parked_position(app, card_size);
-    match point {
-        Some(p) => {
-            prepare_picker_backdrop(app, &win, p, card_size, &tokens);
-            win32_ext::warm_surface(hwnd);
-            place_window_at_card(&win, hwnd, p, card_size);
-        }
-        None => {
-            warn!("速贴归位失败：记忆位置与光标锚点均不可得，窗口留在停屏位");
-            win.set_blur_active(false);
-            win32_ext::warm_surface(hwnd);
+    // 编辑窗口刚关闭，先归还来源目标；等待期内的用户切换由显示收尾保留。
+    if let Some(hwnd) = target.target_window_hwnd {
+        if !ActiveAppResolver::restore_foreground_window_with_focus(hwnd, target.target_focus_hwnd)
+            && ActiveAppResolver::force_foreground_window(hwnd)
+        {
+            let _ = ActiveAppResolver::restore_foreground_window_with_focus(
+                hwnd,
+                target.target_focus_hwnd,
+            );
         }
     }
-
-    app.state.begin_picker_activation();
-
-    // 无激活兜位重现（对齐旧版 show_window_no_activate）：编辑期间窗口
-    // 只是停屏，移回屏上后表面内容原样有效；这里顺带从最小化恢复。
-    // 主题随设置刷新照常执行
     let _ = window_control::show_window_no_activate(hwnd);
-    // 上屏即滑入（同 activate）
-    win.set_enter_animated(true);
-    win.set_enter_offset(0.0);
 
-    // 主题随设置刷新（编辑期间设置可能已被外部修改）
+    // 主题与底图必须在准备首帧之前更新。
+    let resolved = theme::resolve_theme(settings.theme_mode.clone(), theme::system_prefers_dark());
+    let tokens = theme::derive_tokens(&settings.theme_preset, &settings.theme_accent, resolved);
     theme_bridge::apply_theme(
         Some(&win),
         app.tooltip.upgrade().as_ref(),
@@ -456,30 +476,42 @@ pub fn restore_after_editor(app: &App, target: TargetSession) {
         app.settings.upgrade().as_ref(),
         &tokens,
     );
-    // 键鼠会话最后装配（理由同 activate：LL 钩子回调泵送不能被阻塞）
-    begin_input_session(app, hwnd, &settings);
-    info!("从 Editor 返回 Picker");
+
+    // 归位记忆位置 + 按档备底（同 activate：移回屏内前完成，背后
+    // 区域抓不到面板自己）。上屏收尾使用相同等待期（理由同 activate：
+    // 停屏期 resize 后的新尺寸渲染帧排在事件循环后续，立即上屏会带
+    // 出旧尺寸帧的错位内容）
+    let point = resolve_parked_position(app, size);
+    match point {
+        Some(p) => {
+            prepare_picker_backdrop(app, &win, p, size, &tokens);
+            schedule_reveal(app, &win, hwnd, p, size, epoch);
+        }
+        None => {
+            warn!("速贴归位失败：记忆位置与光标锚点均不可得，窗口留在停屏位");
+            win.set_blur_active(false);
+            hide(app, false);
+        }
+    }
 }
 
 fn begin_input_session(app: &App, hwnd: isize, settings: &UserSetting) {
+    let epoch = app.state.picker_session_epoch();
     let app_for_mouse = app.clone();
     // 外击关闭不还原前台：用户点击的位置已取得焦点，此时再把原目标
     // 拉回前台会被前台所有权检查拒绝，Windows 拒绝时闪烁目标窗口的
-    // 任务栏按钮（Esc/主快捷键关闭仍走还原，见 hide）
-    // 命中矩形内缩柔影留边：留边是窗口里的透明区、由面板窗吞点击，
-    // 按可见卡片判定才不会在阴影上点出「没反应」
-    let inset = app
-        .picker
-        .upgrade()
-        .map(|win| shadow_margin_px(&win))
-        .unwrap_or(0);
+    // 任务栏按钮（Esc/主快捷键关闭仍走还原，见 hide）。命中矩形按短影
+    // 留边内缩，只把可见卡片视为窗口内
+    let inset = app.picker.upgrade().map_or(0, |win| shadow_margin_px(&win));
     mouse_monitor::begin_session(
         hwnd,
         inset,
         Box::new(move || {
             let app = app_for_mouse.clone();
             let _ = slint::invoke_from_event_loop(move || {
-                hide(&app, false);
+                if app.state.is_current_picker_activation(epoch) {
+                    hide(&app, false);
+                }
             });
         }),
     );
@@ -490,7 +522,9 @@ fn begin_input_session(app: &App, hwnd: isize, settings: &UserSetting) {
         Box::new(move |action| {
             let app = app_for_keys.clone();
             let _ = slint::invoke_from_event_loop(move || {
-                handle_session_action(&app, action);
+                if app.state.is_current_picker_activation(epoch) {
+                    handle_session_action(&app, action);
+                }
             });
         }),
     );
@@ -736,14 +770,14 @@ fn preview_avail_widths(win: &QuickPasteWindow) -> (f32, f32) {
         return (reported_no_thumb, win.get_preview_width_thumb());
     }
     let geo = win.global::<PanelGeometry>();
-    let chrome = 2.0 * geo.get_card_border() + geo.get_scroll_slot() + geo.get_preview_pad_h();
+    let chrome = 2.0 * (geo.get_card_border() + geo.get_shadow_margin())
+        + geo.get_scroll_slot()
+        + geo.get_preview_pad_h();
     let thumb_column = geo.get_thumb_size() + geo.get_thumb_gap();
-    // window().size() 为物理像素；度量标尺与布局都以逻辑像素运作。
-    // 窗口含四周柔影留边，卡片宽要扣掉两侧留边再算内容宽
+    // window().size() 为物理像素；度量标尺与布局都以逻辑像素运作
     let scale = win.window().scale_factor();
-    let card_logical =
-        win.window().size().width as f32 / scale - 2.0 * geo.get_shadow_margin();
-    let no_thumb = (card_logical - chrome).max(40.0);
+    let panel_logical = win.window().size().width as f32 / scale;
+    let no_thumb = (panel_logical - chrome).max(40.0);
     (no_thumb, (no_thumb - thumb_column).max(40.0))
 }
 
@@ -912,13 +946,10 @@ pub fn navigate(app: &App, up: bool) {
 
 /* ───────────────── 定位 ───────────────── */
 
-/// 本次上屏的**卡片**物理尺寸：有记忆用记忆（落盘的已是物理像素），无记忆
-/// 按设计尺寸与显示器缩放折算。定位与定尺寸必须取自同一组数——首开（或刚
-/// 从编辑器返回）时尺寸是这里算出来、刚请求下去的值，回读窗口拿到的还可
-/// 能是装配期旧值。
-///
-/// 卡片尺寸是持久化与最小尺寸的口径；窗口另加四周柔影留边，见
-/// [`window_physical_size`]
+/// 本次上屏的窗口物理尺寸：有记忆用记忆（落盘的已是物理像素），无记忆按
+/// 设计尺寸与显示器缩放折算。定位与定尺寸必须取自同一组数——首开（或刚从
+/// 编辑器返回）时窗口尺寸是这里算出来、刚请求下去的值，回读窗口拿到的
+/// 还可能是装配期旧值
 fn resolve_physical_size(app: &App, scale_factor: f32) -> slint::PhysicalSize {
     let (width, height) =
         PickerPositionService::resolve_window_size(&app.core().repository, scale_factor)
@@ -926,83 +957,6 @@ fn resolve_physical_size(app: &App, scale_factor: f32) -> slint::PhysicalSize {
             .flatten()
             .unwrap_or_else(|| default_window_size(scale_factor));
     slint::PhysicalSize::new(width, height)
-}
-
-/// 柔影留边（物理像素）：`PanelGeometry.shadow-margin` 的单一来源在
-/// slint，Rust 侧一律经此读取，不手抄数值
-fn shadow_margin_px(win: &QuickPasteWindow) -> i32 {
-    let logical = win.global::<PanelGeometry>().get_shadow_margin();
-    (logical * win.window().scale_factor()).round().max(0.0) as i32
-}
-
-/// 窗口物理尺寸 = 卡片 + 四周柔影留边。窗口比卡片大一圈，投影画在透
-/// 明留边里（自绘 SoftShadow，不挂 DWM 系统投影）
-fn window_physical_size(win: &QuickPasteWindow, card: slint::PhysicalSize) -> slint::PhysicalSize {
-    let margin = shadow_margin_px(win);
-    slint::PhysicalSize::new(
-        card.width + 2 * margin as u32,
-        card.height + 2 * margin as u32,
-    )
-}
-
-/// 物理窗口尺寸反推卡片尺寸（已知窗口实测尺寸时用，如会话恢复路径）
-fn card_physical_size(win: &QuickPasteWindow, window: slint::PhysicalSize) -> slint::PhysicalSize {
-    let margin = 2 * shadow_margin_px(win) as u32;
-    slint::PhysicalSize::new(
-        window.width.saturating_sub(margin),
-        window.height.saturating_sub(margin),
-    )
-}
-
-/// 读取并落盘当前**卡片**几何：位置取卡片左上角、尺寸取卡片尺寸。
-/// 窗口几何含四周柔影留边（透明区），直接落盘会让下次重现整体
-/// 平移一圈留边、且尺寸随留边定义漂移。留边是观感实现，不属于
-/// 用户感知的窗口几何
-fn save_window_geometry(app: &App, win: &QuickPasteWindow, hwnd: isize) {
-    let Some(rect) = (hwnd != 0).then(|| win32_ext::physical_rect(hwnd)).flatten() else {
-        return;
-    };
-    let margin = shadow_margin_px(win);
-    let geometry = WindowGeometry {
-        x: rect.left + margin,
-        y: rect.top + margin,
-        width: ((rect.right - rect.left).max(0) as u32).saturating_sub(2 * margin as u32),
-        height: ((rect.bottom - rect.top).max(0) as u32).saturating_sub(2 * margin as u32),
-    };
-    if let Some(stored) = PickerPositionService::capture_window_position(geometry) {
-        let _ = app.core().repository.save_picker_window_state(&stored);
-    }
-}
-
-/// 窗口最小尺寸（物理像素）：卡片下限（[`PICKER_MIN_WIDTH`] /
-/// [`PICKER_MIN_HEIGHT`]）加留边——拉伸下限约束的是卡片，不是含留边的窗口
-fn min_window_size(win: &QuickPasteWindow) -> (i32, i32) {
-    let scale = win.window().scale_factor();
-    let margin = 2 * shadow_margin_px(win);
-    (
-        (PICKER_MIN_WIDTH as f32 * scale).round() as i32 + margin,
-        (PICKER_MIN_HEIGHT as f32 * scale).round() as i32 + margin,
-    )
-}
-
-/// 按**卡片**左上角摆放窗口：窗口比卡片四周各大一份留边，实际窗口原点
-/// 是卡片原点向左上偏移留边。定位服务（PickerPositionService）全部以
-/// 「窗口/卡片在该点整块落在工作区内」为契约，换算收口在此一处
-fn place_window_at_card(
-    win: &QuickPasteWindow,
-    hwnd: isize,
-    card_point: ScreenPoint,
-    card_size: slint::PhysicalSize,
-) {
-    let margin = shadow_margin_px(win);
-    let window = window_physical_size(win, card_size);
-    window_control::set_window_bounds(
-        hwnd,
-        card_point.x - margin,
-        card_point.y - margin,
-        window.width as i32,
-        window.height as i32,
-    );
 }
 
 /// 按设置模式定位并上屏。窗口尺寸是定位的输入而非输出：速贴的三种模式
@@ -1033,6 +987,10 @@ fn resolve_window_position(
     .or_else(|| resolve_near_cursor(width, height))
 }
 
+fn shadow_margin_px(win: &QuickPasteWindow) -> i32 {
+    (win.global::<PanelGeometry>().get_shadow_margin() * win.window().scale_factor()).round() as i32
+}
+
 /// 速贴底分档编排：唤起时按设置项「背景材质」现读分派（见
 /// [WindowMaterial]）。速贴永不激活，DWM 对从未激活窗不渲染 Mica
 /// backdrop（ADR-0005 窗口活性前提，实测确认），Mica 与 Acrylic 两档
@@ -1061,6 +1019,15 @@ fn prepare_picker_backdrop(
             return;
         }
     };
+    let margin = shadow_margin_px(win);
+    let point = ScreenPoint {
+        x: point.x + margin,
+        y: point.y + margin,
+    };
+    let size = slint::PhysicalSize::new(
+        size.width.saturating_sub(2 * margin as u32).max(1),
+        size.height.saturating_sub(2 * margin as u32).max(1),
+    );
     prepare_blur_backdrop(win, point, size, tint_alpha, tokens);
 }
 
@@ -1284,16 +1251,16 @@ pub fn wire(app: &App) {
                 6 => ResizeDirection::SouthWest,
                 _ => ResizeDirection::SouthEast,
             };
-            let (min_width, min_height) = app_cb
+            let scale = app_cb
                 .picker
                 .upgrade()
-                .map(|win| min_window_size(&win))
-                .unwrap_or((PICKER_MIN_WIDTH as i32, PICKER_MIN_HEIGHT as i32));
+                .map(|win| win.window().scale_factor())
+                .unwrap_or(1.0);
             window_control::begin_window_gesture(
                 hwnd,
                 GestureMode::Resize(direction),
-                min_width,
-                min_height,
+                (PICKER_MIN_WIDTH as f32 * scale) as i32,
+                (PICKER_MIN_HEIGHT as f32 * scale) as i32,
             );
         });
     }
@@ -1322,6 +1289,221 @@ pub fn wire(app: &App) {
         win.on_retry_clicked(move || {
             refresh_list_changed(&app_cb);
         });
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod reveal_contract_tests {
+    use super::*;
+    use floatpaste_core::{
+        domain::settings::StoredWindowPosition, repository::sqlite_repository::SqliteRepository,
+        services::image_storage::ImageStorage, services::normalize_service::NormalizeService,
+    };
+    use std::{path::Path, time::Duration};
+
+    fn pump(ms: u64) {
+        slint::Timer::single_shot(Duration::from_millis(ms), || {
+            slint::quit_event_loop().unwrap();
+        });
+        slint::run_event_loop_until_quit().unwrap();
+    }
+
+    pub(crate) fn run() {
+        let dir = std::env::temp_dir().join(format!("floatpaste-reveal-{}", std::process::id()));
+        let _cleanup = TempDirGuard(dir.clone());
+        let repository = SqliteRepository::new(Path::new(":memory:")).unwrap();
+        for text in ["首帧甲", "首帧乙"] {
+            let item = NormalizeService::normalize_text(text, None).unwrap();
+            repository.save_text_item(&item).unwrap();
+        }
+        let settings = UserSetting {
+            picker_position_mode: PickerPositionMode::LastPosition,
+            window_material: WindowMaterial::None,
+            ..Default::default()
+        };
+        let core = CoreState::new(repository, ImageStorage::new(dir).unwrap(), settings);
+        let win = QuickPasteWindow::new().unwrap();
+        win.window()
+            .set_position(slint::PhysicalPosition::new(-32000, -32000));
+        win.show().unwrap();
+        pump(100);
+        let hwnd = overlay::silent_assemble_parked(&win).unwrap();
+        let app = App {
+            state: Arc::new(SharedState::new(core)),
+            picker: win.as_weak(),
+            tooltip: Default::default(),
+            tray_menu: Default::default(),
+            search: Default::default(),
+            editor: Default::default(),
+            settings: Default::default(),
+        };
+        app.state.picker_hwnd.store(hwnd, Ordering::SeqCst);
+        let stored = StoredWindowPosition {
+            x: 120,
+            y: 140,
+            width: Some(360),
+            height: Some(420),
+        };
+        app.core()
+            .repository
+            .save_picker_window_state(&stored)
+            .unwrap();
+        let expected = resolve_parked_position(&app, slint::PhysicalSize::new(360, 420)).unwrap();
+        let parked = || {
+            let rect = win32_ext::physical_rect(hwnd).unwrap();
+            assert_eq!((rect.left, rect.top), (-32000, -32000));
+            assert!(!mouse_monitor::is_session_active(), "停屏期间不能接管输入");
+        };
+
+        // 同一实际窗口依次走首次呼出和编辑返回；返回沿用原 session_id。
+        for returning in [false, true] {
+            let target = app.state.picker_session();
+            let open = || {
+                if returning {
+                    restore_after_editor(&app, target);
+                } else {
+                    activate(&app);
+                }
+            };
+            open();
+            let old_epoch = app.state.picker_session_epoch();
+            parked();
+            activate(&app);
+            parked();
+            assert_eq!(
+                app.state.picker_session_epoch(),
+                old_epoch,
+                "重复打开不得重启准备期"
+            );
+            toggle(&app);
+            let saved = app
+                .core()
+                .repository
+                .load_picker_window_state()
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                (saved.x, saved.y, saved.width, saved.height),
+                (stored.x, stored.y, stored.width, stored.height),
+                "取消准备不能污染几何记忆"
+            );
+
+            open();
+            assert!(!app.state.is_current_picker_activation(old_epoch));
+            pump(REVEAL_DELAY_MS / 2);
+            parked();
+            pump(REVEAL_DELAY_MS + 80);
+            let rect = win32_ext::physical_rect(hwnd).unwrap();
+            assert_eq!((rect.left, rect.top), (expected.x, expected.y));
+            assert_eq!((rect.right - rect.left, rect.bottom - rect.top), (360, 420));
+            assert!(
+                mouse_monitor::is_session_active(),
+                "真实显示后必须安装鼠标钩子"
+            );
+            assert!(window_control::is_topmost(hwnd));
+            assert!(TOPMOST_GUARD.with(|slot| slot.borrow().as_ref().unwrap().running()));
+            win.set_selected(1);
+            let epoch = app.state.picker_session_epoch();
+            let state = app.state.clone();
+            overlay::after_show(
+                hwnd,
+                false,
+                ForegroundPolicy::Keep,
+                ForegroundPolicy::Keep,
+                move || state.is_current_picker_activation(epoch),
+            );
+            hide_for_editor(&app);
+            restore_after_editor(&app, app.state.picker_session());
+            assert_eq!(win.get_selected(), 1, "编辑返回不得重置选中");
+            // 拉开新显示与旧补挂的执行时间，让 release 的短等待也覆盖此交错。
+            REVEAL_TIMER.with(|timer| timer.set_interval(Duration::from_millis(200)));
+            // 暂时剥掉置顶位，旧显示的 50ms 补挂不得在新一代准备期重新抬窗。
+            use windows::Win32::{
+                Foundation::HWND,
+                UI::WindowsAndMessaging::{
+                    SetWindowPos, HWND_NOTOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+                },
+            };
+            unsafe {
+                SetWindowPos(
+                    HWND(hwnd as *mut _),
+                    Some(HWND_NOTOPMOST),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
+                )
+                .unwrap();
+            }
+            pump(80);
+            parked();
+            assert!(
+                !window_control::is_topmost(hwnd),
+                "旧代际补挂不能操作新一代窗口"
+            );
+            hide_for_editor(&app);
+            pump(REVEAL_DELAY_MS + 80);
+            parked();
+            assert!(
+                !app.state.is_picker_active(),
+                "取消后不能被延迟回调重新打开"
+            );
+        }
+
+        // 交互桌面可用时检查编辑返回归还前台，以及等待期间切换窗口的保留。
+        let previous = ActiveAppResolver::current_foreground_hwnd();
+        let source = crate::EditorWindow::new().unwrap();
+        let other = SearchWindow::new().unwrap();
+        source.show().unwrap();
+        other.show().unwrap();
+        pump(100);
+        let source_hwnd = win32_ext::window_hwnd(&source).unwrap();
+        let other_hwnd = win32_ext::window_hwnd(&other).unwrap();
+        if ActiveAppResolver::force_foreground_window(other_hwnd) {
+            let target = TargetSession {
+                target_window_hwnd: Some(source_hwnd),
+                ..Default::default()
+            };
+            restore_after_editor(&app, target);
+            assert_eq!(
+                ActiveAppResolver::current_foreground_hwnd(),
+                Some(source_hwnd),
+                "编辑返回应先归还前台"
+            );
+            assert!(ActiveAppResolver::force_foreground_window(other_hwnd));
+            pump(REVEAL_DELAY_MS + 80);
+            assert_eq!(
+                ActiveAppResolver::current_foreground_hwnd(),
+                Some(other_hwnd),
+                "显示与补挂不能覆盖等待期的前台切换"
+            );
+            hide(&app, true);
+            pump(80);
+            assert_eq!(
+                ActiveAppResolver::current_foreground_hwnd(),
+                Some(other_hwnd),
+                "关闭延迟恢复不能覆盖新前台"
+            );
+            eprintln!("速贴交互桌面前台恢复契约通过");
+        } else {
+            eprintln!("无可控交互前台，跳过速贴前台恢复契约");
+        }
+        restore_after_editor(&app, app.state.picker_session());
+        app.core().begin_quit();
+        pump(REVEAL_DELAY_MS + 80);
+        parked();
+        hide(&app, false);
+        if let Some(hwnd) = previous {
+            let _ = ActiveAppResolver::restore_foreground_window(hwnd);
+        }
+    }
+
+    struct TempDirGuard(std::path::PathBuf);
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
     }
 }
 

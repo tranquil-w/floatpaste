@@ -28,8 +28,6 @@ use crate::win32_ext;
 pub enum ForegroundPolicy {
     /// 不动前台
     Keep,
-    /// 无条件把前台还给指定窗口（面板显示路径：还给显示前捕获的目标）
-    Restore(isize),
     /// 仅当前台被本浮层占据时归还，不覆盖用户主动的窗口切换
     /// （tooltip 路径 / 面板的延迟兜底复查）
     RestoreIfStolen(isize),
@@ -140,9 +138,8 @@ pub fn schedule_caption_strip(hwnd: isize) {
 /// 面板回不透明底，Mica 走 DWM Mica，Acrylic 走 DWM Acrylic，窗根
 /// 玻璃 tint 直透，各窗观感一致。设置窗的卡片分层靠卡面亮度差 +
 /// 描边 + 投影承担，底随壁纸变化是 Acrylic 的固有形态（用户拍板接受）。
-/// 速贴不经本函数：picker.rs 每次唤起按档分派——Mica 档同样挂 DWM
-/// Mica（无焦点窗，失活不渲 backdrop 时退化为均匀 tint，已接受），
-/// Acrylic 档自绘烘焙毛玻璃（见 core::backdrop），「无」档实底
+/// 速贴不经本函数：picker.rs 每次唤起按档分派——Mica/Acrylic 均自绘
+/// 烘焙毛玻璃，以 tint 区分两档（见 core::backdrop），「无」档实底
 ///
 /// 档位「无」/不支持/系统透明关闭时返回 false，调用方把
 /// material-active 置 false 让面板回不透明底。挂载幂等，每次显示/
@@ -166,10 +163,8 @@ pub fn apply_material(app: &App, hwnd: isize) -> bool {
 /// show 固定 SW_SHOW（无视 WS_EX_NOACTIVATE，激活窗口会打断宿主输入焦点
 /// 与 IME 组合），不用 Slint/Win32 的 show 显隐，收起只平移
 ///
-/// 不挂 DWM 投影与系统圆角：停屏浮层（速贴/tooltip/托盘菜单）的投影与
-/// 圆角都是窗口内自绘（各自 slint 的 SoftShadow + 四周留边）。DWM 只按
-/// 窗口框绘制上薄下厚的投影、并给窗口（而非卡片）加圆角，两者都会与
-/// 自绘的对称柔影冲突
+/// 保留 winit 的透明合成策略；投影由各浮层的客户区绘制。
+/// 不要禁用 DWM 非客户区渲染，否则可能露出经典窗口边框。
 pub fn silent_assemble_parked<W: ComponentHandle>(win: &W) -> Option<isize> {
     // show 会激活自己（winit 对首窗外的 show 走 SW_SHOW，无视
     // WS_EX_NOACTIVATE），先记下装配前的前台，装配完归还——停屏窗口
@@ -180,10 +175,6 @@ pub fn silent_assemble_parked<W: ComponentHandle>(win: &W) -> Option<isize> {
     let _ = win.window().show();
     let hwnd = win32_ext::window_hwnd(win)?;
     win32_ext::apply_overlay_style(hwnd, true);
-    // winit 的无边框窗样式里仍留着 WS_CAPTION/WS_THICKFRAME（靠
-    // WM_NCCALCSIZE 吃掉非客户区），DWM 据此照常绘制上薄下厚的系统
-    // 投影。浮层投影一律自绘，显式关闭系统投影
-    win32_ext::disable_dwm_shadow(hwnd);
     let _ = window_control::remove_window_system_menu(hwnd);
     win.window()
         .set_position(slint::PhysicalPosition::new(-32000, -32000));
@@ -209,6 +200,7 @@ pub fn after_show_focusable(hwnd: isize) {
 /// 显示后立即重挂浮层样式并执行前台策略，50ms 后兜底重挂一次
 /// （winit 样式重置的落地时间不定，兜底等不起但也不可省）。
 /// click_through 供点击穿透的 tooltip 使用，面板传 false。
+/// is_current 约束立即操作与延迟补挂，避免旧显示回调干扰后续会话。
 ///
 /// 顺序约束：immediate 前台策略必须先于置顶执行——归还前台是
 /// SetForegroundWindow，会把目标窗口提到其 Z 序带顶部；宿主也是置顶
@@ -218,7 +210,11 @@ pub fn after_show(
     click_through: bool,
     immediate: ForegroundPolicy,
     deferred: ForegroundPolicy,
+    is_current: impl Fn() -> bool + 'static,
 ) {
+    if !is_current() {
+        return;
+    }
     win32_ext::apply_overlay_style(hwnd, true);
     let _ = window_control::remove_window_system_menu(hwnd);
     if click_through {
@@ -228,22 +224,22 @@ pub fn after_show(
     window_control::set_window_topmost_no_activate(hwnd);
 
     slint::Timer::single_shot(Duration::from_millis(50), move || {
+        if !is_current() {
+            return;
+        }
         win32_ext::apply_overlay_style(hwnd, true);
         let _ = window_control::remove_window_system_menu(hwnd);
         if click_through {
             let _ = window_control::set_window_click_through(hwnd);
         }
-        window_control::set_window_topmost_no_activate(hwnd);
         apply_policy(hwnd, &deferred);
+        window_control::set_window_topmost_no_activate(hwnd);
     });
 }
 
 fn apply_policy(hwnd: isize, policy: &ForegroundPolicy) {
     match *policy {
         ForegroundPolicy::Keep => {}
-        ForegroundPolicy::Restore(target) => {
-            let _ = ActiveAppResolver::restore_foreground_window(target);
-        }
         ForegroundPolicy::RestoreIfStolen(target) => {
             if ActiveAppResolver::current_foreground_hwnd() == Some(hwnd) {
                 let _ = ActiveAppResolver::restore_foreground_window(target);

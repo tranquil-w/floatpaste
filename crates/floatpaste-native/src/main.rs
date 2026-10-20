@@ -403,11 +403,10 @@ fn main() {
 
         // 速贴装配（屏外停屏）：模糊底为唤起时自绘烘焙（core::backdrop），
         // 不挂 DWM SystemBackdrop（Acrylic 模糊是激活态特权，无焦点窗
-        // 拿不到玻璃感）；投影同为窗口内自绘柔影（picker.slint SoftShadow
-        // + 四周留边），不挂系统投影——DWM 只按窗口框画上薄下厚的投影，
-        // 与面板观感不符
+        // 拿不到玻璃感）
         match overlay::silent_assemble_parked(&picker_win) {
             Some(hwnd) => {
+                win32_ext::use_client_side_shadow(hwnd);
                 app_for_init.state.picker_hwnd.store(hwnd, Ordering::SeqCst);
             }
             None => tracing::error!("获取速贴窗口句柄失败，会话功能不可用"),
@@ -748,6 +747,8 @@ fn l2_headless_ui_contracts() {
     search::scroll_reset_tests::run();
     search::refresh_after_editor_tests::run();
     tray_menu::headless_contract_tests::run();
+    win32_ext::repaint_contract_tests::run();
+    picker::reveal_contract_tests::run();
 }
 
 #[cfg(test)]

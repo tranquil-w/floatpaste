@@ -7,17 +7,16 @@ use slint::ComponentHandle;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{
     DwmExtendFrameIntoClientArea, DwmSetWindowAttribute, DWMSBT_MAINWINDOW, DWMSBT_TRANSIENTWINDOW,
-    DWMNCRENDERINGPOLICY, DWMNCRP_DISABLED, DWMWA_NCRENDERING_POLICY,
     DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE,
-    DWMWCP_ROUND, DWM_SYSTEMBACKDROP_TYPE, DWM_WINDOW_CORNER_PREFERENCE,
+    DWMWCP_DONOTROUND, DWMWCP_ROUND, DWM_SYSTEMBACKDROP_TYPE, DWM_WINDOW_CORNER_PREFERENCE,
 };
 use windows::Win32::Graphics::Gdi::{ClientToScreen, InvalidateRect, UpdateWindow};
 use windows::Win32::UI::Controls::MARGINS;
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetWindowLongPtrW, GetWindowRect, SetWindowLongPtrW, ShowWindow, GWL_EXSTYLE, GWL_STYLE,
-    SIZE_RESTORED, SW_HIDE, SW_SHOWNOACTIVATE, WM_ACTIVATE, WM_SHOWWINDOW, WM_SIZE,
+    GetClientRect, GetWindowLongPtrW, GetWindowRect, SetWindowLongPtrW, ShowWindow, GWL_EXSTYLE,
+    GWL_STYLE, SIZE_RESTORED, SW_HIDE, SW_SHOWNOACTIVATE, WM_ACTIVATE, WM_SHOWWINDOW, WM_SIZE,
     WM_WINDOWPOSCHANGED, WS_EX_APPWINDOW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
     WS_EX_TRANSPARENT, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_SYSMENU,
 };
@@ -33,8 +32,8 @@ pub fn window_hwnd<W: ComponentHandle>(window: &W) -> Option<isize> {
 
 /// 强制窗口同步完成一次呈现（InvalidateRect + UpdateWindow 泵出
 /// WM_PAINT）。停屏期间 Slint 只把帧画进后备缓冲，窗口表面要等
-/// WM_PAINT 才落盘，而屏外窗口收不到自发绘制——上屏前先暖一次
-/// 表面，移回屏上的第一帧即有内容，不会闪透明
+/// WM_PAINT 才落盘，而屏外窗口收不到自发绘制。这里只呈现当前缓冲，
+/// 不驱动 Slint 布局或等待新帧完成；显示前须另给渲染器准备机会。
 pub fn warm_surface(hwnd: isize) {
     let hwnd = HWND(hwnd as *mut _);
     unsafe {
@@ -43,37 +42,70 @@ pub fn warm_surface(hwnd: isize) {
     }
 }
 
-/// 强制下一帧全量重绘：软渲染按 damage 矩形局部呈现（present 逐矩形
-/// BitBlt），「仅颜色变化」的帧依赖局部渲染器的脏区跟踪覆盖整窗，该
-/// 跟踪在停屏/恢复时序下不可靠（浅↔深主题切换实测速贴/搜索窗残留
-/// 旧主题像素）。真实往返一次窗口高度，迫使 softbuffer 重分配缓冲、
-/// 渲染器转入 NewBuffer 全量渲染，不再依赖脏区。回位延迟 50ms 留出
-/// 一帧渲染间隔；期间窗口可能已上屏，±1px 不可感
-pub fn force_full_repaint(hwnd: isize) {
-    let Some(rect) = physical_rect(hwnd) else {
-        return;
-    };
-    let (width, height) = (rect.right - rect.left, rect.bottom - rect.top);
-    if width <= 0 || height <= 0 {
-        return;
-    }
-    window_control::set_window_size_no_activate(hwnd, width, height + 1);
-    warm_surface(hwnd);
-    slint::Timer::single_shot(std::time::Duration::from_millis(50), move || {
-        // 回位前校验：50ms 窗口内尺寸若已被外部改动（上屏后的高度
-        // 伸缩等），说明缓冲已因那次 resize 重分配——往返目的已达成，
-        // 强回快照值会顶掉新尺寸（预置筛选首开的快速收缩曾由此被
-        // 顶回起步高度，与收缩指令赛跑表现为偶现）
-        if let Some(current) = physical_rect(hwnd) {
-            let still_perturbed =
-                current.right - current.left == width && current.bottom - current.top == height + 1;
-            if !still_perturbed {
-                return;
+/// 标记整窗脏区再请求呈现，不改变窗口几何，也不借用快照渲染缓存。
+/// Slint 的公共 request_redraw 只调度帧，不强制局部渲染器覆盖整窗；
+/// 此处集中使用 1.18 的内部脏区接口，升级 Slint 时须复核呈现契约。
+pub fn force_full_repaint<W: ComponentHandle + 'static>(win: &W) {
+    let weak = win.as_weak();
+    // 先让 winit 消费 Resized 事件；否则脏区会被旧尺寸帧提前消费。
+    slint::Timer::single_shot(std::time::Duration::from_millis(1), move || {
+        let Some(win) = weak.upgrade() else {
+            return;
+        };
+
+        use slint::private_unstable_api::re_exports::{LogicalRect, WindowInner};
+        let mut size = win.window().size();
+        if let Some(hwnd) = window_hwnd(&win) {
+            let mut rect = RECT::default();
+            if unsafe { GetClientRect(HWND(hwnd as *mut _), &mut rect) }.is_ok() {
+                // Win32 resize 已落地时，Slint 的 Resized 事件可能尚未消费。
+                // 脏区必须覆盖真实客户区，不能只按旧布局尺寸标记。
+                size.width = size.width.max((rect.right - rect.left).max(0) as u32);
+                size.height = size.height.max((rect.bottom - rect.top).max(0) as u32);
             }
         }
-        window_control::set_window_size_no_activate(hwnd, width, height);
-        warm_surface(hwnd);
+        let scale = win.window().scale_factor();
+        let region =
+            LogicalRect::from_size((size.width as f32 / scale, size.height as f32 / scale).into());
+        WindowInner::from_pub(win.window())
+            .window_adapter()
+            .renderer()
+            .mark_dirty_region(region.into());
+        win.window().request_redraw();
     });
+}
+
+#[cfg(test)]
+pub(crate) mod repaint_contract_tests {
+    use super::*;
+    use std::{cell::Cell, rc::Rc, time::Duration};
+
+    pub(crate) fn run() {
+        let win = crate::QuickPasteWindow::new().unwrap();
+        win.window()
+            .set_position(slint::PhysicalPosition::new(-32000, -32000));
+        win.show().unwrap();
+        let checked = Rc::new(Cell::new(false));
+        let checked_cb = checked.clone();
+        slint::Timer::single_shot(Duration::from_millis(100), move || {
+            let hwnd = crate::overlay::silent_assemble_parked(&win).unwrap();
+            let bounds = move || {
+                let r = physical_rect(hwnd).unwrap();
+                (r.left, r.top, r.right, r.bottom)
+            };
+            let before = bounds();
+            force_full_repaint(&win);
+            assert_eq!(bounds(), before, "重绘准备不能临时改变窗口边界");
+            slint::Timer::single_shot(Duration::from_millis(80), move || {
+                let _keep_alive = win;
+                assert_eq!(bounds(), before, "呈现后的窗口边界必须保持稳定");
+                checked_cb.set(true);
+                slint::quit_event_loop().unwrap();
+            });
+        });
+        slint::run_event_loop_until_quit().unwrap();
+        assert!(checked.get(), "必须执行实际窗口几何检查");
+    }
 }
 
 /// 系统是否开启「透明效果」（设置 > 个性化 > 颜色）。注册表值缺失
@@ -117,8 +149,8 @@ pub fn system_transparency_enabled() -> bool {
 /// 被真正激活过一次——从未激活的窗口（含建窗即 NOACTIVATE）挂属性恒
 /// 降级为平色（裸 Win32 消融探针定案，2026-10-01）；激活后挂载，此后
 /// 转 NOACTIVATE/TOOLWINDOW、剥 SYSMENU、停屏移位均保活。速贴不消费
-/// 本管线（模糊底自绘烘焙，见 core::backdrop）。走 hide 销毁重建的窗口
-/// （编辑/设置）在重新 show 后重挂。`transient=true` 用 Acrylic
+/// 本管线（模糊底自绘烘焙，见 core::backdrop）。编辑/设置窗保持 Slint
+/// 存活，在 Win32 重新显示后重挂。`transient=true` 用 Acrylic
 /// （瞬态浮层），false 用 Mica（常驻内容窗）。extend frame 会覆盖
 /// [`apply_dwm_shadow`] 的 1px 底边——backdrop 窗口由 DWM 按窗口轮廓
 /// 投影与圆角，无需保留
@@ -225,8 +257,6 @@ pub fn set_window_visible(hwnd: isize, visible: bool) {
 
 /// 给无边框窗口挂系统悬浮阴影（原版 Tauri shadow(true) 的等效）：
 /// DWM 非客户区渲染 + 1px 底部外框即可让合成器绘制标准投影。
-///
-/// 自绘柔影的浮层不要用它：改用 [`disable_dwm_shadow`]
 pub fn apply_dwm_shadow(hwnd: isize) {
     let hwnd = HWND(hwnd as *mut _);
     let margins = MARGINS {
@@ -240,31 +270,26 @@ pub fn apply_dwm_shadow(hwnd: isize) {
     }
 }
 
-/// 关闭 DWM 非客户区渲染，即关掉系统窗口投影。
-///
-/// winit 的「无边框」只是用 WM_NCCALCSIZE 吃掉非客户区，样式里仍留着
-/// WS_CAPTION/WS_THICKFRAME（实测 `style=0x16C40000`），DWM 因此照常
-/// 按窗口框绘制标准投影——上缘几乎无影、下缘最长最浓（实测底部 ~65px、
-/// 顶部 ~11px），与自绘柔影的对称语言冲突，且它画在窗口矩形之外、
-/// 会盖过柔影留边。自绘柔影的浮层（速贴/tooltip/托盘菜单）显式关闭，
-/// 投影全部由 slint 的 SoftShadow 在留边内承担
-pub fn disable_dwm_shadow(hwnd: isize) {
+/// 自绘投影窗口保留 DWM 非客户区渲染，但不扩展窗框、不请求系统圆角。
+/// Win11 的系统圆角会连带生成大范围投影；仅取消 extend frame 不足以
+/// 消除它。圆角与短影由客户区绘制，避免禁用非客户区引出的经典边框。
+pub fn use_client_side_shadow(hwnd: isize) {
     let hwnd = HWND(hwnd as *mut _);
-    let policy = DWMNCRP_DISABLED;
+    let preference = DWMWCP_DONOTROUND;
     unsafe {
+        let _ = DwmExtendFrameIntoClientArea(hwnd, &MARGINS::default());
         let _ = DwmSetWindowAttribute(
             hwnd,
-            DWMWA_NCRENDERING_POLICY,
-            &policy as *const DWMNCRENDERINGPOLICY as *const _,
-            std::mem::size_of::<DWMNCRENDERINGPOLICY>() as u32,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            &preference as *const DWM_WINDOW_CORNER_PREFERENCE as *const _,
+            std::mem::size_of::<DWM_WINDOW_CORNER_PREFERENCE>() as u32,
         );
     }
 }
 
-/// Win11 系统圆角（跟随系统半径与投影轮廓，对齐原版观感）：
-/// tao 的无边框阴影窗保留 WS_CAPTION/WS_THICKFRAME 样式（WM_NCCALCSIZE
-/// 吃掉非客户区），合成器按默认策略给这类窗口自动加圆角；winit 无边框
-/// 窗是纯 WS_POPUP，须显式声明。Win10 无此属性，调用失败即无圆角
+/// 内容窗显式请求 Win11 系统圆角，轮廓与系统投影一致。
+/// 无边框声明不保证原生窗口样式或 DWM 的默认圆角策略；Win10 无此属性，
+/// 调用失败即无圆角。
 pub fn apply_dwm_rounded_corners(hwnd: isize) {
     let hwnd = HWND(hwnd as *mut _);
     let preference = DWMWCP_ROUND;

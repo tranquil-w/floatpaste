@@ -720,7 +720,7 @@ pub fn open(app: &App) {
     win32_ext::set_window_visible(hwnd, true);
     win.set_material_active(overlay::apply_material(app, hwnd));
     win32_ext::warm_surface(hwnd);
-    win32_ext::force_full_repaint(hwnd);
+    win32_ext::force_full_repaint(&win);
     win.window()
         .set_position(slint::PhysicalPosition::new(x, y));
     // 设置窗口需要真实前台（输入框键盘输入），绕前台锁获取

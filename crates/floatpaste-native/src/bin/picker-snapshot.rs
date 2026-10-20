@@ -254,10 +254,8 @@ fn main() {
     let mica_alpha: Option<f32> =
         std::env::args().find_map(|a| a.strip_prefix("mica=").and_then(|v| v.parse::<f32>().ok()));
     let use_mica = mica_alpha.is_some() || std::env::args().any(|a| a == "mica");
-    // 卡片设计尺寸（与 picker.slint preferred-* 同值）；窗口另加四周
-    // 柔影留边——快照按窗口全尺寸出图，留边里是自绘柔影
-    let (card_w, card_h) = (360.0, 420.0);
-    let margin = picker.global::<PanelGeometry>().get_shadow_margin();
+    let (width, height) = (360, 420);
+    let margin = picker.global::<PanelGeometry>().get_shadow_margin() as u32;
     if std::env::args().any(|a| a == "blur") || use_mica {
         picker.set_blur_backdrop(synthetic_backdrop(
             &picker,
@@ -270,24 +268,25 @@ fn main() {
             is_light,
             use_mica,
             background,
-            card_w as u32,
-            card_h as u32,
+            width - 2 * margin,
+            height - 2 * margin,
         ));
         picker.set_blur_active(true);
         picker.set_material_active(use_mica);
     }
 
-    picker.window().set_size(slint::PhysicalSize::new(
-        (card_w + 2.0 * margin) as u32,
-        (card_h + 2.0 * margin) as u32,
-    ));
+    picker
+        .window()
+        .set_size(slint::PhysicalSize::new(width, height));
     let _ = picker.show();
     if !hover_y.is_nan() {
         picker
             .window()
             .dispatch_event(slint::platform::WindowEvent::PointerMoved {
-                // 悬停坐标按卡片内坐标给（留边不属于卡片内容）
-                position: slint::LogicalPosition::new(180.0 + margin, hover_y + margin),
+                position: slint::LogicalPosition::new(
+                    180.0,
+                    hover_y + picker.global::<PanelGeometry>().get_shadow_margin(),
+                ),
             });
     }
 
