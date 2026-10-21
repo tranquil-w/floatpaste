@@ -93,6 +93,7 @@ thread_local! {
     static TOPMOST_GUARD: std::cell::RefCell<Option<slint::Timer>> =
         const { std::cell::RefCell::new(None) };
     static REVEAL_TIMER: std::cell::RefCell<slint::Timer> = slint::Timer::default().into();
+    static LAST_HIDDEN_AT: std::cell::Cell<Option<Instant>> = const { std::cell::Cell::new(None) };
 }
 
 fn cancel_reveal() {
@@ -225,6 +226,7 @@ pub fn activate(app: &App) {
     info!(
         session_id = session.session_id,
         hwnd,
+        idle_ms = ?LAST_HIDDEN_AT.with(|at| at.get().map(|at| at.elapsed().as_millis())),
         target_window = ?session.target_window_hwnd,
         target_focus = ?session.target_focus_hwnd,
         "显示 Picker"
@@ -260,6 +262,11 @@ pub fn activate(app: &App) {
     // 会话开始：刷新列表、选中归零、滚回顶部、清空消息。放在上屏之前：
     // 列表重活（查询 + 逐行裁排）跑在停屏期间，上屏即最新内容
     refresh_list_reset(app, &settings);
+    tracing::debug!(
+        session_id = session.session_id,
+        elapsed_ms = started.elapsed().as_millis(),
+        "速贴列表与主题准备完成"
+    );
 
     prepare_reveal(
         app,
@@ -356,6 +363,7 @@ pub fn hide(app: &App, restore_target: bool) {
     let Some(win) = app.picker.upgrade() else {
         return;
     };
+    let was_active = app.state.is_picker_active();
     let hwnd = app
         .state
         .picker_hwnd
@@ -374,6 +382,9 @@ pub fn hide(app: &App, restore_target: bool) {
         .set_position(slint::PhysicalPosition::new(-32000, -32000));
 
     app.state.end_picker_activation();
+    if was_active {
+        LAST_HIDDEN_AT.with(|at| at.set(Some(Instant::now())));
+    }
     tooltip::cancel(app);
     info!(
         session_id = app.state.picker_session().session_id,
@@ -1015,17 +1026,21 @@ fn spawn_preparation(
     task: impl FnOnce() -> PreparedReveal + Send + 'static,
 ) -> Option<mpsc::Receiver<PreparedReveal>> {
     if PREPARATION_BUSY.swap(true, Ordering::AcqRel) {
+        tracing::debug!("速贴后台准备任务仍在执行，本次直接回退");
         return None;
     }
     let guard = PreparationGuard;
     let (tx, rx) = mpsc::sync_channel(1);
-    std::thread::Builder::new()
+    if let Err(error) = std::thread::Builder::new()
         .name("picker-prepare".into())
         .spawn(move || {
             let _guard = guard;
             let _ = tx.send(task());
         })
-        .ok()?;
+    {
+        warn!("启动速贴准备线程失败: {error}");
+        return None;
+    }
     Some(rx)
 }
 
@@ -1114,9 +1129,16 @@ fn wait_for_preparation(
                     {
                         return
                     }
-                    _ => {
+                    other => {
+                        let reason = match other {
+                            None => "worker_unavailable",
+                            Some(Err(mpsc::TryRecvError::Disconnected)) => "worker_disconnected",
+                            _ => "deadline",
+                        };
                         info!(
                             session_id = app.state.picker_session().session_id,
+                            reason,
+                            budget_ms = PREPARATION_BUDGET.as_millis(),
                             elapsed_ms = started.elapsed().as_millis(),
                             "速贴准备超时或不可用，回退实底与备用位置"
                         );
@@ -1200,6 +1222,8 @@ fn prepare_picker_backdrop(
         );
         return None;
     };
+    let capture_ms = started.elapsed().as_millis();
+    let bake_started = Instant::now();
     if cap_w < w as i32 || cap_h < h as i32 {
         // 钳制后装不下窗口（显示器热插拔竞态）：无完整窗口区域可裁，
         // 不进 crop 的 debug_assert，回实底
@@ -1231,6 +1255,8 @@ fn prepare_picker_backdrop(
     backdrop::bake_round_corners(&mut rgba, w, h, corner);
     // 烘焙成本监控：唤起关键路径上的新增 CPU 开销，一眼可见
     tracing::info!(
+        capture_ms,
+        bake_ms = bake_started.elapsed().as_millis(),
         "模糊底图烘焙: {}x{}px 半径{} 用时{}ms",
         w,
         h,
@@ -1525,6 +1551,12 @@ pub(crate) mod reveal_contract_tests {
             "到期后必须丢弃准备结果接收端"
         );
         hide(&app, false);
+
+        // 重复关闭不能把真实闲置的起点刷新成最近一次空关闭。
+        let hidden_at = LAST_HIDDEN_AT.with(std::cell::Cell::get);
+        assert!(hidden_at.is_some());
+        hide(&app, false);
+        assert_eq!(LAST_HIDDEN_AT.with(std::cell::Cell::get), hidden_at);
 
         // 准备期关闭后再收到结果，不得重新显示。
         let (cancelled_tx, cancelled_rx) = mpsc::sync_channel(1);
