@@ -109,6 +109,13 @@ pub fn init_logging() -> Option<LoggingGuard> {
         tracing::warn!("应用日志目录不可用，已改写入临时目录: {error}");
     }
     tracing::info!("日志将写入 {}", log_dir.display());
+    tracing::info!(
+        version = env!("CARGO_PKG_VERSION"),
+        pid = std::process::id(),
+        executable = ?std::env::current_exe().ok(),
+        diagnostic_text = std::env::var_os("FLOATPASTE_DIAGNOSTIC_LOG").is_some_and(|value| value == "1"),
+        "应用启动诊断"
+    );
     let (reporter_stop, reporter_thread) = start_drop_reporter(dropped_lines);
     Some(LoggingGuard {
         reporter_stop,
