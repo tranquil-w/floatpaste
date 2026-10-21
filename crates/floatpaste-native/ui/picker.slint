@@ -546,8 +546,8 @@ export component QuickPasteWindow inherits Window {
             ? transparent
             : Theme.is-dark ? Theme.card-layer : Theme.canvas-default;
         border-radius: Metrics.radius-lg;
-        border-width: PanelGeometry.card-border;
-        border-color: Theme.border-window;
+        // 窗口描边不画在这里：玻璃档铺满的烘焙底图会盖住自身边框，
+        // 子元素补环又会被圆角 clip 裁掉，统一由下方 frame 承载
         clip: true;
 
         // 模糊底图铺底（z 序最底，画在内容之下）
@@ -881,5 +881,23 @@ export component QuickPasteWindow inherits Window {
             font-weight: Metrics.weight-semibold;
             wrap: word-wrap;
         }
+    }
+
+    // ── 窗口描边环：三档（无/Mica/Acrylic）统一的 1px 边框 ──
+    // 不能画在 card 自身（玻璃档被铺满的烘焙底图盖住）也不能画在
+    // card 内（圆角 clip 沿 border 内缘裁剪，与之重叠的环直边整条
+    // 被裁）；作为 card 兄弟置顶既不受 clip 影响也不被底图与内容覆
+    // 盖。速贴无 DWM 投影托底（自绘短影刻意轻），边界感比可激活窗
+    // 更依赖描边，用比 border-window 实一档的 border-muted（行卡描
+    // 边同 token）。几何对齐 card，纯视觉不参与命中，改宽不动任何
+    // 布局几何
+    frame := Rectangle {
+        x: PanelGeometry.shadow-margin;
+        y: PanelGeometry.shadow-margin;
+        width: parent.width - 2 * PanelGeometry.shadow-margin;
+        height: parent.height - 2 * PanelGeometry.shadow-margin;
+        border-radius: Metrics.radius-lg;
+        border-width: PanelGeometry.card-border;
+        border-color: Theme.border-muted;
     }
 }
