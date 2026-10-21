@@ -100,7 +100,7 @@
 //! （`uia-probe`）上，客户端缓存在该线程，等价于复用 UIA 的跨进程连接
 //! （连接一旦建立，后续调用不再受连接超时约束）。移到专用线程是为了给
 //! 开窗路径一个**硬上限**：provider 隔久变冷时单次往返能阻塞到秒级，
-//! 主线程只等 [`UIA_PROBE_WAIT`]，超时回退鼠标位置。
+//! 调用方只等 [`UIA_PROBE_WAIT`]，超时回退鼠标位置。
 
 use std::cell::RefCell;
 use std::ffi::c_void;
@@ -113,8 +113,7 @@ use windows::Win32::Foundation::{HWND, POINT, RECT};
 use windows::Win32::Graphics::Gdi::ClientToScreen;
 use windows::Win32::System::{
     Com::{
-        CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED,
-        COINIT_MULTITHREADED, SAFEARRAY,
+        CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, SAFEARRAY,
     },
     Ole::{SafeArrayAccessData, SafeArrayDestroy, SafeArrayUnaccessData},
     Variant::VARIANT,
@@ -147,7 +146,7 @@ const UIA_TRANSACTION_TIMEOUT_MS: u32 = 300;
 /// 整条探测链的等待上限。单项超时（连接 150ms / 事务 300ms）只限一次调用，
 /// provider 隔久变冷时每次往返都可能逼近超时，几十次叠加仍能到秒级（实测
 /// ChatGPT 空闲半小时后首次探测 1.45s，紧接着的下一次只要 27ms）。面板显示
-/// 不能等它：主线程最多等这么久，超时即回退鼠标位置。取值盖住热态正常探测
+/// 不能等它：调用方最多等这么久，超时即回退鼠标位置。取值盖住热态正常探测
 /// （实测 p99≈102ms），只拦冷态离群值
 const UIA_PROBE_WAIT: Duration = Duration::from_millis(250);
 
@@ -178,7 +177,7 @@ thread_local! {
 /// 目标不是前台时读到的会是别的窗口的插入符，宁可不给（前台条件在派发前
 /// 与探测线程上各查一次，后者拦住派发间隙里的前台切换）
 ///
-/// 探测跑在专用线程上、主线程只等 [`UIA_PROBE_WAIT`]：provider 隔久变冷时
+/// 探测跑在专用线程上、调用方只等 [`UIA_PROBE_WAIT`]：provider 隔久变冷时
 /// 单次往返可能阻塞到秒级（实测 1.45s），同步跑在开窗路径上就是「空闲后
 /// 第一次打开很慢」。超时即回退鼠标位置，面板不必等 provider 醒过来；
 /// 专用线程常驻，UIA 客户端与其跨进程连接照旧复用
@@ -240,7 +239,7 @@ fn probe_worker() -> Option<&'static mpsc::SyncSender<ProbeRequest>> {
                     while let Ok(request) = rx.recv() {
                         let result = probe_caret_on_current_thread(request.target_hwnd)
                             .map_err(|error| error.to_string());
-                        // 主线程已超时离开时接收端已丢弃，发送失败即结束
+                        // 调用方已超时离开时接收端已丢弃，发送失败即结束
                         let _ = request.reply.send(result);
                     }
                 })
@@ -1131,7 +1130,7 @@ unsafe fn take_bounding_rectangles(array: *mut SAFEARRAY) -> Vec<f64> {
     values
 }
 
-// 供同层模块复用（开始菜单几何探测，跑在事件循环线程上）：共享这份线程
+// 供同层模块复用（开始菜单几何探测，跑在准备任务线程上）：共享这份线程
 // 缓存客户端与超时设置。插入符探测不再走这里——它在 uia-probe 线程上
 // 另建一份客户端
 pub(super) fn uia_client() -> Result<IUIAutomation, AppError> {
@@ -1144,10 +1143,9 @@ pub(super) fn uia_client() -> Result<IUIAutomation, AppError> {
 }
 
 fn create_uia_client() -> Result<IUIAutomation, AppError> {
-    // 调用线程可能已由 winit 做 STA 初始化（同线程重复初始化返回 S_FALSE），
-    // 也可能在 MTA（返回 RPC_E_CHANGED_MODE，探测线程就是这种）——两种
-    // 情况下 CUIAutomation8 都可用，不计较具体返回值
-    let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+    // 没有消息泵的准备线程使用 MTA；已有 winit STA 的线程会返回
+    // RPC_E_CHANGED_MODE，但已完成 COM 初始化，仍可创建 CUIAutomation8。
+    let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
 
     // 必须用 CUIAutomation8：v1 的 CUIAutomation 不支持 IUIAutomation2，
     // 也就设不了连接超时，跨进程 provider 卡死会一路拖住开窗
@@ -1672,7 +1670,7 @@ mod tests {
         assert_eq!(log_label("第一行\n第二行\t第三行"), "第一行 第二行 第三行");
     }
 
-    /// 探测进行中主线程必须立刻回退而不是排队：请求通道是零容量 rendezvous，
+    /// 探测进行中调用方必须立刻回退而不是排队：请求通道是零容量 rendezvous，
     /// 探测线程忙着处理上一条时交不出去，调用方据此回退鼠标（排队会让这次
     /// 唤起凭空多等一轮完整探测）
     #[test]

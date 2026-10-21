@@ -197,7 +197,8 @@ fn beside_start_menu_point(
     clamp_top_left(ScreenPoint { x, y }, work_area, window_width, window_height)
 }
 
-fn resolve_from_last_position(
+/// 读取记忆位置并约束到工作区；不访问 UIA，供显示期限内的原位回退使用。
+pub fn resolve_from_last_position(
     repository: &SqliteRepository,
     window_width: i32,
     window_height: i32,

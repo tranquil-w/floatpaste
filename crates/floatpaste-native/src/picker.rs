@@ -9,8 +9,9 @@
 //! - 尺寸/位置持久化与三种定位模式在 core::PickerPositionService。
 
 use std::rc::Rc;
-use std::sync::atomic::Ordering;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
+use std::time::{Duration, Instant};
 
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use tracing::{info, warn};
@@ -48,6 +49,8 @@ use crate::{ClipRow, PanelGeometry, QuickPasteWindow, SearchWindow, TooltipWindo
 
 // debug 软件渲染冷帧较慢；发布构建保留短暂的屏外布局与呈现准备期。
 const REVEAL_DELAY_MS: u64 = if cfg!(debug_assertions) { 200 } else { 50 };
+// 定位和抓屏共用预算；冷 provider / GDI 不能把第一次呼出拖到秒级。
+const PREPARATION_BUDGET: Duration = Duration::from_millis(150);
 
 /// 预览最多显示行数（对齐原版 line-clamp-4）
 const PREVIEW_MAX_LINES: usize = 4;
@@ -89,7 +92,14 @@ impl App {
 thread_local! {
     static TOPMOST_GUARD: std::cell::RefCell<Option<slint::Timer>> =
         const { std::cell::RefCell::new(None) };
-    static REVEAL_TIMER: slint::Timer = slint::Timer::default();
+    static REVEAL_TIMER: std::cell::RefCell<slint::Timer> = slint::Timer::default().into();
+}
+
+fn cancel_reveal() {
+    // stop() 保留回调及其中的接收端；丢弃定时器才能立即释放迟到结果。
+    REVEAL_TIMER.with(|timer| {
+        timer.replace(slint::Timer::default());
+    });
 }
 
 fn start_topmost_guard(app: &App) {
@@ -132,6 +142,7 @@ fn stop_topmost_guard() {
 
 /// 打开速贴面板（对齐 WindowCoordinator::activate_picker）
 pub fn activate(app: &App) {
+    let started = Instant::now();
     let Some(win) = app.picker.upgrade() else {
         return;
     };
@@ -148,7 +159,7 @@ pub fn activate(app: &App) {
 
     if app.state.is_picker_active() {
         // 停屏窗口的 IsWindowVisible 仍为真；准备期重复打开不能提前落位。
-        if REVEAL_TIMER.with(slint::Timer::running) {
+        if REVEAL_TIMER.with(|timer| timer.borrow().running()) {
             return;
         }
         // 兜底：标志位与真实可见性脱节时（Win+D/多屏切换/被全屏应用抢占）
@@ -250,20 +261,15 @@ pub fn activate(app: &App) {
     // 列表重活（查询 + 逐行裁排）跑在停屏期间，上屏即最新内容
     refresh_list_reset(app, &settings);
 
-    // 定位解析先行：抓屏烘焙模糊底图要在移回屏内之前完成（窗口尚在
-    // 屏外，背后区域抓不到面板自己）；定位失败保持停屏位并回实底
-    let position = resolve_window_position(app, &settings, size, session.target_window_hwnd);
-    match position {
-        Some(point) => {
-            prepare_picker_backdrop(app, &win, point, size, &tokens);
-            schedule_reveal(app, &win, hwnd, point, size, epoch);
-        }
-        None => {
-            warn!("速贴定位失败：光标位置与工作区均不可得，窗口保持停屏位");
-            win.set_blur_active(false);
-            hide(app, false);
-        }
-    }
+    prepare_reveal(
+        app,
+        &win,
+        size,
+        epoch,
+        &settings.picker_position_mode,
+        tokens,
+        started,
+    );
 }
 
 /// 两条显示路径共用准备期与收尾；等待时间只给事件循环渲染机会，不保证帧已完成。
@@ -274,11 +280,12 @@ fn schedule_reveal(
     point: ScreenPoint,
     size: slint::PhysicalSize,
     epoch: u64,
+    started: Instant,
 ) {
     win32_ext::force_full_repaint(win);
     let app = app.clone();
     REVEAL_TIMER.with(|timer| {
-        timer.start(
+        timer.borrow().start(
             slint::TimerMode::SingleShot,
             std::time::Duration::from_millis(REVEAL_DELAY_MS),
             move || {
@@ -311,6 +318,11 @@ fn schedule_reveal(
                 }
                 // LL 鼠标钩子由事件循环线程泵出，必须在重活完成且真实显示后安装。
                 begin_input_session(&app, hwnd, &app.state.current_settings());
+                info!(
+                    session_id = app.state.picker_session().session_id,
+                    elapsed_ms = started.elapsed().as_millis(),
+                    "速贴实际显示并接管输入"
+                );
             },
         );
     });
@@ -318,7 +330,7 @@ fn schedule_reveal(
 
 fn save_window_geometry(app: &App, hwnd: isize) {
     // 准备期尚未落位，不能用 -32000 停屏坐标覆盖用户的几何记忆。
-    if !app.state.is_picker_active() || REVEAL_TIMER.with(slint::Timer::running) {
+    if !app.state.is_picker_active() || REVEAL_TIMER.with(|timer| timer.borrow().running()) {
         return;
     }
     if let Some(rect) = (hwnd != 0)
@@ -353,7 +365,7 @@ pub fn hide(app: &App, restore_target: bool) {
     mouse_monitor::end_session();
 
     save_window_geometry(app, hwnd);
-    REVEAL_TIMER.with(slint::Timer::stop);
+    cancel_reveal();
 
     // 停屏到屏幕外而非 Slint hide（同 hide_for_editor）：hide→show 周期中
     // winit 清空窗口表面且 Slint 脏区跟踪失效，下次显示会出现透明空壳；
@@ -419,6 +431,7 @@ pub fn toggle(app: &App) {
 /// 上下文与滚动位置）。先归还目标前台，再延迟显示；会话键经
 /// RegisterHotKey 接回，无需窗口持有焦点
 pub fn restore_after_editor(app: &App, target: TargetSession) {
+    let started = Instant::now();
     let Some(win) = app.picker.upgrade() else {
         return;
     };
@@ -477,22 +490,15 @@ pub fn restore_after_editor(app: &App, target: TargetSession) {
         &tokens,
     );
 
-    // 归位记忆位置 + 按档备底（同 activate：移回屏内前完成，背后
-    // 区域抓不到面板自己）。上屏收尾使用相同等待期（理由同 activate：
-    // 停屏期 resize 后的新尺寸渲染帧排在事件循环后续，立即上屏会带
-    // 出旧尺寸帧的错位内容）
-    let point = resolve_parked_position(app, size);
-    match point {
-        Some(p) => {
-            prepare_picker_backdrop(app, &win, p, size, &tokens);
-            schedule_reveal(app, &win, hwnd, p, size, epoch);
-        }
-        None => {
-            warn!("速贴归位失败：记忆位置与光标锚点均不可得，窗口留在停屏位");
-            win.set_blur_active(false);
-            hide(app, false);
-        }
-    }
+    prepare_reveal(
+        app,
+        &win,
+        size,
+        epoch,
+        &PickerPositionMode::LastPosition,
+        tokens,
+        started,
+    );
 }
 
 fn begin_input_session(app: &App, hwnd: isize, settings: &UserSetting) {
@@ -991,6 +997,154 @@ fn shadow_margin_px(win: &QuickPasteWindow) -> i32 {
     (win.global::<PanelGeometry>().get_shadow_margin() * win.window().scale_factor()).round() as i32
 }
 
+type PreparedReveal = (Option<ScreenPoint>, Option<(Vec<u8>, u32, u32)>);
+
+// 简化: 同时只容许一份准备任务；系统调用未返回时后续呼出直接回退，
+// 不为每次按键堆积线程。升级：需要并行准备时再引入有界任务队列。
+static PREPARATION_BUSY: AtomicBool = AtomicBool::new(false);
+
+struct PreparationGuard;
+
+impl Drop for PreparationGuard {
+    fn drop(&mut self) {
+        PREPARATION_BUSY.store(false, Ordering::Release);
+    }
+}
+
+fn spawn_preparation(
+    task: impl FnOnce() -> PreparedReveal + Send + 'static,
+) -> Option<mpsc::Receiver<PreparedReveal>> {
+    if PREPARATION_BUSY.swap(true, Ordering::AcqRel) {
+        return None;
+    }
+    let guard = PreparationGuard;
+    let (tx, rx) = mpsc::sync_channel(1);
+    std::thread::Builder::new()
+        .name("picker-prepare".into())
+        .spawn(move || {
+            let _guard = guard;
+            let _ = tx.send(task());
+        })
+        .ok()?;
+    Some(rx)
+}
+
+/// 只把原始像素带回 UI 线程；外部进程、GDI 与 CPU 烘焙共用一个截止时间。
+fn prepare_reveal(
+    app: &App,
+    win: &QuickPasteWindow,
+    size: slint::PhysicalSize,
+    epoch: u64,
+    mode: &PickerPositionMode,
+    tokens: theme::ThemeTokens,
+    started: Instant,
+) {
+    let settings = app.state.current_settings();
+    let material = settings.window_material;
+    win.set_material_active(matches!(material, WindowMaterial::Mica));
+    // 旧底图属于上一次会话；超时也不能露出旧屏幕内容。
+    win.set_blur_active(false);
+    let fallback = if matches!(mode, PickerPositionMode::LastPosition) {
+        resolve_parked_position(app, size)
+    } else {
+        resolve_near_cursor(size.width as i32, size.height as i32)
+    };
+    let repository = app.core().repository.clone();
+    let session = app.state.picker_session();
+    let state = app.state.clone();
+    let mode = mode.clone();
+    let scale = win.window().scale_factor();
+    let margin = shadow_margin_px(win);
+    let corner = (win.global::<PanelGeometry>().get_card_radius() * scale).round() as usize;
+    let rx = spawn_preparation(move || {
+        let _span =
+            tracing::info_span!("picker_preparation", session_id = session.session_id, epoch)
+                .entered();
+        if !state.is_current_picker_activation(epoch) || started.elapsed() >= PREPARATION_BUDGET {
+            return (fallback, None);
+        }
+        let point = PickerPositionService::resolve_window_position(
+            &repository,
+            &mode,
+            size.width as i32,
+            size.height as i32,
+            session.target_window_hwnd,
+        )
+        .ok()
+        .flatten()
+        .or(fallback);
+        tracing::debug!(
+            elapsed_ms = started.elapsed().as_millis(),
+            "速贴定位准备完成"
+        );
+        if !state.is_current_picker_activation(epoch) || started.elapsed() >= PREPARATION_BUDGET {
+            return (point, None);
+        }
+        let backdrop = point.and_then(|point| {
+            prepare_picker_backdrop(point, size, margin, scale, corner, material, &tokens)
+        });
+        (point, backdrop)
+    });
+    wait_for_preparation(app, size, epoch, fallback, started, rx);
+}
+
+fn wait_for_preparation(
+    app: &App,
+    size: slint::PhysicalSize,
+    epoch: u64,
+    fallback: Option<ScreenPoint>,
+    started: Instant,
+    rx: Option<mpsc::Receiver<PreparedReveal>>,
+) {
+    let app = app.clone();
+    REVEAL_TIMER.with(|timer| {
+        timer.borrow().start(
+            slint::TimerMode::Repeated,
+            Duration::from_millis(8),
+            move || {
+                if !app.state.is_current_picker_activation(epoch) {
+                    cancel_reveal();
+                    return;
+                }
+                let result = rx.as_ref().map(|rx| rx.try_recv());
+                let prepared = match result {
+                    Some(Ok(prepared)) if started.elapsed() < PREPARATION_BUDGET => prepared,
+                    Some(Err(mpsc::TryRecvError::Empty))
+                        if started.elapsed() < PREPARATION_BUDGET =>
+                    {
+                        return
+                    }
+                    _ => {
+                        info!(
+                            session_id = app.state.picker_session().session_id,
+                            elapsed_ms = started.elapsed().as_millis(),
+                            "速贴准备超时或不可用，回退实底与备用位置"
+                        );
+                        (fallback, None)
+                    }
+                };
+                cancel_reveal();
+                let Some(win) = app.picker.upgrade() else {
+                    return;
+                };
+                let Some(point) = prepared.0 else {
+                    warn!("速贴定位失败，窗口保持停屏位");
+                    hide(&app, false);
+                    return;
+                };
+                if let Some((rgba, width, height)) = prepared.1 {
+                    let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(width, height);
+                    buf.make_mut_bytes().copy_from_slice(&rgba);
+                    win.set_blur_backdrop(slint::Image::from_rgba8(buf));
+                    win.set_blur_active(true);
+                }
+                let hwnd = app.state.picker_hwnd.load(Ordering::SeqCst);
+                schedule_reveal(&app, &win, hwnd, point, size, epoch, started);
+            },
+        );
+    });
+}
+
 /// 速贴底分档编排：唤起时按设置项「背景材质」现读分派（见
 /// [WindowMaterial]）。速贴永不激活，DWM 对从未激活窗不渲染 Mica
 /// backdrop（ADR-0005 窗口活性前提，实测确认），Mica 与 Acrylic 两档
@@ -1000,26 +1154,19 @@ fn shadow_margin_px(win: &QuickPasteWindow) -> i32 {
 /// =0.80（深色 tint 提亮，行卡半透玻璃卡），「无」档实底。烘焙抓屏失败（锁屏/会话
 /// 切换）回实底。每次唤起重烘焙，明暗自愈
 fn prepare_picker_backdrop(
-    app: &App,
-    win: &QuickPasteWindow,
     point: ScreenPoint,
     size: slint::PhysicalSize,
+    margin: i32,
+    scale: f32,
+    corner: usize,
+    material: WindowMaterial,
     tokens: &theme::ThemeTokens,
-) {
-    let settings = app.state.current_settings();
-    let material = settings.window_material;
-    // Mica 档实底近不透明，玻璃卡叠上必然塌层，行卡切实卡（细描边
-    // 分层，同「无」档语言）；Acrylic 档保持玻璃卡
-    win.set_material_active(matches!(material, WindowMaterial::Mica));
+) -> Option<(Vec<u8>, u32, u32)> {
     let tint_alpha = match material {
         WindowMaterial::Mica => backdrop::MICA_TINT_ALPHA,
         WindowMaterial::Acrylic => backdrop::ACRYLIC_TINT_ALPHA,
-        WindowMaterial::None => {
-            win.set_blur_active(false);
-            return;
-        }
+        WindowMaterial::None => return None,
     };
-    let margin = shadow_margin_px(win);
     let point = ScreenPoint {
         x: point.x + margin,
         y: point.y + margin,
@@ -1028,25 +1175,8 @@ fn prepare_picker_backdrop(
         size.width.saturating_sub(2 * margin as u32).max(1),
         size.height.saturating_sub(2 * margin as u32).max(1),
     );
-    prepare_blur_backdrop(win, point, size, tint_alpha, tokens);
-}
-
-/// 自绘模糊底图烘焙：抓取目标位屏幕区域（窗口尚在屏外，抓不到面板
-/// 自己；四周外扩一个模糊半径，钳到虚拟桌面）→ 三遍 box 模糊 → 裁回
-/// 窗口尺寸 → 主题 tint（material-layer 同源 rgb，观感与真 Acrylic
-/// 面板底一致）→ 圆角烘焙进图 alpha，写入 blur-backdrop。
-/// `tint_alpha`：档位 tint 浓度（[`backdrop::ACRYLIC_TINT_ALPHA`] /
-/// [`backdrop::MICA_TINT_ALPHA`]）。抓屏失败（锁屏/会话切换等）回
-/// 实底（blur-active=false）
-fn prepare_blur_backdrop(
-    win: &QuickPasteWindow,
-    point: ScreenPoint,
-    size: slint::PhysicalSize,
-    tint_alpha: f32,
-    tokens: &theme::ThemeTokens,
-) {
+    // 抓屏 → 三遍 box 模糊 → 裁回卡片尺寸 → 主题 tint → 圆角 alpha。
     let started = std::time::Instant::now();
-    let scale = win.window().scale_factor();
     let blur_radius = (backdrop::BLUR_RADIUS_LOGICAL * scale).round().max(1.0) as usize;
     let (w, h) = (size.width.max(1) as usize, size.height.max(1) as usize);
     // 扩边抓屏：四周多抓一个模糊半径，模糊后裁回窗口尺寸——边缘模糊
@@ -1068,8 +1198,7 @@ fn prepare_blur_backdrop(
             w,
             h
         );
-        win.set_blur_active(false);
-        return;
+        return None;
     };
     if cap_w < w as i32 || cap_h < h as i32 {
         // 钳制后装不下窗口（显示器热插拔竞态）：无完整窗口区域可裁，
@@ -1081,8 +1210,7 @@ fn prepare_blur_backdrop(
             w,
             h
         );
-        win.set_blur_active(false);
-        return;
+        return None;
     }
     let (full_w, full_h) = (cap_w as usize, cap_h as usize);
     backdrop::blur_rgba(&mut rgba, full_w, full_h, blur_radius);
@@ -1095,17 +1223,12 @@ fn prepare_blur_backdrop(
         w,
         h,
     );
-    if win.get_material_active() {
+    if matches!(material, WindowMaterial::Mica) {
         backdrop::tint_opaque(&mut rgba, tokens.material_layer_rgb, tint_alpha);
     } else {
         backdrop::tint_acrylic(&mut rgba, tokens.material_layer_rgb, tokens.is_dark);
     }
-    let corner = (win.global::<PanelGeometry>().get_card_radius() * scale).round() as usize;
     backdrop::bake_round_corners(&mut rgba, w, h, corner);
-    let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(w as u32, h as u32);
-    buf.make_mut_bytes().copy_from_slice(&rgba);
-    win.set_blur_backdrop(slint::Image::from_rgba8(buf));
-    win.set_blur_active(true);
     // 烘焙成本监控：唤起关键路径上的新增 CPU 开销，一眼可见
     tracing::info!(
         "模糊底图烘焙: {}x{}px 半径{} 用时{}ms",
@@ -1114,6 +1237,7 @@ fn prepare_blur_backdrop(
         blur_radius,
         started.elapsed().as_millis()
     );
+    Some((rgba, w as u32, h as u32))
 }
 
 /// 归位解析（纯计算）：不重跑定位模式——鼠标/插入符锚点在编辑往返后
@@ -1124,12 +1248,10 @@ fn prepare_blur_backdrop(
 fn resolve_parked_position(app: &App, physical_size: slint::PhysicalSize) -> Option<ScreenPoint> {
     let width = physical_size.width.max(1) as i32;
     let height = physical_size.height.max(1) as i32;
-    PickerPositionService::resolve_window_position(
+    floatpaste_core::services::picker_position_service::resolve_from_last_position(
         &app.core().repository,
-        &PickerPositionMode::LastPosition,
         width,
         height,
-        None,
     )
     .ok()
     .flatten()
@@ -1355,6 +1477,71 @@ pub(crate) mod reveal_contract_tests {
             assert!(!mouse_monitor::is_session_active(), "停屏期间不能接管输入");
         };
 
+        // 系统调用卡住时不得为连续呼出叠加线程；完成后允许下一份任务。
+        let (release_tx, release_rx) = mpsc::sync_channel(1);
+        let pending = spawn_preparation(move || {
+            release_rx.recv().unwrap();
+            (Some(expected), None)
+        })
+        .unwrap();
+        assert!(spawn_preparation(|| unreachable!("忙时不得启动第二份任务")).is_none());
+        release_tx.send(()).unwrap();
+        assert_eq!(
+            pending.recv_timeout(Duration::from_secs(1)).unwrap().0,
+            Some(expected)
+        );
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while PREPARATION_BUSY.load(Ordering::Acquire) && Instant::now() < deadline {
+            pump(8);
+        }
+        assert!(!PREPARATION_BUSY.load(Ordering::Acquire));
+
+        // 慢准备任务不阻塞 UI；到期后显示，迟到结果不得挪动窗口或换底图。
+        let (late_tx, late_rx) = mpsc::sync_channel(1);
+        let epoch = app.state.begin_picker_activation();
+        win.set_blur_active(false);
+        wait_for_preparation(
+            &app,
+            slint::PhysicalSize::new(360, 420),
+            epoch,
+            Some(expected),
+            Instant::now(),
+            Some(late_rx),
+        );
+        let responsive = Rc::new(std::cell::Cell::new(false));
+        let responsive_cb = responsive.clone();
+        slint::Timer::single_shot(Duration::from_millis(8), move || responsive_cb.set(true));
+        pump(32);
+        assert!(responsive.get(), "后台准备期间事件循环必须能响应其他事件");
+        parked();
+        pump(PREPARATION_BUDGET.as_millis() as u64 + REVEAL_DELAY_MS + 80);
+        let rect = win32_ext::physical_rect(hwnd).unwrap();
+        assert_eq!((rect.left, rect.top), (expected.x, expected.y));
+        assert!(!win.get_blur_active(), "超时必须使用当前主题实底");
+        assert!(
+            late_tx
+                .send((Some(ScreenPoint { x: 900, y: 900 }), None))
+                .is_err(),
+            "到期后必须丢弃准备结果接收端"
+        );
+        hide(&app, false);
+
+        // 准备期关闭后再收到结果，不得重新显示。
+        let (cancelled_tx, cancelled_rx) = mpsc::sync_channel(1);
+        let epoch = app.state.begin_picker_activation();
+        wait_for_preparation(
+            &app,
+            slint::PhysicalSize::new(360, 420),
+            epoch,
+            Some(expected),
+            Instant::now(),
+            Some(cancelled_rx),
+        );
+        hide(&app, false);
+        assert!(cancelled_tx.send((Some(expected), None)).is_err());
+        pump(PREPARATION_BUDGET.as_millis() as u64 + REVEAL_DELAY_MS + 80);
+        parked();
+
         // 同一实际窗口依次走首次呼出和编辑返回；返回沿用原 session_id。
         for returning in [false, true] {
             let target = app.state.picker_session();
@@ -1416,7 +1603,7 @@ pub(crate) mod reveal_contract_tests {
             restore_after_editor(&app, app.state.picker_session());
             assert_eq!(win.get_selected(), 1, "编辑返回不得重置选中");
             // 拉开新显示与旧补挂的执行时间，让 release 的短等待也覆盖此交错。
-            REVEAL_TIMER.with(|timer| timer.set_interval(Duration::from_millis(200)));
+            REVEAL_TIMER.with(|timer| timer.borrow().set_interval(Duration::from_millis(200)));
             // 暂时剥掉置顶位，旧显示的 50ms 补挂不得在新一代准备期重新抬窗。
             use windows::Win32::{
                 Foundation::HWND,

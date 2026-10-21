@@ -35,6 +35,7 @@ Rust 改动后，保证 `cargo test` 与 `cargo build -p floatpaste-native` 通�
 - 日志写入 `%APPDATA%\com.floatpaste\logs`，文件以 `floatpaste-native.log` 为前缀按天滚动，最多保留 15 个文件；主目录不可用时写入 `%TEMP%\FloatPaste\logs`。
 - 默认不记录窗口标题或 UIA 元素名称；设置 `FLOATPASTE_DIAGNOSTIC_LOG=1` 后启用这些字段。共享诊断日志前检查其中的敏感信息。
 - 窗口生命周期用 `session_id` 关联，上屏异步操作同时记录 `operation_id`；日志队列丢弃计数每 30 秒检查并在新增丢弃时报告，panic 日志包含线程名与堆栈。实现见 [system.rs](crates/floatpaste-native/src/system.rs)。
+- 排查慢呼出时，对齐「命中全局快捷键 / 收到二次启动唤醒」、事件循环处理的 `queue_ms`、`picker_preparation` 中的定位及烘焙耗时、以及「速贴实际显示并接管输入」的 `elapsed_ms`；显示日志表示窗口移入屏内并完成输入装配，不保证 DWM 已合成首帧。准备期限与回退见 [窗口指南](docs/no-focus-picker.md)。
 - 静默启动使用 `--silent`；二次启动通过单实例命名事件唤醒已有实例的速贴后退出。
 - E2E 的隔离、日志保留和失败排查见 [测试体系](docs/testing.md)。真实快捷键分发、上屏注入、第三方应用兼容与视觉效果按改动范围在交互桌面验证。
 

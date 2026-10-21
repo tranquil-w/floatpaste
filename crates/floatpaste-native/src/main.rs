@@ -174,8 +174,14 @@ fn main() {
         let app_for_wake = app.clone();
         if let Err(error) =
             floatpaste_core::platform::windows::single_instance::listen_wake(move || {
+                let triggered = std::time::Instant::now();
+                tracing::info!("收到二次启动唤醒");
                 let app = app_for_wake.clone();
                 let _ = slint::invoke_from_event_loop(move || {
+                    tracing::debug!(
+                        queue_ms = triggered.elapsed().as_millis(),
+                        "处理二次启动唤醒"
+                    );
                     picker::toggle(&app);
                 });
             })
@@ -677,9 +683,15 @@ pub(crate) fn sync_global_hotkeys(app: &App) {
     for attempt in 0..3 {
         let app_for_hotkey = app.clone();
         let on_trigger = move |id: u32| {
+            let triggered = std::time::Instant::now();
             tracing::info!("命中全局快捷键 id={id}");
             let app = app_for_hotkey.clone();
             let result = slint::invoke_from_event_loop(move || {
+                tracing::debug!(
+                    id,
+                    queue_ms = triggered.elapsed().as_millis(),
+                    "处理全局快捷键"
+                );
                 // 不做命中防抖：MOD_NOREPEAT 已在注册层过滤按住连发，
                 // 人工连按每击必响应（开/关由击数次序决定）
                 if id == HOTKEY_ID_SEARCH {
