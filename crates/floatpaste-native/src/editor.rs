@@ -232,6 +232,7 @@ fn show_editor(app: &App, session: EditorSession, anchor: Option<HostAnchor>) {
 /// 载入条目详情并填充界面（同步读库：单条查询延迟可忽略，省去加载态）
 fn load_session(app: &App, win: &EditorWindow, item_id: &str) {
     win.set_is_text(false);
+    win.set_has_html(false);
     win.set_draft_text("".into());
     win.set_saved_text("".into());
     win.set_item_missing(false);
@@ -259,6 +260,7 @@ fn load_session(app: &App, win: &EditorWindow, item_id: &str) {
     win.set_has_session(true);
     win.set_item_missing(false);
     win.set_is_text(detail.r#type == "text");
+    win.set_has_html(detail.has_html);
     win.set_meta_source(
         detail
             .source_app
@@ -470,7 +472,8 @@ pub fn save(app: &App) {
     };
     let draft = win.get_draft_text().to_string();
     match ClipService::update_text(&app.core(), &session.item_id, &draft) {
-        Ok(_) => {
+        Ok(detail) => {
+            win.set_has_html(detail.has_html);
             // 对齐旧版 markSaved(draftText)：草稿即视为已保存基线。
             // UI 侧 saved-text 必须同步回写，否则 is-dirty（draft!=saved）
             // 恒为真，保存后 Esc 仍会弹"未保存"确认框
@@ -1086,6 +1089,79 @@ pub(crate) mod load_error_tests {
         wire(app);
         load_session(app, win, item_id);
         assert!(win.get_is_text());
+
+        // 富文本仍走普通编辑器；标签与原文未变时保留格式，正文保存后撤销提示。
+        let html = floatpaste_core::services::html_format::encode_html_fragment(
+            "<p><b>富文本 中文😀</b></p>",
+        );
+        let rich = floatpaste_core::services::history_service::HistoryService::ingest_text_formats(
+            app.core(),
+            "富文本 中文😀",
+            Some(html),
+            None,
+        )
+        .unwrap()
+        .unwrap();
+        app.state.set_editor_session(Some(EditorSession {
+            item_id: rich.id.clone(),
+            ..Default::default()
+        }));
+        load_session(app, win, &rich.id);
+        assert!(win.get_has_html());
+        assert!(!win.get_is_dirty());
+        assert!(crate::search::make_row(&rich.to_summary()).has_html);
+        save(app);
+        assert!(win.get_has_html(), "原文未改的保存保留格式提示");
+        if std::env::var_os("FLOATPASTE_UI_SNAPSHOTS").is_some() {
+            let snapshot_dir =
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.artifacts/snapshot");
+            std::fs::create_dir_all(&snapshot_dir).unwrap();
+            for (name, theme) in [
+                ("light", floatpaste_core::theme::ResolvedTheme::Light),
+                ("dark", floatpaste_core::theme::ResolvedTheme::Dark),
+            ] {
+                let tokens = floatpaste_core::theme::derive_tokens("default", "", theme);
+                crate::theme_bridge::reapply_theme(app, &tokens);
+                win.window().set_size(slint::LogicalSize::new(800.0, 600.0));
+                win.show().unwrap();
+                let search = app.search.upgrade().unwrap();
+                search.set_rows(slint::ModelRc::new(std::rc::Rc::new(VecModel::from(vec![
+                    crate::search::make_row(&rich.to_summary()),
+                ]))));
+                search.set_selected(0);
+                search.set_result_count(1);
+                search.set_result_total(1);
+                search.show().unwrap();
+                let closer = std::thread::spawn(|| {
+                    std::thread::sleep(Duration::from_millis(150));
+                    let _ = slint::quit_event_loop();
+                });
+                let _ = slint::run_event_loop_until_quit();
+                closer.join().unwrap();
+                for (label, window) in [("editor", win.window()), ("search", search.window())] {
+                    let pixels = window.take_snapshot().unwrap();
+                    image::save_buffer(
+                        snapshot_dir.join(format!(
+                            "rich-text-{label}-{name}-{}.png",
+                            (window.scale_factor() * 100.0).round() as u32
+                        )),
+                        pixels.as_bytes(),
+                        pixels.width(),
+                        pixels.height(),
+                        image::ColorType::Rgba8,
+                    )
+                    .unwrap();
+                }
+            }
+        }
+        win.set_draft_text("修改后的正文".into());
+        save(app);
+        assert!(!win.get_has_html());
+        assert!(!win.get_is_dirty());
+        app.state.set_editor_session(Some(EditorSession {
+            item_id: item_id.into(),
+            ..Default::default()
+        }));
 
         // 无记录与数据库读取错误必须进入不同状态；错误不能留下旧草稿可保存。
         win.set_draft_text("未保存的旧草稿".into());

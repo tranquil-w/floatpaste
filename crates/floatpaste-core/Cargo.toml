@@ -4,8 +4,8 @@ version = "0.7.1"
 edition = "2021"
 
 [dependencies]
-arboard = "3.4.1"
 chrono = { version = "0.4.42", features = ["clock", "serde"] }
+html5ever = "0.40.1"
 image = { version = "0.25.9", default-features = false, features = ["bmp", "png"] }
 png = "0.18.1"
 rusqlite = { version = "0.40.2", features = ["bundled"] }

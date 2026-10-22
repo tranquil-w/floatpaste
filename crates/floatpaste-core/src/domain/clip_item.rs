@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClipItemSummary {
+    #[serde(default)]
+    pub has_html: bool,
     pub id: String,
     pub r#type: String,
     pub content_preview: String,
@@ -26,6 +28,9 @@ pub struct ClipItemSummary {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClipItemDetail {
+    pub has_html: bool,
+    /// 仅上屏详情读取载荷；普通详情和列表不读取 HTML。
+    pub html_bytes: Option<Vec<u8>>,
     pub id: String,
     pub r#type: String,
     pub content_preview: String,
@@ -56,6 +61,7 @@ pub struct ClipItemDetail {
 impl ClipItemDetail {
     pub fn to_summary(&self) -> ClipItemSummary {
         ClipItemSummary {
+            has_html: self.has_html,
             id: self.id.clone(),
             r#type: self.r#type.clone(),
             content_preview: self.content_preview.clone(),
@@ -231,11 +237,30 @@ pub struct PasteOption {
     pub restore_clipboard_after_paste: bool,
     #[serde(default = "default_true")]
     pub paste_to_target: bool,
-    /// 次级上屏形态（Shift+Enter）：把路径作为文本写入剪贴板——图片写
-    /// 图片文件路径、文件写逐行路径列表。文本类型暂无次级形态，标记被
-    /// 忽略（处理类次级形态设计中，见 docs/adr-0004）
     #[serde(default)]
-    pub as_path_text: bool,
+    pub mode: PasteMode,
+}
+
+/// 共用能力解析后的剪贴板发布模式。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PasteMode {
+    #[default]
+    Original,
+    PlainText,
+    PathText,
+}
+
+/// 窗口只传主/次动作；能力到发布模式的规则集中在这里。
+pub fn resolve_paste_mode(item: &ClipItemSummary, secondary: bool) -> PasteMode {
+    if !secondary {
+        return PasteMode::Original;
+    }
+    match item.r#type.as_str() {
+        "image" | "file" => PasteMode::PathText,
+        "text" if item.has_html => PasteMode::PlainText,
+        _ => PasteMode::Original,
+    }
 }
 
 fn default_true() -> bool {
@@ -252,6 +277,7 @@ pub struct PasteResult {
 
 #[derive(Debug, Clone)]
 pub struct NormalizedClipText {
+    pub html_bytes: Option<Vec<u8>>,
     pub full_text: String,
     pub preview_text: String,
     pub search_text: String,

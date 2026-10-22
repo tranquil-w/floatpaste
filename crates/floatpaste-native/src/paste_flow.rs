@@ -15,8 +15,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::Duration;
 
-use arboard::Clipboard;
-
 use floatpaste_core::domain::clip_item::PasteOption;
 use floatpaste_core::domain::error::AppError;
 use floatpaste_core::platform::windows::active_app::ActiveAppResolver;
@@ -53,26 +51,28 @@ pub fn notify_admin_target_once(app: &App, restore_clipboard: bool) {
 }
 
 pub fn paste_item(app: &App, id: &str, option: PasteOption) -> Result<(), AppError> {
-    let detail = app.core().repository.get_item_detail(id)?;
+    let detail = app.core().repository.get_item_for_paste(id)?;
     let session = app.state.picker_session();
 
     // 管理员目标：照常写入剪贴板并还原目标焦点（用户可手动 Ctrl+V），
     // 仅跳过必然无效的按键注入，经托盘气泡一次性说明
     let admin_target =
         option.paste_to_target && paste_target_requires_elevation(session.target_window_hwnd);
+    let operation_id = next_paste_operation_id();
+    let operation_gate = paste_support::lock_paste_operation()?;
     let previous_clipboard = paste_support::capture_snapshot_if_needed(&option)?;
-    let mut clipboard = Clipboard::new().map_err(|error| AppError::Clipboard(error.to_string()))?;
 
     // 剪贴板属主：优先速贴窗口（此刻仍存活/可见）
     let owner_hwnd = picker_owner_hwnd(app);
 
-    paste_support::write_item_to_clipboard(
+    let written_sequence = paste_support::publish_item(
         app.core(),
-        &mut clipboard,
         &detail,
-        option.as_path_text,
+        option.mode,
         owner_hwnd,
+        previous_clipboard.as_ref(),
     )?;
+    drop(operation_gate);
 
     if admin_target {
         notify_admin_target_once(app, option.restore_clipboard_after_paste);
@@ -94,14 +94,16 @@ pub fn paste_item(app: &App, id: &str, option: PasteOption) -> Result<(), AppErr
     let core = app.core().clone();
     let app_for_result = app.clone();
     let id = id.to_string();
-    let operation_id = next_paste_operation_id();
     let session_id = session.session_id;
     thread::spawn(move || {
         let started = std::time::Instant::now();
         let (success, message) = match session.target_window_hwnd {
             Some(target_hwnd) => {
                 thread::sleep(RESTORE_DELAY);
-                if core.is_quitting() {
+                if core.is_quitting()
+                    || floatpaste_core::platform::windows::clipboard_formats::clipboard_sequence()
+                        != written_sequence
+                {
                     return;
                 }
                 if ActiveAppResolver::restore_foreground_window_with_focus(
@@ -125,7 +127,11 @@ pub fn paste_item(app: &App, id: &str, option: PasteOption) -> Result<(), AppErr
                         (false, "目标应用以管理员身份运行，无法自动粘贴。")
                     } else {
                         thread::sleep(INJECT_DELAY);
-                        if paste_support::trigger_ctrl_v(session_id, operation_id) {
+                        if paste_support::trigger_ctrl_v_if_current(
+                            written_sequence,
+                            session_id,
+                            operation_id,
+                        ) {
                             (true, "")
                         } else {
                             (false, "未能自动粘贴。")
@@ -145,6 +151,7 @@ pub fn paste_item(app: &App, id: &str, option: PasteOption) -> Result<(), AppErr
                 owner_hwnd,
                 session_id,
                 operation_id,
+                written_sequence,
             ) {
                 warn!(session_id, operation_id, error = %error, "速贴上屏后安排剪贴板恢复失败");
             }

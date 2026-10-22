@@ -1,32 +1,16 @@
-use std::{io::Cursor, ptr::copy_nonoverlapping, slice};
+use std::io::Cursor;
 
 use image::{
     codecs::bmp::{BmpDecoder, BmpEncoder},
     DynamicImage, ExtendedColorType, ImageDecoder, ImageEncoder,
 };
-use tracing::warn;
-use windows::{
-    core::{w, Error as WindowsError},
-    Win32::{
-        Foundation::{GlobalFree, HANDLE, HGLOBAL, HWND},
-        System::{
-            DataExchange::{
-                CloseClipboard, EmptyClipboard, GetClipboardData, GetPriorityClipboardFormat,
-                OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
-            },
-            Memory::{
-                GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE, GMEM_ZEROINIT,
-            },
-        },
-    },
-};
+use windows::core::w;
 
 use crate::domain::error::AppError;
 
-use super::clipboard_error::map_clipboard_error;
+use super::clipboard_formats::{registered_format, write_formats, ClipboardSnapshot};
 
 const CF_DIB_FORMAT: u32 = 8;
-const CF_DIBV5_FORMAT: u32 = 17;
 
 #[derive(Debug, Clone)]
 pub struct ClipboardImageData {
@@ -43,81 +27,9 @@ struct ClipboardImagePayload {
     png_bytes: Option<Vec<u8>>,
 }
 
-pub fn read_image_from_clipboard() -> Result<Option<ClipboardImageData>, AppError> {
-    unsafe {
-        OpenClipboard(None).map_err(map_clipboard_error)?;
-        let result = (|| {
-            let png_format = png_clipboard_format()?;
-            if let Some(format) = preferred_image_clipboard_format(png_format)? {
-                let data = read_clipboard_bytes(format)?;
-                if format == png_format {
-                    return decode_png_bytes(data).map(Some);
-                }
-                return decode_dib_bytes(&data).map(Some);
-            }
-
-            Ok(None)
-        })();
-        let _ = CloseClipboard();
-        result
-    }
-}
-
-fn preferred_image_clipboard_format(png_format: u32) -> Result<Option<u32>, AppError> {
-    unsafe {
-        match GetPriorityClipboardFormat(&[png_format, CF_DIBV5_FORMAT, CF_DIB_FORMAT]) {
-            value if value == png_format as i32 => Ok(Some(png_format)),
-            value if value == CF_DIBV5_FORMAT as i32 => Ok(Some(CF_DIBV5_FORMAT)),
-            value if value == CF_DIB_FORMAT as i32 => Ok(Some(CF_DIB_FORMAT)),
-            -1 => Ok(None),
-            0 => Err(AppError::Clipboard(format!(
-                "检查图片剪贴板格式失败: {}",
-                WindowsError::from_thread()
-            ))),
-            other => Err(AppError::Clipboard(format!(
-                "检查图片剪贴板格式返回了未知结果: {other}"
-            ))),
-        }
-    }
-}
-
-fn png_clipboard_format() -> Result<u32, AppError> {
-    let format = unsafe { RegisterClipboardFormatW(w!("PNG")) };
-    if format == 0 {
-        return Err(AppError::Clipboard(format!(
-            "注册 PNG 剪贴板格式失败: {}",
-            WindowsError::from_thread()
-        )));
-    }
-
-    Ok(format)
-}
-
-unsafe fn read_clipboard_bytes(format: u32) -> Result<Vec<u8>, AppError> {
-    let handle = GetClipboardData(format).map_err(map_clipboard_error)?;
-    let handle = HGLOBAL(handle.0);
-    if handle.is_invalid() {
-        return Err(AppError::Clipboard("剪贴板图片句柄无效".to_string()));
-    }
-
-    let size = GlobalSize(handle);
-    if size == 0 {
-        return Err(AppError::Clipboard("剪贴板图片数据为空".to_string()));
-    }
-
-    let pointer = GlobalLock(handle).cast::<u8>();
-    if pointer.is_null() {
-        return Err(AppError::Clipboard("锁定剪贴板图片数据失败".to_string()));
-    }
-
-    let bytes = slice::from_raw_parts(pointer, size).to_vec();
-    let _ = GlobalUnlock(handle);
-    Ok(bytes)
-}
-
 /// 接收剪贴板字节所有权：PNG 透传时原始字节直接存入条目，不再拷贝一份
 /// （大截图 PNG 数 MB，录入峰值减半）
-fn decode_png_bytes(data: Vec<u8>) -> Result<ClipboardImageData, AppError> {
+pub(super) fn decode_png_bytes(data: Vec<u8>) -> Result<ClipboardImageData, AppError> {
     let decoder = image::codecs::png::PngDecoder::new(Cursor::new(&data))
         .map_err(|error| AppError::Message(format!("解码剪贴板 PNG 图片失败: {error}")))?;
     let (width, height, rgba) = decode_image_pixels(decoder)?;
@@ -129,7 +41,7 @@ fn decode_png_bytes(data: Vec<u8>) -> Result<ClipboardImageData, AppError> {
     })
 }
 
-fn decode_dib_bytes(data: &[u8]) -> Result<ClipboardImageData, AppError> {
+pub(super) fn decode_dib_bytes(data: &[u8]) -> Result<ClipboardImageData, AppError> {
     let decoder = BmpDecoder::new_without_file_header(Cursor::new(data))
         .map_err(|error| AppError::Message(format!("解码剪贴板 DIB 图片失败: {error}")))?;
     let (width, height, rgba) = decode_image_pixels(decoder)?;
@@ -162,39 +74,23 @@ where
 }
 
 pub fn write_image_to_clipboard(
-    owner_window: isize,
+    owner: Option<isize>,
     image: &ClipboardImageData,
-) -> Result<(), AppError> {
+    rollback: Option<&ClipboardSnapshot>,
+) -> Result<u32, AppError> {
     let payload = build_clipboard_image_payload(
         &image.rgba,
         image.width,
         image.height,
         image.png_bytes.clone(),
     )?;
-    let owner = HWND(owner_window as *mut _);
-    if owner.0.is_null() {
-        return Err(AppError::Clipboard("剪贴板宿主窗口句柄无效".to_string()));
+    let mut formats = Vec::new();
+    if let Some(png) = payload.png_bytes {
+        formats.push((registered_format(w!("PNG"))?, png));
     }
-
-    unsafe {
-        OpenClipboard(Some(owner)).map_err(map_clipboard_error)?;
-        let result = (|| {
-            EmptyClipboard().map_err(map_clipboard_error)?;
-
-            if let Some(png_bytes) = payload.png_bytes.as_deref() {
-                let png_format = png_clipboard_format()?;
-                if let Err(error) = set_clipboard_bytes(png_format, png_bytes) {
-                    warn!("写入补充 PNG 剪贴板格式失败，将仅保留标准 DIB: {error}");
-                }
-            }
-
-            set_clipboard_bytes(CF_DIB_FORMAT, &payload.dib_bytes)?;
-
-            Ok(())
-        })();
-        let _ = CloseClipboard();
-        result
-    }
+    formats.push((CF_DIB_FORMAT, payload.dib_bytes));
+    write_formats(&formats, owner, None, rollback)?
+        .ok_or_else(|| AppError::Clipboard("发布后剪贴板发生变化，已取消上屏".into()))
 }
 
 fn build_clipboard_image_payload(
@@ -245,38 +141,6 @@ fn validate_rgba_buffer(rgba: &[u8], width: usize, height: usize) -> Result<(), 
         ));
     }
     Ok(())
-}
-
-unsafe fn set_clipboard_bytes(format: u32, bytes: &[u8]) -> Result<(), AppError> {
-    let handle = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, bytes.len())
-        .map_err(|e| AppError::Clipboard(format!("分配剪贴板内存失败: {e}")))?;
-    if handle.is_invalid() {
-        return Err(AppError::Clipboard("分配剪贴板内存失败".to_string()));
-    }
-
-    let pointer = GlobalLock(handle).cast::<u8>();
-    if pointer.is_null() {
-        let _ = free_global_memory(handle);
-        return Err(AppError::Clipboard("锁定剪贴板内存失败".to_string()));
-    }
-
-    copy_nonoverlapping(bytes.as_ptr(), pointer, bytes.len());
-    let _ = GlobalUnlock(handle);
-
-    if let Err(error) = SetClipboardData(format, Some(HANDLE(handle.0))) {
-        let _ = free_global_memory(handle);
-        return Err(AppError::Clipboard(format!("写入剪贴板数据失败: {error}")));
-    }
-
-    Ok(())
-}
-
-fn free_global_memory(handle: HGLOBAL) -> Result<(), AppError> {
-    unsafe {
-        GlobalFree(Some(handle))
-            .map(|_| ())
-            .map_err(map_clipboard_error)
-    }
 }
 
 #[cfg(test)]

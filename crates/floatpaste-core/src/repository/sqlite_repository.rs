@@ -41,7 +41,7 @@ fn summary_select_columns() -> String {
        ci.image_path, ci.image_width, ci.image_height, ci.image_format, ci.file_size,
        ci.file_paths, ci.file_count, ci.total_size, ci.directory_count,
        ci.created_at, ci.updated_at, ci.last_used_at,
-       {TAG_NAMES_SUBQUERY} AS tag_names, ci.text_kind"
+       {TAG_NAMES_SUBQUERY} AS tag_names, ci.text_kind, EXISTS(SELECT 1 FROM clip_text_formats f WHERE f.item_id = ci.id)"
     )
 }
 
@@ -99,6 +99,12 @@ impl SqliteRepository {
                     item.source_app.as_deref().map(space_cjk_text),
                 ],
             )?;
+            if let Some(html) = &item.normalized.html_bytes {
+                transaction.execute(
+                    "INSERT INTO clip_text_formats(item_id, html_bytes) VALUES(?1, ?2)",
+                    params![id, html],
+                )?;
+            }
             transaction.commit()?;
         }
         self.get_item_detail(&id)
@@ -237,13 +243,30 @@ impl SqliteRepository {
     }
 
     pub fn get_item_detail(&self, id: &str) -> Result<ClipItemDetail, AppError> {
+        self.get_item_detail_with_formats(id, false)
+    }
+
+    pub fn get_item_for_paste(&self, id: &str) -> Result<ClipItemDetail, AppError> {
+        self.get_item_detail_with_formats(id, true)
+    }
+
+    fn get_item_detail_with_formats(
+        &self,
+        id: &str,
+        include_html: bool,
+    ) -> Result<ClipItemDetail, AppError> {
+        let html_column = if include_html {
+            "(SELECT f.html_bytes FROM clip_text_formats f WHERE f.item_id = ci.id)"
+        } else {
+            "NULL"
+        };
         let connection = self.connection.lock()?;
         let mut statement = connection.prepare(&format!(
             "SELECT ci.id, ci.type, ci.preview_text, ci.full_text, ci.search_text, ci.source_app,
                     ci.is_favorited, ci.created_at, ci.updated_at, ci.last_used_at, ci.hash,
                     ci.image_path, ci.image_width, ci.image_height, ci.image_format, ci.file_size,
                     ci.file_paths, ci.file_count, ci.total_size, ci.directory_count,
-                    {TAG_NAMES_SUBQUERY} AS tag_names, ci.text_kind
+                    {TAG_NAMES_SUBQUERY} AS tag_names, ci.text_kind, EXISTS(SELECT 1 FROM clip_text_formats f WHERE f.item_id = ci.id), {html_column}
              FROM clip_items ci
              WHERE ci.id = ?1 AND ci.deleted_at IS NULL"
         ))?;
@@ -281,6 +304,7 @@ impl SqliteRepository {
                     now
                 ],
             )?;
+            transaction.execute("DELETE FROM clip_text_formats WHERE item_id = ?1", [id])?;
             transaction.execute("DELETE FROM clip_items_fts WHERE item_id = ?1", [id])?;
             rewrite_item_fts_row(&transaction, id)?;
             transaction.commit()?;
@@ -620,7 +644,9 @@ impl SqliteRepository {
         // search_text 精确子串加权：关键词以字面形式出现在 search_text（文件名/标题/描述）
         // 中的记录排在最前，让"标题命中"优于"正文命中"，也区分开多关键词的连续短语命中。
         let like_pattern = format!("%{}%", escape_like(&query.keyword.trim().to_lowercase()));
-        data_values.push(Value::Text(like_pattern));
+        if matches!(query.sort, SearchSort::RelevanceDesc) {
+            data_values.push(Value::Text(like_pattern));
+        }
         data_values.push(Value::Integer(i64::from(query.limit)));
         data_values.push(Value::Integer(i64::from(query.offset)));
         let order_clause = match query.sort {
@@ -879,6 +905,7 @@ fn map_summary_row(row: &Row<'_>) -> rusqlite::Result<ClipItemSummary> {
     );
 
     Ok(ClipItemSummary {
+        has_html: row.get(19)?,
         id: row.get(0)?,
         r#type,
         content_preview: resolved_file_fields.content_preview.unwrap_or(preview_text),
@@ -915,6 +942,8 @@ fn map_detail_row(row: &Row<'_>) -> rusqlite::Result<ClipItemDetail> {
     );
 
     Ok(ClipItemDetail {
+        has_html: row.get(22)?,
+        html_bytes: row.get(23)?,
         id: row.get(0)?,
         r#type,
         content_preview: resolved_file_fields.content_preview.unwrap_or(preview_text),
@@ -1135,7 +1164,7 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
             .unwrap()
             .query_row("PRAGMA user_version", [], |row| row.get::<_, i32>(0))
             .unwrap();
-        assert_eq!(version, 7);
+        assert_eq!(version, 8);
 
         // v6 迁移按原文回填用途并重算 hash：ID、标签、收藏保持不变
         let legacy_detail = repository.get_item_detail("legacy-item").unwrap();
@@ -1498,23 +1527,24 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
         assert_eq!(recent_result.items.len(), 1);
         assert_eq!(recent_result.items[0].id, "image-item");
 
-        let keyword_result = repository
-            .search(SearchQuery {
-                keyword: "shared".to_string(),
-                filters: SearchFilters {
-                    clip_type: Some(ClipType::File),
-                    ..SearchFilters::default()
-                },
-                offset: 0,
-                limit: 10,
-                sort: SearchSort::RelevanceDesc,
-            })
-            .unwrap();
+        for sort in [SearchSort::RelevanceDesc, SearchSort::RecentDesc] {
+            let keyword_result = repository
+                .search(SearchQuery {
+                    keyword: "shared".to_string(),
+                    filters: SearchFilters {
+                        clip_type: Some(ClipType::File),
+                        ..SearchFilters::default()
+                    },
+                    offset: 0,
+                    limit: 10,
+                    sort,
+                })
+                .unwrap();
 
-        assert_eq!(keyword_result.total, 1);
-        assert_eq!(keyword_result.items.len(), 1);
-        assert_eq!(keyword_result.items[0].id, "file-item");
-
+            assert_eq!(keyword_result.total, 1);
+            assert_eq!(keyword_result.items.len(), 1);
+            assert_eq!(keyword_result.items[0].id, "file-item");
+        }
         drop(repository);
         fs::remove_file(path).unwrap();
     }
@@ -1523,6 +1553,7 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
         repository
             .save_text_item(&NewClipTextItem {
                 normalized: NormalizedClipText {
+                    html_bytes: None,
                     full_text: full_text.to_string(),
                     preview_text: full_text.to_string(),
                     search_text: full_text.to_string(),
@@ -1868,6 +1899,7 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
                 &id,
                 &NewClipTextItem {
                     normalized: NormalizedClipText {
+                        html_bytes: None,
                         full_text: "编辑后内容".to_string(),
                         preview_text: "编辑后内容".to_string(),
                         search_text: "编辑后内容".to_string(),

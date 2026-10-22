@@ -3,7 +3,6 @@ use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::Duration;
 
-use arboard::Clipboard;
 use tracing::{debug, error, info, warn};
 use windows::core::{w, Error as WindowsError, PCWSTR};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
@@ -24,9 +23,7 @@ use crate::{
     domain::{clip_item::ClipItemDetail, error::AppError},
     platform::windows::{
         active_app::ActiveAppResolver,
-        clipboard_error::{map_clipboard_error, should_retry_clipboard_read},
-        file_clipboard::read_file_paths_from_clipboard,
-        image_clipboard::read_image_from_clipboard,
+        clipboard_formats::{clipboard_sequence, ClipboardSnapshot},
     },
     services::{history_service::HistoryService, normalize_service::analyze_file_paths},
     state::CoreState,
@@ -292,45 +289,91 @@ fn process_clipboard_change(
     on_upsert: &ClipUpsertSink,
     source_app: Option<String>,
 ) -> Result<(), AppError> {
-    if let Some(file_paths) = read_file_paths_from_clipboard()? {
-        let file_selection = analyze_file_paths(&file_paths);
+    let settings = core.current_settings()?;
+    // 排除规则本体在 privacy_service（入库前仍会生效）；此处前置短路，
+    // 避免为排除来源白白捕获多格式快照。暂停监测由调用方先行丢弃。
+    if source_app.as_deref().is_some_and(|app| {
+        settings
+            .excluded_apps
+            .iter()
+            .any(|excluded| excluded.eq_ignore_ascii_case(app))
+    }) {
+        return Ok(());
+    }
+    let snapshot = ClipboardSnapshot::capture(false)?;
+    if let Some(file_paths) = snapshot.files.as_ref() {
+        let file_selection = analyze_file_paths(file_paths);
+        if clipboard_sequence() != snapshot.sequence {
+            return Ok(());
+        }
         if let Some(detail) = HistoryService::ingest_files(
             core,
-            file_paths,
+            file_paths.clone(),
             file_selection.directory_count,
             file_selection.total_size,
-            source_app.clone(),
+            source_app,
         )? {
             on_upsert(detail);
         }
         return Ok(());
     }
-
-    if let Some(image) = read_image_from_clipboard()? {
+    let html_result = snapshot
+        .html()
+        .map(crate::services::html_format::parse_html_text);
+    let html_failed = snapshot.html_available && !matches!(html_result, Some(Ok(_)));
+    let html_text = html_result.and_then(Result::ok).flatten();
+    let plain = snapshot.text();
+    if let Some(extracted) = html_text {
+        let text = plain
+            .as_deref()
+            .filter(|text| !text.trim().is_empty())
+            .unwrap_or(&extracted);
+        if clipboard_sequence() != snapshot.sequence {
+            return Ok(());
+        }
+        if let Some(detail) = HistoryService::ingest_text_formats(
+            core,
+            text,
+            snapshot.html().map(<[u8]>::to_vec),
+            source_app,
+        )? {
+            on_upsert(detail);
+        }
+        return Ok(());
+    }
+    if html_failed {
+        if let Some(text) = plain.as_deref().filter(|text| !text.trim().is_empty()) {
+            if clipboard_sequence() != snapshot.sequence {
+                return Ok(());
+            }
+            if let Some(detail) = HistoryService::ingest_text(core, text, source_app)? {
+                on_upsert(detail);
+            }
+            return Ok(());
+        }
+    }
+    if let Some(image) = snapshot.image() {
         let prepared = core.image_storage.prepare_image(
             &image.rgba,
             image.width,
             image.height,
             image.png_bytes.as_deref(),
         )?;
-        if let Some(detail) = HistoryService::ingest_image(core, prepared, source_app.clone())? {
+        if clipboard_sequence() != snapshot.sequence {
+            return Ok(());
+        }
+        if let Some(detail) = HistoryService::ingest_image(core, prepared, source_app)? {
             on_upsert(detail);
         }
         return Ok(());
     }
-
-    let mut clipboard = Clipboard::new().map_err(map_clipboard_error)?;
-
-    match clipboard.get_text() {
-        Ok(text) => {
-            if let Some(detail) = HistoryService::ingest_text(core, &text, source_app)? {
-                on_upsert(detail);
-            }
+    if let Some(text) = plain {
+        if clipboard_sequence() != snapshot.sequence {
+            return Ok(());
         }
-        Err(error) if should_retry_clipboard_read(&error) => {
-            return Err(map_clipboard_error(error));
+        if let Some(detail) = HistoryService::ingest_text(core, &text, source_app)? {
+            on_upsert(detail);
         }
-        Err(_) => {}
     }
 
     Ok(())
@@ -338,30 +381,7 @@ fn process_clipboard_change(
 
 #[cfg(test)]
 mod tests {
-    use arboard::Error as ClipboardError;
-
-    use super::super::clipboard_error::should_retry_clipboard_read;
     use super::{retry_decision, RetryDecision, CLIPBOARD_MAX_ATTEMPTS};
-
-    #[test]
-    fn retries_when_clipboard_is_temporarily_occupied() {
-        assert!(should_retry_clipboard_read(
-            &ClipboardError::ClipboardOccupied
-        ));
-    }
-
-    #[test]
-    fn does_not_retry_for_unsupported_or_missing_content() {
-        assert!(!should_retry_clipboard_read(
-            &ClipboardError::ContentNotAvailable
-        ));
-        assert!(!should_retry_clipboard_read(
-            &ClipboardError::ConversionFailure
-        ));
-        assert!(!should_retry_clipboard_read(&ClipboardError::Unknown {
-            description: "test".to_string(),
-        }));
-    }
 
     #[test]
     fn schedules_retry_below_attempt_limit() {

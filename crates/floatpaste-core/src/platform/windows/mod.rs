@@ -19,3 +19,5 @@ pub mod uia_caret;
 pub mod wide_string;
 pub mod window_control;
 pub mod winv_takeover;
+
+pub mod clipboard_formats;

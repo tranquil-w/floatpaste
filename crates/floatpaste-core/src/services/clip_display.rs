@@ -79,12 +79,23 @@ pub fn search_empty_state(
 /// 「链接/路径/代码」，用途不改变其文本本体身份。
 pub fn clip_type_label(item: &ClipItemSummary) -> String {
     match item.r#type.as_str() {
-        "text" => match item.text_kind {
-            TextKind::Link => "链接".to_string(),
-            TextKind::Path => "路径".to_string(),
-            TextKind::Code => "代码".to_string(),
-            TextKind::Plain => "文本".to_string(),
-        },
+        "text" => {
+            let label = match item.text_kind {
+                TextKind::Link => "链接",
+                TextKind::Path => "路径",
+                TextKind::Code => "代码",
+                TextKind::Plain => "文本",
+            };
+            if item.has_html {
+                if item.text_kind == TextKind::Plain {
+                    "富文本".into()
+                } else {
+                    format!("{label} · 富文本")
+                }
+            } else {
+                label.into()
+            }
+        }
         "image" => "图片".to_string(),
         "file" => {
             let file_count = item.file_count.max(0) as usize;
@@ -128,6 +139,9 @@ pub fn build_meta(item: &ClipItemSummary) -> String {
         if item.directory_count > 0 {
             parts.push(format!("{} 个文件夹", item.directory_count));
         }
+    }
+    if item.has_html {
+        parts.push("含原格式".into());
     }
     parts.join(" · ")
 }
@@ -201,6 +215,7 @@ mod tests {
 
     fn item_of(kind: &str, file_count: i32, directory_count: i32) -> ClipItemSummary {
         ClipItemSummary {
+            has_html: false,
             id: "id".into(),
             r#type: kind.into(),
             content_preview: String::new(),

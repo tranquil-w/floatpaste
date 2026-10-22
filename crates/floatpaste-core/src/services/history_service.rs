@@ -44,10 +44,28 @@ impl HistoryService {
         text: &str,
         source_app: Option<String>,
     ) -> Result<Option<ClipItemDetail>, AppError> {
+        Self::ingest_text_formats(state, text, None, source_app)
+    }
+
+    pub fn ingest_text_formats(
+        state: &CoreState,
+        text: &str,
+        html_bytes: Option<Vec<u8>>,
+        source_app: Option<String>,
+    ) -> Result<Option<ClipItemDetail>, AppError> {
         let settings = state.current_settings()?;
-        let Some(normalized) = NormalizeService::normalize_text(text, source_app.clone()) else {
+        let Some(mut normalized) = NormalizeService::normalize_text(text, source_app.clone())
+        else {
             return Ok(None);
         };
+
+        // 公共入口同样校验格式；损坏或纯图片包装只保留可用纯文本。
+        normalized.normalized.html_bytes =
+            html_bytes.filter(|bytes| super::html_format::extract_html_text(bytes).is_some());
+        normalized.normalized.hash = super::text_identity::text_formats_hash(
+            text,
+            normalized.normalized.html_bytes.as_deref(),
+        );
 
         if !PrivacyService::should_capture(
             &settings,

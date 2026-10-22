@@ -107,6 +107,7 @@ export component EditorWindow inherits Window {
     in-out property <int> draft-byte-len: 0;
     in-out property <string> draft-text;
     in-out property <string> saved-text;
+    in property <bool> has-html: false;
     // 旧版 store：isDirty = draft !== saved
     in-out property <bool> is-dirty: root.draft-text != root.saved-text;
     in-out property <bool> has-image: false;
@@ -862,6 +863,21 @@ export component EditorWindow inherits Window {
                         }
                         }
                     }
+                }
+            }
+
+            if (root.has-html): Rectangle {
+                height: 30px;
+                background: Theme.warning-subtle;
+                Text {
+                    x: 20px;
+                    width: parent.width - 40px;
+                    height: parent.height;
+                    text: "修改文本并保存后将不保留原格式";
+                    color: Theme.warning-fg;
+                    font-size: Metrics.text-xs;
+                    vertical-alignment: center;
+                    overflow: elide;
                 }
             }
 

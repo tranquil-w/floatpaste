@@ -1074,12 +1074,13 @@ pub(crate) fn next_navigation_index(count: usize, current: usize, up: bool) -> u
 
 /// 单行数据构建（行高恒定：选中态由 slint 侧 selected 绑定驱动，
 /// 行数据不区分选中形态）
-fn make_row(item: &ClipItemSummary) -> SearchRow {
+pub(crate) fn make_row(item: &ClipItemSummary) -> SearchRow {
     let thumb = thumbnails::cached(&item.id);
     let has_thumb = thumb.is_some();
     let normal_preview = flatten_preview_newlines(&item.content_preview);
 
     SearchRow {
+        has_html: item.has_html,
         id: item.id.clone().into(),
         preview: normal_preview.into(),
         kind: match item.r#type.as_str() {
@@ -1208,11 +1209,11 @@ fn apply_material(app: &App, win: &SearchWindow, hwnd: isize) {
     win.set_material_active(overlay::apply_material(app, hwnd));
 }
 
-pub fn paste_index(app: &App, index: usize, as_path_text: bool) {
+pub fn paste_index(app: &App, index: usize, secondary: bool) {
     let Some(item) = app.state.search_item_at(index) else {
         return;
     };
-    paste_item(app, &item, as_path_text);
+    paste_item(app, &item, secondary);
 }
 
 /// 键盘路径的行号来源：当前选中行（鼠标路径由行回调直接带行号）
@@ -1223,21 +1224,21 @@ fn selected_index(app: &App) -> usize {
 
 /// 选中条目上屏（键盘路径）；次级形态按类型生效：图片上屏为图片路径、
 /// 文件上屏为逐行路径列表文本（文本暂无次级形态，等同主上屏）
-pub fn paste_selected(app: &App, as_path_text: bool) {
-    paste_index(app, selected_index(app), as_path_text);
+pub fn paste_selected(app: &App, secondary: bool) {
+    paste_index(app, selected_index(app), secondary);
 }
 
-fn paste_item(app: &App, item: &ClipItemSummary, as_path_text: bool) {
+fn paste_item(app: &App, item: &ClipItemSummary, secondary: bool) {
     tooltip::cancel(app);
     let settings = app.state.current_settings();
     let option = PasteOption {
         restore_clipboard_after_paste: settings.restore_clipboard_after_paste,
         paste_to_target: true,
-        as_path_text,
+        mode: floatpaste_core::domain::clip_item::resolve_paste_mode(item, secondary),
     };
     if let Err(error) = execute_paste(app, &item.id, option) {
         warn!("搜索粘贴失败: {error}");
-        crate::tray::notify_failure("上屏失败，请稍后重试");
+        crate::tray::notify_failure(&format!("上屏失败：{error}"));
     }
 }
 
@@ -1245,27 +1246,28 @@ fn paste_item(app: &App, item: &ClipItemSummary, as_path_text: bool) {
 /// 隐藏并还原会话目标 → 90ms → 恢复前台 → 60ms → 注入 Ctrl+V →
 /// 调度快照恢复 → mark_used。失败提示经托盘通知呈现。
 fn execute_paste(app: &App, id: &str, option: PasteOption) -> Result<(), AppError> {
-    let detail = app.core().repository.get_item_detail(id)?;
+    let detail = app.core().repository.get_item_for_paste(id)?;
     let session = app.state.search_session();
 
     // 管理员目标：照常写入剪贴板并还原目标焦点（用户可手动 Ctrl+V），
     // 仅跳过必然无效的按键注入，经托盘气泡一次性说明
     let admin_target = paste_flow::paste_target_requires_elevation(session.target_window_hwnd);
+    let operation_id = paste_flow::next_paste_operation_id();
+    let operation_gate = paste_support::lock_paste_operation()?;
     let previous_clipboard = paste_support::capture_snapshot_if_needed(&option)?;
-    let mut clipboard =
-        arboard::Clipboard::new().map_err(|error| AppError::Clipboard(error.to_string()))?;
 
     let owner_hwnd = {
         let hwnd = app.state.search_hwnd.load(Ordering::SeqCst);
         (hwnd != 0).then_some(hwnd)
     };
-    paste_support::write_item_to_clipboard(
+    let written_sequence = paste_support::publish_item(
         app.core(),
-        &mut clipboard,
         &detail,
-        option.as_path_text,
+        option.mode,
         owner_hwnd,
+        previous_clipboard.as_ref(),
     )?;
+    drop(operation_gate);
 
     if admin_target {
         paste_flow::notify_admin_target_once(app, option.restore_clipboard_after_paste);
@@ -1276,19 +1278,25 @@ fn execute_paste(app: &App, id: &str, option: PasteOption) -> Result<(), AppErro
     let core = app.core().clone();
     let id = id.to_string();
     let session_id = session.session_id;
-    let operation_id = paste_flow::next_paste_operation_id();
     thread::spawn(move || {
         let started = Instant::now();
         let failure = match session.target_window_hwnd {
             Some(target_hwnd) => {
                 thread::sleep(RESTORE_DELAY);
-                if core.is_quitting() {
+                if core.is_quitting()
+                    || floatpaste_core::platform::windows::clipboard_formats::clipboard_sequence()
+                        != written_sequence
+                {
                     return;
                 }
                 if ActiveAppResolver::restore_foreground_window_with_focus(target_hwnd, None) {
                     if !admin_target {
                         thread::sleep(INJECT_DELAY);
-                        if !paste_support::trigger_ctrl_v(session_id, operation_id) {
+                        if !paste_support::trigger_ctrl_v_if_current(
+                            written_sequence,
+                            session_id,
+                            operation_id,
+                        ) {
                             warn!(session_id, operation_id, "搜索回贴 Ctrl+V 注入失败");
                             Some("未能自动粘贴。")
                         } else {
@@ -1314,6 +1322,7 @@ fn execute_paste(app: &App, id: &str, option: PasteOption) -> Result<(), AppErro
                 owner_hwnd,
                 session_id,
                 operation_id,
+                written_sequence,
             ) {
                 warn!(session_id, operation_id, error = %error, "搜索上屏后安排剪贴板恢复失败");
             }
@@ -1667,7 +1676,7 @@ fn event_key_name(text: &str) -> Option<String> {
 
 /// 会话键解析（窗口 capture 阶段调用）：按当前设置的键位精确匹配
 /// （键名忽略大小写、修饰键集合一致），返回动作码：
-/// 0=无 1=向上 2=向下 3=上屏 4=次级上屏（粘贴为路径） 5=编辑 6=收藏 7=关闭 8=删除
+/// 0=无 1=向上 2=向下 3=上屏 4=次级上屏（纯文本或路径） 5=编辑 6=收藏 7=关闭 8=删除
 fn resolve_session_action(
     settings: &UserSetting,
     text: &str,
@@ -1870,8 +1879,8 @@ pub fn wire(app: &App) {
     }
     {
         let app_cb = app.clone();
-        win.on_key_paste(move |as_path_text| {
-            paste_selected(&app_cb, as_path_text);
+        win.on_key_paste(move |secondary| {
+            paste_selected(&app_cb, secondary);
         });
     }
     {
@@ -2173,6 +2182,7 @@ pub(crate) mod scroll_reset_tests {
                 id: format!("row-{index}").into(),
                 preview: format!("条目 {index}").into(),
                 kind: 0,
+                has_html: false,
                 source_app: "".into(),
                 time_text: "".into(),
                 meta: "".into(),

@@ -4,7 +4,7 @@ use crate::services::text_identity::text_content_hash;
 use crate::services::text_kind::detect_text_kind;
 use crate::{domain::error::AppError, services::normalize_service::space_cjk_text};
 
-const CURRENT_SCHEMA_VERSION: i32 = 7;
+const CURRENT_SCHEMA_VERSION: i32 = 8;
 const CLIP_ITEMS_MEDIA_COLUMNS: [(&str, &str); 7] = [
     ("image_path", "TEXT NULL"),
     ("image_width", "INTEGER NULL"),
@@ -63,6 +63,33 @@ fn apply_schema_upgrades(connection: &Connection, current_version: i32) -> Resul
 
     if current_version < 7 {
         apply_text_kind_migration(&transaction)?;
+    }
+
+    if current_version < 8 {
+        transaction.execute_batch(
+            "CREATE TABLE IF NOT EXISTS clip_text_formats(
+            item_id TEXT PRIMARY KEY REFERENCES clip_items(id) ON DELETE CASCADE,
+            html_bytes BLOB NOT NULL
+        );",
+        )?;
+        let mut statement = transaction.prepare("SELECT ci.id, ci.full_text, f.html_bytes FROM clip_items ci LEFT JOIN clip_text_formats f ON f.item_id = ci.id WHERE ci.type = 'text'")?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<Vec<u8>>>(2)?,
+            ))
+        })?;
+        for row in rows {
+            let (id, text, html) = row?;
+            transaction.execute(
+                "UPDATE clip_items SET hash = ?2 WHERE id = ?1",
+                params![
+                    id,
+                    crate::services::text_identity::text_formats_hash(&text, html.as_deref())
+                ],
+            )?;
+        }
     }
 
     set_schema_version(&transaction, CURRENT_SCHEMA_VERSION)?;

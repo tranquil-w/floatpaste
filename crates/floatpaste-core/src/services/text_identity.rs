@@ -3,19 +3,29 @@
 //!
 //! 哈希输入带版本与基础类型前缀，参与计算的是原始 `full_text` 的 UTF-8
 //! 字节——代码缩进、连续空格等原文差异都算不同内容。文本用途不参与
-//! 计算，调整识别规则不会制造新条目；普通文本与未来的富文本变体共用
-//! 这套版本化编码，通过前缀中的类型段区分。
+//! 计算，调整识别规则不会制造新条目；普通文本与富文本变体共用
+//! 这套版本化编码，通过格式标记与长度边界区分。
 
 use sha2::{Digest, Sha256};
 
-/// 文本身份的域分隔前缀：`floatpaste:text:v1\0`（基础类型 text，编码 v1）。
-const TEXT_HASH_DOMAIN: &[u8] = b"floatpaste:text:v1\0";
+/// 文本身份的域分隔前缀：`floatpaste:text:v2\0`（基础类型 text，编码 v2）。
+const TEXT_HASH_DOMAIN: &[u8] = b"floatpaste:text:v2\0";
 
 /// 计算文本条目的内容身份。输入为完整原文；同文必然同身份。
 pub fn text_content_hash(full_text: &str) -> String {
+    text_formats_hash(full_text, None)
+}
+
+pub fn text_formats_hash(full_text: &str, html: Option<&[u8]>) -> String {
     let mut hasher = Sha256::new();
     hasher.update(TEXT_HASH_DOMAIN);
+    hasher.update((full_text.len() as u64).to_le_bytes());
     hasher.update(full_text.as_bytes());
+    hasher.update([u8::from(html.is_some())]);
+    if let Some(html) = html {
+        hasher.update((html.len() as u64).to_le_bytes());
+        hasher.update(html);
+    }
     crate::services::digest_to_hex(hasher.finalize().iter().copied())
 }
 

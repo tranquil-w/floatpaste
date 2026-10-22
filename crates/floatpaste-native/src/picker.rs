@@ -895,9 +895,8 @@ fn ensure_thumbnails(app: &App, items: &[ClipItemSummary]) {
 
 /* ───────────────── 会话动作 ───────────────── */
 
-/// 确认上屏（对齐 PickerShell.confirmSelection）：as_path_text 走次级
-/// 形态——图片上屏为图片路径、文件上屏为逐行路径列表（Shift+Enter）
-pub fn confirm(app: &App, index: usize, as_path_text: bool) {
+/// 确认上屏：窗口仅选择主/次动作，格式能力交给共用解析器。
+pub fn confirm(app: &App, index: usize, secondary: bool) {
     let Some(item) = app.state.item_at(index) else {
         return;
     };
@@ -908,12 +907,12 @@ pub fn confirm(app: &App, index: usize, as_path_text: bool) {
     let option = PasteOption {
         restore_clipboard_after_paste: settings.restore_clipboard_after_paste,
         paste_to_target: true,
-        as_path_text,
+        mode: floatpaste_core::domain::clip_item::resolve_paste_mode(&item, secondary),
     };
 
     if let Err(error) = paste_flow::paste_item(app, &item.id, option) {
         warn!("粘贴失败: {error}");
-        crate::tray::notify_failure("上屏失败，请稍后重试");
+        crate::tray::notify_failure(&format!("上屏失败：{error}"));
     }
 }
 
@@ -1456,6 +1455,20 @@ pub(crate) mod reveal_contract_tests {
         slint::run_event_loop_until_quit().unwrap();
     }
 
+    fn wait_for_reveal(hwnd: isize, expected: ScreenPoint) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            if win32_ext::physical_rect(hwnd)
+                .is_some_and(|r| (r.left, r.top) == (expected.x, expected.y))
+            {
+                return;
+            }
+            // 暖帧繁忙时准备超时和显示延迟会在不同轮事件循环调度。
+            // 正向显屏断言等实际几何，提前显示/取消断言仍按原时序检查。
+            pump(16);
+        }
+    }
+
     pub(crate) fn run() {
         let dir = std::env::temp_dir().join(format!("floatpaste-reveal-{}", std::process::id()));
         let _cleanup = TempDirGuard(dir.clone());
@@ -1541,6 +1554,7 @@ pub(crate) mod reveal_contract_tests {
         assert!(responsive.get(), "后台准备期间事件循环必须能响应其他事件");
         parked();
         pump(PREPARATION_BUDGET.as_millis() as u64 + REVEAL_DELAY_MS + 80);
+        wait_for_reveal(hwnd, expected);
         let rect = win32_ext::physical_rect(hwnd).unwrap();
         assert_eq!((rect.left, rect.top), (expected.x, expected.y));
         assert!(!win.get_blur_active(), "超时必须使用当前主题实底");
@@ -1612,6 +1626,7 @@ pub(crate) mod reveal_contract_tests {
             pump(REVEAL_DELAY_MS / 2);
             parked();
             pump(REVEAL_DELAY_MS + 80);
+            wait_for_reveal(hwnd, expected);
             let rect = win32_ext::physical_rect(hwnd).unwrap();
             assert_eq!((rect.left, rect.top), (expected.x, expected.y));
             assert_eq!((rect.right - rect.left, rect.bottom - rect.top), (360, 420));

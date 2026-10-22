@@ -28,6 +28,10 @@ impl ClipService {
             )));
         }
 
+        if existing.full_text == text {
+            return Ok(existing);
+        }
+
         let normalized = NormalizeService::normalize_text(text, None)
             .ok_or_else(|| AppError::Message("更新内容不能为空".to_string()))?;
         state.repository.update_text(id, &normalized)

@@ -28,6 +28,7 @@ impl NormalizeService {
 
         Some(NewClipTextItem {
             normalized: NormalizedClipText {
+                html_bytes: None,
                 full_text: text.to_string(),
                 preview_text: preview,
                 search_text: normalized_text.to_lowercase(),

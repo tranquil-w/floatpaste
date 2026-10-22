@@ -31,6 +31,23 @@ use floatpaste_core::{
     services::normalize_service::NormalizeService,
     services::picker_position_service::center_in_work_area,
 };
+use floatpaste_core::{
+    domain::{
+        clip_item::{PasteMode, SearchQuery, SearchSort},
+        error::AppError,
+    },
+    platform::windows::{
+        clipboard_formats::{write_text_formats, ClipboardSnapshot},
+        file_clipboard::write_file_paths_to_clipboard,
+    },
+    services::{
+        history_service::HistoryService,
+        html_format::{encode_html_fragment, MAX_HTML_BYTES},
+        image_storage::ImageStorage,
+        paste_support::{publish_item, schedule_clipboard_restore},
+    },
+    state::CoreState,
+};
 use windows::{
     core::{BOOL, PCWSTR},
     Win32::{
@@ -89,7 +106,7 @@ fn clipboard_unusable_before_start() -> bool {
 }
 /// 剪贴板是互斥资源，输入法、剪贴板管理器等外部进程会间歇占用；
 /// 写入类操作短重试，持续失败才让测试失败
-fn retry_clipboard<T>(mut op: impl FnMut() -> Result<T, arboard::Error>) -> T {
+fn retry_clipboard<T, E: std::fmt::Debug>(mut op: impl FnMut() -> Result<T, E>) -> T {
     let mut last = None;
     for _ in 0..15 {
         match op() {
@@ -98,12 +115,7 @@ fn retry_clipboard<T>(mut op: impl FnMut() -> Result<T, arboard::Error>) -> T {
         }
         thread::sleep(Duration::from_millis(200));
     }
-    panic!(
-        "剪贴板操作持续失败（被外部进程占用）: {last:?}\n\
-         若反复出现，系统剪贴板可能已被外部进程持有不释放或进程死在临界区\
-         （见 docs/testing.md 故障模式）；恢复：taskkill /f /im explorer.exe \
-         && start explorer.exe"
-    );
+    panic!("剪贴板操作短重试后仍失败: {last:?}；保留隔离目录与实例日志，区分占用、格式转换和实例行为，排查步骤见 docs/testing.md");
 }
 
 /// 只读连接查隔离库；被测实例持有写连接（短事务），busy_timeout 兜并发
@@ -393,7 +405,7 @@ fn wake_via_second_launch(envs: &[(&str, String)]) {
 struct Cleanup {
     child: Option<Child>,
     instance_id: String,
-    original_text: Option<String>,
+    original_clipboard: Option<ClipboardSnapshot>,
     data_root: PathBuf,
 }
 
@@ -427,17 +439,15 @@ impl Drop for Cleanup {
             }
             let _ = child.wait();
         }
-        if let Ok(mut clipboard) = arboard::Clipboard::new() {
-            for _ in 0..5 {
-                let attempt = match self.original_text.clone() {
-                    Some(text) => clipboard.set_text(text).map(|_| ()),
-                    None => clipboard.clear(),
-                };
-                if attempt.is_ok() {
-                    break;
-                }
-                thread::sleep(Duration::from_millis(200));
+        for _ in 0..5 {
+            if self
+                .original_clipboard
+                .as_ref()
+                .is_none_or(|snapshot| snapshot.restore(None, None).is_ok())
+            {
+                break;
             }
+            thread::sleep(Duration::from_millis(200));
         }
         // 诊断开关：FLOATPASTE_E2E_KEEP=1 时保留临时目录（实例日志在
         // com.floatpaste/logs），供间歇失败的事后取证；平时不留痕
@@ -517,7 +527,7 @@ fn app_e2e_smoke_flow() {
     // spawn 前清空剪贴板：被测实例启动即主动核对一次当前剪贴板，
     // 残留内容会作为首条录入污染计数
     let mut clipboard = arboard::Clipboard::new().unwrap();
-    let original_text = clipboard.get_text().ok();
+    let original_clipboard = retry_clipboard(|| ClipboardSnapshot::capture(true));
     retry_clipboard(|| clipboard.clear());
 
     let instance_id = format!("e2e-{stamp}");
@@ -539,7 +549,7 @@ fn app_e2e_smoke_flow() {
     let mut cleanup = Cleanup {
         child: Some(spawn_instance(&envs, true)),
         instance_id,
-        original_text: original_text.clone(),
+        original_clipboard: Some(original_clipboard),
         data_root: data_root.clone(),
     };
     let picker_pid = cleanup.child.as_ref().unwrap().id();
@@ -587,6 +597,112 @@ fn app_e2e_smoke_flow() {
         "重复复制相同文本应去重置顶，不得新增条目"
     );
 
+    // 多格式采集跨进程持久化；快照/发布契约串行使用同一剪贴板隔离范围。
+    let html_text = format!("e2e-html-中文😀-{stamp}");
+    let html_bytes = encode_html_fragment(&format!("<p><b>{html_text}</b></p>"));
+    retry_clipboard(|| write_text_formats(&html_text, Some(&html_bytes), None));
+    assert!(
+        wait_until(Duration::from_secs(10), Duration::from_millis(200), || {
+            count_rows(&db_path, "SELECT count(*) FROM clip_items ci JOIN clip_text_formats f ON f.item_id = ci.id WHERE ci.full_text = ?1 AND ci.deleted_at IS NULL", Some(&html_text)) == 1
+        }),
+        "HTML 与纯文本应作为同一条目持久化"
+    );
+    let snapshot = retry_clipboard(|| ClipboardSnapshot::capture(true));
+    assert_eq!(snapshot.html(), Some(html_bytes.as_slice()));
+    let repository = SqliteRepository::new(&db_path).unwrap();
+    let persisted = repository
+        .search(SearchQuery {
+            keyword: html_text.clone(),
+            filters: Default::default(),
+            offset: 0,
+            limit: 10,
+            sort: SearchSort::RecentDesc,
+        })
+        .unwrap();
+    let rich = repository
+        .get_item_for_paste(&persisted.items[0].id)
+        .unwrap();
+    assert_eq!(rich.html_bytes, Some(html_bytes.clone()));
+    let driver = CoreState::new(
+        repository,
+        ImageStorage::new(app_dir.clone()).unwrap(),
+        UserSetting::default(),
+    );
+    // 复用真正上屏的发布逻辑，只验证写回、不向外部应用注入按键。
+    retry_clipboard(|| publish_item(&driver, &rich, PasteMode::Original, None, Some(&snapshot)));
+    assert!(
+        HistoryService::ingest_text_formats(&driver, &html_text, Some(html_bytes.clone()), None)
+            .unwrap()
+            .is_none(),
+        "发布须登记完整格式身份"
+    );
+    let plain_sequence = retry_clipboard(|| {
+        publish_item(&driver, &rich, PasteMode::PlainText, None, Some(&snapshot))
+    });
+    assert!(retry_clipboard(|| { ClipboardSnapshot::capture(true) })
+        .html()
+        .is_none());
+    assert!(
+        HistoryService::ingest_text(&driver, &html_text, None)
+            .unwrap()
+            .is_none(),
+        "发布须登记纯文本回退身份"
+    );
+    schedule_clipboard_restore(&driver, snapshot.clone(), None, 0, 1, plain_sequence).unwrap();
+    let newer = format!("e2e-user-new-copy-{stamp}");
+    retry_clipboard(|| clipboard.set_text(newer.clone()));
+    thread::sleep(Duration::from_millis(700));
+    assert_eq!(
+        retry_clipboard(|| clipboard.get_text()),
+        newer,
+        "延迟恢复不得覆盖用户的新复制"
+    );
+    assert!(retry_clipboard(|| snapshot.restore(None, Some(plain_sequence))).is_none());
+    let sequence = retry_clipboard(|| write_text_formats(&html_text, None, None));
+    assert!(retry_clipboard(|| snapshot.restore(None, Some(sequence))).is_some());
+    assert_eq!(
+        retry_clipboard(|| { ClipboardSnapshot::capture(true) }).html(),
+        Some(html_bytes.as_slice())
+    );
+    let extracted_marker = format!("e2e-html-only-中文😀-{stamp}");
+    let html_only = encode_html_fragment(&format!("<b>{extracted_marker}</b>"));
+    retry_clipboard(|| write_text_formats("", Some(&html_only), None));
+    assert!(
+        wait_until(Duration::from_secs(10), Duration::from_millis(100), || {
+            active_full_text_exists(&db_path, &extracted_marker)
+        }),
+        "无可用系统纯文本时应从有效 HTML 片段提取文字"
+    );
+    let oversized_fallback = format!("e2e-html-oversized-{stamp}");
+    let oversized = format!("<p>{}</p>", "x".repeat(MAX_HTML_BYTES));
+    retry_clipboard(|| clipboard.set_html(oversized.as_str(), Some(oversized_fallback.as_str())));
+    assert!(
+        wait_until(Duration::from_secs(10), Duration::from_millis(100), || {
+            active_full_text_exists(&db_path, &oversized_fallback)
+        }),
+        "超限 HTML 应保留可用纯文本"
+    );
+    let over_limit_error = retry_clipboard(|| match ClipboardSnapshot::capture(true) {
+        Err(AppError::Clipboard(message)) if message.contains("4 MiB") => Ok(message),
+        Err(error) => Err(error),
+        Ok(_) => panic!("恢复快照不得接受超限 HTML"),
+    });
+    assert!(over_limit_error.contains("取消"));
+    assert_eq!(retry_clipboard(|| clipboard.get_text()), oversized_fallback);
+    let paths = vec![db_path.to_string_lossy().into_owned()];
+    retry_clipboard(|| write_file_paths_to_clipboard(&paths, None, None));
+    let files_snapshot = retry_clipboard(|| ClipboardSnapshot::capture(true));
+    assert_eq!(files_snapshot.files.as_ref(), Some(&paths));
+    retry_clipboard(|| clipboard.set_text("文件快照恢复前"));
+    assert!(retry_clipboard(|| files_snapshot.restore(None, None)).is_some());
+    assert_eq!(
+        retry_clipboard(|| { ClipboardSnapshot::capture(true) })
+            .files
+            .as_ref(),
+        Some(&paths)
+    );
+    drop(driver);
+
     // ── 场景 4：图片录入（CF 读取 → 解码 → 落盘 images/）──
     cleanup.assert_running("图片录入");
     let mut pixels = Vec::with_capacity(8 * 8 * 4);
@@ -616,6 +732,23 @@ fn app_e2e_smoke_flow() {
             .unwrap_or(false)
     });
     assert!(images_written, "图片条目应把文件写入 images/ 存储");
+
+    let image_snapshot = retry_clipboard(|| ClipboardSnapshot::capture(true));
+    let image = image_snapshot.image().expect("图片快照应可解码");
+    retry_clipboard(|| {
+        floatpaste_core::platform::windows::image_clipboard::write_image_to_clipboard(
+            None,
+            &image,
+            Some(&image_snapshot),
+        )
+    });
+    let restored_image = retry_clipboard(|| ClipboardSnapshot::capture(true))
+        .image()
+        .unwrap();
+    assert_eq!(
+        restored_image.rgba, image.rgba,
+        "PNG/DIB 共用发布器应保留像素"
+    );
 
     // ── 场景 5：二次启动经唤醒事件开关速贴面板（屏内 ↔ 停屏）──
     cleanup.assert_running("唤醒面板");
@@ -793,7 +926,7 @@ fn app_e2e_smoke_flow() {
         let mut search_cleanup = Cleanup {
             child: Some(spawn_instance(&search_envs, true)),
             instance_id: search_stamp.clone(),
-            original_text: None,
+            original_clipboard: None,
             data_root: search_root,
         };
         let search_pid = search_cleanup.child.as_ref().unwrap().id();

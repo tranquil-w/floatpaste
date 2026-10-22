@@ -25,3 +25,5 @@ pub(crate) fn digest_to_hex(bytes: impl Iterator<Item = u8>) -> String {
     }
     encoded
 }
+
+pub mod html_format;
