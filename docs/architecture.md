@@ -61,6 +61,7 @@ Rust 文件路径相对于对应 crate 的 `src/`；Slint 界面位于 native �
 | 改动范围 | 主要入口 | 当前约束 |
 |----------|----------|----------|
 | 录入、去重、搜索与标签 | core 的 `services/`、`repository/sqlite_repository.rs` | [运行行为与数据约定](runtime-behavior.md) |
+| 文本用途识别与内容身份 | core 的 `services/text_kind.rs`、`services/text_identity.rs` | 识别与搜索归一化分离；用途不参与 hash，见 [运行行为与数据约定](runtime-behavior.md) |
 | 启动、日志与共享状态 | native 的 `main.rs`、`system.rs`、`app_state.rs` | [开发与诊断](../CONTRIBUTING.md) |
 | 窗口与上屏 | native 的 `picker.rs`、`search.rs`、`overlay.rs`、`paste_flow.rs` | [窗口时序与防坑](no-focus-picker.md) |
 | 会话键与窗口外点击 | core 的 `platform/windows/session_keyboard.rs`（RegisterHotKey）、`mouse_monitor.rs`（LL 鼠标钩子） | [窗口时序与防坑](no-focus-picker.md) |

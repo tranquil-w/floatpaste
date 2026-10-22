@@ -3,8 +3,49 @@
 //! 纯文本派生，不依赖 GUI 运行时；速贴、搜索、编辑与预览窗口共用，
 //! 保证各窗口对同一条目的文案一致。
 
-use crate::domain::clip_item::ClipItemSummary;
+use crate::domain::clip_item::{ClipItemSummary, TextKind};
+use crate::services::text_kind::http_url_parts;
 use crate::services::time_format::format_relative_time_or_unused;
+
+/// 列表摘要最多 120 字符；原文与上屏内容由 full_text 独立保存。
+pub fn text_preview(full_text: &str, kind: TextKind) -> String {
+    let trimmed = full_text.trim();
+    let preview = match kind {
+        TextKind::Link => http_url_parts(trimmed)
+            .map(|(host, suffix)| {
+                if suffix.is_empty() {
+                    host.to_string()
+                } else {
+                    format!("{host} · {suffix}")
+                }
+            })
+            .unwrap_or_else(|| full_text.to_string()),
+        TextKind::Path => {
+            let mut lines = trimmed.lines();
+            let first = lines.next().unwrap_or_default().trim();
+            let path = first.trim_end_matches(['\\', '/']);
+            let mut summary = if first.len() == 3 && first.as_bytes().get(1) == Some(&b':') {
+                first.to_string()
+            } else if let Some((parent, name)) = path.rsplit_once(['\\', '/']) {
+                let parent = if parent.len() == 2 && parent.as_bytes()[1] == b':' {
+                    &path[..3]
+                } else {
+                    parent
+                };
+                format!("{name} · {parent}")
+            } else {
+                first.to_string()
+            };
+            let remaining = lines.count();
+            if remaining > 0 {
+                summary.push_str(&format!(" （另 {remaining} 条路径）"));
+            }
+            summary
+        }
+        _ => return full_text.chars().take(120).collect(),
+    };
+    preview.chars().take(120).collect()
+}
 
 /// 无结果时优先解释关键词与筛选，再根据监听状态引导下一步。
 /// 动作码：0=无，1=清除关键词，2=清除筛选。
@@ -34,10 +75,16 @@ pub fn search_empty_state(
 }
 
 /// 类型徽章文案（对齐旧版 getClipTypeLabel）：文件类按「文件/文件夹」
-/// 组成细分，目录数以文件数为上限（脏数据兜底）。
+/// 组成细分，目录数以文件数为上限（脏数据兜底）；文本条目按用途细分
+/// 「链接/路径/代码」，用途不改变其文本本体身份。
 pub fn clip_type_label(item: &ClipItemSummary) -> String {
     match item.r#type.as_str() {
-        "text" => "文本".to_string(),
+        "text" => match item.text_kind {
+            TextKind::Link => "链接".to_string(),
+            TextKind::Path => "路径".to_string(),
+            TextKind::Code => "代码".to_string(),
+            TextKind::Plain => "文本".to_string(),
+        },
         "image" => "图片".to_string(),
         "file" => {
             let file_count = item.file_count.max(0) as usize;
@@ -113,7 +160,32 @@ pub fn format_file_size(bytes: Option<i64>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{build_meta, clip_type_label, format_file_size, search_empty_state};
-    use crate::domain::clip_item::ClipItemSummary;
+    use crate::domain::clip_item::{ClipItemSummary, TextKind};
+
+    #[test]
+    fn text_summaries_emphasize_host_and_filename_but_keep_code_layout() {
+        assert_eq!(
+            super::text_preview("https://user:pass@example.com/a?x=1#f", TextKind::Link),
+            "example.com · /a?x=1#f"
+        );
+        assert_eq!(
+            super::text_preview("https://[::1]:8080/", TextKind::Link),
+            "[::1] · /"
+        );
+        assert_eq!(
+            super::text_preview("C:\\Temp\\a.txt\nD:\\b.txt", TextKind::Path),
+            "a.txt · C:\\Temp （另 1 条路径）"
+        );
+        assert_eq!(super::text_preview("C:\\", TextKind::Path), "C:\\");
+        let code = "fn main() {\n    println!(\"hi\");\n}";
+        assert_eq!(super::text_preview(code, TextKind::Code), code);
+        assert_eq!(
+            super::text_preview(&"中".repeat(121), TextKind::Plain)
+                .chars()
+                .count(),
+            120
+        );
+    }
 
     #[test]
     fn empty_state_prioritizes_keyword_then_filters_before_monitoring() {
@@ -145,6 +217,7 @@ mod tests {
             image_format: None,
             file_size: None,
             tags: Vec::new(),
+            text_kind: TextKind::Plain,
         }
     }
 
@@ -159,6 +232,23 @@ mod tests {
         assert_eq!(label("file", 3, 1), "文件/文件夹");
         assert_eq!(label("file", 3, 0), "文件");
         assert_eq!(label("unknown", 0, 0), "未知");
+    }
+
+    #[test]
+    fn clip_type_label_refines_text_items_by_kind() {
+        let mut link = item_of("text", 0, 0);
+        link.text_kind = TextKind::Link;
+        assert_eq!(clip_type_label(&link), "链接");
+        let mut path = item_of("text", 0, 0);
+        path.text_kind = TextKind::Path;
+        assert_eq!(clip_type_label(&path), "路径");
+        let mut code = item_of("text", 0, 0);
+        code.text_kind = TextKind::Code;
+        assert_eq!(clip_type_label(&code), "代码");
+        // 非文本条目忽略用途列
+        let mut file = item_of("file", 1, 0);
+        file.text_kind = TextKind::Code;
+        assert_eq!(clip_type_label(&file), "文件");
     }
 
     #[test]

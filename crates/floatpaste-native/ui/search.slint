@@ -650,7 +650,10 @@ export component SearchWindow inherits Window {
     in-out property <bool> has-next-page: false;
     in-out property <bool> fetching-next: false;
     in-out property <[SearchTagChip]> tag-chips;
-    in-out property <int> active-filter: 0; // 0=全部 1=收藏 2=文本 3=图片 4=文件
+    in-out property <int> active-filter: 0; // 0=全部类型 2=文本 3=图片 4=文件
+    in-out property <bool> favorited-only: false;
+    // 文本用途细分筛选（仅 active-filter==2 时显示）：0=全部 1=普通 2=链接 3=代码 4=路径
+    in-out property <int> active-text-kind: 0;
     // 空状态：标题/描述/动作（0=无 1=清除关键词 2=清除筛选）
     in-out property <string> empty-title;
     in-out property <string> empty-description;
@@ -679,6 +682,7 @@ export component SearchWindow inherits Window {
     callback keyword-edited(string);
     callback clear-keyword();
     callback filter-selected(int);
+    callback text-kind-selected(int);
     callback tag-toggled(int);
     callback clear-filters();
     callback retry-clicked();
@@ -990,19 +994,56 @@ export component SearchWindow inherits Window {
                             alignment: start;
 
                             FilterChip {
-                                label: "全部";
+                                label: "全部类型";
                                 active: root.active-filter == 0;
                                 clicked => { root.filter-selected(0); }
                             }
                             FilterChip {
-                                label: "收藏";
-                                active: root.active-filter == 1;
+                                label: "仅收藏";
+                                active: root.favorited-only;
                                 clicked => { root.filter-selected(1); }
                             }
                             FilterChip {
                                 label: "文本";
                                 active: root.active-filter == 2;
                                 clicked => { root.filter-selected(2); }
+                            }
+                            // 文本用途细分（仅文本筛选激活时出现）
+                            if (root.active-filter == 2): Rectangle {
+                                width: 9px;
+                                height: 16px;
+                                Rectangle {
+                                    x: 4px;
+                                    y: 0;
+                                    width: 1px;
+                                    height: parent.height;
+                                    background: Theme.border-subtle;
+                                }
+                            }
+                            if (root.active-filter == 2): FilterChip {
+                                label: "全部";
+                                active: root.active-text-kind == 0;
+                                clicked => { root.text-kind-selected(0); }
+                            }
+                            if (root.active-filter == 2): FilterChip {
+                                label: "普通";
+                                active: root.active-text-kind == 1;
+                                clicked => { root.text-kind-selected(1); }
+                            }
+                            if (root.active-filter == 2): FilterChip {
+                                label: "链接";
+                                active: root.active-text-kind == 2;
+                                clicked => { root.text-kind-selected(2); }
+                            }
+                            if (root.active-filter == 2): FilterChip {
+                                label: "代码";
+                                active: root.active-text-kind == 3;
+                                clicked => { root.text-kind-selected(3); }
+                            }
+                            if (root.active-filter == 2): FilterChip {
+                                label: "路径";
+                                active: root.active-text-kind == 4;
+                                clicked => { root.text-kind-selected(4); }
                             }
                             FilterChip {
                                 label: "图片";

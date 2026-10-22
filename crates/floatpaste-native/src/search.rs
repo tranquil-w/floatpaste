@@ -24,6 +24,7 @@ use tracing::{info, warn};
 
 use floatpaste_core::domain::clip_item::{
     ClipItemSummary, ClipType, PasteOption, SearchFilters, SearchQuery, SearchResult, SearchSort,
+    TextKind,
 };
 use floatpaste_core::domain::error::AppError;
 use floatpaste_core::domain::settings::{PasteTrigger, UserSetting};
@@ -166,10 +167,14 @@ fn apply_preset_filter(app: &App, preset_tags: Vec<String>) {
         let mut state = state.borrow_mut();
         state.tags = tags;
         state.filter = 0;
+        state.favorited_only = false;
+        state.text_kind = 0;
     });
     // 「看这个标签下的条目」从全新筛选开始
     win.set_keyword("".into());
     win.set_active_filter(0);
+    win.set_favorited_only(false);
+    win.set_active_text_kind(0);
     PRESET_RESIZE.with(|flag| flag.set(true));
     refresh_tags(app);
     run_query(app);
@@ -527,6 +532,8 @@ fn reset_session_state(app: &App) {
     win.set_selected(0);
     win.set_delete_armed_row(-1);
     win.set_active_filter(0);
+    win.set_favorited_only(false);
+    win.set_active_text_kind(0);
     win.set_load_failed(false);
     win.set_fetching_next(false);
     win.set_has_next_page(false);
@@ -601,8 +608,12 @@ fn begin_focus_watcher(app: &App, epoch: u64) {
 struct QueryState {
     /// 已生效（防抖后）进入查询的关键词
     keyword: String,
-    /// 0=全部 1=收藏 2=文本 3=图片 4=文件
+    /// 0=全部类型 2=文本 3=图片 4=文件；收藏为独立条件
     filter: u32,
+    favorited_only: bool,
+    /// 文本用途细分筛选（仅 filter==2 时参与查询）：
+    /// 0=全部 1=普通 2=链接 3=代码 4=路径
+    text_kind: u32,
     /// 标签筛选（原始大小写，AND 语义）
     tags: Vec<String>,
     /// 已加载条数（分页游标）
@@ -613,6 +624,19 @@ struct QueryState {
     fetching_next: bool,
     /// 失效在途响应：会话重置/新查询使旧回调丢弃
     seq: u64,
+}
+
+impl QueryState {
+    fn select_filter(&mut self, filter: u32) {
+        if filter == 1 {
+            self.favorited_only = !self.favorited_only;
+        } else {
+            self.filter = filter;
+            if filter != 2 {
+                self.text_kind = 0;
+            }
+        }
+    }
 }
 
 thread_local! {
@@ -631,11 +655,27 @@ thread_local! {
     static ALLOW_SHRINK: Cell<bool> = const { Cell::new(false) };
 }
 
-fn build_query(keyword: &str, filter: u32, tags: &[String], offset: u32) -> SearchQuery {
+fn build_query(
+    keyword: &str,
+    filter: u32,
+    text_kind: u32,
+    tags: &[String],
+    offset: u32,
+    favorited_only: bool,
+) -> SearchQuery {
     let mut filters = SearchFilters::default();
+    filters.favorited_only = favorited_only.then_some(true);
     match filter {
-        1 => filters.favorited_only = Some(true),
-        2 => filters.clip_type = Some(ClipType::Text),
+        2 => {
+            filters.clip_type = Some(ClipType::Text);
+            filters.text_kind = match text_kind {
+                1 => Some(TextKind::Plain),
+                2 => Some(TextKind::Link),
+                3 => Some(TextKind::Code),
+                4 => Some(TextKind::Path),
+                _ => None,
+            };
+        }
         3 => filters.clip_type = Some(ClipType::Image),
         4 => filters.clip_type = Some(ClipType::File),
         _ => {}
@@ -663,14 +703,20 @@ fn run_query(app: &App) {
         return;
     };
     let keyword = win.get_keyword().to_string();
-    let (filter, tags, seq) = QUERY.with(|state| {
+    let (filter, text_kind, favorited_only, tags, seq) = QUERY.with(|state| {
         let mut state = state.borrow_mut();
         state.keyword = keyword.clone();
         state.offset = 0;
         state.fetching = true;
         state.fetching_next = false;
         state.seq += 1;
-        (state.filter, state.tags.clone(), state.seq)
+        (
+            state.filter,
+            state.text_kind,
+            state.favorited_only,
+            state.tags.clone(),
+            state.seq,
+        )
     });
     win.set_fetching_next(false);
     let keep_loading = win.get_rows().row_count() == 0;
@@ -682,7 +728,7 @@ fn run_query(app: &App) {
     let core = app.core().clone();
     let app_cb = app.clone();
     thread::spawn(move || {
-        let query = build_query(&keyword, filter, &tags, 0);
+        let query = build_query(&keyword, filter, text_kind, &tags, 0, favorited_only);
         let result = core.repository.search(query);
         let _ = slint::invoke_from_event_loop(move || match result {
             Ok(result) => apply_page(&app_cb, result, seq, false),
@@ -793,17 +839,20 @@ fn preset_resize(app: &App) {
 
 /// 触底预载（对齐 fetchNextPage：offset + items.length < total）
 pub fn fetch_next(app: &App) {
-    let (has_more, fetching, fetching_next, keyword, filter, tags) = QUERY.with(|state| {
-        let state = state.borrow();
-        (
-            state.has_more,
-            state.fetching,
-            state.fetching_next,
-            state.keyword.clone(),
-            state.filter,
-            state.tags.clone(),
-        )
-    });
+    let (has_more, fetching, fetching_next, keyword, filter, text_kind, favorited_only, tags) =
+        QUERY.with(|state| {
+            let state = state.borrow();
+            (
+                state.has_more,
+                state.fetching,
+                state.fetching_next,
+                state.keyword.clone(),
+                state.filter,
+                state.text_kind,
+                state.favorited_only,
+                state.tags.clone(),
+            )
+        });
     if !has_more || fetching || fetching_next {
         return;
     }
@@ -819,7 +868,7 @@ pub fn fetch_next(app: &App) {
     let core = app.core().clone();
     let app_cb = app.clone();
     thread::spawn(move || {
-        let query = build_query(&keyword, filter, &tags, offset);
+        let query = build_query(&keyword, filter, text_kind, &tags, offset, favorited_only);
         let result = core.repository.search(query);
         let _ = slint::invoke_from_event_loop(move || match result {
             Ok(result) => apply_page(&app_cb, result, seq, true),
@@ -875,8 +924,24 @@ pub fn clear_keyword(app: &App) {
 }
 
 pub fn filter_selected(app: &App, filter: i32) {
-    QUERY.with(|state| state.borrow_mut().filter = filter.max(0) as u32);
-    app.with_search(|win| win.set_active_filter(filter));
+    let (filter, kind, favorited_only) = QUERY.with(|state| {
+        let mut state = state.borrow_mut();
+        state.select_filter(filter.max(0) as u32);
+        (state.filter, state.text_kind, state.favorited_only)
+    });
+    app.with_search(|win| {
+        win.set_active_filter(filter as i32);
+        win.set_favorited_only(favorited_only);
+        win.set_active_text_kind(kind as i32);
+    });
+    run_query(app);
+}
+
+/// 文本用途细分筛选（仅文本筛选激活时出现）：0=全部 1=普通 2=链接 3=代码 4=路径
+pub fn text_kind_selected(app: &App, kind: i32) {
+    let kind = kind.max(0) as u32;
+    QUERY.with(|state| state.borrow_mut().text_kind = kind);
+    app.with_search(|win| win.set_active_text_kind(kind as i32));
     run_query(app);
 }
 
@@ -884,10 +949,14 @@ pub fn clear_filters(app: &App) {
     QUERY.with(|state| {
         let mut state = state.borrow_mut();
         state.filter = 0;
+        state.favorited_only = false;
+        state.text_kind = 0;
         state.tags.clear();
     });
     app.with_search(|win| {
         win.set_active_filter(0);
+        win.set_favorited_only(false);
+        win.set_active_text_kind(0);
         rebuild_tag_chips(win);
     });
     run_query(app);
@@ -1110,13 +1179,19 @@ pub fn refresh_copy(app: &App) {
 }
 
 fn update_empty_state(app: &App) {
-    let (keyword, filter, tags_len) = QUERY.with(|state| {
+    let (keyword, has_filters) = QUERY.with(|state| {
         let state = state.borrow();
-        (state.keyword.clone(), state.filter, state.tags.len())
+        (
+            state.keyword.clone(),
+            state.filter != 0
+                || state.text_kind != 0
+                || state.favorited_only
+                || !state.tags.is_empty(),
+        )
     });
     let (title, description, action) = floatpaste_core::services::clip_display::search_empty_state(
         &keyword,
-        filter != 0 || tags_len > 0,
+        has_filters,
         app.state.current_settings().pause_monitoring,
     );
     app.with_search(|win| {
@@ -1302,7 +1377,7 @@ pub fn toggle_favorite(app: &App, index: usize) {
                 .filter(|item| item.id == target_id)
                 .for_each(|item| item.is_favorited = next);
 
-            let favorite_view_removed = !next && QUERY.with(|state| state.borrow().filter == 1);
+            let favorite_view_removed = !next && QUERY.with(|state| state.borrow().favorited_only);
             if favorite_view_removed {
                 // 收藏视图内取消收藏：从当前页移除、总数回补、选中重锚
                 items.retain(|item| item.id != target_id);
@@ -1494,7 +1569,11 @@ fn apply_height(app: &App) {
     // 与本次结果行同源
     let default_view = QUERY.with(|state| {
         let state = state.borrow();
-        state.keyword.trim().is_empty() && state.filter == 0 && state.tags.is_empty()
+        state.keyword.trim().is_empty()
+            && state.filter == 0
+            && !state.favorited_only
+            && state.text_kind == 0
+            && state.tags.is_empty()
     });
     if default_view && !win.get_loading() && win.get_rows().row_count() > 0 {
         OPEN_BASE_HEIGHT.with(|value| value.set(target as f32));
@@ -1653,6 +1732,12 @@ pub fn wire(app: &App) {
         let app_cb = app.clone();
         win.on_filter_selected(move |filter| {
             filter_selected(&app_cb, filter);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_text_kind_selected(move |kind| {
+            text_kind_selected(&app_cb, kind);
         });
     }
     {
@@ -1866,9 +1951,10 @@ mod tests {
 
     #[test]
     fn query_maps_filter_and_sort() {
-        let query = build_query("  关键词 ", 3, &["工作".to_string()], 50);
+        let query = build_query("  关键词 ", 3, 0, &["工作".to_string()], 50, false);
         assert_eq!(query.keyword, "  关键词 ");
         assert_eq!(query.filters.clip_type, Some(ClipType::Image));
+        assert_eq!(query.filters.text_kind, None);
         assert_eq!(
             query.filters.tag_names.as_deref(),
             Some(["工作".to_string()].as_slice())
@@ -1877,9 +1963,55 @@ mod tests {
         assert_eq!(query.offset, 50);
         assert_eq!(query.limit, PAGE_SIZE);
 
-        let query = build_query("", 1, &[], 0);
+        let query = build_query("", 0, 0, &[], 0, true);
         assert!(matches!(query.sort, SearchSort::RecentDesc));
         assert_eq!(query.filters.favorited_only, Some(true));
+    }
+
+    #[test]
+    fn query_maps_text_kind_sub_filter_only_under_text_filter() {
+        let query = build_query("", 2, 2, &[], 0, false);
+        assert_eq!(query.filters.clip_type, Some(ClipType::Text));
+        assert_eq!(query.filters.text_kind, Some(TextKind::Link));
+
+        // 用途细分只在文本筛选下参与查询；索引 0 与越界值都是不筛选
+        let query = build_query("", 2, 0, &[], 0, false);
+        assert_eq!(query.filters.clip_type, Some(ClipType::Text));
+        assert_eq!(query.filters.text_kind, None);
+
+        let query = build_query("", 0, 2, &[], 0, false);
+        assert_eq!(query.filters.clip_type, None);
+        assert_eq!(query.filters.text_kind, None);
+    }
+
+    #[test]
+    fn favorites_toggle_preserves_type_kind_and_combines_with_tags() {
+        let mut state = super::QueryState::default();
+        state.select_filter(2);
+        state.text_kind = 2;
+        state.tags.push("工作".into());
+        state.select_filter(1);
+        let query = build_query(
+            "关键词",
+            state.filter,
+            state.text_kind,
+            &state.tags,
+            50,
+            state.favorited_only,
+        );
+        assert_eq!(query.filters.favorited_only, Some(true));
+        assert_eq!(query.filters.clip_type, Some(ClipType::Text));
+        assert_eq!(query.filters.text_kind, Some(TextKind::Link));
+        assert_eq!(query.filters.tag_names, Some(vec!["工作".into()]));
+        assert_eq!(query.offset, 50);
+        state.select_filter(1);
+        assert!(!state.favorited_only);
+        assert_eq!(state.text_kind, 2);
+        state.select_filter(1);
+        state.select_filter(3);
+        assert!(state.favorited_only);
+        assert_eq!(state.filter, 3);
+        assert_eq!(state.text_kind, 0);
     }
 
     #[test]
@@ -2091,6 +2223,30 @@ pub(crate) mod scroll_reset_tests {
             win.get_list_scroll_y(),
             0.0,
             "深滚动位上的空态视口必须回顶（bug 现场：清除筛选按钮不可见）"
+        );
+
+        let link = NormalizeService::normalize_text("https://example.com/favorite", None).unwrap();
+        let link_id = app.core().repository.save_text_item(&link).unwrap().id;
+        app.core().repository.set_favorited(&link_id, true).unwrap();
+        filter_selected(&app, 2);
+        text_kind_selected(&app, 2);
+        filter_selected(&app, 1);
+        let closer = thread::spawn(|| {
+            thread::sleep(Duration::from_millis(1000));
+            slint::quit_event_loop().unwrap();
+        });
+        let _ = slint::run_event_loop_until_quit();
+        closer.join().unwrap();
+        assert!(win.get_favorited_only());
+        assert_eq!(win.get_active_filter(), 2);
+        assert_eq!(win.get_active_text_kind(), 2);
+        assert_eq!(win.get_rows().row_count(), 1);
+        assert_eq!(win.get_rows().row_data(0).unwrap().id.as_str(), link_id);
+        toggle_favorite(&app, 0);
+        assert_eq!(
+            win.get_rows().row_count(),
+            0,
+            "组合收藏视图中取消收藏应立即移除条目"
         );
     }
 }

@@ -127,12 +127,14 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    /// 文本身份按原文定义：空白折叠只是搜索归一化，不再参与 hash。
+    /// 空白变体（首尾空白、换行与连续空格差异）是不同内容、各自成条。
     #[test]
-    fn decide_treats_whitespace_variants_as_same_content() {
+    fn decide_treats_whitespace_variants_as_distinct_content() {
         let path = temp_db_path();
         let repository = SqliteRepository::new(&path).unwrap();
 
-        // "Alpha\nBeta" 与 " Alpha   Beta " 经 split_whitespace 折叠后 hash 相同
+        // "Alpha\nBeta" 与 " Alpha   Beta " 原文不同，身份不同
         let first = NormalizeService::normalize_text("Alpha\nBeta", None).unwrap();
         repository.save_text_item(&first).unwrap();
 
@@ -140,7 +142,37 @@ mod tests {
         let decision = DedupService::default()
             .decide(&repository, &second.normalized.hash)
             .unwrap();
+        assert!(matches!(decision, DedupDecision::StoreNew));
+
+        // 相同原文仍然命中既有项
+        let same = NormalizeService::normalize_text("Alpha\nBeta", None).unwrap();
+        let decision = DedupService::default()
+            .decide(&repository, &same.normalized.hash)
+            .unwrap();
         assert!(matches!(decision, DedupDecision::BumpExisting(_)));
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    /// 文本用途不参与身份：同一原文调整识别规则前后 hash 不变。
+    #[test]
+    fn identity_is_independent_of_detected_text_kind() {
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+
+        let url = NormalizeService::normalize_text("https://example.com/x", None).unwrap();
+        assert_eq!(
+            url.normalized.text_kind,
+            crate::domain::clip_item::TextKind::Link
+        );
+        repository.save_text_item(&url).unwrap();
+
+        // 用途不进 hash：身份只由原文决定，识别规则变化不改变 hash
+        assert_eq!(
+            url.normalized.hash,
+            crate::services::text_identity::text_content_hash("https://example.com/x")
+        );
 
         drop(repository);
         fs::remove_file(path).unwrap();

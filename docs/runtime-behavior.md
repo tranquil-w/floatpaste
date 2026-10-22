@@ -4,8 +4,11 @@
 
 ## 剪贴监听与入库
 
-- 三类条目：文本（原文/预览/搜索文本/来源应用）、图片（PNG 直传与 DIB、缩略图、哈希去重）、文件（路径列表/数量/总大小）。
-- 同 hash（未删除）内容刷新既有条目并置顶，不重复插入；监听使用 `AddClipboardFormatListener`，上屏写回按内容 hash 设置 3 秒抑制窗。
+- 三类条目：文本（原文/预览/搜索文本/来源应用/文本用途）、图片（PNG 直传与 DIB、缩略图、哈希去重）、文件（路径列表/数量/总大小）。
+- 文本条目按保守规则识别用途（整段链接 → Windows 绝对路径/UNC/逐行路径 → JSON 对象数组/完整围栏/多强特征裸代码，顺序即优先级），识别不确定时回到普通文本。用途只影响类型徽章、悬浮气泡与检索筛选，不改写原文、不访问磁盘与网络、不影响可上屏性；用户分类仍走标签。规则见 `services/text_kind.rs`。
+- 链接识别校验 HTTP(S) scheme、主机标签、IP 字面量与 0–65535 端口；列表摘要突出主机与路径/查询/片段，不显示 userinfo。路径摘要突出首条路径的文件名与父路径，并标识额外路径数量。摘要最多 120 字符，悬浮气泡和上屏仍使用完整原文；代码气泡使用等宽字体并保留换行、缩进，度量与渲染共用字体。
+- 同 hash（未删除）内容刷新既有条目并置顶，不重复插入。文本 hash 按原始 `full_text` 的 UTF-8 字节计算（带版本与基础类型前缀的版本化编码，见 `services/text_identity.rs`）：代码缩进、连续空格等原文差异是不同内容；空白折叠加小写的归一化文本仅用于搜索索引，不用于身份。文本用途不参与 hash，调整识别规则不会制造新条目；编辑保存文本后按同一规则重算用途与身份。图片、文件 hash 语义不变。
+- 监听使用 `AddClipboardFormatListener`，上屏写回按内容 hash 设置 3 秒抑制窗。
 - 排除应用名单、暂停监听、自写回抑制（上屏写剪贴板不再入库）。
 
 ## 搜索排序
@@ -13,6 +16,7 @@
 - `recent_desc`：`COALESCE(last_used_at, created_at) DESC`，再按 `created_at DESC`。
 - `relevance_desc`：收藏与带标签条目加权置前，其次 `search_text` 子串命中，再按 FTS5 `bm25 ASC`，最后同 `recent_desc` 的时间序。
 - 空关键词强制 `recent_desc`；收藏是独立筛选条件、不在速贴置顶，但在 `relevance_desc` 中有加权。
+- 类型筛选「文本」下可再按用途细分（全部/普通/链接/代码/路径），细分 chip 仅在文本筛选激活时出现；「仅收藏」为独立开关，与类型、用途、关键词和标签按 AND 组合。切换收藏保留类型与用途，切出文本类型时清空用途；「全部类型」保留收藏开关，「清除筛选」同时清除类型、用途、收藏和标签。不选细分时「文本」包含全部用途。
 - 操作按钮与输入暂停提示显示当前配置的会话键，设置保存后即时更新；无历史条目时根据监听状态引导复制或恢复监听。
 
 ## 上屏执行
@@ -48,9 +52,12 @@ SQLite（`%APPDATA%\com.floatpaste\floatpaste.db`）+ FTS5：`clip_items`（条�
 
 存储策略：文本进库；图片以 PNG 存数据目录 `images/` 子目录；文件条目只记路径引用；删除为软删除。标签只经由条目关联成立：全量替换、重命名与物理删除路径上失去全部关联的标签行随之清理（孤儿清理）；仅被软删条目引用的标签保留——软删即保留期缓冲，清理不得改为 join `clip_items` 过滤，否则破坏恢复语义。
 
+数据库升级时按保存的原文回填文本用途、列表摘要并重算文本 hash；v6 数据同样按当前规则刷新派生字段。不改 ID、标签与收藏，不合并历史条目；此前被旧版空白归一化合并掉的原文差异无法从库中还原。图片与文件行的用途列保持默认值并被忽略。
+
 ## 实现入口
 
 - 录入与自写回过滤：[clip_service.rs](../crates/floatpaste-core/src/services/clip_service.rs)、[paste_support.rs](../crates/floatpaste-core/src/services/paste_support.rs)。
+- 文本用途识别与内容身份：[text_kind.rs](../crates/floatpaste-core/src/services/text_kind.rs)、[text_identity.rs](../crates/floatpaste-core/src/services/text_identity.rs)。
 - 搜索排序与标签关联：[sqlite_repository.rs](../crates/floatpaste-core/src/repository/sqlite_repository.rs)。
 - 上屏编排：[paste_flow.rs](../crates/floatpaste-native/src/paste_flow.rs)。
 - 启动权限判断：[launch_mode.rs](../crates/floatpaste-core/src/launch_mode.rs)；自启任务：[elevated_task.rs](../crates/floatpaste-core/src/platform/windows/elevated_task.rs)。

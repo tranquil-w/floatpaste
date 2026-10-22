@@ -19,6 +19,8 @@ pub struct ClipItemSummary {
     pub image_format: Option<String>,
     pub file_size: Option<i64>,
     pub tags: Vec<String>,
+    /// 文本用途；图片、文件恒为 Plain（忽略此列）
+    pub text_kind: TextKind,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,6 +49,8 @@ pub struct ClipItemDetail {
     pub directory_count: i32,
     pub total_size: Option<i64>,
     pub tags: Vec<String>,
+    /// 文本用途；图片、文件恒为 Plain（忽略此列）
+    pub text_kind: TextKind,
 }
 
 impl ClipItemDetail {
@@ -68,6 +72,7 @@ impl ClipItemDetail {
             image_format: self.image_format.clone(),
             file_size: self.file_size,
             tags: self.tags.clone(),
+            text_kind: self.text_kind,
         }
     }
 }
@@ -140,6 +145,43 @@ impl ClipType {
     }
 }
 
+/// 文本用途：文字更像什么，决定徽章、预览与筛选。
+///
+/// 与基础类型（`ClipType`）和内容身份（hash）互相独立：用途不参与 hash，
+/// 调整识别规则不会制造新条目；识别不确定时回到 `Plain`，且任何用途值
+/// 都不影响原文上屏。
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TextKind {
+    #[default]
+    Plain,
+    Link,
+    Path,
+    Code,
+}
+
+impl TextKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Plain => "plain",
+            Self::Link => "link",
+            Self::Path => "path",
+            Self::Code => "code",
+        }
+    }
+
+    /// 数据库读取的解码入口：未知值一律降级为普通文本，
+    /// 不让识别值影响可上屏性。
+    pub fn parse(value: &str) -> Self {
+        match value {
+            "link" => Self::Link,
+            "path" => Self::Path,
+            "code" => Self::Code,
+            _ => Self::Plain,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchFilters {
@@ -149,6 +191,8 @@ pub struct SearchFilters {
     pub include_deleted: Option<bool>,
     /// 按标签筛选，AND 语义；None 或空数组表示不筛选
     pub tag_names: Option<Vec<String>>,
+    /// 按文本用途筛选，AND 语义；None 表示不筛选（"文本"仍包含全部文本用途）
+    pub text_kind: Option<TextKind>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -212,6 +256,7 @@ pub struct NormalizedClipText {
     pub preview_text: String,
     pub search_text: String,
     pub hash: String,
+    pub text_kind: TextKind,
 }
 
 #[derive(Debug, Clone)]

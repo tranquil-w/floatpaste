@@ -12,7 +12,7 @@ use std::sync::atomic::Ordering;
 
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
-use floatpaste_core::domain::clip_item::ClipItemSummary;
+use floatpaste_core::domain::clip_item::{ClipItemSummary, TextKind};
 use floatpaste_core::platform::windows::active_app::ActiveAppResolver;
 use floatpaste_core::platform::windows::picker_position::{
     current_cursor_point, work_area_from_point,
@@ -211,6 +211,14 @@ fn render(
     };
     // 条目预览总是带元信息行（静态提示可能刚用过 simple-mode）
     win.set_simple_mode(false);
+    // 字体在度量前切换；正文与两个标尺共用此属性，避免窗口尺寸失配。
+    win.set_content_font_family(
+        if item.r#type == "text" && item.text_kind == TextKind::Code {
+            "Consolas".into()
+        } else {
+            SharedString::default()
+        },
+    );
 
     let dpi = if host_hwnd > 0 {
         win32_ext::window_dpi(host_hwnd) as f32 / 96.0
@@ -334,6 +342,8 @@ fn render(
     // 卡片宽不得小于元信息行的自然需求（徽章组 + 来源 + 时间 + 行内
     // 间距 6px，与 tooltip.slint 元信息行布局对齐）：正文短于元信息
     // 时只按正文定宽会把行尾时间裁掉
+    let content_font = win.get_content_font_family();
+    win.set_content_font_family(SharedString::default());
     let meta_content_width = {
         let badge_w: f32 = badges
             .iter()
@@ -347,6 +357,7 @@ fn render(
         let time_w = win.invoke_measure_natural_width(win.get_time_text());
         badge_w + 6.0 + source_w + 6.0 + 6.0 + time_w
     };
+    win.set_content_font_family(content_font);
     let width = (content_width.max(meta_content_width) + inset_h).clamp(MIN_WIDTH, MAX_WIDTH);
     let height = content_height + chrome_v + HEIGHT_SAFETY;
     present(

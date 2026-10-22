@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS clip_items (
   file_paths TEXT NOT NULL DEFAULT '[]',
   file_count INTEGER NOT NULL DEFAULT 0,
   total_size INTEGER NULL,
-  directory_count INTEGER NOT NULL DEFAULT 0
+  directory_count INTEGER NOT NULL DEFAULT 0,
+  text_kind TEXT NOT NULL DEFAULT 'plain'
 );
 
 CREATE INDEX IF NOT EXISTS idx_clip_items_created_at ON clip_items(created_at DESC);

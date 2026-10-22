@@ -12,6 +12,8 @@ pub mod retention_service;
 pub mod search_service;
 
 pub mod tag_service;
+pub mod text_identity;
+pub mod text_kind;
 pub mod time_format;
 
 pub(crate) fn digest_to_hex(bytes: impl Iterator<Item = u8>) -> String {

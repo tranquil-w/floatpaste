@@ -17,7 +17,7 @@ use crate::{
     domain::{
         clip_item::{
             ClipItemDetail, ClipItemSummary, NewClipFileItem, NewClipImageItem, NewClipTextItem,
-            SearchQuery, SearchResult, SearchSort, TagInfo,
+            SearchQuery, SearchResult, SearchSort, TagInfo, TextKind,
         },
         error::AppError,
     },
@@ -41,7 +41,7 @@ fn summary_select_columns() -> String {
        ci.image_path, ci.image_width, ci.image_height, ci.image_format, ci.file_size,
        ci.file_paths, ci.file_count, ci.total_size, ci.directory_count,
        ci.created_at, ci.updated_at, ci.last_used_at,
-       {TAG_NAMES_SUBQUERY} AS tag_names"
+       {TAG_NAMES_SUBQUERY} AS tag_names, ci.text_kind"
     )
 }
 
@@ -76,8 +76,8 @@ impl SqliteRepository {
                 "INSERT INTO clip_items(
                     id, type, full_text, preview_text, search_text, source_app,
                     is_favorited, hash, created_at, updated_at, last_used_at, deleted_at,
-                    image_path, image_width, image_height, image_format, file_size, file_paths, file_count, total_size, directory_count
-                ) VALUES(?1, 'text', ?2, ?3, ?4, ?5, 0, ?6, ?7, ?7, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '[]', 0, NULL, 0)",
+                    image_path, image_width, image_height, image_format, file_size, file_paths, file_count, total_size, directory_count, text_kind
+                ) VALUES(?1, 'text', ?2, ?3, ?4, ?5, 0, ?6, ?7, ?7, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '[]', 0, NULL, 0, ?8)",
                 params![
                     id,
                     item.normalized.full_text,
@@ -85,7 +85,8 @@ impl SqliteRepository {
                     item.normalized.search_text,
                     item.source_app,
                     item.normalized.hash,
-                    now
+                    now,
+                    item.normalized.text_kind.as_str()
                 ],
             )?;
             transaction.execute(
@@ -242,7 +243,7 @@ impl SqliteRepository {
                     ci.is_favorited, ci.created_at, ci.updated_at, ci.last_used_at, ci.hash,
                     ci.image_path, ci.image_width, ci.image_height, ci.image_format, ci.file_size,
                     ci.file_paths, ci.file_count, ci.total_size, ci.directory_count,
-                    {TAG_NAMES_SUBQUERY} AS tag_names
+                    {TAG_NAMES_SUBQUERY} AS tag_names, ci.text_kind
              FROM clip_items ci
              WHERE ci.id = ?1 AND ci.deleted_at IS NULL"
         ))?;
@@ -267,7 +268,7 @@ impl SqliteRepository {
             transaction.execute(
                 "UPDATE clip_items
                  SET full_text = ?2, preview_text = ?3, search_text = ?4, source_app = COALESCE(source_app, ?5),
-                     hash = ?6, updated_at = ?7
+                     hash = ?6, text_kind = ?7, updated_at = ?8
                  WHERE id = ?1 AND deleted_at IS NULL",
                 params![
                     id,
@@ -276,6 +277,7 @@ impl SqliteRepository {
                     text.normalized.search_text,
                     text.source_app,
                     text.normalized.hash,
+                    text.normalized.text_kind.as_str(),
                     now
                 ],
             )?;
@@ -791,6 +793,12 @@ fn build_filters_clause_with_alias(query: &SearchQuery, alias: &str) -> (String,
         values.push(Value::Text(source_app.to_string()));
     }
 
+    // 文本用途筛选为 AND 语义；"文本"不筛选用途时仍包含全部文本用途
+    if let Some(text_kind) = query.filters.text_kind {
+        clauses.push(format!("{}text_kind = ?", prefix(alias)));
+        values.push(Value::Text(text_kind.as_str().to_string()));
+    }
+
     // 标签筛选为 AND 语义：每个标签一条 EXISTS；空列表等价于未筛选
     if let Some(tag_names) = query.filters.tag_names.as_ref() {
         for tag_name in tag_names
@@ -887,6 +895,7 @@ fn map_summary_row(row: &Row<'_>) -> rusqlite::Result<ClipItemSummary> {
         image_format: row.get(8)?,
         file_size: row.get(9)?,
         tags: parse_tags(row.get::<_, String>(17)?),
+        text_kind: TextKind::parse(&row.get::<_, String>(18)?),
     })
 }
 
@@ -927,6 +936,7 @@ fn map_detail_row(row: &Row<'_>) -> rusqlite::Result<ClipItemDetail> {
         directory_count: resolved_file_fields.directory_count,
         total_size: resolved_file_fields.total_size,
         tags: parse_tags(row.get::<_, String>(20)?),
+        text_kind: TextKind::parse(&row.get::<_, String>(21)?),
     })
 }
 
@@ -1028,9 +1038,11 @@ mod tests {
     use crate::domain::{
         clip_item::{
             ClipType, NewClipTextItem, NormalizedClipText, SearchFilters, SearchQuery, SearchSort,
+            TextKind,
         },
         settings::StoredWindowPosition,
     };
+    use crate::services::normalize_service::NormalizeService;
 
     const LEGACY_SCHEMA_SQL: &str = r#"
 PRAGMA journal_mode = WAL;
@@ -1123,7 +1135,15 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
             .unwrap()
             .query_row("PRAGMA user_version", [], |row| row.get::<_, i32>(0))
             .unwrap();
-        assert_eq!(version, 5);
+        assert_eq!(version, 7);
+
+        // v6 迁移按原文回填用途并重算 hash：ID、标签、收藏保持不变
+        let legacy_detail = repository.get_item_detail("legacy-item").unwrap();
+        assert_eq!(legacy_detail.text_kind, TextKind::Plain);
+        assert_eq!(
+            legacy_detail.hash,
+            crate::services::text_identity::text_content_hash("遗留记录包含测试关键词")
+        );
 
         // v4 迁移重建了 FTS 索引：旧记录的中文关键词（位于连续中文串中部）应可命中
         let migrated_result = repository
@@ -1138,6 +1158,122 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
         assert_eq!(migrated_result.total, 1);
         assert_eq!(migrated_result.items[0].id, "legacy-item");
 
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    /// 迁移识别：旧库中保存的链接/路径/代码原文在升级后获得对应用途，
+    /// 且同载荷再次入库时按新 hash 命中既有条目（不重复录入）。
+    #[test]
+    fn migration_backfills_text_kind_and_new_captures_dedup_on_recomputed_hash() {
+        let path = temp_db_path();
+        let connection = Connection::open(&path).unwrap();
+        connection.execute_batch(LEGACY_SCHEMA_SQL).unwrap();
+        connection
+            .execute_batch(
+                "INSERT INTO clip_items(
+                    id, type, full_text, preview_text, search_text, source_app,
+                    is_favorited, hash, created_at, updated_at, last_used_at, deleted_at
+                ) VALUES
+                 ('m-link', 'text', 'https://example.com/a?b=1', 'https://example.com/a?b=1', 'https://example.com/a?b=1', NULL, 0, 'old-hash-1', 1, 1, NULL, NULL),
+                 ('m-json', 'text', '{\"k\": [1, 2]}', '{\"k\": [1, 2]}', '{\"k\": [1, 2]}', NULL, 0, 'old-hash-2', 1, 1, NULL, NULL),
+                 ('m-plain', 'text', '一句普通的话', '一句普通的话', '一句普通的话', NULL, 0, 'old-hash-3', 1, 1, NULL, NULL);",
+            )
+            .unwrap();
+        for (id, text) in [
+            ("m-chinese", "第一行\n第二行"),
+            ("m-emoji", "🙂第一行\n第二行"),
+        ] {
+            connection.execute(
+                "INSERT INTO clip_items (id,type,full_text,preview_text,search_text,hash,created_at,updated_at) VALUES (?1,'text',?2,'preview','search','old-unicode-hash',1,1)",
+                params![id, text],
+            ).unwrap();
+        }
+        drop(connection);
+
+        let repository = SqliteRepository::new(&path).unwrap();
+        for (id, text) in [
+            ("m-chinese", "第一行\n第二行"),
+            ("m-emoji", "🙂第一行\n第二行"),
+        ] {
+            let detail = repository.get_item_detail(id).unwrap();
+            assert_eq!(detail.full_text, text);
+            assert_eq!(detail.text_kind, TextKind::Plain);
+            assert_eq!(
+                detail.hash,
+                crate::services::text_identity::text_content_hash(text)
+            );
+        }
+        assert_eq!(
+            repository
+                .get_item_detail("m-link")
+                .unwrap()
+                .content_preview,
+            "example.com · /a?b=1"
+        );
+        assert_eq!(
+            repository.get_item_detail("m-link").unwrap().text_kind,
+            TextKind::Link
+        );
+        assert_eq!(
+            repository.get_item_detail("m-json").unwrap().text_kind,
+            TextKind::Code
+        );
+        assert_eq!(
+            repository.get_item_detail("m-plain").unwrap().text_kind,
+            TextKind::Plain
+        );
+
+        // 重算后的 hash 与当前识别口径一致：再次复制同文命中既有条目
+        let normalized = crate::services::normalize_service::NormalizeService::normalize_text(
+            "https://example.com/a?b=1",
+            None,
+        )
+        .unwrap();
+        assert!(matches!(
+            crate::services::dedup_service::DedupService::default()
+                .decide(&repository, &normalized.normalized.hash)
+                .unwrap(),
+            crate::services::dedup_service::DedupDecision::BumpExisting(id) if id == "m-link"
+        ));
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn v6_migration_refreshes_previews_and_invalid_links_without_losing_metadata() {
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+        let valid = NormalizeService::normalize_text("https://example.com/a", None).unwrap();
+        let id = repository.save_text_item(&valid).unwrap().id;
+        repository.set_item_tags(&id, &["工作".into()]).unwrap();
+        repository.set_favorited(&id, true).unwrap();
+        let invalid = NormalizeService::normalize_text("https://[not-an-ip]/path", None).unwrap();
+        let invalid_id = repository.save_text_item(&invalid).unwrap().id;
+        {
+            let connection = repository.connection.lock().unwrap();
+            connection
+                .execute(
+                    "UPDATE clip_items SET preview_text = full_text, text_kind = 'link'",
+                    [],
+                )
+                .unwrap();
+            connection.pragma_update(None, "user_version", 6).unwrap();
+        }
+        drop(repository);
+
+        let repository = SqliteRepository::new(&path).unwrap();
+        let detail = repository.get_item_detail(&id).unwrap();
+        assert_eq!(detail.content_preview, "example.com · /a");
+        assert_eq!(detail.full_text, valid.normalized.full_text);
+        assert_eq!(detail.hash, valid.normalized.hash);
+        assert_eq!(detail.tags, vec!["工作"]);
+        assert!(detail.is_favorited);
+        assert_eq!(
+            repository.get_item_detail(&invalid_id).unwrap().text_kind,
+            TextKind::Plain
+        );
         drop(repository);
         fs::remove_file(path).unwrap();
     }
@@ -1349,11 +1485,8 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
             .search(SearchQuery {
                 keyword: String::new(),
                 filters: SearchFilters {
-                    favorited_only: None,
                     clip_type: Some(ClipType::Image),
-                    source_app: None,
-                    include_deleted: None,
-                    tag_names: None,
+                    ..SearchFilters::default()
                 },
                 offset: 0,
                 limit: 10,
@@ -1369,11 +1502,8 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
             .search(SearchQuery {
                 keyword: "shared".to_string(),
                 filters: SearchFilters {
-                    favorited_only: None,
                     clip_type: Some(ClipType::File),
-                    source_app: None,
-                    include_deleted: None,
-                    tag_names: None,
+                    ..SearchFilters::default()
                 },
                 offset: 0,
                 limit: 10,
@@ -1397,6 +1527,7 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
                     preview_text: full_text.to_string(),
                     search_text: full_text.to_string(),
                     hash: format!("hash-{full_text}"),
+                    text_kind: TextKind::Plain,
                 },
                 source_app: None,
             })
@@ -1741,6 +1872,7 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
                         preview_text: "编辑后内容".to_string(),
                         search_text: "编辑后内容".to_string(),
                         hash: "hash-edited".to_string(),
+                        text_kind: TextKind::Plain,
                     },
                     source_app: None,
                 },
@@ -1908,11 +2040,8 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
             .unwrap();
 
         let filters = |tag_names: Option<Vec<String>>| SearchFilters {
-            favorited_only: None,
-            clip_type: None,
-            source_app: None,
-            include_deleted: None,
             tag_names,
+            ..SearchFilters::default()
         };
 
         let single_tag = repository
@@ -2122,6 +2251,118 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
             .unwrap();
         drop(connection);
         assert_eq!(remaining_ids, vec!["newest", "newer", "oldest-favorited"]);
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    /// 用途筛选与标签、收藏按 AND 组合；不筛选用途时"文本"包含全部用途。
+    #[test]
+    fn search_combines_text_kind_filter_with_other_filters() {
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+
+        let link = NormalizeService::normalize_text("https://example.com/link", None).unwrap();
+        let link_id = repository.save_text_item(&link).unwrap().id;
+        let code = NormalizeService::normalize_text("{\"a\": [1]}", None).unwrap();
+        repository.save_text_item(&code).unwrap();
+        let plain = NormalizeService::normalize_text("一句普通的话", None).unwrap();
+        repository.save_text_item(&plain).unwrap();
+        repository
+            .set_item_tags(&link_id, &["工作".to_string()])
+            .unwrap();
+        repository.set_favorited(&link_id, true).unwrap();
+
+        let query_with_kind = |text_kind: Option<TextKind>| SearchQuery {
+            keyword: String::new(),
+            filters: SearchFilters {
+                text_kind,
+                ..SearchFilters::default()
+            },
+            offset: 0,
+            limit: 10,
+            sort: SearchSort::RecentDesc,
+        };
+
+        // 不筛选用途：文本包含全部用途
+        assert_eq!(repository.search(query_with_kind(None)).unwrap().total, 3);
+        let links = repository
+            .search(query_with_kind(Some(TextKind::Link)))
+            .unwrap();
+        assert_eq!(links.total, 1);
+        assert_eq!(links.items[0].id, link_id);
+        assert_eq!(links.items[0].text_kind, TextKind::Link);
+        assert_eq!(
+            repository
+                .search(query_with_kind(Some(TextKind::Code)))
+                .unwrap()
+                .total,
+            1
+        );
+        assert_eq!(
+            repository
+                .search(query_with_kind(Some(TextKind::Plain)))
+                .unwrap()
+                .total,
+            1
+        );
+
+        // 与标签 AND 组合：链接 + 标签命中；链接 + 其他标签为空
+        let link_and_tag = SearchQuery {
+            keyword: String::new(),
+            filters: SearchFilters {
+                text_kind: Some(TextKind::Link),
+                tag_names: Some(vec!["工作".to_string()]),
+                ..SearchFilters::default()
+            },
+            offset: 0,
+            limit: 10,
+            sort: SearchSort::RecentDesc,
+        };
+        assert_eq!(repository.search(link_and_tag.clone()).unwrap().total, 1);
+        let link_and_other_tag = SearchQuery {
+            filters: SearchFilters {
+                text_kind: Some(TextKind::Link),
+                tag_names: Some(vec!["生活".to_string()]),
+                ..SearchFilters::default()
+            },
+            ..link_and_tag
+        };
+        assert_eq!(repository.search(link_and_other_tag).unwrap().total, 0);
+
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    /// 编辑文本后用途与 hash 同步重算：链接改为普通文本后按新用途筛选
+    /// 不再命中，且同文再入库按新 hash 去重。
+    #[test]
+    fn update_text_recomputes_kind_and_hash() {
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+        let seeded = NormalizeService::normalize_text("https://example.com/old", None).unwrap();
+        let id = repository.save_text_item(&seeded).unwrap().id;
+        assert_eq!(
+            repository.get_item_detail(&id).unwrap().text_kind,
+            TextKind::Link
+        );
+
+        let edited = NormalizeService::normalize_text("编辑后的普通文本", None).unwrap();
+        let detail = repository.update_text(&id, &edited).unwrap();
+        assert_eq!(detail.text_kind, TextKind::Plain);
+        assert_eq!(detail.hash, edited.normalized.hash);
+
+        let kind_query = SearchQuery {
+            keyword: "编辑后的普通文本".to_string(),
+            filters: SearchFilters {
+                text_kind: Some(TextKind::Link),
+                ..SearchFilters::default()
+            },
+            offset: 0,
+            limit: 10,
+            sort: SearchSort::RelevanceDesc,
+        };
+        assert_eq!(repository.search(kind_query).unwrap().total, 0);
 
         drop(repository);
         fs::remove_file(path).unwrap();

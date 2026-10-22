@@ -29,6 +29,7 @@ export component TooltipWindow inherits Window {
     in-out property <length> image-width: 0px;
     in-out property <length> image-height: 0px;
     in-out property <string> content-text;
+    in-out property <string> content-font-family;
     // 正文按源行拆行渲染（Slint Text 无 line-height，行距由
     // content-line-spacing 提供）；静态提示模式仍走 content-text 单行
     in-out property <[TooltipLine]> content-lines;
@@ -159,6 +160,7 @@ export component TooltipWindow inherits Window {
                 spacing: root.content-line-spacing;
                 for line in root.content-lines: Text {
                     text: line.text;
+                    font-family: root.content-font-family;
                     color: Theme.fg-default;
                     font-size: Metrics.text-body;
                     wrap: word-wrap;
@@ -247,6 +249,7 @@ export component TooltipWindow inherits Window {
         // 度量标尺（不可见不挡输入，排版属性与内容 Text 一致），
         // Rust 显示前经 measure-text 借它量内容高度
         text-ruler := Text {
+            font-family: root.content-font-family;
             opacity: 0;
             x: 0;
             y: 0;
@@ -258,6 +261,7 @@ export component TooltipWindow inherits Window {
 
         // 自然宽度标尺：不换行排版，preferred-width 即最宽段落所需宽度
         natural-ruler := Text {
+            font-family: root.content-font-family;
             opacity: 0;
             x: 0;
             y: 0;

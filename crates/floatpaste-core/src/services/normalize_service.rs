@@ -8,6 +8,8 @@ use crate::domain::clip_item::{
     NewClipFileItem, NewClipImageItem, NewClipTextItem, NormalizedClipFile, NormalizedClipImage,
     NormalizedClipText,
 };
+use crate::services::text_identity::text_content_hash;
+use crate::services::text_kind::detect_text_kind;
 
 pub struct NormalizeService;
 
@@ -18,8 +20,11 @@ impl NormalizeService {
         }
 
         let normalized_text = normalize_text_for_indexing(text);
-        let preview = text.chars().take(120).collect::<String>();
-        let hash = digest_to_hex(Sha256::digest(normalized_text.as_bytes()).iter().copied());
+        // 内容身份按原文 UTF-8 字节计算（版本化编码），与搜索归一化无关；
+        // 用途仅描述文字形态，不影响身份
+        let hash = text_content_hash(text);
+        let text_kind = detect_text_kind(text);
+        let preview = super::clip_display::text_preview(text, text_kind);
 
         Some(NewClipTextItem {
             normalized: NormalizedClipText {
@@ -27,6 +32,7 @@ impl NormalizeService {
                 preview_text: preview,
                 search_text: normalized_text.to_lowercase(),
                 hash,
+                text_kind,
             },
             source_app,
         })
@@ -286,6 +292,9 @@ fn normalize_text_for_indexing(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::NormalizeService;
+    use crate::domain::clip_item::TextKind;
+    use crate::services::text_identity::text_content_hash;
+    use crate::services::text_kind::detect_text_kind;
 
     #[test]
     fn normalize_text_keeps_raw_text_but_normalizes_search_and_hash() {
@@ -293,10 +302,24 @@ mod tests {
 
         assert_eq!(item.normalized.full_text, "  Hello\n  WORLD \t ");
         assert_eq!(item.normalized.search_text, "hello world");
+        // 内容身份按原文计算，与搜索归一化解耦
         assert_eq!(
             item.normalized.hash,
-            "149b2dc47770cda1d6b08470b95b620303572835fb6bb66ca78a3d5c24b80919"
+            text_content_hash("  Hello\n  WORLD \t ")
         );
+    }
+
+    #[test]
+    fn normalize_text_carries_detected_kind() {
+        let link = NormalizeService::normalize_text("https://example.com/x", None).unwrap();
+        assert_eq!(link.normalized.text_kind, TextKind::Link);
+
+        let plain = NormalizeService::normalize_text("普通一句话", None).unwrap();
+        assert_eq!(plain.normalized.text_kind, TextKind::Plain);
+
+        // 用途只由原文决定，与 detect_text_kind 一致
+        let json = NormalizeService::normalize_text("{\"a\":1}", None).unwrap();
+        assert_eq!(json.normalized.text_kind, detect_text_kind("{\"a\":1}"));
     }
 
     #[test]

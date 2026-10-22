@@ -1,8 +1,10 @@
 use rusqlite::{params, Connection};
 
+use crate::services::text_identity::text_content_hash;
+use crate::services::text_kind::detect_text_kind;
 use crate::{domain::error::AppError, services::normalize_service::space_cjk_text};
 
-const CURRENT_SCHEMA_VERSION: i32 = 5;
+const CURRENT_SCHEMA_VERSION: i32 = 7;
 const CLIP_ITEMS_MEDIA_COLUMNS: [(&str, &str); 7] = [
     ("image_path", "TEXT NULL"),
     ("image_width", "INTEGER NULL"),
@@ -57,6 +59,10 @@ fn apply_schema_upgrades(connection: &Connection, current_version: i32) -> Resul
 
     if current_version < 5 {
         apply_tags_migration(&transaction)?;
+    }
+
+    if current_version < 7 {
+        apply_text_kind_migration(&transaction)?;
     }
 
     set_schema_version(&transaction, CURRENT_SCHEMA_VERSION)?;
@@ -166,6 +172,52 @@ fn apply_tags_migration(connection: &Connection) -> Result<(), AppError> {
                     .unwrap_or_default(),
                 space_cjk_text(&tags),
             ],
+        )?;
+    }
+    Ok(())
+}
+
+/// v6 引入文本用途与原文身份；v7 按校验后的用途规则重建用途与摘要。
+/// 从任意旧版本升级只扫描一次；已有 v6 数据也需刷新派生字段。
+///
+/// - 用途在 Rust 侧按保守规则从保存的原文识别，图片与文件行保持默认值；
+/// - hash 按原文 UTF-8 字节重算，不改 ID、标签与收藏，也不合并历史条目
+///   （此前被空白归一化合并掉的原文差异无法还原）；
+/// - 重算在事务内进行，hash 索引非唯一，同原文的软删行与存活行各自更新。
+/// - 简化: 全量载入待更新行；数据量大时再引入分批处理。
+fn apply_text_kind_migration(connection: &Connection) -> Result<(), AppError> {
+    // 建列需幂等：全新库先执行 0001_init.sql（已含该列）再跑增量迁移
+    if !column_exists(connection, "clip_items", "text_kind")? {
+        connection.execute(
+            "ALTER TABLE clip_items ADD COLUMN text_kind TEXT NOT NULL DEFAULT 'plain'",
+            [],
+        )?;
+    }
+
+    let updates: Vec<(String, String, String, String)> = {
+        let mut statement =
+            connection.prepare("SELECT id, full_text FROM clip_items WHERE type = 'text'")?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut updates = Vec::new();
+        for row in rows {
+            let (id, full_text) = row?;
+            let kind = detect_text_kind(&full_text);
+            updates.push((
+                id,
+                kind.as_str().to_string(),
+                text_content_hash(&full_text),
+                crate::services::clip_display::text_preview(&full_text, kind),
+            ));
+        }
+        updates
+    };
+
+    for (id, kind, hash, preview) in updates {
+        connection.execute(
+            "UPDATE clip_items SET text_kind = ?2, hash = ?3, preview_text = ?4 WHERE id = ?1",
+            params![id, kind, hash, preview],
         )?;
     }
     Ok(())
