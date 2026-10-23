@@ -1091,6 +1091,19 @@ pub(crate) fn make_row(
 
     SearchRow {
         has_html: item.has_html,
+        is_code: item.r#type == "text" && item.text_kind == TextKind::Code,
+        purpose_label: if item.r#type == "text" {
+            match item.text_kind {
+                TextKind::Link => "链接",
+                TextKind::Path => "路径",
+                TextKind::Code => "代码",
+                TextKind::Plain if item.has_html => "富文本",
+                TextKind::Plain => "",
+            }
+        } else {
+            ""
+        }
+        .into(),
         id: item.id.clone().into(),
         preview: normal_preview.into(),
         kind: match item.r#type.as_str() {
@@ -1304,7 +1317,8 @@ fn open_actions_menu(app: &App, index: usize, x: f32, y: f32) {
         let count = available_paste_modes(&item).len() as f32;
         let menu_height = count * geometry.get_row_height()
             + (count - 1.0) * geometry.get_spacing()
-            + 2.0 * geometry.get_padding();
+            + 2.0 * geometry.get_padding()
+            + geometry.get_caption_height();
         let y = if y + menu_height > logical.height - 8.0 {
             (y - menu_height - 36.0).max(8.0)
         } else {
@@ -2323,6 +2337,8 @@ pub(crate) mod scroll_reset_tests {
                 preview: format!("条目 {index}").into(),
                 kind: 0,
                 has_html: false,
+                is_code: false,
+                purpose_label: "".into(),
                 source_app: "".into(),
                 time_text: "".into(),
                 meta: "".into(),
@@ -2590,6 +2606,13 @@ pub(crate) mod action_menu_tests {
         // 行投影：目录按类型展开，普通文本不凑「纯文本」选项，
         // 次级动作提示名跟随默认配置
         let plain = make_row(&summary("text", false), &keys, &defaults);
+        let mut code = summary("text", false);
+        code.text_kind = floatpaste_core::domain::clip_item::TextKind::Code;
+        code.content_preview = "fn main() {\n    println!(\"浮贴 😀\");\n}".into();
+        let code_row = make_row(&code, &keys, &defaults);
+        assert!(code_row.is_code);
+        assert_eq!(code_row.purpose_label, "代码");
+        assert!(code_row.preview.contains("    println!"));
         assert_eq!(plain.actions.row_count(), 1);
         assert_eq!(row_labels(&plain), vec!["粘贴为文本"]);
         assert_eq!(plain.secondary_label, "", "普通文本无独立次级动作提示");
@@ -2597,6 +2620,12 @@ pub(crate) mod action_menu_tests {
         let rich = make_row(&summary("text", true), &keys, &defaults);
         assert_eq!(row_labels(&rich), vec!["粘贴为原格式", "粘贴为纯文本"]);
         assert_eq!(rich.secondary_label, "粘贴为纯文本");
+        assert_eq!(rich.purpose_label, "富文本");
+        for (purpose, label) in [(TextKind::Link, "链接"), (TextKind::Path, "路径")] {
+            let mut item = summary("text", true);
+            item.text_kind = purpose;
+            assert_eq!(make_row(&item, &keys, &defaults).purpose_label, label);
+        }
 
         let image = make_row(&summary("image", false), &keys, &defaults);
         assert_eq!(
@@ -2736,6 +2765,7 @@ pub(crate) mod action_menu_tests {
 
         let mut item = summary("file", false);
         item.content_preview = "D:\\文档\\项目设计说明.pdf".into();
+        item.tags = vec!["工作".into(), "一个需要省略的长标签名称".into()];
         app.state
             .set_search_items(vec![summary("text", true), item]);
         build_rows(app);
@@ -2764,7 +2794,7 @@ pub(crate) mod action_menu_tests {
             }
         }
         assert!(bounds.0 < bounds.1, "应找到文件行");
-        let y = (bounds.0 + bounds.1) as f32 / 2.0;
+        let y = bounds.0 as f32 + 22.0;
         let (mut main, mut more) = (None, None);
         for x in 400..760 {
             win.window().dispatch_event(WindowEvent::PointerMoved {
@@ -2816,8 +2846,12 @@ pub(crate) mod action_menu_tests {
             ] {
                 let tokens = floatpaste_core::theme::derive_tokens("default", "", theme);
                 crate::theme_bridge::reapply_theme(app, &tokens);
-                for (state, menu) in [("split", false), ("menu", true)] {
+                for (state, menu) in [("split", false), ("menu", true), ("delete", false)] {
                     close_actions_menu(app);
+                    reset_delete_arm(app);
+                    if state == "delete" {
+                        request_delete(app, 1);
+                    }
                     let _ = win.window().take_snapshot().unwrap();
                     if menu {
                         slint::platform::update_timers_and_animations();
@@ -2841,6 +2875,170 @@ pub(crate) mod action_menu_tests {
                 }
             }
         }
+        reset_delete_arm(app);
         close_actions_menu(app);
+        if std::env::var_os("FLOATPASTE_UI_SNAPSHOTS").is_some() {
+            content_snapshots(app, win);
+        }
+    }
+
+    fn content_snapshots(app: &App, win: &SearchWindow) {
+        use floatpaste_core::domain::clip_item::TextKind;
+        if let Ok(requested) = std::env::var("SLINT_SCALE_FACTOR") {
+            let requested: f32 = requested.parse().unwrap();
+            let actual = win.window().scale_factor();
+            assert!(
+                (actual - requested).abs() < 0.01,
+                "快照缩放不符：请求 {requested}，实际 {actual}；需要逐档重新构建"
+            );
+            println!("搜索快照实际缩放：{actual}");
+        }
+        let mut items = Vec::new();
+        for (kind, text, purpose) in [
+            ("text", "发布检查完成，继续原来的输入任务 😀\n第二行保留在完整预览中。", TextKind::Plain),
+            ("text", "FloatPaste — clipboard history, ready when you need it.", TextKind::Plain),
+            ("text", "https://example.com/docs/floatpaste/very-long-path?language=zh-CN&view=preview", TextKind::Link),
+            ("text", "C:\\Users\\设计师\\Documents\\FloatPaste\\release\\2026\\界面验收说明与交付清单.md", TextKind::Path),
+            ("text", "fn main() {\n    println!(\"Hello, 浮贴 😀\");\n}", TextKind::Code),
+            ("image", "FloatPaste 图标 · 512 × 512 · PNG", TextKind::Plain),
+            ("file", "界面验收说明.md、主题对比.png 等 3 个文件", TextKind::Plain),
+        ] {
+            let mut item = summary(kind, false);
+            item.id = format!("sample-{}", items.len());
+            item.content_preview = floatpaste_core::services::clip_display::text_preview(text, purpose);
+            item.text_kind = purpose;
+            item.source_app = Some("一个很长的来源应用名称 Microsoft Visual Studio Code".into());
+            item.created_at = "2026-10-24T08:00:00+08:00".into();
+            item.tags = vec!["一个需要省略的长标签名称".into(), "工作".into(), "常用".into(), "验收".into()];
+            item.is_favorited = items.len() == 2;
+            if kind == "file" { item.file_count = 3; }
+            items.push(item);
+        }
+        app.state.set_search_items(items);
+        build_rows(app);
+        let rows = win.get_rows();
+        let mut image_row = rows.row_data(5).unwrap();
+        image_row.has_thumb = true;
+        image_row.thumb = slint::Image::load_from_path(std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/icon-512.png"
+        )))
+        .unwrap();
+        rows.set_row_data(5, image_row);
+        win.set_result_count(7);
+        win.set_result_total(7);
+        win.window().set_size(slint::LogicalSize::new(780.0, 620.0));
+        let dir =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.artifacts/snapshot");
+        for preset in floatpaste_core::theme::THEME_PRESET_IDS {
+            for (name, mode) in [
+                ("light", floatpaste_core::theme::ResolvedTheme::Light),
+                ("dark", floatpaste_core::theme::ResolvedTheme::Dark),
+            ] {
+                crate::theme_bridge::reapply_theme(
+                    app,
+                    &floatpaste_core::theme::derive_tokens(preset, "", mode),
+                );
+                win.set_selected(2);
+                let pixels = win.window().take_snapshot().unwrap();
+                image::save_buffer(
+                    dir.join(format!(
+                        "polish-search-{preset}-{name}-{}.png",
+                        (win.window().scale_factor() * 100.0).round() as u32
+                    )),
+                    pixels.as_bytes(),
+                    pixels.width(),
+                    pixels.height(),
+                    image::ColorType::Rgba8,
+                )
+                .unwrap();
+            }
+        }
+
+        // 彩色边框四边都应可见，实际渲染宽高比同时防止回退到 cover 裁切。
+        let mut items = Vec::new();
+        for (id, preview, width, height) in [
+            ("landscape", "横图 · 四边完整，保持 2:1 比例", 160, 80),
+            ("portrait", "竖图 · 四边完整，保持 1:2 比例", 80, 160),
+        ] {
+            let mut item = summary("image", false);
+            item.id = id.into();
+            item.content_preview = preview.into();
+            item.image_width = Some(width);
+            item.image_height = Some(height);
+            items.push(item);
+        }
+        app.state.set_search_items(items);
+        build_rows(app);
+        let rows = win.get_rows();
+        for (index, (width, height)) in [(160, 80), (80, 160)].into_iter().enumerate() {
+            let pixels = image::RgbaImage::from_fn(width, height, |x, y| {
+                if x < 8 || y < 8 || x >= width - 8 || y >= height - 8 {
+                    image::Rgba([230, 60, 70, 255])
+                } else {
+                    image::Rgba([22, 142, 168, 255])
+                }
+            });
+            let mut row = rows.row_data(index).unwrap();
+            row.has_thumb = true;
+            row.thumb = slint::Image::from_rgba8(slint::SharedPixelBuffer::clone_from_slice(
+                pixels.as_raw(),
+                width,
+                height,
+            ));
+            rows.set_row_data(index, row);
+        }
+        win.set_result_count(2);
+        win.set_result_total(2);
+        win.set_selected(0);
+        win.window().set_size(slint::LogicalSize::new(780.0, 270.0));
+        for (name, mode) in [
+            ("light", floatpaste_core::theme::ResolvedTheme::Light),
+            ("dark", floatpaste_core::theme::ResolvedTheme::Dark),
+        ] {
+            crate::theme_bridge::reapply_theme(
+                app,
+                &floatpaste_core::theme::derive_tokens("default", "", mode),
+            );
+            let pixels = win.window().take_snapshot().unwrap();
+            let mut bounds = Vec::new();
+            for y in 0..pixels.height() {
+                for x in 0..pixels.width() {
+                    let pixel = pixels.as_slice()[(y * pixels.width() + x) as usize];
+                    if pixel.r > 210 && pixel.g < 85 && pixel.b < 95 {
+                        if bounds
+                            .last()
+                            .is_none_or(|b: &(u32, u32, u32, u32)| y > b.3 + 1)
+                        {
+                            bounds.push((x, y, x, y));
+                        }
+                        let b = bounds.last_mut().unwrap();
+                        b.0 = b.0.min(x);
+                        b.2 = b.2.max(x);
+                        b.3 = y;
+                    }
+                }
+            }
+            assert_eq!(bounds.len(), 2, "两张缩略图的边框应完整可见");
+            for (index, (left, top, right, bottom)) in bounds.into_iter().enumerate() {
+                let ratio = (right - left + 1) as f32 / (bottom - top + 1) as f32;
+                let expected = if index == 0 { 2.0 } else { 0.5 };
+                assert!(
+                    (ratio - expected).abs() < 0.2,
+                    "缩略图不能被裁为方形：{ratio}"
+                );
+            }
+            image::save_buffer(
+                dir.join(format!(
+                    "polish-search-images-{name}-{}.png",
+                    (win.window().scale_factor() * 100.0).round() as u32
+                )),
+                pixels.as_bytes(),
+                pixels.width(),
+                pixels.height(),
+                image::ColorType::Rgba8,
+            )
+            .unwrap();
+        }
     }
 }

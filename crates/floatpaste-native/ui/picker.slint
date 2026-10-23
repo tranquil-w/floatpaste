@@ -22,6 +22,7 @@ export global PasteMenuGeometry {
     out property <length> padding: 6px;
     out property <length> spacing: 2px;
     out property <length> width: 248px;
+    out property <length> caption-height: 30px;
 }
 
 export component PasteActionMenu inherits Rectangle {
@@ -33,7 +34,7 @@ export component PasteActionMenu inherits Rectangle {
     // 节点常驻：从关闭态起算进场；收起立即撤销命中，不延迟后续操作。
     // 关闭态也读取 reveal，确保首次展开从 0 起步（隐藏节点的属性按需求值）。
     visible: root.reveal > 0 || root.open;
-    height: 2 * PasteMenuGeometry.padding + root.actions.length * PasteMenuGeometry.row-height
+    height: PasteMenuGeometry.caption-height + 2 * PasteMenuGeometry.padding + root.actions.length * PasteMenuGeometry.row-height
         + Math.max(0, root.actions.length - 1) * PasteMenuGeometry.spacing;
     property <float> reveal: root.open ? 1 : 0;
     animate reveal { duration: root.open ? Motion.dur-enter : 0ms; easing: Motion.ease; }
@@ -62,6 +63,13 @@ export component PasteActionMenu inherits Rectangle {
         VerticalLayout {
             padding: PasteMenuGeometry.padding;
             spacing: PasteMenuGeometry.spacing;
+            Text {
+                height: PasteMenuGeometry.caption-height - PasteMenuGeometry.spacing;
+                text: "更多上屏方式 · 仅本次";
+                color: Theme.fg-muted;
+                font-size: Metrics.text-hint;
+                vertical-alignment: center;
+            }
             for action[idx] in root.actions: Rectangle {
                 height: PasteMenuGeometry.row-height;
                 border-radius: Metrics.radius-md;
@@ -77,24 +85,22 @@ export component PasteActionMenu inherits Rectangle {
                 HorizontalLayout {
                     padding-left: 12px;
                     padding-right: 8px;
-                    padding-top: 7px;
-                    padding-bottom: 7px;
+                    padding-top: 2px;
+                    padding-bottom: 2px;
                     spacing: 12px;
                     Text {
                         text: action.label;
                         color: Theme.fg-default;
-                        font-size: Metrics.text-sm;
-                        font-weight: idx == root.highlighted
-                            ? Metrics.weight-medium : Metrics.weight-normal;
+                        font-size: Metrics.text-body;
                         vertical-alignment: center;
                         horizontal-stretch: 1;
                         overflow: elide;
                     }
                     if (action.shortcut != ""): Rectangle {
-                        height: 20px;
+                        height: idx > 0 ? 30px : 20px;
                         border-radius: 4px;
                         background: Theme.hover-bg;
-                        HorizontalLayout {
+                        VerticalLayout {
                             padding-left: 6px;
                             padding-right: 6px;
                             Text {
@@ -103,6 +109,12 @@ export component PasteActionMenu inherits Rectangle {
                                 font-size: Metrics.text-xs;
                                 font-family: "Consolas";
                                 vertical-alignment: center;
+                            }
+                            if (idx > 0): Text {
+                                text: "默认次级动作";
+                                color: Theme.fg-muted;
+                                font-size: Metrics.text-meta;
+                                horizontal-alignment: center;
                             }
                         }
                     }
@@ -121,6 +133,7 @@ export component PasteActionMenu inherits Rectangle {
 export struct ClipRow {
     id: string,
     preview: string,
+    is-code: bool,
     type-label: string,
     source-app: string,
     time-text: string,
@@ -388,6 +401,7 @@ component ClipRowCard inherits Rectangle {
                         // 由 ★ 星标承载，不再吃文字色档位
                         color: Theme.fg-default;
                         font-size: Metrics.text-body;
+                        font-family: data.is-code ? Metrics.font-code : "";
                         // 预览串由 Rust 按当前宽度与三行预算裁排并加省略号
                         font-weight: selected ? Metrics.weight-semibold : Metrics.weight-medium;
                         wrap: word-wrap;
@@ -428,7 +442,7 @@ component ClipRowCard inherits Rectangle {
                                     // 恒 fg-muted：徽章底是 canvas 系深底，
                                     // fg-subtle 落上去跌破 4.5 对比度门禁
                                     color: Theme.fg-muted;
-                                    font-size: Metrics.text-micro;
+                                    font-size: Metrics.text-hint;
                                     font-weight: Metrics.weight-bold;
                                     font-family: "Consolas";
                                     vertical-alignment: center;
@@ -448,7 +462,7 @@ component ClipRowCard inherits Rectangle {
                                     text: data.type-label;
                                     // 同数字徽章：canvas-inset 底上用 fg-muted 保对比度
                                     color: Theme.fg-muted;
-                                    font-size: Metrics.text-meta;
+                                    font-size: Metrics.text-hint;
                                     font-weight: Metrics.weight-medium;
                                     vertical-alignment: center;
                                 }
@@ -458,7 +472,7 @@ component ClipRowCard inherits Rectangle {
                         Text {
                             text: data.source-app;
                             color: Theme.fg-metadata;
-                            font-size: Metrics.text-meta;
+                            font-size: Metrics.text-hint;
                             font-weight: Metrics.weight-medium;
                             vertical-alignment: center;
                             overflow: elide;
@@ -485,7 +499,7 @@ component ClipRowCard inherits Rectangle {
                                 height: parent.height;
                                 text: tag-name;
                                 color: Theme.fg-muted;
-                                font-size: Metrics.text-meta;
+                                font-size: Metrics.text-hint;
                                 vertical-alignment: center;
                                 overflow: elide;
                             }
@@ -493,7 +507,7 @@ component ClipRowCard inherits Rectangle {
                         if (data.tag-more > 0): Text {
                             text: "+" + data.tag-more;
                             color: Theme.fg-metadata;
-                            font-size: Metrics.text-meta;
+                            font-size: Metrics.text-hint;
                             vertical-alignment: center;
                         }
                     }
@@ -501,7 +515,7 @@ component ClipRowCard inherits Rectangle {
                     Text {
                         text: data.time-text;
                         color: Theme.fg-metadata;
-                        font-size: Metrics.text-meta;
+                        font-size: Metrics.text-hint;
                         font-weight: Metrics.weight-medium;
                         vertical-alignment: center;
                     }
@@ -509,7 +523,7 @@ component ClipRowCard inherits Rectangle {
                     if (data.favorited): Text {
                         text: "★";
                         color: Theme.favorite;
-                        font-size: selected ? 11px : 12px;
+                        font-size: Metrics.text-xs;
                         vertical-alignment: center;
                     }
                 }
@@ -659,8 +673,9 @@ export component QuickPasteWindow inherits Window {
     // 用 Slint 自己的排版引擎度量，与实际渲染天然一致。字重固定
     // Metrics.weight-semibold（标尺属性同值）：选中态行内 Text 在
     // 500↔600 间切换，按重字重裁排才能保证两态都不溢出预算
-    callback measure-preview(string, length) -> length;
-    measure-preview(text, width) => {
+    callback measure-preview(string, length, bool) -> length;
+    measure-preview(text, width, code) => {
+        measure-ruler.font-family = code ? Metrics.font-code : "";
         measure-ruler.text = text;
         measure-ruler.width = width;
         measure-ruler.height
@@ -745,15 +760,21 @@ export component QuickPasteWindow inherits Window {
                     height: 16px;
                 }
 
-                // 居中拖拽横条（装饰性把手，悬停不加粗避免行高跳动）
-                Rectangle {
-                    x: (parent.width - 28px) / 2;
-                    y: (parent.height - 3px) / 2;
-                    width: 28px;
-                    height: 3px;
-                    border-radius: Metrics.radius-pill;
-                    // border-default 为 border-subtle 与 fg 前景系之间的折中档
-                    background: Theme.border-default;
+                // 直接说明当前主键的作用；沿用整条顶栏的拖拽命中，不新增焦点。
+                Text {
+                    x: 38px;
+                    width: parent.width - 84px;
+                    height: parent.height;
+                    text: root.actions-row >= 0 ? "更多上屏方式"
+                        : (root.selected >= 0 && root.selected < root.rows.length
+                            && root.rows[root.selected].actions.length > 0
+                            ? root.rows[root.selected].actions[0].shortcut + " · "
+                                + root.rows[root.selected].actions[0].label : "速贴");
+                    color: Theme.fg-muted;
+                    font-size: Metrics.text-hint;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    overflow: elide;
                 }
 
                 // 关闭（hover 淡红底；12px X 与 WindowTitleBar 窗控同规格）

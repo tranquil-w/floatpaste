@@ -118,16 +118,9 @@ pub fn clip_type_label(item: &ClipItemSummary) -> String {
     }
 }
 
-/// 元信息行（对齐旧版 getItemDetailMeta）：来源 • 相对时间 • [尺寸] • [大小] • [文件数]
+/// 元信息行：内容特征、时间优先，长来源在末端省略，避免挤掉尺寸与文件数量。
 pub fn build_meta(item: &ClipItemSummary) -> String {
-    let mut parts = vec![
-        item.source_app.clone().unwrap_or_else(|| "未知来源".into()),
-        format_relative_time_or_unused(
-            item.last_used_at
-                .as_deref()
-                .or(Some(item.created_at.as_str())),
-        ),
-    ];
+    let mut parts = Vec::new();
     if item.r#type == "image" {
         if let (Some(width), Some(height)) = (item.image_width, item.image_height) {
             parts.push(format!("{width} × {height}"));
@@ -147,6 +140,13 @@ pub fn build_meta(item: &ClipItemSummary) -> String {
     if item.has_html {
         parts.push("含原格式".into());
     }
+    parts.push(format_relative_time_or_unused(
+        item.last_used_at
+            .as_deref()
+            .or(Some(item.created_at.as_str())),
+    ));
+    parts.push(item.source_app.clone().unwrap_or_else(|| "未知来源".into()));
+    parts.retain(|part| !part.is_empty());
     parts.join(" · ")
 }
 
@@ -336,7 +336,7 @@ mod tests {
         item.source_app = Some("记事本".into());
         item.created_at = chrono::Local::now().to_rfc3339();
         item.file_size = Some(2048);
-        assert_eq!(build_meta(&item), "记事本 · 刚刚 · 2.00 KB");
+        assert_eq!(build_meta(&item), "2.00 KB · 刚刚 · 记事本");
     }
 
     #[test]
@@ -346,7 +346,7 @@ mod tests {
         item.created_at = chrono::Local::now().to_rfc3339();
         assert_eq!(
             build_meta(&item),
-            "资源管理器 · 刚刚 · 2 个文件 · 1 个文件夹"
+            "2 个文件 · 1 个文件夹 · 刚刚 · 资源管理器"
         );
     }
 

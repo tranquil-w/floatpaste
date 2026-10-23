@@ -19,6 +19,7 @@ use tracing::{info, warn};
 use floatpaste_core::backdrop;
 use floatpaste_core::domain::clip_item::{
     available_paste_modes, resolve_secondary_mode, ClipItemSummary, PasteMode, PasteOption,
+    TextKind,
 };
 use floatpaste_core::domain::settings::{
     PasteTrigger, PickerPositionMode, UserSetting, WindowMaterial,
@@ -755,9 +756,9 @@ thread_local! {
 
 /// 预览单行排版高度（逻辑像素）：同一文本一行与两行的度量之差，
 /// 不依赖具体字体行框数值。度量走 measure-preview 标尺，与裁排同字重
-fn preview_line_height(win: &QuickPasteWindow) -> f32 {
-    let one = win.invoke_measure_preview("文本Ag".into(), 1000.0);
-    let two = win.invoke_measure_preview("文本Ag\n文本Ag".into(), 1000.0);
+fn preview_line_height(win: &QuickPasteWindow, is_code: bool) -> f32 {
+    let one = win.invoke_measure_preview("文本Ag".into(), 1000.0, is_code);
+    let two = win.invoke_measure_preview("文本Ag\n文本Ag".into(), 1000.0, is_code);
     (two - one).max(1.0)
 }
 
@@ -831,9 +832,10 @@ fn clamp_preview(
     avail_logical: f32,
     source_truncated: bool,
     line_height: f32,
+    is_code: bool,
 ) -> String {
     clamp_preview_with(
-        &mut |candidate, width| win.invoke_measure_preview(candidate.into(), width),
+        &mut |candidate, width| win.invoke_measure_preview(candidate.into(), width, is_code),
         text,
         avail_logical,
         source_truncated,
@@ -869,7 +871,8 @@ fn build_rows(app: &App, win: &QuickPasteWindow, items: &[ClipItemSummary]) {
     let settings = app.state.current_settings();
     let keys = &settings.session_keys;
     let (avail_no_thumb, avail_with_thumb) = preview_avail_widths(win);
-    let line_height = preview_line_height(win);
+    let line_height = preview_line_height(win, false);
+    let code_line_height = preview_line_height(win, true);
     let geometry_ms = geometry_started.elapsed().as_millis();
     let rows_started = Instant::now();
     let mut preview_time = Duration::ZERO;
@@ -888,6 +891,7 @@ fn build_rows(app: &App, win: &QuickPasteWindow, items: &[ClipItemSummary]) {
                 0.0
             };
             let preview_started = Instant::now();
+            let is_code = item.r#type == "text" && item.text_kind == TextKind::Code;
             let preview = clamp_preview(
                 win,
                 &item.content_preview,
@@ -898,12 +902,18 @@ fn build_rows(app: &App, win: &QuickPasteWindow, items: &[ClipItemSummary]) {
                 } - action_reserve)
                     .max(40.0),
                 source_truncated,
-                line_height,
+                if is_code {
+                    code_line_height
+                } else {
+                    line_height
+                },
+                is_code,
             );
             preview_time += preview_started.elapsed();
             ClipRow {
                 id: item.id.clone().into(),
                 preview: preview.into(),
+                is_code,
                 type_label: clip_type_label(item).into(),
                 source_app: item
                     .source_app
@@ -2249,7 +2259,9 @@ pub(crate) mod action_sheet_tests {
         items[1].source_app = Some("一个需要省略的很长的来源应用名称".into());
         items[2].r#type = "image".into();
         items[2].content_preview = "图片预览".into();
-        items[3].content_preview.clear();
+        items[3].r#type = "text".into();
+        items[3].text_kind = TextKind::Code;
+        items[3].content_preview = "fn main() {\n    println!(\"Hello, 浮贴 😀\");\n}".into();
         let hovered = Rc::new(std::cell::Cell::new(-1));
         let hovered_cb = hovered.clone();
         win.on_row_hover(move |row, _, _| hovered_cb.set(row));
@@ -2261,6 +2273,8 @@ pub(crate) mod action_sheet_tests {
             assert_eq!(rows.row_data(1).unwrap().tags.row_count(), 1);
             assert_eq!(rows.row_data(1).unwrap().tag_more, 2);
             assert!(rows.row_data(1).unwrap().preview.ends_with('…'));
+            assert!(rows.row_data(3).unwrap().is_code);
+            assert!(rows.row_data(3).unwrap().preview.contains("\n    "));
             for with_thumb in [false, true] {
                 let mut image_row = rows.row_data(2).unwrap();
                 image_row.has_thumb = with_thumb;

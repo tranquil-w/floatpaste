@@ -65,6 +65,7 @@ fn row(
     ClipRow {
         id: "1".into(),
         preview: SharedString::from(preview),
+        is_code: type_label == "代码",
         type_label: SharedString::from(type_label),
         source_app: SharedString::from(source),
         time_text: SharedString::from(time),

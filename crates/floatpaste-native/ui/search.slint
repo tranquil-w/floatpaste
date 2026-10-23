@@ -17,6 +17,8 @@ export struct SearchRow {
     preview: string,
     kind: int, // 0=text 1=image 2=file
     has-html: bool,
+    is-code: bool,
+    purpose-label: string,
     source-app: string,
     time-text: string,
     meta: string, // 已用 " • " 连接的元信息串
@@ -236,7 +238,7 @@ component SearchRowCard inherits Rectangle {
     in property <SearchRow> data;
     in property <SearchActionKeys> action-keys;
     in property <bool> selected;
-    in property <length> preview-width; // 基础预览宽（未扣选中预留/未扣 pr-1）
+    in property <length> preview-width; // 右侧内容列宽，已扣图标列
     in property <bool> delete-armed;
     in property <bool> menu-open;
     callback clicked();
@@ -271,7 +273,7 @@ component SearchRowCard inherits Rectangle {
     // 右列纵向排布链。行高恒定（不随选中展开）：切换选中时下方行
     // 才不会被推挤跳动（选中只换高亮/左条/操作条浮层）
     property <length> preview-h: 24px;
-    property <length> meta-y: root.preview-h + 2px;
+    property <length> meta-y: root.preview-h + 6px;
     property <length> meta-h: meta-ruler.height;
     property <bool> tags-shown: data.tags.length > 0;
     property <length> tags-y: root.meta-y + root.meta-h + 4px;
@@ -337,11 +339,8 @@ component SearchRowCard inherits Rectangle {
     property <length> col-x: SearchGeometry.row-border-l + SearchGeometry.row-pad-h;
     // 上报的 preview-width 已扣除图标列，这里直接就是右列宽
     property <length> col-w: root.preview-width;
-    // 操作条显出时右列文本的让位宽度（激活行文字
-    // 重排给按钮区让位）。操作条右缘越出列右缘 2px（外层右距 10px <
-    // 行右距 12px），再留 4px 呼吸空隙；随删除确认键加宽自动增长
-    property <length> bar-reserve: (root.selected || root.hovered)
-        ? action-bar.width + 2px : 0px;
+    // 摘要常驻预留最大操作宽度（含删除确认）；下方元信息与标签使用整列。
+    property <length> bar-reserve: data.actions.length > 1 ? 238px : 214px;
 
     if (data.has-thumb): Rectangle {
         x: SearchGeometry.row-border-l + SearchGeometry.row-pad-h;
@@ -356,7 +355,7 @@ component SearchRowCard inherits Rectangle {
             width: parent.width;
             height: parent.height;
             source: data.thumb;
-            image-fit: cover;
+            image-fit: contain;
         }
     }
     if (!data.has-thumb): Rectangle {
@@ -366,13 +365,23 @@ component SearchRowCard inherits Rectangle {
         height: SearchGeometry.thumb-size;
         border-radius: Metrics.radius-md;
         background: Theme.canvas-inset;
-        TypeGlyph {
+        if (data.purpose-label == ""): TypeGlyph {
             kind: data.kind;
             // 非选中行悬停时图标变亮（旧版 group-hover:text-pg-fg-default）
             glyph-color: (root.selected || root.hovered)
                 ? Theme.fg-default : Theme.fg-muted;
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
+        }
+        if (data.purpose-label != ""): Text {
+            width: parent.width;
+            height: parent.height;
+            text: data.purpose-label;
+            color: (root.selected || root.hovered) ? Theme.fg-default : Theme.fg-muted;
+            font-size: Metrics.text-hint;
+            font-weight: Metrics.weight-medium;
+            horizontal-alignment: center;
+            vertical-alignment: center;
         }
     }
 
@@ -392,48 +401,41 @@ component SearchRowCard inherits Rectangle {
                 width: root.col-w - 4px - root.bar-reserve;
                 text: data.preview;
                 color: Theme.fg-default;
-                font-size: 15px;
+                font-size: Metrics.text-preview;
+                font-family: data.is-code ? Metrics.font-code : "";
                 font-weight: root.selected ? Metrics.weight-semibold : Metrics.weight-normal;
                 wrap: no-wrap;
                 overflow: elide;
                 vertical-alignment: center;
             }
 
-            // 元信息行（mt-0.5 text-xs fg-subtle）。让位定宽裁剪：变窄后
-            // 多折出的整行落在 meta-h 之外被整行裁掉，不会截半行；行高
-            // 仍由全宽标尺实测（恒定行高）
+            // 元信息固定单行省略，收藏星标独占末端空间。
             Rectangle {
                 x: 0;
                 y: root.meta-y;
-                width: root.col-w - root.bar-reserve;
+                width: root.col-w;
                 height: root.meta-h;
                 clip: true;
                 Text {
-                    width: parent.width;
+                    x: 0;
+                    width: parent.width - (data.favorited ? 24px : 0px);
                     text: data.meta;
                     // 元信息按卡面与交互底色独立校正。
                     color: Theme.fg-metadata;
                     font-size: Metrics.text-xs;
-                    wrap: word-wrap;
+                    wrap: no-wrap;
+                    overflow: elide;
                     vertical-alignment: top;
                 }
-                // 首行宽度实测：收藏星标内联跟随文字末尾（对齐速贴窗
-                // 时间行末尾的星标），元信息超行时退到首行右缘
-                meta-line-ruler := Text {
-                    opacity: 0;
-                    text: data.meta;
-                    font-size: Metrics.text-xs;
-                    wrap: no-wrap;
-                }
                 if (data.favorited): Text {
-                    x: min(meta-line-ruler.width + 6px, parent.width - self.width);
+                    // 定宽末端槽，避免 Text 的默认宽度与定位互相依赖。
+                    x: parent.width - 16px;
+                    width: 16px;
                     y: 0;
-                    // 盒高取标尺自然高（= 首行真实行高），星标与首行
-                    // 同一行框内居中，避免写死像素对不齐
-                    height: meta-line-ruler.height;
+                    height: parent.height;
                     text: "★";
                     color: Theme.favorite;
-                    font-size: root.selected ? 11px : 12px;
+                    font-size: Metrics.text-xs;
                     vertical-alignment: center;
                 }
             }
@@ -444,13 +446,14 @@ component SearchRowCard inherits Rectangle {
                 x: 0;
                 y: root.tags-y;
                 height: root.tags-h;
-                width: root.col-w - root.bar-reserve;
+                width: root.col-w;
                 clip: true;
                 HorizontalLayout {
                     spacing: Metrics.space-1;
                     alignment: start;
                     for tag-name in data.tags: Rectangle {
                         height: 18px;
+                        max-width: 100px;
                         border-radius: Metrics.radius-pill;
                         background: Theme.canvas-inset;
                         HorizontalLayout {
@@ -459,7 +462,8 @@ component SearchRowCard inherits Rectangle {
                             Text {
                                 text: tag-name;
                                 color: Theme.fg-muted;
-                                font-size: 11px;
+                                font-size: Metrics.text-hint;
+                                overflow: elide;
                                 vertical-alignment: center;
                             }
                         }
@@ -467,20 +471,20 @@ component SearchRowCard inherits Rectangle {
                     if (data.tag-more > 0): Text {
                         text: "+" + data.tag-more;
                         color: Theme.fg-metadata;
-                        font-size: 11px;
+                        font-size: Metrics.text-hint;
                         vertical-alignment: center;
                     }
                 }
             }
 
-            // 元信息标尺：元信息可能折行，高度实测
+            // 固定样本文字只量单行行高，来源再长也不挤高条目。
             meta-ruler := Text {
                 opacity: 0;
                 x: 0;
                 y: 0;
-                text: data.meta;
+                text: "来源 · 时间";
                 font-size: Metrics.text-xs;
-                wrap: word-wrap;
+                wrap: no-wrap;
                 width: root.col-w;
             }
     }
@@ -494,9 +498,9 @@ component SearchRowCard inherits Rectangle {
         animate opacity { duration: Motion.dur-enter; easing: Motion.ease; }
         clip: false;
         x: 0;
-        y: 0;
+        y: 6px;
         width: parent.width;
-        height: parent.height;
+        height: 32px;
         VerticalLayout {
             alignment: center;
             HorizontalLayout {
@@ -1287,7 +1291,7 @@ export component SearchWindow inherits Window {
                                 }
                                 // 动作按钮水平居中 + 内容自适应宽
                                 //（直挂 VerticalLayout 会被交叉轴拉成通栏）
-                                HorizontalLayout {
+                                if (root.empty-action != 0): HorizontalLayout {
                                     padding-top: Metrics.space-2;
                                     alignment: center;
                                     Rectangle {
@@ -1330,6 +1334,7 @@ export component SearchWindow inherits Window {
                                     selected: i == root.selected;
                                     preview-width: root.preview-width-no-thumb;
                                     delete-armed: root.delete-armed-row == i;
+                                    menu-open: root.actions-menu-row == i;
                                     clicked => { root.row-clicked(i); }
                                     double-clicked => { root.row-double-clicked(i); }
                                     hover(x, y) => { root.row-hover(i, x, y); }
