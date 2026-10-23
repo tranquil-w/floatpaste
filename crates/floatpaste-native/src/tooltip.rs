@@ -1,10 +1,10 @@
 //! 悬停预览 tooltip：400ms 延迟触发、请求失效、内容构建、排版度量与翻转定位。
 //!
 //! 对齐原版 useHoverTooltip + tooltip.html + TooltipWindow：
-//! - 悬停移动每帧重置计时；离开条目立即取消并隐藏；
+//! - 同一目标只计时一次，等待期更新锚点，显示后保持稳定；离开立即取消；
 //! - 文本条目按需取全文（detail），图片条目解码原图预览（≤560×420）；
 //!   静态文案模式（工具栏按钮提示）由调用方给定文案与锚点；
-//! - 定位：面板窗口位置 + 锚点×scale，越界时按光标翻转（gap 4）；
+//! - 定位：宿主客户区原点 + 锚点×scale，在目标所在工作区翻转并约束；
 //! - 点击穿透 + 置顶不激活显示（winit 样式重置统一交 overlay 公共层处理）。
 
 use std::rc::Rc;
@@ -15,7 +15,7 @@ use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use floatpaste_core::domain::clip_item::{ClipItemSummary, TextKind};
 use floatpaste_core::platform::windows::active_app::ActiveAppResolver;
 use floatpaste_core::platform::windows::picker_position::{
-    current_cursor_point, work_area_from_point,
+    primary_monitor_work_area, work_area_from_point, ScreenPoint, ScreenRect,
 };
 use floatpaste_core::platform::windows::window_control;
 use floatpaste_core::services::clip_display::clip_type_label;
@@ -36,6 +36,8 @@ const MAX_WIDTH: f32 = 600.0;
 const MIN_WIDTH: f32 = 120.0;
 const IMAGE_MAX_WIDTH: f32 = 560.0;
 const IMAGE_MAX_HEIGHT: f32 = 420.0;
+/// 小图的最长边放大到可辨认的预览尺寸，元信息保留原始像素尺寸。
+const IMAGE_MIN_LONG_EDGE: f32 = 160.0;
 /// 高度安全余量：逐行 ceil 后度量误差极小，1px 保险即可（由 slint 底部
 /// 弹性占位吸收，下边距与四周一致）
 const HEIGHT_SAFETY: f32 = 1.0;
@@ -45,13 +47,82 @@ const HEIGHT_SAFETY_STATIC: f32 = 4.0;
 const MIN_WIDTH_STATIC: f32 = 40.0;
 
 thread_local! {
-    /// 悬停调度的请求 id（对齐前端 requestIdRef：新请求使旧回调失效）
-    static PENDING_TOKEN: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static HOVER: std::cell::RefCell<HoverState> = std::cell::RefCell::new(HoverState::default());
+}
+
+#[derive(Default)]
+struct HoverState {
+    token: u64,
+    request: Option<HoverRequest>,
+}
+
+struct HoverRequest {
+    host: HoverHost,
+    target: HoverTarget,
+    anchor: (f32, f32),
+}
+
+#[derive(PartialEq)]
+enum HoverTarget {
+    Item(String),
+    Static(String, u32, u32),
+}
+
+impl HoverState {
+    fn start(&mut self, host: HoverHost, target: HoverTarget, anchor: (f32, f32)) -> Option<u64> {
+        if let Some(request) = &mut self.request {
+            if request.host.hwnd == host.hwnd && request.target == target {
+                request.anchor = anchor;
+                return None;
+            }
+        }
+        self.token = self.token.wrapping_add(1);
+        self.request = Some(HoverRequest {
+            host,
+            target,
+            anchor,
+        });
+        Some(self.token)
+    }
+
+    fn cancel(&mut self) {
+        self.token = self.token.wrapping_add(1);
+        self.request = None;
+    }
+}
+
+fn is_current(app: &App, token: u64) -> bool {
+    let host = HOVER.with(|state| {
+        let state = state.borrow();
+        state
+            .request
+            .as_ref()
+            .filter(|_| state.token == token)
+            .map(|r| r.host)
+    });
+    host.is_some_and(|host| (host.is_active)(app))
+}
+
+fn current_anchor() -> (f32, f32) {
+    HOVER.with(|state| {
+        state
+            .borrow()
+            .request
+            .as_ref()
+            .map_or((0.0, 0.0), |r| r.anchor)
+    })
+}
+
+fn park(app: &App) {
+    let hwnd = app.state.tooltip_hwnd.load(Ordering::SeqCst);
+    if hwnd != 0 {
+        window_control::set_window_position_no_activate(hwnd, PARKED_POS.0, PARKED_POS.1);
+    }
 }
 
 enum Payload {
     Text(String),
-    /// None = 图片解码失败，按元数据占位显示
+    /// None = 图片解码失败，清空旧图并显示失败文案
     Image(Option<slint::Image>),
 }
 
@@ -85,7 +156,7 @@ pub fn schedule(app: &App, index: usize, mouse_x: f32, mouse_y: f32) {
     schedule_with(app, host, item, mouse_x, mouse_y);
 }
 
-/// 条目内鼠标移动：重置 400ms 计时，到点后构建内容并显示
+/// 同一条目只安排一次计时，等待与加载期间更新锚点，显示后不重复排版。
 pub fn schedule_with(
     app: &App,
     host: HoverHost,
@@ -93,20 +164,26 @@ pub fn schedule_with(
     mouse_x: f32,
     mouse_y: f32,
 ) {
-    let token = PENDING_TOKEN.with(|value| {
-        value.set(value.get() + 1);
-        value.get()
-    });
+    if !(host.is_active)(app) {
+        return;
+    }
+    let Some(token) = HOVER.with(|state| {
+        state
+            .borrow_mut()
+            .start(host, HoverTarget::Item(item.id.clone()), (mouse_x, mouse_y))
+    }) else {
+        return;
+    };
+    park(app);
     let host_hwnd = host.hwnd;
-    let host_active = host.is_active;
     let app = app.clone();
 
     slint::Timer::single_shot(std::time::Duration::from_millis(SHOW_DELAY_MS), move || {
-        if PENDING_TOKEN.with(|value| value.get()) != token || !host_active(&app) {
+        if !is_current(&app, token) {
             return;
         }
 
-        if item.r#type == "image" && item.image_path.is_some() {
+        if item.r#type == "image" {
             // 图片解码可能上百毫秒：放后台线程（只传原始像素），回填走 token 失效校验。
             // 预览缩到显示上限（逻辑 560×420 × 宿主 DPI）：超出的原像素不可见，
             // 全量解码只会制造内存尖峰（4K 截图 RGBA ≈ 33MB，缩放后 ≈ 3MB）
@@ -124,11 +201,11 @@ pub fn schedule_with(
             std::thread::spawn(move || {
                 let raw = thumbnails::load_preview_image_raw(&core, &path, max_w, max_h);
                 let _ = slint::invoke_from_event_loop(move || {
-                    if PENDING_TOKEN.with(|value| value.get()) != token || !host_active(&app_for_cb)
-                    {
+                    if !is_current(&app_for_cb, token) {
                         return;
                     }
                     let image = raw.map(thumbnails::image_from_rgba);
+                    let (mouse_x, mouse_y) = current_anchor();
                     render(
                         &app_for_cb,
                         host_hwnd,
@@ -151,6 +228,7 @@ pub fn schedule_with(
                 .unwrap_or_else(|| item.content_preview.clone());
             // 原版 HTML 的 pre-wrap 不为块尾换行生成行框，尾部空白不可见；
             // Slint 会照排成空行，把元信息行顶出窗口下方，显示前裁掉
+            let (mouse_x, mouse_y) = current_anchor();
             render(
                 &app,
                 host_hwnd,
@@ -168,16 +246,24 @@ pub fn schedule_with(
 /// anchor 为宿主窗口坐标（通常取按钮下方）。400ms 延迟与请求失效令牌
 /// 与条目预览共用，悬停目标切换时互相打断
 pub fn schedule_static(app: &App, host: HoverHost, text: String, anchor_x: f32, anchor_y: f32) {
-    let token = PENDING_TOKEN.with(|value| {
-        value.set(value.get() + 1);
-        value.get()
-    });
+    if !(host.is_active)(app) {
+        return;
+    }
+    let Some(token) = HOVER.with(|state| {
+        state.borrow_mut().start(
+            host,
+            HoverTarget::Static(text.clone(), anchor_x.to_bits(), anchor_y.to_bits()),
+            (anchor_x, anchor_y),
+        )
+    }) else {
+        return;
+    };
+    park(app);
     let host_hwnd = host.hwnd;
-    let host_active = host.is_active;
     let app = app.clone();
 
     slint::Timer::single_shot(std::time::Duration::from_millis(SHOW_DELAY_MS), move || {
-        if PENDING_TOKEN.with(|value| value.get()) != token || !host_active(&app) {
+        if !is_current(&app, token) {
             return;
         }
         render_static(&app, host_hwnd, &text, anchor_x, anchor_y, token);
@@ -186,15 +272,11 @@ pub fn schedule_static(app: &App, host: HoverHost, text: String, anchor_x: f32, 
 
 /// 取消挂起的显示并隐藏当前 tooltip（离开条目/会话结束/粘贴前调用）
 pub fn cancel(app: &App) {
-    PENDING_TOKEN.with(|value| value.set(value.get() + 1));
-    let hwnd = app.state.tooltip_hwnd.load(Ordering::SeqCst);
-    if hwnd == 0 {
-        return; // 装配失败：tooltip 从未正确显示过，无可收起
-    }
+    HOVER.with(|state| state.borrow_mut().cancel());
     // 收起 = 停屏（对齐速贴/搜索）：SW_HIDE 隐藏期 winit 抑制重绘，会让
     // 下一次显示（尺寸往往不同）首帧残缺闪烁；停屏保持表面可正常
     // resize/重绘，移上屏即完整内容。几何走裸 SetWindowPos（绝不激活）
-    window_control::set_window_position_no_activate(hwnd, PARKED_POS.0, PARKED_POS.1);
+    park(app);
 }
 
 fn render(
@@ -206,8 +288,17 @@ fn render(
     payload: Payload,
     token: u64,
 ) {
+    if !is_current(app, token) {
+        return;
+    }
     let Some(win) = app.tooltip.upgrade() else {
         return;
+    };
+    // 共享窗口不能把上一张图当成当前解码失败的占位。
+    win.set_image(slint::Image::default());
+    let payload = match payload {
+        Payload::Image(None) => Payload::Text("图片预览加载失败".into()),
+        payload => payload,
     };
     // 条目预览总是带元信息行（静态提示可能刚用过 simple-mode）
     win.set_simple_mode(false);
@@ -223,103 +314,12 @@ fn render(
     let dpi = if host_hwnd > 0 {
         win32_ext::window_dpi(host_hwnd) as f32 / 96.0
     } else {
-        1.0
+        win.window().scale_factor()
     };
 
-    // ── 内容与度量 ──
+    let (max_width, max_height) = card_limits(&win, host_hwnd, dpi, (mouse_x, mouse_y));
     let inset_h = win.get_card_inset_h();
     let chrome_v = win.get_card_chrome_v();
-    let (content_width, content_height) = match &payload {
-        Payload::Text(text) => {
-            // 正文按源行拆行渲染（Slint Text 无 line-height）：行距取
-            // content-line-spacing，行尾空白裁掉（不可见却计入自然宽，
-            // 把右边距撑得比左边大），空行以单个空格占住一行的高度
-            let raw_lines: Vec<SharedString> = text
-                .split('\n')
-                .map(|line| {
-                    let trimmed = line.trim_end();
-                    if trimmed.is_empty() {
-                        SharedString::from(" ")
-                    } else {
-                        SharedString::from(trimmed)
-                    }
-                })
-                .collect();
-            let naturals: Vec<f32> = raw_lines
-                .iter()
-                .map(|line| win.invoke_measure_natural_width(line.clone()))
-                .collect();
-            let natural_width = naturals.iter().copied().fold(0.0f32, f32::max);
-            let initial_width = (natural_width + inset_h).clamp(MIN_WIDTH, MAX_WIDTH) - inset_h;
-            // 宽度收敛：折行行的断行残端会让右边距比左边大出一个词的
-            // 空白。对每个折行行二分「保持行数不变的最小宽度」（行高在
-            // 宽度上单调不增），不折行行以其自然宽为下限；卡片取约束
-            // 最大值，内容即贴满实际占宽
-            let mut required = 0.0f32;
-            for (line, &natural) in raw_lines.iter().zip(&naturals) {
-                let limit = if natural <= initial_width {
-                    natural
-                } else {
-                    let rows = win.invoke_measure_text(line.clone(), initial_width);
-                    let (mut lo, mut hi) = (0.0f32, initial_width);
-                    while lo + 0.5 < hi {
-                        let mid = (lo + hi) / 2.0;
-                        if win.invoke_measure_text(line.clone(), mid) <= rows {
-                            hi = mid;
-                        } else {
-                            lo = mid;
-                        }
-                    }
-                    hi
-                };
-                required = required.max(limit);
-            }
-            let card_width = (required + inset_h).clamp(MIN_WIDTH, MAX_WIDTH);
-            let text_width = card_width - inset_h;
-            let spacing = win.get_content_line_spacing();
-            let lines: Vec<TooltipLine> = raw_lines
-                .iter()
-                .map(|line| TooltipLine {
-                    text: line.clone(),
-                    // ceil：对齐渲染器整像素行盒，多行累计误差不再吃掉下边距
-                    height: win.invoke_measure_text(line.clone(), text_width).ceil(),
-                })
-                .collect();
-            let line_spacing_total = spacing * lines.len().saturating_sub(1) as f32;
-            let content_height: f32 = lines.iter().map(|line| line.height).sum::<f32>()
-                + line_spacing_total
-                + win.get_content_bottom_gap();
-            win.set_content_lines(ModelRc::new(Rc::new(VecModel::from(lines))));
-            win.set_has_image(false);
-            (text_width, content_height)
-        }
-        Payload::Image(image) => {
-            // 元数据等比缩到 560×420 内（逻辑像素）
-            let (w, h) = match image {
-                Some(image) if image.size().width > 0 => {
-                    (image.size().width as f32, image.size().height as f32)
-                }
-                _ => (
-                    item.image_width.unwrap_or(0) as f32,
-                    item.image_height.unwrap_or(0) as f32,
-                ),
-            };
-            let (display_w, display_h) = if w > 0.0 && h > 0.0 {
-                let ratio = (IMAGE_MAX_WIDTH / w).min(IMAGE_MAX_HEIGHT / h).min(1.0);
-                ((w * ratio).round(), (h * ratio).round())
-            } else {
-                (0.0, 0.0)
-            };
-            if let Some(image) = image {
-                win.set_image(image.clone());
-            }
-            win.set_has_image(true);
-            win.set_image_width(display_w);
-            win.set_image_height(display_h);
-            (display_w, display_h + win.get_content_bottom_gap())
-        }
-    };
-
     // ── 元信息 ──
     let badges = build_badges(item);
     win.set_badges(ModelRc::new(Rc::new(VecModel::from(badges.clone()))));
@@ -338,7 +338,6 @@ fn render(
         .into(),
     );
 
-    // ── 窗口尺寸（chrome 读 slint 属性 + 安全余量）──
     // 卡片宽不得小于元信息行的自然需求（徽章组 + 来源 + 时间 + 行内
     // 间距 6px，与 tooltip.slint 元信息行布局对齐）：正文短于元信息
     // 时只按正文定宽会把行尾时间裁掉
@@ -358,8 +357,46 @@ fn render(
         badge_w + 6.0 + source_w + 6.0 + 6.0 + time_w
     };
     win.set_content_font_family(content_font);
-    let width = (content_width.max(meta_content_width) + inset_h).clamp(MIN_WIDTH, MAX_WIDTH);
-    let height = content_height + chrome_v + HEIGHT_SAFETY;
+    let min_content_width =
+        (meta_content_width + inset_h).clamp(MIN_WIDTH.min(max_width), max_width) - inset_h;
+    let content_budget =
+        (max_height - chrome_v - HEIGHT_SAFETY - win.get_content_bottom_gap()).max(0.0);
+    win.set_preview_truncated(false);
+    let (content_width, content_height) = match &payload {
+        Payload::Text(text) => {
+            win.set_has_image(false);
+            layout_text(
+                &win,
+                text,
+                min_content_width,
+                max_width - inset_h,
+                content_budget,
+            )
+        }
+        Payload::Image(image) => {
+            let image = image.as_ref().expect("失败图片在排版前转换为文案");
+            let w = item
+                .image_width
+                .filter(|v| *v > 0)
+                .map_or(image.size().width as f32 / dpi, |v| v as f32);
+            let h = item
+                .image_height
+                .filter(|v| *v > 0)
+                .map_or(image.size().height as f32 / dpi, |v| v as f32);
+            let ratio = ((max_width - inset_h).min(IMAGE_MAX_WIDTH) / w)
+                .min(content_budget.min(IMAGE_MAX_HEIGHT) / h)
+                .min((IMAGE_MIN_LONG_EDGE / w.max(h)).max(1.0));
+            let display_w = (w * ratio).floor().max(1.0);
+            let display_h = (h * ratio).floor().max(1.0);
+            win.set_image(image.clone());
+            win.set_has_image(true);
+            win.set_image_width(display_w);
+            win.set_image_height(display_h);
+            (display_w.max(min_content_width), display_h)
+        }
+    };
+    let width = content_width + inset_h;
+    let height = content_height + win.get_content_bottom_gap() + chrome_v + HEIGHT_SAFETY;
     present(
         app,
         &win,
@@ -372,6 +409,138 @@ fn render(
     );
 }
 
+/// 只为有限前缀排版；超出高度时截到完整字符，保留元信息与截断提示的位置。
+fn layout_text(
+    win: &TooltipWindow,
+    text: &str,
+    min_width: f32,
+    max_width: f32,
+    max_height: f32,
+) -> (f32, f32) {
+    const MAX_CHARS: usize = 4096;
+    const MAX_SOURCE_LINES: usize = 32;
+    let end = text
+        .char_indices()
+        .nth(MAX_CHARS)
+        .map_or(text.len(), |(i, _)| i);
+    let mut source = text[..end].split('\n');
+    let raw_lines: Vec<SharedString> = source
+        .by_ref()
+        .take(MAX_SOURCE_LINES)
+        .map(|line| {
+            let line = line.trim_end();
+            if line.is_empty() {
+                " ".into()
+            } else {
+                line.into()
+            }
+        })
+        .collect();
+    let source_truncated = end < text.len() || source.next().is_some();
+    let natural = raw_lines
+        .iter()
+        .map(|line| win.invoke_measure_natural_width(line.clone()))
+        .fold(min_width, f32::max);
+    let mut width = natural.clamp(min_width, max_width);
+    let spacing = win.get_content_line_spacing();
+    let measure = |width| {
+        raw_lines
+            .iter()
+            .map(|text| TooltipLine {
+                text: text.clone(),
+                height: win.invoke_measure_text(text.clone(), width).ceil(),
+            })
+            .collect::<Vec<_>>()
+    };
+    let total_height = |lines: &[TooltipLine]| {
+        lines.iter().map(|l| l.height).sum::<f32>() + spacing * lines.len().saturating_sub(1) as f32
+    };
+    let mut measured = measure(width);
+    if source_truncated || total_height(&measured) > max_height {
+        let notice_width = win
+            .invoke_measure_simple_width(win.get_truncation_notice())
+            .ceil()
+            + 2.0;
+        let wider = width.max(notice_width).min(max_width);
+        if wider > width {
+            width = wider;
+            measured = measure(width);
+        }
+    }
+    let truncated = source_truncated || total_height(&measured) > max_height;
+    let budget = if truncated {
+        (max_height - win.get_notice_height() - spacing).max(0.0)
+    } else {
+        max_height
+    };
+    let mut lines = Vec::new();
+    let mut height = 0.0;
+    for line in measured {
+        let gap = if lines.is_empty() { 0.0 } else { spacing };
+        let remaining = budget - height - gap;
+        if line.height <= remaining {
+            height += gap + line.height;
+            lines.push(line);
+        } else {
+            // 长单行也只度量有界前缀；二分字符边界使中文和 emoji 保持完整 UTF-8。
+            let ends: Vec<usize> = line
+                .text
+                .char_indices()
+                .map(|(i, _)| i)
+                .chain(std::iter::once(line.text.len()))
+                .collect();
+            let (mut lo, mut hi) = (0, ends.len());
+            while lo + 1 < hi {
+                let mid = (lo + hi) / 2;
+                let candidate: SharedString = format!("{}…", &line.text[..ends[mid]]).into();
+                if win.invoke_measure_text(candidate, width).ceil() <= remaining {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+            let text: SharedString = format!("{}…", &line.text[..ends[lo]]).into();
+            let clipped_height = win.invoke_measure_text(text.clone(), width).ceil();
+            if clipped_height <= remaining {
+                height += gap + clipped_height;
+                lines.push(TooltipLine {
+                    text,
+                    height: clipped_height,
+                });
+            }
+            break;
+        }
+    }
+    if truncated {
+        height += win.get_notice_height() + if lines.is_empty() { 0.0 } else { spacing };
+    }
+    win.set_preview_truncated(truncated);
+    win.set_content_lines(ModelRc::new(Rc::new(VecModel::from(lines))));
+    (width, height)
+}
+
+fn screen_anchor(host_hwnd: isize, anchor: (f32, f32), dpi: f32) -> ScreenPoint {
+    let (x, y) = win32_ext::client_origin(host_hwnd).unwrap_or_default();
+    ScreenPoint {
+        x: x + (anchor.0 * dpi).round() as i32,
+        y: y + (anchor.1 * dpi).round() as i32,
+    }
+}
+
+fn work_area(point: ScreenPoint) -> Option<ScreenRect> {
+    work_area_from_point(point)
+        .or_else(|_| primary_monitor_work_area())
+        .ok()
+}
+
+fn card_limits(win: &TooltipWindow, host_hwnd: isize, dpi: f32, anchor: (f32, f32)) -> (f32, f32) {
+    let margin = 2.0 * win.get_shadow_margin();
+    let area = work_area(screen_anchor(host_hwnd, anchor, dpi));
+    let width = area.map_or(MAX_WIDTH, |r| r.width() as f32 / dpi - margin - 8.0);
+    let height = area.map_or(480.0, |r| r.height() as f32 / dpi - margin - 8.0);
+    (width.min(MAX_WIDTH).max(40.0), height.min(480.0).max(80.0))
+}
+
 /// 静态提示渲染：单行短文案（text-xs/medium），无元信息行，锚点取按钮下方
 fn render_static(
     app: &App,
@@ -381,17 +550,21 @@ fn render_static(
     anchor_y: f32,
     token: u64,
 ) {
+    if !is_current(app, token) {
+        return;
+    }
     let Some(win) = app.tooltip.upgrade() else {
         return;
     };
     let dpi = if host_hwnd > 0 {
         win32_ext::window_dpi(host_hwnd) as f32 / 96.0
     } else {
-        1.0
+        win.window().scale_factor()
     };
 
+    let (max_width, _) = card_limits(&win, host_hwnd, dpi, (anchor_x, anchor_y));
     let natural_width = win.invoke_measure_simple_width(text.into());
-    let width = (natural_width + win.get_card_inset_h()).clamp(MIN_WIDTH_STATIC, MAX_WIDTH);
+    let width = (natural_width + win.get_card_inset_h()).clamp(MIN_WIDTH_STATIC, max_width);
     let height =
         win.get_simple_line_height() + win.get_card_chrome_v_simple() + HEIGHT_SAFETY_STATIC;
 
@@ -425,6 +598,9 @@ fn present(
     anchor: (f32, f32),
     token: u64,
 ) {
+    if !is_current(app, token) {
+        return;
+    }
     // 柔影留边（单一来源 tooltip.slint shadow-margin，此处读同源值）：
     // 窗口比卡片大四周 margin——柔影画在卡外圈，贴内容尺寸的窗口没有
     // 落影面；锚点反补 margin 让卡片仍落在原锚点，越界翻转按窗口全尺寸
@@ -436,10 +612,6 @@ fn present(
     if tooltip_hwnd == 0 {
         // 装配失败降级：裸 Slint show，可接受激活副作用
         let _ = win.window().show();
-        return;
-    }
-    // 过期渲染（新请求/取消已递增令牌）直接放弃，不触碰窗口
-    if PENDING_TOKEN.with(|value| value.get()) != token {
         return;
     }
     // 出现动画从透明起步：重绘落盘期间不可见，上屏后置 true 渐显
@@ -463,7 +635,10 @@ fn present(
     // 一拍即成）。到点先暖表面（把最终帧同步泵进表面）再平移上屏——
     // 移动不触发重绘，首帧即完整内容；上屏后 16ms 补泵兜底
     let reveal_delay_ms = if cfg!(debug_assertions) { 200 } else { 16 };
+    // 以悬停目标选屏，避免居中后的左上角落到相邻屏幕。
+    let reference = screen_anchor(host_hwnd, current_anchor(), dpi);
     let win_cb = win.as_weak();
+    let app = app.clone();
     slint::Timer::single_shot(
         std::time::Duration::from_millis(reveal_delay_ms),
         move || {
@@ -472,7 +647,7 @@ fn present(
                 return;
             }
             // 期间有新的悬停请求或取消（令牌递增）则放弃本次显示
-            if PENDING_TOKEN.with(|value| value.get()) != token {
+            if !is_current(&app, token) {
                 return;
             }
             win32_ext::warm_surface(tooltip_hwnd);
@@ -484,6 +659,7 @@ fn present(
                 dpi,
                 physical_w,
                 physical_h,
+                reference,
             );
             window_control::set_window_bounds(
                 tooltip_hwnd,
@@ -496,14 +672,28 @@ fn present(
             // 须把 tooltip 抬回置顶带顶部，宿主同为置顶会盖住它）
             let restore =
                 prev_foreground.map_or(ForegroundPolicy::Keep, ForegroundPolicy::RestoreIfStolen);
-            overlay::after_show(tooltip_hwnd, true, restore, ForegroundPolicy::Keep, || true);
+            let app_for_overlay = app.clone();
+            overlay::after_show(
+                tooltip_hwnd,
+                true,
+                restore,
+                ForegroundPolicy::Keep,
+                move || is_current(&app_for_overlay, token),
+            );
+            let app_for_appear = app.clone();
             slint::Timer::single_shot(std::time::Duration::from_millis(16), move || {
+                if !is_current(&app_for_appear, token) {
+                    return;
+                }
                 if let Some(win) = win_cb.upgrade() {
                     win.set_appear(true);
                 }
                 win32_ext::warm_surface(tooltip_hwnd);
             });
             slint::Timer::single_shot(std::time::Duration::from_millis(60), move || {
+                if !is_current(&app, token) {
+                    return;
+                }
                 if ActiveAppResolver::current_foreground_hwnd() == Some(tooltip_hwnd)
                     && ActiveAppResolver::restore_foreground_window(host_hwnd)
                 {
@@ -516,7 +706,7 @@ fn present(
 
 /// 定位与翻转（对齐 TooltipWindow::resolve_clamped_position：
 /// anchor 为相对宿主**客户区**原点的逻辑锚点（已含偏移），默认向右下
-/// 展开，超出工作区时按当前光标位置翻到对侧，留 4px 间隙）
+/// 展开，超出工作区时按锚点翻到对侧，再约束四条边）
 fn resolve_position(
     picker_hwnd: isize,
     anchor_x: f32,
@@ -524,34 +714,33 @@ fn resolve_position(
     scale: f32,
     width: u32,
     height: u32,
+    reference: ScreenPoint,
 ) -> (i32, i32) {
     // 基准 = 客户区原点（ClientToScreen 0,0）：Slint 的 absolute-position
     // 相对客户区，而带框窗口（编辑/设置）的 GetWindowRect 含标题栏与边框，
     // 以窗口 rect 为基准会让 tooltip 偏移一个非客户区高度；无框窗口两者重合
-    let origin = (picker_hwnd > 0)
-        .then(|| win32_ext::client_origin(picker_hwnd))
-        .flatten();
-    let (mut x, mut y) = match origin {
-        Some((ox, oy)) => (
-            ox + (anchor_x * scale) as i32,
-            oy + (anchor_y * scale) as i32,
-        ),
-        None => (0, 0),
+    let point = screen_anchor(picker_hwnd, (anchor_x, anchor_y), scale);
+    work_area(reference).map_or((point.x, point.y), |area| {
+        fit_position(point, (width, height), area, (4.0 * scale).round() as i32)
+    })
+}
+
+fn fit_position(point: ScreenPoint, size: (u32, u32), area: ScreenRect, gap: i32) -> (i32, i32) {
+    let (w, h) = (size.0 as i32, size.1 as i32);
+    let x = if point.x + w > area.right {
+        point.x - w - gap
+    } else {
+        point.x
     };
-
-    if let Ok(cursor) = current_cursor_point() {
-        if let Ok(work_area) = work_area_from_point(cursor) {
-            const FLIP_GAP: i32 = 4;
-            if x + width as i32 > work_area.right {
-                x = cursor.x - width as i32 - FLIP_GAP;
-            }
-            if y + height as i32 > work_area.bottom {
-                y = cursor.y - height as i32 - FLIP_GAP;
-            }
-        }
-    }
-
-    (x, y)
+    let y = if point.y + h > area.bottom {
+        point.y - h - gap
+    } else {
+        point.y
+    };
+    (
+        x.clamp(area.left, (area.right - w).max(area.left)),
+        y.clamp(area.top, (area.bottom - h).max(area.top)),
+    )
 }
 
 /// 构建元信息徽章（类型徽章 / 图片尺寸 / 图片格式）；宽度计算复用同一数据
@@ -576,4 +765,437 @@ fn build_badges(item: &ClipItemSummary) -> Vec<TooltipMetaBadge> {
         }
     }
     badges
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hover_keeps_deadline_and_invalidates_previous_target() {
+        let host = HoverHost {
+            hwnd: 1,
+            is_active: |_| true,
+        };
+        let mut state = HoverState::default();
+        let first = state
+            .start(host, HoverTarget::Item("a".into()), (1.0, 2.0))
+            .unwrap();
+        assert_eq!(
+            state.start(host, HoverTarget::Item("a".into()), (3.0, 4.0)),
+            None
+        );
+        assert_eq!(state.token, first, "同一条目移动不能重置期限");
+        assert_eq!(state.request.as_ref().unwrap().anchor, (3.0, 4.0));
+        let second = state
+            .start(host, HoverTarget::Item("b".into()), (3.0, 4.0))
+            .unwrap();
+        assert_ne!(second, first);
+        state.cancel();
+        assert!(state.request.is_none());
+        assert_ne!(state.token, second, "取消使所有旧回调失效");
+        let other_host = HoverHost { hwnd: 2, ..host };
+        let third = state
+            .start(host, HoverTarget::Item("b".into()), (0.0, 0.0))
+            .unwrap();
+        assert_ne!(
+            state.start(other_host, HoverTarget::Item("b".into()), (0.0, 0.0)),
+            Some(third)
+        );
+    }
+
+    #[test]
+    fn position_flips_and_clamps_on_negative_monitor() {
+        let area = ScreenRect {
+            left: -800,
+            top: -600,
+            right: 0,
+            bottom: 0,
+        };
+        for point in [
+            (-799, -599),
+            (-10, -599),
+            (-799, -10),
+            (-10, -10),
+            (-900, -700),
+        ] {
+            let (x, y) = fit_position(
+                ScreenPoint {
+                    x: point.0,
+                    y: point.1,
+                },
+                (600, 480),
+                area,
+                4,
+            );
+            assert!(x >= area.left && x + 600 <= area.right);
+            assert!(y >= area.top && y + 480 <= area.bottom);
+        }
+        assert_eq!(
+            fit_position(ScreenPoint { x: -10, y: -10 }, (200, 100), area, 4),
+            (-214, -114)
+        );
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod headless_contract_tests {
+    use super::*;
+    use crate::app_state::SharedState;
+    use floatpaste_core::{
+        domain::settings::UserSetting,
+        repository::sqlite_repository::SqliteRepository,
+        services::{image_storage::ImageStorage, normalize_service::NormalizeService},
+        state::CoreState,
+    };
+    use std::{
+        path::Path,
+        sync::Arc,
+        time::{Duration, Instant},
+    };
+
+    fn pump(ms: u64) {
+        slint::Timer::single_shot(Duration::from_millis(ms), || {
+            slint::quit_event_loop().unwrap()
+        });
+        slint::run_event_loop_until_quit().unwrap();
+    }
+
+    fn wait_until(mut condition: impl FnMut() -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while !condition() {
+            assert!(Instant::now() < deadline, "等待悬浮气泡状态超时");
+            pump(8);
+        }
+    }
+
+    pub(crate) fn run() {
+        use slint::Model;
+        let dir = std::env::temp_dir().join(format!("floatpaste-tooltip-{}", std::process::id()));
+        let repository = SqliteRepository::new(Path::new(":memory:")).unwrap();
+        let item = repository
+            .save_text_item(
+                &NormalizeService::normalize_text("中文与 emoji 🦀 的预览", None).unwrap(),
+            )
+            .unwrap()
+            .to_summary();
+        let core = CoreState::new(
+            repository,
+            ImageStorage::new(dir.clone()).unwrap(),
+            UserSetting::default(),
+        );
+        let win = TooltipWindow::new().unwrap();
+        // winit 延迟创建 HWND，先在屏外完成首次 show 和消息泵。
+        win.window()
+            .set_position(slint::PhysicalPosition::new(PARKED_POS.0, PARKED_POS.1));
+        win.show().unwrap();
+        pump(100);
+        let app = App {
+            state: Arc::new(SharedState::new(core)),
+            tooltip: win.as_weak(),
+            picker: Default::default(),
+            tray_menu: Default::default(),
+            search: Default::default(),
+            editor: Default::default(),
+            settings: Default::default(),
+        };
+        let hwnd = overlay::silent_assemble_parked(&win).unwrap();
+        app.state.tooltip_hwnd.store(hwnd, Ordering::SeqCst);
+        app.state.begin_picker_activation();
+        let host = HoverHost {
+            hwnd: 0,
+            is_active: picker_is_active,
+        };
+        cancel(&app);
+
+        // 移动不重置 400ms；显示后也不能重新停屏、改锚点或淡入。
+        schedule_with(&app, host, item.clone(), 100.0, 100.0);
+        pump(220);
+        assert_eq!(win.get_content_lines().row_count(), 0);
+        schedule_with(&app, host, item.clone(), 120.0, 120.0);
+        pump(230);
+        assert!(
+            win.get_content_lines().row_count() > 0,
+            "首次进入后的期限不能被移动延后"
+        );
+        wait_until(|| {
+            win.get_appear() && win32_ext::physical_rect(hwnd).unwrap().left != PARKED_POS.0
+        });
+        let rect = win32_ext::physical_rect(hwnd).unwrap();
+        schedule_with(&app, host, item.clone(), 240.0, 240.0);
+        pump(80);
+        assert_eq!(win32_ext::physical_rect(hwnd).unwrap(), rect);
+        assert!(win.get_appear());
+
+        // 按钮与条目共享窗口，切换立即收起；取消阻止旧请求复活。
+        schedule_static(&app, host, "保存（Ctrl+S）".into(), 300.0, 200.0);
+        assert_eq!(win32_ext::physical_rect(hwnd).unwrap().left, PARKED_POS.0);
+        cancel(&app);
+        win.set_appear(false);
+        pump(700);
+        assert!(!win.get_appear());
+        assert_eq!(win32_ext::physical_rect(hwnd).unwrap().left, PARKED_POS.0);
+
+        // 显屏后的延迟渐显不得越过取消。
+        schedule_static(&app, host, "关闭".into(), 300.0, 200.0);
+        wait_until(|| win32_ext::physical_rect(hwnd).unwrap().left != PARKED_POS.0);
+        cancel(&app);
+        win.set_appear(false);
+        pump(100);
+        assert!(!win.get_appear());
+
+        // 进入预热后结束宿主会话，显屏回调仍须重新检查活跃状态。
+        schedule_static(&app, host, "失效会话".into(), 300.0, 200.0);
+        pump(450);
+        app.state.end_picker_activation();
+        pump(300);
+        assert_eq!(win32_ext::physical_rect(hwnd).unwrap().left, PARKED_POS.0);
+        app.state.begin_picker_activation();
+
+        for text in [
+            "短文本 🦀".to_string(),
+            "    中文与 emoji 🦀\n".repeat(200),
+            "中文🦀".repeat(5000),
+        ] {
+            let (width, height) = layout_text(&win, &text, 120.0, 360.0, 180.0);
+            assert!(width <= 360.0 && height <= 180.0);
+            assert_eq!(win.get_preview_truncated(), text.chars().count() > 20);
+            if win.get_preview_truncated() {
+                assert!(
+                    width
+                        >= win
+                            .invoke_measure_simple_width(win.get_truncation_notice())
+                            .ceil(),
+                    "截断提示须完整可读"
+                );
+            }
+            assert!(win.get_content_lines().iter().all(|line| line.height > 0.0));
+        }
+
+        // 成功图片之后的失败必须清空图像并切换为明确文案。
+        let mut buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(560, 280);
+        for (i, pixel) in buffer.make_mut_slice().iter_mut().enumerate() {
+            *pixel = slint::Rgba8Pixel {
+                r: (i % 560 * 255 / 559) as u8,
+                g: (i / 560 * 255 / 279) as u8,
+                b: 160,
+                a: 255,
+            };
+        }
+        let image = slint::Image::from_rgba8(buffer);
+        let mut image_item = item.clone();
+        image_item.r#type = "image".into();
+        image_item.image_width = Some(1920);
+        image_item.image_height = Some(960);
+        cancel(&app);
+        let token = HOVER
+            .with(|s| {
+                s.borrow_mut()
+                    .start(host, HoverTarget::Item(item.id.clone()), (100.0, 100.0))
+            })
+            .unwrap();
+        render(
+            &app,
+            0,
+            &image_item,
+            100.0,
+            100.0,
+            Payload::Image(Some(image.clone())),
+            token,
+        );
+        assert!(win.get_has_image());
+        assert!(
+            win.get_image_width() <= IMAGE_MAX_WIDTH && win.get_image_height() <= IMAGE_MAX_HEIGHT
+        );
+        assert_eq!(win.get_image_width(), 2.0 * win.get_image_height());
+        for (w, h, expected) in [
+            (8, 8, Some((160.0, 160.0))),
+            (32, 16, Some((160.0, 80.0))),
+            (320, 200, Some((320.0, 200.0))),
+            (1, 100_000, None),
+            (100_000, 1, None),
+        ] {
+            let mut sample = image_item.clone();
+            sample.image_width = Some(w);
+            sample.image_height = Some(h);
+            render(
+                &app,
+                0,
+                &sample,
+                100.0,
+                100.0,
+                Payload::Image(Some(image.clone())),
+                token,
+            );
+            let size = (win.get_image_width(), win.get_image_height());
+            assert!(
+                size.0 >= 1.0 && size.1 >= 1.0,
+                "极细边不能取整到零：{w}×{h}"
+            );
+            assert!(size.0 <= IMAGE_MAX_WIDTH && size.1 <= IMAGE_MAX_HEIGHT);
+            if let Some(expected) = expected {
+                assert_eq!(size, expected, "小图放大与普通图原尺寸：{w}×{h}");
+            }
+        }
+        let mut small_buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(8, 8);
+        small_buffer.make_mut_slice().fill(slint::Rgba8Pixel {
+            r: 255,
+            g: 0,
+            b: 0,
+            a: 255,
+        });
+        let small_image = slint::Image::from_rgba8(small_buffer);
+        let mut small_item = image_item.clone();
+        small_item.image_width = Some(8);
+        small_item.image_height = Some(8);
+        small_item.image_format = Some("png".into());
+        small_item.source_app = Some("chrome.exe".into());
+        render(
+            &app,
+            0,
+            &small_item,
+            100.0,
+            100.0,
+            Payload::Image(Some(small_image.clone())),
+            token,
+        );
+        assert_eq!(win.get_badges().row_data(1).unwrap().text, "8 × 8");
+        render(
+            &app,
+            0,
+            &image_item,
+            100.0,
+            100.0,
+            Payload::Image(None),
+            token,
+        );
+        assert!(!win.get_has_image());
+        assert_eq!(win.get_image().size().width, 0);
+        assert_eq!(
+            win.get_content_lines().row_data(0).unwrap().text,
+            "图片预览加载失败"
+        );
+        cancel(&app);
+
+        if std::env::var_os("FLOATPASTE_UI_SNAPSHOTS").is_some() {
+            for (name, theme) in [
+                ("light", floatpaste_core::theme::ResolvedTheme::Light),
+                ("dark", floatpaste_core::theme::ResolvedTheme::Dark),
+            ] {
+                let tokens = floatpaste_core::theme::derive_tokens("default", "", theme);
+                crate::theme_bridge::reapply_theme(&app, &tokens);
+                cancel(&app);
+                let token = HOVER
+                    .with(|s| {
+                        s.borrow_mut().start(
+                            host,
+                            HoverTarget::Item(image_item.id.clone()),
+                            (100.0, 100.0),
+                        )
+                    })
+                    .unwrap();
+                render(
+                    &app,
+                    0,
+                    &image_item,
+                    100.0,
+                    100.0,
+                    Payload::Image(Some(image.clone())),
+                    token,
+                );
+                snapshot(&win, "image", name);
+                cancel(&app);
+                let token = HOVER
+                    .with(|s| {
+                        s.borrow_mut().start(
+                            host,
+                            HoverTarget::Item(small_item.id.clone()),
+                            (100.0, 100.0),
+                        )
+                    })
+                    .unwrap();
+                render(
+                    &app,
+                    0,
+                    &small_item,
+                    100.0,
+                    100.0,
+                    Payload::Image(Some(small_image.clone())),
+                    token,
+                );
+                snapshot(&win, "small-image", name);
+                for (case, text) in [
+                    ("short", "短文本与 emoji 🦀".to_string()),
+                    ("code", "    let 内容 = \"中文🦀\";\n".repeat(200)),
+                    ("long-line", "中文🦀".repeat(5000)),
+                    ("image-error", "图片预览加载失败".to_string()),
+                ] {
+                    let mut item = item.clone();
+                    item.text_kind = if case == "code" {
+                        TextKind::Code
+                    } else {
+                        TextKind::Plain
+                    };
+                    cancel(&app);
+                    let token = HOVER
+                        .with(|s| {
+                            s.borrow_mut().start(
+                                host,
+                                HoverTarget::Item(item.id.clone()),
+                                (100.0, 100.0),
+                            )
+                        })
+                        .unwrap();
+                    render(&app, 0, &item, 100.0, 100.0, Payload::Text(text), token);
+                    snapshot(&win, case, name);
+                }
+                cancel(&app);
+                let token = HOVER
+                    .with(|s| {
+                        s.borrow_mut().start(
+                            host,
+                            HoverTarget::Static("保存".into(), 0, 0),
+                            (100.0, 100.0),
+                        )
+                    })
+                    .unwrap();
+                render_static(&app, 0, "保存（Ctrl+S）", 100.0, 100.0, token);
+                snapshot(&win, "button", name);
+            }
+        }
+        cancel(&app);
+        drop(app);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    fn snapshot(win: &TooltipWindow, case: &str, theme: &str) {
+        win.set_appear(true);
+        pump(160);
+        let pixels = win.window().take_snapshot().unwrap();
+        if win.get_has_image() {
+            let expected_height = (win.get_image_height()
+                + win.get_content_bottom_gap()
+                + win.get_card_chrome_v()
+                + HEIGHT_SAFETY
+                + 2.0 * win.get_shadow_margin())
+                * win.window().scale_factor();
+            assert!(
+                (pixels.height() as f32 - expected_height).abs() <= 2.0,
+                "图片气泡高度须匹配当前图片，不能残留上一张的空白"
+            );
+        }
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.artifacts/snapshot");
+        std::fs::create_dir_all(&dir).unwrap();
+        image::save_buffer(
+            dir.join(format!(
+                "tooltip-{case}-{theme}-{}.png",
+                (win.window().scale_factor() * 100.0).round() as u32
+            )),
+            pixels.as_bytes(),
+            pixels.width(),
+            pixels.height(),
+            image::ColorType::Rgba8,
+        )
+        .unwrap();
+    }
 }

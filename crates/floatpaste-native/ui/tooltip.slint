@@ -33,6 +33,9 @@ export component TooltipWindow inherits Window {
     // 正文按源行拆行渲染（Slint Text 无 line-height，行距由
     // content-line-spacing 提供）；静态提示模式仍走 content-text 单行
     in-out property <[TooltipLine]> content-lines;
+    in-out property <bool> preview-truncated: false;
+    out property <length> notice-height: 18px;
+    out property <string> truncation-notice: "内容未完整展示，可进入编辑查看";
     // 行间距：Rust 测高时读取，保持与渲染同源
     out property <length> content-line-spacing: 4px;
     // 正文与分隔线之间的间距：Rust 测高时读取（计入窗口高）
@@ -145,7 +148,8 @@ export component TooltipWindow inherits Window {
                 color: Theme.fg-default;
                 font-size: Metrics.text-xs;
                 font-weight: Metrics.weight-medium;
-                wrap: word-wrap;
+                wrap: no-wrap;
+                overflow: elide;
                 min-width: 0px;
                 height: root.simple-line-height;
                 vertical-alignment: top;
@@ -168,10 +172,20 @@ export component TooltipWindow inherits Window {
                     height: line.height;
                     vertical-alignment: top;
                 }
+                if (root.preview-truncated): Text {
+                    text: root.truncation-notice;
+                    height: root.notice-height;
+                    font-size: Metrics.text-xs;
+                    font-weight: Metrics.weight-medium;
+                    color: Theme.fg-muted;
+                    wrap: no-wrap;
+                    overflow: elide;
+                    min-width: 0px;
+                }
             }
 
             // 正文与分隔线之间的固定间距
-            if (!root.has-image && !root.simple-mode): Rectangle {
+            if (!root.simple-mode): Rectangle {
                 height: root.content-bottom-gap;
             }
 
@@ -218,6 +232,8 @@ export component TooltipWindow inherits Window {
                 Text {
                     horizontal-stretch: 0;
                     text: root.source-app;
+                    min-width: 0px;
+                    overflow: elide;
                     color: Theme.fg-metadata;
                     font-size: Metrics.text-hint;
                     font-weight: Metrics.weight-medium;

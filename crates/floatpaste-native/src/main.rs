@@ -763,6 +763,7 @@ fn l2_headless_ui_contracts() {
     win32_ext::repaint_contract_tests::run();
     picker::reveal_contract_tests::run();
     picker::action_sheet_tests::run();
+    tooltip::headless_contract_tests::run();
 }
 
 #[cfg(test)]

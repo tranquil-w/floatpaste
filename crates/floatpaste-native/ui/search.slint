@@ -310,14 +310,24 @@ component SearchRowCard inherits Rectangle {
         clicked => { root.clicked(); }
         double-clicked => { root.double-clicked(); }
         changed mouse-x => {
-            root.hover(self.absolute-position.x + self.mouse-x,
-                self.absolute-position.y + self.mouse-y);
+            if (self.has-hover) {
+                root.hover(self.absolute-position.x + self.mouse-x,
+                    self.absolute-position.y + self.mouse-y);
+            }
         }
         changed mouse-y => {
-            root.hover(self.absolute-position.x + self.mouse-x,
-                self.absolute-position.y + self.mouse-y);
+            if (self.has-hover) {
+                root.hover(self.absolute-position.x + self.mouse-x,
+                    self.absolute-position.y + self.mouse-y);
+            }
         }
-        changed has-hover => { root.sync-hover(); }
+        changed has-hover => {
+            root.sync-hover();
+            if (self.has-hover) {
+                root.hover(self.absolute-position.x + self.mouse-x,
+                    self.absolute-position.y + self.mouse-y);
+            }
+        }
     }
 
     // ── 行主体（py-2.5 pl-3 pr-3 gap-3）──
@@ -1170,6 +1180,7 @@ export component SearchWindow inherits Window {
                         width: parent.width - SearchGeometry.scroll-slot;
                         height: parent.height;
                         interactive: true;
+                        changed content-y => { root.row-hover-left(); }
 
                         function report-preview-widths() {
                             // 列表内容宽（扣双层包裹 padding）→ 行基础预览宽

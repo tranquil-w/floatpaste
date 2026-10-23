@@ -1705,6 +1705,7 @@ fn apply_height(app: &App) {
 /* ───────────────── 窗口拖拽 ───────────────── */
 
 pub fn drag_started(app: &App) {
+    tooltip::cancel(app);
     let hwnd = app.state.search_hwnd.load(Ordering::SeqCst);
     if hwnd != 0 {
         window_control::begin_window_gesture(

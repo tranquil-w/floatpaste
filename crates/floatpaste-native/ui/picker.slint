@@ -541,15 +541,22 @@ component ClipRowCard inherits Rectangle {
         // 坐标换算成窗口内位置上报：tooltip 以面板原点
         // 定位（原版 clientX/Y），行内坐标会偏移整行位置
         changed mouse-x => {
-            root.hover(self.absolute-position.x + self.mouse-x,
-                self.absolute-position.y + self.mouse-y);
+            if (self.has-hover) {
+                root.hover(self.absolute-position.x + self.mouse-x,
+                    self.absolute-position.y + self.mouse-y);
+            }
         }
         changed mouse-y => {
-            root.hover(self.absolute-position.x + self.mouse-x,
-                self.absolute-position.y + self.mouse-y);
+            if (self.has-hover) {
+                root.hover(self.absolute-position.x + self.mouse-x,
+                    self.absolute-position.y + self.mouse-y);
+            }
         }
         changed has-hover => {
-            if (!self.has-hover) {
+            if (self.has-hover) {
+                root.hover(self.absolute-position.x + self.mouse-x,
+                    self.absolute-position.y + self.mouse-y);
+            } else {
                 root.hover-left();
             }
         }
@@ -858,6 +865,7 @@ export component QuickPasteWindow inherits Window {
                         width: parent.width - PanelGeometry.scroll-slot;
                         height: parent.height;
                         interactive: true;
+                        changed content-y => { root.row-hover-left(); }
                         // 实测上报预览可用宽：flick 宽扣 PanelGeometry.
                         // preview-pad-h（列表内边距 + 卡片内容边距 +
                         // 行内边距），含缩略图列再扣缩略图列宽。窗口
