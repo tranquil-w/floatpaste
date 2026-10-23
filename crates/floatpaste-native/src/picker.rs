@@ -242,8 +242,11 @@ pub fn activate(app: &App) {
     win.set_monitoring_paused(settings.pause_monitoring);
 
     // 主题随设置刷新（设置可能在后台被改变）
+    let theme_started = Instant::now();
     let resolved = theme::resolve_theme(settings.theme_mode.clone(), theme::system_prefers_dark());
     let tokens = theme::derive_tokens(&settings.theme_preset, &settings.theme_accent, resolved);
+    let theme_resolve_ms = theme_started.elapsed().as_millis();
+    let theme_apply_started = Instant::now();
     theme_bridge::apply_theme(
         Some(&win),
         app.tooltip.upgrade().as_ref(),
@@ -252,6 +255,12 @@ pub fn activate(app: &App) {
         app.editor.upgrade().as_ref(),
         app.settings.upgrade().as_ref(),
         &tokens,
+    );
+    tracing::debug!(
+        session_id = session.session_id,
+        resolve_ms = theme_resolve_ms,
+        apply_ms = theme_apply_started.elapsed().as_millis(),
+        "速贴主题准备完成"
     );
 
     // 材质底：唤起时按设置「背景材质」现读分派（Mica/Acrylic 均自绘
@@ -263,7 +272,13 @@ pub fn activate(app: &App) {
     // Slint 可见（停屏态），这里只做最小化兜位恢复，不走 Slint show：
     // hide→show 周期中 winit 清空表面且脏区跟踪失效，是开窗透明闪烁的
     // 根源。样式重挂与前台策略仍交 overlay 公共层处理
+    let show_started = Instant::now();
     let _ = window_control::show_window_no_activate(hwnd);
+    tracing::debug!(
+        session_id = session.session_id,
+        show_ms = show_started.elapsed().as_millis(),
+        "速贴屏外窗口恢复完成"
+    );
 
     // 会话开始：刷新列表、选中归零、滚回顶部、清空消息。放在上屏之前：
     // 列表重活（查询 + 逐行裁排）跑在停屏期间，上屏即最新内容
@@ -297,6 +312,7 @@ fn schedule_reveal(
 ) {
     win32_ext::force_full_repaint(win);
     let app = app.clone();
+    let scheduled = Instant::now();
     REVEAL_TIMER.with(|timer| {
         timer.borrow().start(
             slint::TimerMode::SingleShot,
@@ -308,7 +324,11 @@ fn schedule_reveal(
                 let Some(win) = app.picker.upgrade() else {
                     return;
                 };
+                let timer_wait_ms = scheduled.elapsed().as_millis();
+                let warm_started = Instant::now();
                 win32_ext::warm_surface(hwnd);
+                let warm_ms = warm_started.elapsed().as_millis();
+                let place_started = Instant::now();
                 window_control::set_window_bounds(
                     hwnd,
                     point.x,
@@ -317,6 +337,8 @@ fn schedule_reveal(
                     size.height as i32,
                 );
                 win32_ext::force_full_repaint(&win);
+                let place_ms = place_started.elapsed().as_millis();
+                let overlay_started = Instant::now();
                 let target = app.state.picker_session().target_window_hwnd;
                 // 用户可在准备期切换前台；只纠正速贴自己偷走的焦点。
                 let restore =
@@ -325,12 +347,24 @@ fn schedule_reveal(
                 overlay::after_show(hwnd, false, restore, restore, move || {
                     state.is_current_picker_activation(epoch)
                 });
+                let overlay_ms = overlay_started.elapsed().as_millis();
+                let input_started = Instant::now();
                 start_topmost_guard(&app);
                 if target == Some(app.state.search_hwnd.load(Ordering::SeqCst)) {
                     search::suspend_input(&app);
                 }
                 // LL 鼠标钩子由事件循环线程泵出，必须在重活完成且真实显示后安装。
                 begin_input_session(&app, hwnd, &app.state.current_settings());
+                tracing::debug!(
+                    session_id = app.state.picker_session().session_id,
+                    configured_delay_ms = REVEAL_DELAY_MS,
+                    timer_wait_ms,
+                    warm_ms,
+                    place_ms,
+                    overlay_ms,
+                    input_setup_ms = input_started.elapsed().as_millis(),
+                    "速贴显屏阶段完成"
+                );
                 info!(
                     session_id = app.state.picker_session().session_id,
                     elapsed_ms = started.elapsed().as_millis(),
@@ -648,7 +682,17 @@ fn refresh_list(app: &App, keep_anchor: bool) {
     let settings = app.state.current_settings();
     let limit = settings.picker_record_limit.clamp(9, 1000);
 
-    match app.core().repository.list_recent(limit) {
+    let query_started = Instant::now();
+    let result = app.core().repository.list_recent(limit);
+    tracing::debug!(
+        session_id = app.state.picker_session().session_id,
+        query_ms = query_started.elapsed().as_millis(),
+        row_count = result.as_ref().map_or(0, Vec::len),
+        success = result.is_ok(),
+        keep_anchor,
+        "速贴列表查询完成"
+    );
+    match result {
         Ok(items) => {
             let anchor_id = if keep_anchor {
                 app.state.selected_id()
@@ -683,7 +727,13 @@ fn refresh_list(app: &App, keep_anchor: bool) {
             win.set_actions_row(-1);
 
             build_rows(app, &win, &items);
+            let thumbnails_started = Instant::now();
             ensure_thumbnails(app, &items);
+            tracing::debug!(
+                session_id = app.state.picker_session().session_id,
+                dispatch_ms = thumbnails_started.elapsed().as_millis(),
+                "速贴缩略图任务派发完成"
+            );
         }
         Err(error) => {
             warn!("加载速贴列表失败: {error}");
@@ -816,11 +866,15 @@ fn preview_avail_widths(win: &QuickPasteWindow) -> (f32, f32) {
 }
 
 fn build_rows(app: &App, win: &QuickPasteWindow, items: &[ClipItemSummary]) {
+    let geometry_started = Instant::now();
     let digit_enabled = win.get_digit_shortcuts_enabled();
     let settings = app.state.current_settings();
     let keys = &settings.session_keys;
     let (avail_no_thumb, avail_with_thumb) = preview_avail_widths(win);
     let line_height = preview_line_height(win);
+    let geometry_ms = geometry_started.elapsed().as_millis();
+    let rows_started = Instant::now();
+    let mut preview_time = Duration::ZERO;
 
     let rows: Vec<ClipRow> = items
         .iter()
@@ -835,6 +889,7 @@ fn build_rows(app: &App, win: &QuickPasteWindow, items: &[ClipItemSummary]) {
             } else {
                 0.0
             };
+            let preview_started = Instant::now();
             let preview = clamp_preview(
                 win,
                 &item.content_preview,
@@ -847,6 +902,7 @@ fn build_rows(app: &App, win: &QuickPasteWindow, items: &[ClipItemSummary]) {
                 source_truncated,
                 line_height,
             );
+            preview_time += preview_started.elapsed();
             ClipRow {
                 id: item.id.clone().into(),
                 preview: preview.into(),
@@ -890,8 +946,19 @@ fn build_rows(app: &App, win: &QuickPasteWindow, items: &[ClipItemSummary]) {
         })
         .collect();
 
+    let rows_time = rows_started.elapsed();
+    let publish_started = Instant::now();
     win.set_rows(ModelRc::new(Rc::new(VecModel::from(rows))));
     LIST_VERSION.with(|version| version.set(thumbnails::bump_list_version()));
+    tracing::debug!(
+        session_id = app.state.picker_session().session_id,
+        row_count = items.len(),
+        geometry_ms,
+        preview_ms = preview_time.as_millis(),
+        projection_ms = rows_time.saturating_sub(preview_time).as_millis(),
+        publish_ms = publish_started.elapsed().as_millis(),
+        "速贴行模型准备完成"
+    );
 }
 
 /// 菜单投影 → 行模型字段（速贴与搜索同构转换）
@@ -1176,6 +1243,7 @@ fn prepare_reveal(
     tokens: theme::ThemeTokens,
     started: Instant,
 ) {
+    let setup_started = Instant::now();
     let settings = app.state.current_settings();
     let material = settings.window_material;
     win.set_material_active(matches!(material, WindowMaterial::Mica));
@@ -1222,6 +1290,12 @@ fn prepare_reveal(
         });
         (point, backdrop)
     });
+    tracing::debug!(
+        session_id = session.session_id,
+        setup_ms = setup_started.elapsed().as_millis(),
+        elapsed_ms = started.elapsed().as_millis(),
+        "速贴后台准备派发完成"
+    );
     wait_for_preparation(app, size, epoch, fallback, started, rx);
 }
 
