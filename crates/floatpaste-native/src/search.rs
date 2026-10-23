@@ -23,18 +23,20 @@ use slint::{ComponentHandle, Model, ModelRc, PhysicalPosition, PhysicalSize, Vec
 use tracing::{info, warn};
 
 use floatpaste_core::domain::clip_item::{
-    ClipItemSummary, ClipType, PasteOption, SearchFilters, SearchQuery, SearchResult, SearchSort,
-    TextKind,
+    available_paste_modes, resolve_secondary_mode, ClipItemSummary, ClipType, PasteMode,
+    PasteOption, SearchFilters, SearchQuery, SearchResult, SearchSort, TextKind,
 };
 use floatpaste_core::domain::error::AppError;
-use floatpaste_core::domain::settings::{PasteTrigger, UserSetting};
+use floatpaste_core::domain::settings::{PasteTrigger, SecondaryPasteDefaults, UserSetting};
 use floatpaste_core::platform::windows::active_app::ActiveAppResolver;
 use floatpaste_core::platform::windows::picker_position::{
     current_cursor_point, primary_monitor_work_area, work_area_from_point, ScreenRect,
 };
 use floatpaste_core::platform::windows::session_keyboard::parse_session_combo;
 use floatpaste_core::platform::windows::window_control;
-use floatpaste_core::services::clip_display::build_meta;
+use floatpaste_core::services::clip_display::{
+    build_meta, paste_action_summaries, secondary_action_label,
+};
 use floatpaste_core::services::clip_service::ClipService;
 use floatpaste_core::services::paste_support;
 use floatpaste_core::services::picker_position_service::center_in_work_area;
@@ -47,7 +49,9 @@ use crate::picker::{self, App};
 use crate::thumbnails;
 use crate::tooltip::{self, HoverHost};
 use crate::win32_ext;
-use crate::{SearchActionKeys, SearchGeometry, SearchRow, SearchTagChip, SearchWindow};
+use crate::{
+    PasteMenuGeometry, SearchActionKeys, SearchGeometry, SearchRow, SearchTagChip, SearchWindow,
+};
 
 /// 单页条数（对齐旧版 SEARCH_PAGE_SIZE）
 const PAGE_SIZE: u32 = 50;
@@ -335,6 +339,8 @@ pub fn hide(app: &App, restore_target: bool) {
         }
     }
     if let Some(win) = app.search.upgrade() {
+        // 会话收尾复位动作菜单（悬空行号不带入下次打开）
+        win.set_actions_menu_row(-1);
         // 记录原位后停屏到屏幕外而非 Slint hide（同 hide_for_editor）：
         // hide→show 周期会清空窗口表面，下次显示出现透明空壳
         let hwnd = app.state.search_hwnd.load(Ordering::SeqCst);
@@ -1073,8 +1079,12 @@ pub(crate) fn next_navigation_index(count: usize, current: usize, up: bool) -> u
 }
 
 /// 单行数据构建（行高恒定：选中态由 slint 侧 selected 绑定驱动，
-/// 行数据不区分选中形态）
-pub(crate) fn make_row(item: &ClipItemSummary) -> SearchRow {
+/// 行数据不区分选中形态）。动作目录与次级动作提示随设置快照生成
+pub(crate) fn make_row(
+    item: &ClipItemSummary,
+    keys: &floatpaste_core::domain::settings::SessionKeys,
+    defaults: &SecondaryPasteDefaults,
+) -> SearchRow {
     let thumb = thumbnails::cached(&item.id);
     let has_thumb = thumb.is_some();
     let normal_preview = flatten_preview_newlines(&item.content_preview);
@@ -1113,6 +1123,15 @@ pub(crate) fn make_row(item: &ClipItemSummary) -> SearchRow {
             ModelRc::new(Rc::new(VecModel::from(shown)))
         },
         tag_more: item.tags.len().saturating_sub(3) as i32,
+        actions: picker::action_items(&paste_action_summaries(
+            item,
+            &keys.confirm,
+            &keys.confirm_as_file,
+            defaults,
+        )),
+        secondary_label: secondary_action_label(item, defaults)
+            .unwrap_or_default()
+            .into(),
     }
 }
 
@@ -1122,16 +1141,22 @@ fn build_rows(app: &App) {
         return;
     };
     let items = app.state.search_items();
+    let settings = app.state.current_settings();
     let selected_id = SELECTED_ID.with(|slot| slot.borrow().clone());
     let selected_index = items
         .iter()
         .position(|item| Some(&item.id) == selected_id.as_ref());
 
-    let rows: Vec<SearchRow> = items.iter().map(make_row).collect();
+    let rows: Vec<SearchRow> = items
+        .iter()
+        .map(|item| make_row(item, &settings.session_keys, &settings.secondary_paste))
+        .collect();
 
     let model = Rc::new(VecModel::from(rows));
     ROW_MODEL.with(|slot| *slot.borrow_mut() = Some(model.clone()));
     win.set_selected(selected_index.unwrap_or(0) as i32);
+    // 行集整体重建：菜单锚定的行号可能漂移，收起动作菜单
+    win.set_actions_menu_row(-1);
     win.set_rows(ModelRc::from(model));
 }
 
@@ -1213,7 +1238,24 @@ pub fn paste_index(app: &App, index: usize, secondary: bool) {
     let Some(item) = app.state.search_item_at(index) else {
         return;
     };
-    paste_item(app, &item, secondary);
+    let mode = if secondary {
+        resolve_secondary_mode(&item, &app.state.current_settings().secondary_paste)
+    } else {
+        PasteMode::Original
+    };
+    paste_with_mode(app, &item, mode);
+}
+
+/// 「更多上屏方式」菜单：按目录序号显式选一次（含主动作），不改默认
+fn paste_menu_action(app: &App, index: usize, action_index: usize) {
+    let Some(item) = app.state.search_item_at(index) else {
+        return;
+    };
+    let mode = available_paste_modes(&item)
+        .get(action_index)
+        .copied()
+        .unwrap_or(PasteMode::Original);
+    paste_with_mode(app, &item, mode);
 }
 
 /// 键盘路径的行号来源：当前选中行（鼠标路径由行回调直接带行号）
@@ -1222,24 +1264,89 @@ fn selected_index(app: &App) -> usize {
         .unwrap_or(0)
 }
 
-/// 选中条目上屏（键盘路径）；次级形态按类型生效：图片上屏为图片路径、
-/// 文件上屏为逐行路径列表文本（文本暂无次级形态，等同主上屏）
+/// 选中条目上屏（键盘路径）；次级动作按类别配置解析（普通文本等同主上屏）
 pub fn paste_selected(app: &App, secondary: bool) {
     paste_index(app, selected_index(app), secondary);
 }
 
-fn paste_item(app: &App, item: &ClipItemSummary, secondary: bool) {
+fn paste_with_mode(app: &App, item: &ClipItemSummary, mode: PasteMode) {
     tooltip::cancel(app);
     let settings = app.state.current_settings();
     let option = PasteOption {
         restore_clipboard_after_paste: settings.restore_clipboard_after_paste,
         paste_to_target: true,
-        mode: floatpaste_core::domain::clip_item::resolve_paste_mode(item, secondary),
+        mode,
     };
     if let Err(error) = execute_paste(app, &item.id, option) {
         warn!("搜索粘贴失败: {error}");
         crate::tray::notify_failure(&format!("上屏失败：{error}"));
     }
+}
+
+/* ───────────────── 「更多上屏方式」菜单 ───────────────── */
+
+/// 锚定并打开动作菜单：锚点取展开箭头左下角、向下展开；贴近窗口底边
+/// 时改为向上展开，菜单高度取共享尺寸与实际动作数；Rust 侧只钳纵向，横向钳制
+/// 由界面侧按菜单宽执行
+fn open_actions_menu(app: &App, index: usize, x: f32, y: f32) {
+    tooltip::cancel(app);
+    let Some(item) = app.state.search_item_at(index) else {
+        return;
+    };
+    if available_paste_modes(&item).len() <= 1 {
+        return;
+    }
+    set_selected(app, index);
+    app.with_search(|win| {
+        let scale = win.window().scale_factor();
+        let logical = win.window().size().to_logical(scale);
+        let geometry = win.global::<PasteMenuGeometry>();
+        let count = available_paste_modes(&item).len() as f32;
+        let menu_height = count * geometry.get_row_height()
+            + (count - 1.0) * geometry.get_spacing()
+            + 2.0 * geometry.get_padding();
+        let y = if y + menu_height > logical.height - 8.0 {
+            (y - menu_height - 36.0).max(8.0)
+        } else {
+            y
+        };
+        win.set_actions_menu_row(index as i32);
+        win.set_actions_menu_highlight(0);
+        win.set_actions_menu_x(x);
+        win.set_actions_menu_y(y);
+    });
+}
+
+/// 键盘 ↑↓：菜单内循环移动高亮（与悬停高亮同一状态）
+fn move_actions_menu(app: &App, delta: i32) {
+    app.with_search(|win| {
+        let row = win.get_actions_menu_row();
+        if row < 0 {
+            return;
+        }
+        let Some(item) = app.state.search_item_at(row as usize) else {
+            return;
+        };
+        let count = available_paste_modes(&item).len().max(1);
+        let current = win.get_actions_menu_highlight().max(0) as usize;
+        win.set_actions_menu_highlight(next_navigation_index(count, current, delta < 0) as i32);
+    });
+}
+
+fn close_actions_menu(app: &App) {
+    app.with_search(|win| win.set_actions_menu_row(-1));
+}
+
+/// Enter：执行菜单内高亮的动作（先收菜单；上屏失败时面板保留供重试）
+fn confirm_actions_menu(app: &App) {
+    let (row, highlight) = app
+        .with_search(|win| (win.get_actions_menu_row(), win.get_actions_menu_highlight()))
+        .unwrap_or((-1, 0));
+    if row < 0 {
+        return;
+    }
+    close_actions_menu(app);
+    paste_menu_action(app, row as usize, highlight.max(0) as usize);
 }
 
 /// 上屏流（对齐 PasteExecutor 搜索分支）：趁搜索窗口可见写剪贴板 →
@@ -1831,10 +1938,42 @@ pub fn wire(app: &App) {
             paste_index(&app_cb, index.max(0) as usize, false);
         });
     }
+    // ── 「更多上屏方式」菜单 ──
     {
         let app_cb = app.clone();
-        win.on_action_paste_as_path(move |index| {
-            paste_index(&app_cb, index.max(0) as usize, true);
+        win.on_action_menu_requested(move |row, x, y| {
+            open_actions_menu(&app_cb, row.max(0) as usize, x, y);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_action_menu_move(move |delta| {
+            move_actions_menu(&app_cb, delta);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_action_menu_confirm(move || {
+            confirm_actions_menu(&app_cb);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_action_menu_dismiss(move || {
+            close_actions_menu(&app_cb);
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_action_menu_paste(move |action_index| {
+            let row = app_cb
+                .with_search(|win| win.get_actions_menu_row())
+                .unwrap_or(-1);
+            if row < 0 {
+                return;
+            }
+            close_actions_menu(&app_cb);
+            paste_menu_action(&app_cb, row as usize, action_index.max(0) as usize);
         });
     }
     {
@@ -2191,6 +2330,8 @@ pub(crate) mod scroll_reset_tests {
                 thumb: Default::default(),
                 tags: Default::default(),
                 tag_more: 0,
+                actions: Default::default(),
+                secondary_label: "".into(),
             })
             .collect();
         win.set_rows(ModelRc::new(Rc::new(VecModel::from(rows))));
@@ -2367,5 +2508,338 @@ pub(crate) mod refresh_after_editor_tests {
             "行卡应显示新标签"
         );
         crate::editor::load_error_tests::run(&app, &editor_win, &db_path, &item_id);
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod action_menu_tests {
+    //! 「更多上屏方式」菜单契约（docs/testing.md L2 层）：行级动作目录
+    //! 投影、菜单开合、键盘高亮与跨行 Delete 路由，不执行真实上屏
+    //! （系统剪贴板属 L3 串行资源）。由 l2_headless_ui_contracts 单线程串行调用。
+
+    use super::*;
+    use std::sync::Arc;
+
+    use floatpaste_core::repository::sqlite_repository::SqliteRepository;
+    use floatpaste_core::services::image_storage::ImageStorage;
+    use floatpaste_core::state::CoreState;
+
+    use crate::app_state::SharedState;
+
+    fn headless_app() -> (App, SearchWindow) {
+        let stamp = std::process::id();
+        let dir = std::env::temp_dir().join(format!("floatpaste-menu-{stamp}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("floatpaste.db");
+        let repository = SqliteRepository::new(&db_path).unwrap();
+        let core = CoreState::new(
+            repository,
+            ImageStorage::new(dir).unwrap(),
+            UserSetting::default(),
+        );
+        let win = SearchWindow::new().expect("实例化搜索窗失败");
+        win.window().set_size(slint::LogicalSize::new(780.0, 620.0));
+        let app = App {
+            state: Arc::new(SharedState::new(core)),
+            picker: Default::default(),
+            tooltip: Default::default(),
+            tray_menu: Default::default(),
+            search: win.as_weak(),
+            editor: Default::default(),
+            settings: Default::default(),
+        };
+        (app, win)
+    }
+
+    fn summary(clip_type: &str, has_html: bool) -> ClipItemSummary {
+        ClipItemSummary {
+            has_html,
+            id: format!("{clip_type}-{has_html}"),
+            r#type: clip_type.to_string(),
+            content_preview: "p".into(),
+            source_app: None,
+            is_favorited: false,
+            file_count: 0,
+            directory_count: 0,
+            created_at: String::new(),
+            updated_at: String::new(),
+            last_used_at: None,
+            image_path: None,
+            image_width: None,
+            image_height: None,
+            image_format: None,
+            file_size: None,
+            tags: vec![],
+            text_kind: Default::default(),
+        }
+    }
+
+    fn row_labels(row: &SearchRow) -> Vec<String> {
+        row.actions
+            .iter()
+            .map(|action| action.label.to_string())
+            .collect()
+    }
+
+    /// 单测试函数串行多段中的一段（见模块注释）
+    pub(crate) fn run() {
+        let keys = UserSetting::default().session_keys;
+        let defaults = SecondaryPasteDefaults::default();
+
+        // 行投影：目录按类型展开，普通文本不凑「纯文本」选项，
+        // 次级动作提示名跟随默认配置
+        let plain = make_row(&summary("text", false), &keys, &defaults);
+        assert_eq!(plain.actions.row_count(), 1);
+        assert_eq!(row_labels(&plain), vec!["粘贴为文本"]);
+        assert_eq!(plain.secondary_label, "", "普通文本无独立次级动作提示");
+
+        let rich = make_row(&summary("text", true), &keys, &defaults);
+        assert_eq!(row_labels(&rich), vec!["粘贴为原格式", "粘贴为纯文本"]);
+        assert_eq!(rich.secondary_label, "粘贴为纯文本");
+
+        let image = make_row(&summary("image", false), &keys, &defaults);
+        assert_eq!(
+            row_labels(&image),
+            vec!["粘贴为图片", "粘贴为图片路径", "粘贴为图片文件"]
+        );
+        assert_eq!(image.secondary_label, "粘贴为图片路径");
+
+        let file = make_row(&summary("file", false), &keys, &defaults);
+        assert_eq!(
+            row_labels(&file),
+            vec!["粘贴为文件", "粘贴为完整路径", "粘贴为文件名"]
+        );
+        assert_eq!(file.secondary_label, "粘贴为完整路径");
+
+        // 改配文件名后：次级动作提示换名，快捷键提示跟随新默认
+        let file_named = make_row(
+            &summary("file", false),
+            &keys,
+            &SecondaryPasteDefaults {
+                file: PasteMode::FileNameText,
+                ..defaults
+            },
+        );
+        assert_eq!(file_named.secondary_label, "粘贴为文件名");
+        assert_eq!(
+            row_labels(&file_named),
+            vec!["粘贴为文件", "粘贴为完整路径", "粘贴为文件名"]
+        );
+        let shortcuts: Vec<String> = (0..file_named.actions.row_count())
+            .filter_map(|index| {
+                file_named
+                    .actions
+                    .row_data(index)
+                    .map(|action| action.shortcut.to_string())
+            })
+            .collect();
+        assert_eq!(
+            shortcuts,
+            vec![
+                keys.confirm.clone(),
+                String::new(),
+                keys.confirm_as_file.clone()
+            ],
+            "次级键提示应跟随新默认（文件名），主动作恒带主键提示"
+        );
+
+        // 配置等同主动作（富文本选原格式）：不重复提示，菜单仍完整
+        let rich_original = make_row(
+            &summary("text", true),
+            &keys,
+            &SecondaryPasteDefaults {
+                rich_text: PasteMode::Original,
+                ..defaults
+            },
+        );
+        assert_eq!(rich_original.secondary_label, "");
+        assert_eq!(rich_original.actions.row_count(), 2);
+
+        // 菜单状态流转（不执行真实上屏）：直接注入 summary，
+        // 等价一次查询落地后的行缓存
+        let (app, win) = headless_app();
+        app.state
+            .set_search_items(vec![summary("text", false), summary("file", false)]);
+
+        // 普通文本（仅一项动作）：不打开菜单
+        open_actions_menu(&app, 0, 10.0, 100.0);
+        assert_eq!(win.get_actions_menu_row(), -1, "单项动作不开菜单");
+
+        // 文件条目：打开后高亮回主动作，锚点入属性；键盘循环移动
+        set_selected(&app, 0);
+        request_delete(&app, 0);
+        assert_eq!(win.get_delete_armed_row(), 0);
+        open_actions_menu(&app, 1, 400.0, 80.0);
+        assert_eq!(win.get_selected(), 1, "菜单应选中发起行");
+        assert_eq!(
+            SELECTED_ID.with(|slot| slot.borrow().clone()),
+            Some(summary("file", false).id)
+        );
+        assert_eq!(win.get_delete_armed_row(), -1, "打开菜单应解除删除待确认");
+        assert!(ARMED_DELETE.with(|slot| slot.borrow().is_none()));
+        assert_eq!(win.get_actions_menu_row(), 1);
+        assert_eq!(win.get_actions_menu_highlight(), 0);
+        assert_eq!(win.get_actions_menu_x(), 400.0);
+        move_actions_menu(&app, 1);
+        assert_eq!(win.get_actions_menu_highlight(), 1);
+        move_actions_menu(&app, 1);
+        assert_eq!(win.get_actions_menu_highlight(), 2);
+        move_actions_menu(&app, 1);
+        assert_eq!(win.get_actions_menu_highlight(), 0, "高亮循环回主动作");
+        move_actions_menu(&app, -1);
+        assert_eq!(win.get_actions_menu_highlight(), 2, "向上移动循环");
+
+        // 收起
+        close_actions_menu(&app);
+        assert_eq!(win.get_actions_menu_row(), -1);
+
+        // 贴近窗口底边：菜单锚点向上翻（避免画出窗外）
+        open_actions_menu(&app, 1, 10.0, 600.0);
+        assert!(
+            win.get_actions_menu_y() < 600.0 - 3.0 * 30.0,
+            "底边附近的菜单应向上展开"
+        );
+        close_actions_menu(&app);
+
+        // 从 A 的删除待确认态打开 B 菜单，再按 Delete：只让 B 进入待确认。
+        wire(&app);
+        set_selected(&app, 0);
+        request_delete(&app, 0);
+        win.invoke_action_menu_requested(1, 400.0, 80.0);
+        win.invoke_blur_input();
+        win.window()
+            .dispatch_event(slint::platform::WindowEvent::KeyPressed {
+                text: slint::platform::Key::Delete.into(),
+            });
+        win.window()
+            .dispatch_event(slint::platform::WindowEvent::KeyReleased {
+                text: slint::platform::Key::Delete.into(),
+            });
+        assert_eq!(win.get_actions_menu_row(), -1, "Delete 应先收菜单");
+        assert_eq!(win.get_delete_armed_row(), 1, "Delete 应作用于菜单发起行");
+        assert_eq!(
+            ARMED_DELETE.with(|slot| slot.borrow().clone()),
+            Some(summary("file", false).id)
+        );
+        assert_eq!(
+            app.state.search_items().len(),
+            2,
+            "首次 Delete 不删除任何行"
+        );
+        reset_delete_arm(&app);
+        pointer_split_button(&app, &win);
+    }
+
+    fn pointer_split_button(app: &App, win: &SearchWindow) {
+        use slint::platform::{PointerEventButton, WindowEvent};
+
+        let mut item = summary("file", false);
+        item.content_preview = "D:\\文档\\项目设计说明.pdf".into();
+        app.state
+            .set_search_items(vec![summary("text", true), item]);
+        build_rows(app);
+        win.set_result_count(2);
+        win.set_result_total(2);
+        set_selected(app, 1);
+        let _ = win.window().take_snapshot().unwrap();
+
+        let hint = Rc::new(RefCell::new(None));
+        let hint_cb = hint.clone();
+        win.on_button_hint(move |text, x, y| {
+            *hint_cb.borrow_mut() = Some((text.to_string(), x, y))
+        });
+        let hovered = Rc::new(Cell::new(-1));
+        let hovered_cb = hovered.clone();
+        win.on_row_hover(move |row, _, _| hovered_cb.set(row));
+        let mut bounds = (i32::MAX, 0);
+        for y in 100..380 {
+            hovered.set(-1);
+            win.window().dispatch_event(WindowEvent::PointerMoved {
+                position: slint::LogicalPosition::new(100.0, y as f32),
+            });
+            if hovered.get() == 1 {
+                bounds.0 = bounds.0.min(y);
+                bounds.1 = y;
+            }
+        }
+        assert!(bounds.0 < bounds.1, "应找到文件行");
+        let y = (bounds.0 + bounds.1) as f32 / 2.0;
+        let (mut main, mut more) = (None, None);
+        for x in 400..760 {
+            win.window().dispatch_event(WindowEvent::PointerMoved {
+                position: slint::LogicalPosition::new(x as f32, y),
+            });
+            if let Some((text, x, y)) = hint.borrow_mut().take() {
+                if text.starts_with("更多上屏方式") {
+                    more = Some(slint::LogicalPosition::new(x + 11.0, y - 17.0));
+                } else if text.starts_with("粘贴为文件") {
+                    main = Some(slint::LogicalPosition::new(x + 34.0, y - 17.0));
+                }
+            }
+        }
+
+        // 截获发布回调以避免写系统剪贴板，其余菜单路由使用真实 wire。
+        let pasted = Rc::new(Cell::new(-1));
+        let pasted_cb = pasted.clone();
+        win.on_action_paste(move |row| pasted_cb.set(row));
+        let clicked = Rc::new(Cell::new(false));
+        let clicked_cb = clicked.clone();
+        win.on_row_clicked(move |_| clicked_cb.set(true));
+        for (position, dropdown) in [
+            (main.expect("应找到直接粘贴区"), false),
+            (more.expect("应找到下拉区"), true),
+        ] {
+            pasted.set(-1);
+            win.window()
+                .dispatch_event(WindowEvent::PointerMoved { position });
+            win.window().dispatch_event(WindowEvent::PointerPressed {
+                position,
+                button: PointerEventButton::Left,
+            });
+            win.window().dispatch_event(WindowEvent::PointerReleased {
+                position,
+                button: PointerEventButton::Left,
+            });
+            assert!(!clicked.get(), "复合按钮不能触发行点击");
+            assert_eq!(pasted.get(), if dropdown { -1 } else { 1 });
+            assert_eq!(win.get_actions_menu_row(), if dropdown { 1 } else { -1 });
+        }
+
+        if std::env::var_os("FLOATPASTE_UI_SNAPSHOTS").is_some() {
+            let dir =
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.artifacts/snapshot");
+            std::fs::create_dir_all(&dir).unwrap();
+            for (name, theme) in [
+                ("light", floatpaste_core::theme::ResolvedTheme::Light),
+                ("dark", floatpaste_core::theme::ResolvedTheme::Dark),
+            ] {
+                let tokens = floatpaste_core::theme::derive_tokens("default", "", theme);
+                crate::theme_bridge::reapply_theme(app, &tokens);
+                for (state, menu) in [("split", false), ("menu", true)] {
+                    close_actions_menu(app);
+                    let _ = win.window().take_snapshot().unwrap();
+                    if menu {
+                        slint::platform::update_timers_and_animations();
+                        open_actions_menu(app, 1, 500.0, y + 22.0);
+                        let _ = win.window().take_snapshot().unwrap();
+                        std::thread::sleep(Duration::from_millis(180));
+                        slint::platform::update_timers_and_animations();
+                    }
+                    let pixels = win.window().take_snapshot().unwrap();
+                    image::save_buffer(
+                        dir.join(format!(
+                            "paste-search-{state}-{name}-{}.png",
+                            (win.window().scale_factor() * 100.0).round() as u32
+                        )),
+                        pixels.as_bytes(),
+                        pixels.width(),
+                        pixels.height(),
+                        image::ColorType::Rgba8,
+                    )
+                    .unwrap();
+                }
+            }
+        }
+        close_actions_menu(app);
     }
 }

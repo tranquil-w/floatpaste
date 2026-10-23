@@ -9,7 +9,7 @@
 // - 挂起态（键盘交给速贴面板）：输入框失焦
 // - 行高恒定：选中只换高亮/左条/操作条浮层，不展开（切换零跳动）
 import { Theme, Metrics, Motion } from "theme.slint";
-import { ListScrollBar } from "picker.slint";
+import { ListScrollBar, PasteActionItem, PasteActionMenu, PasteMenuGeometry } from "picker.slint";
 
 export struct SearchRow {
     id: string,
@@ -25,6 +25,10 @@ export struct SearchRow {
     thumb: image,
     tags: [string],
     tag-more: int,
+    // 「更多上屏方式」动作目录（首项为主动作）；仅一项时不显示展开箭头
+    actions: [PasteActionItem],
+    // 默认次级动作的提示名（空串 = 配置等同主动作）
+    secondary-label: string,
 }
 
 export struct SearchTagChip {
@@ -109,7 +113,9 @@ component IconButton inherits Rectangle {
     @children
 
     btn-ta := TouchArea {
-        clicked => { root.clicked(); }
+        clicked => {
+            root.clicked();
+        }
         changed has-hover => {
             root.hover-changed();
             // 提示锚点取按钮下方，气泡稳定悬于按钮之下而非跟随鼠标
@@ -232,6 +238,7 @@ component SearchRowCard inherits Rectangle {
     in property <bool> selected;
     in property <length> preview-width; // 基础预览宽（未扣选中预留/未扣 pr-1）
     in property <bool> delete-armed;
+    in property <bool> menu-open;
     callback clicked();
     callback double-clicked();
     callback hover(length, length);
@@ -239,7 +246,8 @@ component SearchRowCard inherits Rectangle {
     callback button-hint(string, length, length);
     callback button-hint-left();
     callback paste();
-    callback paste-as-path();
+    // 展开箭头命中（按钮左下角锚点），由窗口打开「更多上屏方式」菜单
+    callback menu-requested(length, length);
     callback edit();
     callback toggle-favorite();
     callback delete-armed-request();
@@ -250,12 +258,9 @@ component SearchRowCard inherits Rectangle {
     // 操作条显隐依赖 hovered，任一命中区漏报都会让操作条在移入
     // 按钮瞬间被误判离开而消失
     property <bool> hovered: false;
-    // 次级上屏键（条件元素，文本行不存在）的悬停态桥：sync-hover 汇总
-    // 需要它的命中信息，而条件元素不可被外部按名引用
-    property <bool> sec-hover: false;
     function sync-hover() {
         root.hovered = row-ta.has-hover || act-ta.has-hover
-            || paste-btn.pointer-hover || root.sec-hover
+            || paste-main.pointer-hover || paste-more.pointer-hover
             || edit-btn.pointer-hover
             || fav-btn.pointer-hover || del-btn.pointer-hover;
         if (!root.hovered) {
@@ -501,47 +506,86 @@ component SearchRowCard inherits Rectangle {
                         padding: 2px;
                         spacing: Metrics.space-1;
 
-                        // 粘贴：首位动作的双叠圆角方块图形
-                        paste-btn := IconButton {
-                            icon-color: Theme.fg-default;
-                            hint: (data.kind == 0 ? (data.has-html ? "粘贴为原格式" : "粘贴为文本") : data.kind == 1 ? "粘贴为图片" : "粘贴为文件")
-                                + "（" + root.action-keys.confirm + "）";
-                            clicked => { root.paste(); }
-                            hover(t, x, y) => { root.button-hint(t, x, y); }
-                            hover-left => { root.button-hint-left(); }
-                            hover-changed => { root.sync-hover(); }
-                            Path {
-                                width: 16px;
-                                height: 16px;
-                                viewbox-width: 24;
-                                viewbox-height: 24;
-                                stroke: paste-btn.icon-color;
-                                stroke-width: 1.5px;
-                                commands: "M 8 10 A 2 2 0 0 1 10 8 L 20 8 A 2 2 0 0 1 22 10 L 22 18 A 2 2 0 0 1 20 20 L 10 20 A 2 2 0 0 1 8 18 Z M 4 16 A 2 2 0 0 1 2 14 L 2 4 A 2 2 0 0 1 4 2 L 14 2 A 2 2 0 0 1 16 4";
+                        // 拆分按钮：左侧始终直接粘贴，右侧临时选择形态。
+                        // 两个命中节点常驻，悬停跨分隔线不会撤销操作条。
+                        paste-group := Rectangle {
+                            width: data.actions.length > 1 ? 94px : 70px;
+                            height: 28px;
+                            border-radius: Metrics.radius-md;
+                            border-width: 1px;
+                            border-color: root.menu-open ? Theme.fg-muted : Theme.border-muted;
+                            // 顺着行底轻微提亮/压暗，避免实色卡面在选中行上显得凹陷。
+                            background: Theme.hover-bg;
+                            paste-main := IconButton {
+                                x: 1px;
+                                y: 1px;
+                                width: 68px;
+                                height: 26px;
+                                icon-color: Theme.fg-default;
+                                hint: data.actions[0].label + "（" + root.action-keys.confirm + "）";
+                                clicked => { root.paste(); }
+                                hover(t, x, y) => { root.button-hint(t, x, y); }
+                                hover-left => { root.button-hint-left(); }
+                                hover-changed => { root.sync-hover(); }
+                                HorizontalLayout {
+                                    padding-left: 8px;
+                                    padding-right: 8px;
+                                    padding-top: 6px;
+                                    padding-bottom: 6px;
+                                    spacing: 6px;
+                                    Path {
+                                        width: 14px;
+                                        height: 14px;
+                                        viewbox-width: 24;
+                                        viewbox-height: 24;
+                                        stroke: Theme.fg-default;
+                                        stroke-width: 1.5px;
+                                        fill: transparent;
+                                        commands: "M 8 10 A 2 2 0 0 1 10 8 L 20 8 A 2 2 0 0 1 22 10 L 22 18 A 2 2 0 0 1 20 20 L 10 20 A 2 2 0 0 1 8 18 Z M 4 16 A 2 2 0 0 1 2 14 L 2 4 A 2 2 0 0 1 4 2 L 14 2 A 2 2 0 0 1 16 4";
+                                    }
+                                    Text {
+                                        text: "粘贴";
+                                        color: Theme.fg-default;
+                                        font-size: Metrics.text-xs;
+                                        font-weight: Metrics.weight-medium;
+                                        vertical-alignment: center;
+                                    }
+                                }
                             }
-                        }
-                        // 次级动作按格式能力提供纯文本或路径文本；条件元素不占空槽。
-                        if (data.kind != 0 || data.has-html): IconButton {
-                            hint: data.has-html ? "粘贴为纯文本（" + root.action-keys.confirm-as-file + "）" : data.kind == 1
-                                ? "粘贴为图片路径（" + root.action-keys.confirm-as-file + "）"
-                                : "粘贴为文件路径（" + root.action-keys.confirm-as-file + "）";
-                            clicked => { root.paste-as-path(); }
-                            hover(t, x, y) => { root.button-hint(t, x, y); }
-                            hover-left => { root.button-hint-left(); }
-                            changed pointer-hover => {
-                                root.sec-hover = self.pointer-hover;
-                                root.sync-hover();
+                            Rectangle {
+                                visible: data.actions.length > 1;
+                                x: 69px;
+                                y: 7px;
+                                width: 1px;
+                                height: 14px;
+                                background: Theme.border-muted;
                             }
-                            Path {
-                                width: 16px;
-                                height: 16px;
-                                viewbox-width: 24;
-                                viewbox-height: 24;
-                                stroke: Theme.fg-default;
-                                stroke-width: 1.5px;
-                                commands: data.has-html ? "M 5 5 L 19 5 M 12 5 L 12 20 M 8 20 L 16 20" : data.kind == 1
-                                    ? "M 5.5 5 L 18.5 5 A 2.5 2.5 0 0 1 21 7.5 L 21 16.5 A 2.5 2.5 0 0 1 18.5 19 L 5.5 19 A 2.5 2.5 0 0 1 3 16.5 L 3 7.5 A 2.5 2.5 0 0 1 5.5 5 Z M 5 16 L 9.2 11.8 A 1.5 1.5 0 0 1 11.3 11.8 L 15 15.5 M 13 13 L 14.7 11.3 A 1.5 1.5 0 0 1 16.8 11.3 L 21 15.5"
-                                    : "M 6 3.75 L 13 3.75 L 18.25 9 L 18.25 20.25 L 6 20.25 Z M 13 3.75 L 13 9 L 18.25 9";
+                            paste-more := IconButton {
+                                visible: data.actions.length > 1;
+                                x: 70px;
+                                y: 1px;
+                                width: 23px;
+                                height: 26px;
+                                hint: "更多上屏方式" + (data.secondary-label != ""
+                                    ? " · " + data.secondary-label + "（" + root.action-keys.confirm-as-file + "）" : "");
+                                background: root.menu-open || self.pointer-hover ? Theme.hover-bg : transparent;
+                                clicked => {
+                                    root.menu-requested(paste-group.absolute-position.x,
+                                        paste-group.absolute-position.y + paste-group.height + 4px);
+                                }
+                                hover(t, x, y) => { root.button-hint(t, x, y); }
+                                hover-left => { root.button-hint-left(); }
+                                hover-changed => { root.sync-hover(); }
+                                Path {
+                                    width: 12px;
+                                    height: 12px;
+                                    viewbox-width: 24;
+                                    viewbox-height: 24;
+                                    stroke: Theme.fg-default;
+                                    stroke-width: 1.5px;
+                                    fill: transparent;
+                                    commands: "M 6.5 9.5 L 12 15 L 17.5 9.5";
+                                }
                             }
                         }
                         // 编辑键：全类型通用（编辑器支持文本/图片/文件），
@@ -645,6 +689,12 @@ export component SearchWindow inherits Window {
     // 待确认标记只落在发起行上，不会同时染到其他行的操作条
     in-out property <int> delete-armed-row: -1;
     in-out property <bool> has-next-page: false;
+    // ── 「更多上屏方式」菜单：-1 = 收起；行号指向 rows ──
+    // 高亮与锚点由 Rust 维护（键盘 ↑↓/Enter/Esc 与点击共用一套状态）
+    in-out property <int> actions-menu-row: -1;
+    in-out property <int> actions-menu-highlight: 0;
+    in-out property <length> actions-menu-x: 0px;
+    in-out property <length> actions-menu-y: 0px;
     in-out property <bool> fetching-next: false;
     in-out property <[SearchTagChip]> tag-chips;
     in-out property <int> active-filter: 0; // 0=全部类型 2=文本 3=图片 4=文件
@@ -691,7 +741,14 @@ export component SearchWindow inherits Window {
     callback button-hint(string, length, length);
     callback button-hint-left();
     callback action-paste(int);
-    callback action-paste-as-path(int);
+    // 展开箭头：为该行打开动作菜单（锚点 = 复合按钮左下方）
+    callback action-menu-requested(int, length, length);
+    // 菜单内键盘：移动高亮（±1）、执行高亮项、收起菜单
+    callback action-menu-move(int);
+    callback action-menu-confirm();
+    callback action-menu-dismiss();
+    // 菜单内点击动作（参数 = 目录序号，含主动作）
+    callback action-menu-paste(int);
     callback action-edit(int);
     callback action-toggle-favorite(int);
     callback action-delete(int);
@@ -739,6 +796,31 @@ export component SearchWindow inherits Window {
                 event.modifiers.shift,
                 event.modifiers.meta,
             );
+            // 菜单展开：↑↓/Enter 服务菜单，Esc 只收菜单（再按才关窗口）；
+            // 次级上屏键与速贴浮层同规则——收菜单但不上屏，其余会话键
+            // 先收菜单再走正常分发
+            if (root.actions-menu-row >= 0 && action != 0) {
+                if (action == 1) {
+                    root.action-menu-move(-1);
+                    return accept;
+                }
+                if (action == 2) {
+                    root.action-menu-move(1);
+                    return accept;
+                }
+                if (action == 3) {
+                    root.action-menu-confirm();
+                    return accept;
+                }
+                if (action == 7) {
+                    root.action-menu-dismiss();
+                    return accept;
+                }
+                root.action-menu-dismiss();
+                if (action == 4) {
+                    return accept;
+                }
+            }
             if (action == 7) {
                 root.key-close();
                 return accept;
@@ -1244,7 +1326,7 @@ export component SearchWindow inherits Window {
                                     button-hint(t, x, y) => { root.button-hint(t, x, y); }
                                     button-hint-left => { root.button-hint-left(); }
                                     paste => { root.action-paste(i); }
-                                    paste-as-path => { root.action-paste-as-path(i); }
+                                    menu-requested(x, y) => { root.action-menu-requested(i, x, y); }
                                     edit => { root.action-edit(i); }
                                     toggle-favorite => { root.action-toggle-favorite(i); }
                                     delete-armed-request => { root.action-delete(i); }
@@ -1305,6 +1387,31 @@ export component SearchWindow inherits Window {
                             list-flick.content-y = 0;
                         }
                     }
+                }
+            }
+
+            // ── 「更多上屏方式」菜单浮层（行级展开箭头触发）──
+            // 点击捕手盖满面板：点菜单外即收起；菜单本身在其上。
+            // 悬停同步高亮（与键盘 ↑↓ 同一状态），点击项等同 Enter。
+            // 临时选择只作用当次上屏，不改变默认次级动作
+            Rectangle {
+                x: 0;
+                y: 0;
+                width: 100%;
+                height: 100%;
+                TouchArea {
+                    enabled: root.actions-menu-row >= 0 && root.actions-menu-row < root.rows.length;
+                    clicked => { root.action-menu-dismiss(); }
+                }
+                PasteActionMenu {
+                    open: root.actions-menu-row >= 0 && root.actions-menu-row < root.rows.length;
+                    actions: self.open ? root.rows[root.actions-menu-row].actions : [];
+                    highlighted <=> root.actions-menu-highlight;
+                    x: Math.max(8px, Math.min(root.actions-menu-x,
+                        parent.width - self.width - 8px));
+                    y: root.actions-menu-y;
+                    width: PasteMenuGeometry.width;
+                    activated(index) => { root.action-menu-paste(index); }
                 }
             }
         }

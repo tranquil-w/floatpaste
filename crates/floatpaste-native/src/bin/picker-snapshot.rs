@@ -10,6 +10,8 @@
 //!   alpha 缺省取代码内 MICA_TINT_ALPHA
 //! - backdrop=#RRGGBB：用指定纯色替代合成彩底，校准不同背景下的材质
 //! - preset=<id>：使用指定风格预设（默认 default）
+//! - actions=<行号>：展开该行的动作浮层（从 0 起）；frame=<毫秒> 取进场帧
+//! - hover-x=<坐标>：与 hover-y 配合，检查行内展开钮的悬停
 //!
 //! 输出 `.artifacts/snapshot/picker-<mode>-<tag>.png`（不入 Git）。
 //! 实底形态快照按中灰蓝桌面色合成材质残透，近似真机观感。
@@ -80,6 +82,23 @@ fn row(
         } else {
             0
         },
+        actions: slint::ModelRc::new(slint::VecModel::from(
+            match type_label {
+                "文件" => vec![
+                    ("粘贴为文件", "Enter"),
+                    ("粘贴为完整路径", "Shift+Enter"),
+                    ("粘贴为文件名", ""),
+                ],
+                "富文本" => vec![("粘贴为原格式", "Enter"), ("粘贴为纯文本", "Shift+Enter")],
+                _ => vec![("粘贴为文本", "Enter")],
+            }
+            .into_iter()
+            .map(|(label, shortcut)| PasteActionItem {
+                label: label.into(),
+                shortcut: shortcut.into(),
+            })
+            .collect::<Vec<_>>(),
+        )),
     }
 }
 
@@ -239,7 +258,7 @@ fn main() {
 
     let rows: Vec<ClipRow> = vec![
         row("https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getcaretpos 深入浅出插入符定位", "链接", "Chrome", "刚刚", "1", false, vec![]),
-        row("浅色模式下速贴面板的前景、背景与卡片层次：行默认透明、悬停仅底色变化，玻璃底图与行卡半透叠加", "文本", "微信", "2 分钟前", "2", true, vec!["工作", "常用"]),
+        row("浅色模式下速贴面板的前景、背景与卡片层次：行默认透明、悬停仅底色变化，玻璃底图与行卡半透叠加", "富文本", "微信", "2 分钟前", "2", true, vec!["工作", "常用"]),
         row("cargo build --release -p floatpaste-native", "文本", "Windows 终端", "8 分钟前", "3", false, vec![]),
         row("会议纪要要点：1. 速贴浅色观感走查 2. 搜索窗操作条交互细节 3. 下个迭代排期待定", "文本", "Obsidian", "26 分钟前", "4", false, vec!["会议"]),
         row("let selected_bg = ink.with_alpha(is_light ? 0.12 : 0.16);", "文本", "VS Code", "1 小时前", "5", false, vec![]),
@@ -279,17 +298,38 @@ fn main() {
         .window()
         .set_size(slint::PhysicalSize::new(width, height));
     let _ = picker.show();
+    // 先渲染关闭态，让常驻浮层从 reveal=0 起算。
+    let _ = picker.window().take_snapshot().unwrap();
+    // 自定义平台没有事件循环：输入前也要推进时钟，避免首帧字体初始化
+    // 的耗时被计入随后才触发的动画。
+    slint::platform::update_timers_and_animations();
+    if let Some(row) = std::env::args().find_map(|a| {
+        a.strip_prefix("actions=")
+            .and_then(|s| s.parse::<i32>().ok())
+    }) {
+        picker.set_selected(row);
+        picker.set_actions_row(row);
+    }
     if !hover_y.is_nan() {
         picker
             .window()
             .dispatch_event(slint::platform::WindowEvent::PointerMoved {
                 position: slint::LogicalPosition::new(
-                    180.0,
+                    std::env::args()
+                        .find_map(|a| a.strip_prefix("hover-x=").and_then(|s| s.parse().ok()))
+                        .unwrap_or(180.0),
                     hover_y + picker.global::<PanelGeometry>().get_shadow_margin(),
                 ),
             });
     }
 
+    let _ = picker.window().take_snapshot().unwrap();
+    if let Some(ms) =
+        std::env::args().find_map(|a| a.strip_prefix("frame=").and_then(|s| s.parse::<u64>().ok()))
+    {
+        std::thread::sleep(std::time::Duration::from_millis(ms.min(1000)));
+        slint::platform::update_timers_and_animations();
+    }
     let snap = picker.window().take_snapshot().unwrap();
     let (w, h) = (snap.width(), snap.height());
 

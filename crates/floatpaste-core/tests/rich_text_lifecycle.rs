@@ -3,8 +3,8 @@ use std::fs;
 
 use floatpaste_core::{
     domain::{
-        clip_item::{resolve_paste_mode, PasteMode},
-        settings::UserSetting,
+        clip_item::{resolve_secondary_mode, PasteMode},
+        settings::{SecondaryPasteDefaults, UserSetting},
     },
     repository::sqlite_repository::SqliteRepository,
     services::{
@@ -82,16 +82,14 @@ fn rich_text_identity_edit_migration_and_payload_lifecycle() {
             .unwrap()
             .has_html
     );
+    // 次级动作解析沿用可配置前的既有行为：富文本纯文本、普通文本原文
+    let defaults = SecondaryPasteDefaults::default();
     assert_eq!(
-        resolve_paste_mode(&rich.to_summary(), false),
-        PasteMode::Original
-    );
-    assert_eq!(
-        resolve_paste_mode(&rich.to_summary(), true),
+        resolve_secondary_mode(&rich.to_summary(), &defaults),
         PasteMode::PlainText
     );
     assert_eq!(
-        resolve_paste_mode(&plain.to_summary(), true),
+        resolve_secondary_mode(&plain.to_summary(), &defaults),
         PasteMode::Original
     );
     assert_eq!(

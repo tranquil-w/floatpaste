@@ -39,8 +39,8 @@ pub enum SessionAction {
     NavigateUp,
     NavigateDown,
     Confirm,
-    /// 次级上屏（Shift+Enter）：按条目类型粘贴为路径（图片→图片路径、
-    /// 文件→路径列表文本）
+    /// 次级上屏（默认 Shift+Enter）：执行该类别配置的默认动作
+    /// （见 settings::SecondaryPasteDefaults）
     ConfirmAsPath,
     Dismiss,
     ToggleFavorite,

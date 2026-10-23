@@ -17,7 +17,9 @@ use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use tracing::{info, warn};
 
 use floatpaste_core::backdrop;
-use floatpaste_core::domain::clip_item::{ClipItemSummary, PasteOption};
+use floatpaste_core::domain::clip_item::{
+    available_paste_modes, resolve_secondary_mode, ClipItemSummary, PasteMode, PasteOption,
+};
 use floatpaste_core::domain::settings::{
     PasteTrigger, PickerPositionMode, UserSetting, WindowMaterial,
 };
@@ -27,7 +29,9 @@ use floatpaste_core::platform::windows::screen_capture;
 use floatpaste_core::platform::windows::start_menu;
 use floatpaste_core::platform::windows::window_control::{self, GestureMode, ResizeDirection};
 use floatpaste_core::platform::windows::{mouse_monitor, session_keyboard};
-use floatpaste_core::services::clip_display::clip_type_label;
+use floatpaste_core::services::clip_display::{
+    clip_type_label, paste_action_summaries, PasteActionSummary,
+};
 use floatpaste_core::services::clip_service::ClipService;
 use floatpaste_core::services::picker_position_service::{
     default_window_size, resolve_near_cursor, PickerPositionService, WindowGeometry,
@@ -45,7 +49,9 @@ use crate::theme_bridge;
 use crate::thumbnails;
 use crate::tooltip;
 use crate::win32_ext;
-use crate::{ClipRow, PanelGeometry, QuickPasteWindow, SearchWindow, TooltipWindow};
+use crate::{
+    ClipRow, PanelGeometry, PasteActionItem, QuickPasteWindow, SearchWindow, TooltipWindow,
+};
 
 // debug 软件渲染冷帧较慢；发布构建保留短暂的屏外布局与呈现准备期。
 const REVEAL_DELAY_MS: u64 = if cfg!(debug_assertions) { 200 } else { 50 };
@@ -374,6 +380,7 @@ pub fn hide(app: &App, restore_target: bool) {
 
     save_window_geometry(app, hwnd);
     cancel_reveal();
+    win.set_actions_row(-1);
 
     // 停屏到屏幕外而非 Slint hide（同 hide_for_editor）：hide→show 周期中
     // winit 清空窗口表面且 Slint 脏区跟踪失效，下次显示会出现透明空壳；
@@ -555,6 +562,12 @@ fn handle_session_action(app: &App, action: session_keyboard::SessionAction) {
         info!("会话动作忽略（面板非活跃）: {action:?}");
         return;
     }
+    // 动作浮层展开：会话键先服务浮层（↑↓/Enter/Esc），见专属处理
+    let actions_row = app.with_picker(|win| win.get_actions_row()).unwrap_or(-1);
+    if actions_row >= 0 {
+        handle_session_action_with_actions(app, actions_row, action);
+        return;
+    }
     match action {
         SessionAction::NavigateUp => navigate(app, true),
         SessionAction::NavigateDown => navigate(app, false),
@@ -665,7 +678,11 @@ fn refresh_list(app: &App, keep_anchor: bool) {
                 .set_selected_id(items.get(selected_index).map(|item| item.id.clone()));
             win.set_selected(selected_index as i32);
 
-            build_rows(&win, &items);
+            // 行集整体重建（剪贴板变化/收藏刷新/缩略图回填）：浮层锚定的
+            // 行号可能已漂移，收起动作浮层，避免菜单作用到换位后的条目
+            win.set_actions_row(-1);
+
+            build_rows(app, &win, &items);
             ensure_thumbnails(app, &items);
         }
         Err(error) => {
@@ -798,8 +815,10 @@ fn preview_avail_widths(win: &QuickPasteWindow) -> (f32, f32) {
     (no_thumb, (no_thumb - thumb_column).max(40.0))
 }
 
-fn build_rows(win: &QuickPasteWindow, items: &[ClipItemSummary]) {
+fn build_rows(app: &App, win: &QuickPasteWindow, items: &[ClipItemSummary]) {
     let digit_enabled = win.get_digit_shortcuts_enabled();
+    let settings = app.state.current_settings();
+    let keys = &settings.session_keys;
     let (avail_no_thumb, avail_with_thumb) = preview_avail_widths(win);
     let line_height = preview_line_height(win);
 
@@ -811,14 +830,20 @@ fn build_rows(win: &QuickPasteWindow, items: &[ClipItemSummary]) {
             let has_thumb = thumb.is_some();
             // 预览达到入库截断上限即认为原文更长，行末始终要有省略号
             let source_truncated = item.content_preview.chars().count() >= PREVIEW_SOURCE_LIMIT;
+            let action_reserve = if available_paste_modes(item).len() > 1 {
+                win.global::<PanelGeometry>().get_row_action_width()
+            } else {
+                0.0
+            };
             let preview = clamp_preview(
                 win,
                 &item.content_preview,
-                if has_thumb {
+                (if has_thumb {
                     avail_with_thumb
                 } else {
                     avail_no_thumb
-                },
+                } - action_reserve)
+                    .max(40.0),
                 source_truncated,
                 line_height,
             );
@@ -855,12 +880,30 @@ fn build_rows(win: &QuickPasteWindow, items: &[ClipItemSummary]) {
                     ModelRc::new(Rc::new(VecModel::from(shown)))
                 },
                 tag_more: item.tags.len().saturating_sub(2) as i32,
+                actions: action_items(&paste_action_summaries(
+                    item,
+                    &keys.confirm,
+                    &keys.confirm_as_file,
+                    &settings.secondary_paste,
+                )),
             }
         })
         .collect();
 
     win.set_rows(ModelRc::new(Rc::new(VecModel::from(rows))));
     LIST_VERSION.with(|version| version.set(thumbnails::bump_list_version()));
+}
+
+/// 菜单投影 → 行模型字段（速贴与搜索同构转换）
+pub(crate) fn action_items(summaries: &[PasteActionSummary]) -> ModelRc<PasteActionItem> {
+    let items: Vec<PasteActionItem> = summaries
+        .iter()
+        .map(|summary| PasteActionItem {
+            label: summary.label.clone().into(),
+            shortcut: summary.shortcut.clone().into(),
+        })
+        .collect();
+    ModelRc::new(Rc::new(VecModel::from(items)))
 }
 
 thread_local! {
@@ -880,7 +923,7 @@ pub fn schedule_preview_reclamp(app: &App) {
             return;
         }
         let items = app.state.items();
-        app.with_picker(|win| build_rows(&win, &items));
+        app.with_picker(|win| build_rows(&app, win, &items));
     });
 }
 
@@ -889,14 +932,29 @@ pub fn schedule_preview_reclamp(app: &App) {
 fn ensure_thumbnails(app: &App, items: &[ClipItemSummary]) {
     thumbnails::ensure(app, items, |app| {
         let items = app.state.items();
-        app.with_picker(|win| build_rows(&win, &items));
+        app.with_picker(|win| build_rows(app, win, &items));
     });
 }
 
 /* ───────────────── 会话动作 ───────────────── */
 
-/// 确认上屏：窗口仅选择主/次动作，格式能力交给共用解析器。
+/// 确认上屏：主动作按本体；次级动作用该类别配置的默认变体（普通文本
+/// 等同主动作）。窗口不解析模式，目录与配置集中在 domain。
 pub fn confirm(app: &App, index: usize, secondary: bool) {
+    let Some(item) = app.state.item_at(index) else {
+        return;
+    };
+    let settings = app.state.current_settings();
+    let mode = if secondary {
+        resolve_secondary_mode(&item, &settings.secondary_paste)
+    } else {
+        PasteMode::Original
+    };
+    confirm_mode(app, index, mode);
+}
+
+/// 按显式动作上屏：「更多上屏方式」浮层与菜单的选择路径。
+fn confirm_mode(app: &App, index: usize, mode: PasteMode) {
     let Some(item) = app.state.item_at(index) else {
         return;
     };
@@ -907,12 +965,77 @@ pub fn confirm(app: &App, index: usize, secondary: bool) {
     let option = PasteOption {
         restore_clipboard_after_paste: settings.restore_clipboard_after_paste,
         paste_to_target: true,
-        mode: floatpaste_core::domain::clip_item::resolve_paste_mode(&item, secondary),
+        mode,
     };
 
     if let Err(error) = paste_flow::paste_item(app, &item.id, option) {
         warn!("粘贴失败: {error}");
         crate::tray::notify_failure(&format!("上屏失败：{error}"));
+    }
+}
+
+/* ───────────────── 「更多上屏方式」动作浮层 ───────────────── */
+
+/// 为某行打开动作浮层：选中切到该行，高亮回到目录首项（主动作）。
+/// 临时选择不改变默认次级动作（快捷键行为不随上次操作漂移）
+fn open_actions(app: &App, index: usize) {
+    tooltip::cancel(app);
+    set_selected(app, index);
+    app.with_picker(|win| {
+        win.set_actions_row(index as i32);
+        win.set_action_selected(0);
+    });
+}
+
+fn close_actions(app: &App) {
+    app.with_picker(|win| win.set_actions_row(-1));
+}
+
+/// 浮层展开期间的会话键：↑↓ 与 Enter 服务浮层，Esc 只收浮层（再按才
+/// 关面板）；编辑/收藏收起浮层后照常执行；其余上屏类动作（次级键、
+/// 数字直达）只收浮层不上屏——浏览菜单时的误触不应立即改变剪贴板。
+fn handle_session_action_with_actions(
+    app: &App,
+    sheet_row: i32,
+    action: session_keyboard::SessionAction,
+) {
+    use session_keyboard::SessionAction;
+    let index = sheet_row as usize;
+    let Some(item) = app.state.item_at(index) else {
+        close_actions(app);
+        return;
+    };
+    let count = available_paste_modes(&item).len().max(1);
+    let current = app
+        .with_picker(|win| win.get_action_selected().max(0) as usize)
+        .unwrap_or(0);
+    match action {
+        SessionAction::NavigateUp | SessionAction::NavigateDown => {
+            let next = search::next_navigation_index(
+                count,
+                current,
+                matches!(action, SessionAction::NavigateUp),
+            );
+            app.with_picker(|win| win.set_action_selected(next as i32));
+        }
+        SessionAction::Confirm => {
+            let mode = available_paste_modes(&item)
+                .get(current)
+                .copied()
+                .unwrap_or(PasteMode::Original);
+            close_actions(app);
+            confirm_mode(app, index, mode);
+        }
+        SessionAction::Dismiss => close_actions(app),
+        SessionAction::OpenEditor => {
+            close_actions(app);
+            crate::editor::open_from_picker(app, item.id);
+        }
+        SessionAction::ToggleFavorite => {
+            close_actions(app);
+            toggle_favorite(app);
+        }
+        SessionAction::ConfirmAsPath | SessionAction::SelectIndex(_) => close_actions(app),
     }
 }
 
@@ -1298,32 +1421,58 @@ pub fn wire(app: &App) {
         return;
     };
 
-    // 单击：单击触发模式下立即上屏，否则仅选中
+    // 单击：单击触发模式下立即上屏，否则仅选中。动作浮层展开时先收
+    // 浮层并吞掉本次点击——去点菜单外的第一击不应立即上屏
     {
         let app_cb = app.clone();
         win.on_row_clicked(move |index| {
             let index = index.max(0) as usize;
             set_selected(&app_cb, index);
+            if app_cb
+                .with_picker(|win| win.get_actions_row())
+                .unwrap_or(-1)
+                >= 0
+            {
+                close_actions(&app_cb);
+                return;
+            }
             if app_cb.state.current_settings().paste_trigger == PasteTrigger::Click {
                 confirm(&app_cb, index, false);
             }
         });
     }
 
-    // 双击上屏
+    // 双击上屏（浮层展开时同样只收浮层）
     {
         let app_cb = app.clone();
         win.on_row_double_clicked(move |index| {
             let index = index.max(0) as usize;
             set_selected(&app_cb, index);
+            if app_cb
+                .with_picker(|win| win.get_actions_row())
+                .unwrap_or(-1)
+                >= 0
+            {
+                close_actions(&app_cb);
+                return;
+            }
             confirm(&app_cb, index, false);
         });
     }
 
-    // 悬停（移动即重置 400ms 计时）
+    // 悬停（移动即重置 400ms 计时）；浮层展开时不排悬浮气泡——
+    // 气泡会盖住浮层选项
     {
         let app_cb = app.clone();
         win.on_row_hover(move |index, x, y| {
+            if app_cb
+                .with_picker(|win| win.get_actions_row())
+                .unwrap_or(-1)
+                >= 0
+            {
+                tooltip::cancel(&app_cb);
+                return;
+            }
             tooltip::schedule(&app_cb, index.max(0) as usize, x, y);
         });
     }
@@ -1331,6 +1480,38 @@ pub fn wire(app: &App) {
         let app_cb = app.clone();
         win.on_row_hover_left(move || {
             tooltip::cancel(&app_cb);
+        });
+    }
+
+    // 行内展开钮 → 动作浮层
+    {
+        let app_cb = app.clone();
+        win.on_row_actions_requested(move |index| {
+            open_actions(&app_cb, index.max(0) as usize);
+        });
+    }
+
+    // 浮层内点击动作：按目录序号上屏（含主动作），浮层随上屏流程收起
+    {
+        let app_cb = app.clone();
+        win.on_action_item_clicked(move |action_index| {
+            let row = app_cb
+                .with_picker(|win| win.get_actions_row())
+                .unwrap_or(-1);
+            if row < 0 {
+                return;
+            }
+            let index = row as usize;
+            let Some(item) = app_cb.state.item_at(index) else {
+                close_actions(&app_cb);
+                return;
+            };
+            let mode = available_paste_modes(&item)
+                .get(action_index.max(0) as usize)
+                .copied()
+                .unwrap_or(PasteMode::Original);
+            close_actions(&app_cb);
+            confirm_mode(&app_cb, index, mode);
         });
     }
 
@@ -1810,5 +1991,158 @@ mod tests {
     #[test]
     fn empty_text_returns_empty() {
         assert_eq!(clamp("", 4, false), "");
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod action_sheet_tests {
+    //! 速贴「更多上屏方式」动作浮层契约（docs/testing.md L2 层）：浮层
+    //! 展开期间会话键先服务浮层——↑↓ 移动高亮并循环，Esc 只收浮层，
+    //! 次级键/数字直达收浮层但不上屏；指针点击选中/未选中行的展开钮
+    //! 只开浮层。不执行真实上屏（系统剪贴板属 L3 串行资源）。
+    //! 由 l2_headless_ui_contracts 单线程串行调用。
+
+    use super::*;
+    use std::sync::Arc;
+
+    use floatpaste_core::repository::sqlite_repository::SqliteRepository;
+    use floatpaste_core::services::image_storage::ImageStorage;
+    use floatpaste_core::state::CoreState;
+
+    use crate::app_state::SharedState;
+
+    fn file_summary() -> ClipItemSummary {
+        ClipItemSummary {
+            has_html: false,
+            id: "sheet-file".into(),
+            r#type: "file".into(),
+            content_preview: r"C:\dir\a.txt".into(),
+            source_app: None,
+            is_favorited: false,
+            file_count: 1,
+            directory_count: 0,
+            created_at: String::new(),
+            updated_at: String::new(),
+            last_used_at: None,
+            image_path: None,
+            image_width: None,
+            image_height: None,
+            image_format: None,
+            file_size: None,
+            tags: vec![],
+            text_kind: Default::default(),
+        }
+    }
+
+    /// 单测试函数串行多段中的一段（见模块注释）
+    pub(crate) fn run() {
+        let stamp = std::process::id();
+        let dir = std::env::temp_dir().join(format!("floatpaste-sheet-{stamp}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let repository = SqliteRepository::new(&dir.join("floatpaste.db")).unwrap();
+        let core = CoreState::new(
+            repository,
+            ImageStorage::new(dir).unwrap(),
+            UserSetting::default(),
+        );
+        let win = QuickPasteWindow::new().expect("实例化速贴窗失败");
+        let app = App {
+            state: Arc::new(SharedState::new(core)),
+            picker: win.as_weak(),
+            tooltip: Default::default(),
+            tray_menu: Default::default(),
+            search: Default::default(),
+            editor: Default::default(),
+            settings: Default::default(),
+        };
+        app.state.set_items(vec![file_summary()]);
+
+        // 展开：选中切到该行，高亮回主动作（目录首项）
+        open_actions(&app, 0);
+        assert_eq!(win.get_actions_row(), 0);
+        assert_eq!(win.get_action_selected(), 0);
+        assert_eq!(win.get_selected(), 0);
+
+        // ↑↓ 在 3 项目录内循环
+        use floatpaste_core::platform::windows::session_keyboard::SessionAction;
+        handle_session_action_with_actions(&app, 0, SessionAction::NavigateDown);
+        assert_eq!(win.get_action_selected(), 1);
+        handle_session_action_with_actions(&app, 0, SessionAction::NavigateDown);
+        handle_session_action_with_actions(&app, 0, SessionAction::NavigateDown);
+        assert_eq!(win.get_action_selected(), 0, "高亮循环回主动作");
+        handle_session_action_with_actions(&app, 0, SessionAction::NavigateUp);
+        assert_eq!(win.get_action_selected(), 2, "向上移动循环");
+
+        // 次级键与数字直达：只收浮层，不上屏（无剪贴板写入即通过）
+        handle_session_action_with_actions(&app, 0, SessionAction::ConfirmAsPath);
+        assert_eq!(win.get_actions_row(), -1);
+
+        // Esc 同样只收浮层；面板开关状态不在本契约范围
+        open_actions(&app, 0);
+        handle_session_action_with_actions(&app, 0, SessionAction::Dismiss);
+        assert_eq!(win.get_actions_row(), -1);
+
+        pointer_actions_button(&app, &win);
+
+        let _ =
+            std::fs::remove_dir_all(std::env::temp_dir().join(format!("floatpaste-sheet-{stamp}")));
+    }
+
+    fn pointer_actions_button(app: &App, win: &QuickPasteWindow) {
+        use slint::platform::{PointerEventButton, WindowEvent};
+
+        let mut second = file_summary();
+        second.id = "sheet-file-2".into();
+        let items = vec![file_summary(), second];
+        app.state.set_items(items.clone());
+        win.window().set_size(slint::LogicalSize::new(360.0, 420.0));
+        build_rows(app, win, &items);
+        win.set_selected(0);
+
+        let hovered = Rc::new(std::cell::Cell::new(-1));
+        let hovered_cb = hovered.clone();
+        win.on_row_hover(move |row, _, _| hovered_cb.set(row));
+        let row_clicks = Rc::new(std::cell::Cell::new(0));
+        let clicks_cb = row_clicks.clone();
+        win.on_row_clicked(move |_| clicks_cb.set(clicks_cb.get() + 1));
+        let app_cb = app.clone();
+        win.on_row_actions_requested(move |row| open_actions(&app_cb, row as usize));
+
+        // 用实际布局的悬停事件确定行中心，避免依赖字体与行高的固定像素。
+        let _ = win.window().take_snapshot().unwrap();
+        let mut bounds = [(i32::MAX, 0); 2];
+        for y in 40..320 {
+            hovered.set(-1);
+            win.window().dispatch_event(WindowEvent::PointerMoved {
+                position: slint::LogicalPosition::new(100.0, y as f32),
+            });
+            if let Some(bound) = bounds.get_mut(hovered.get() as usize) {
+                bound.0 = bound.0.min(y);
+                bound.1 = y;
+            }
+        }
+        for (row, (top, bottom)) in bounds.into_iter().enumerate() {
+            assert!(top < bottom, "应找到第 {row} 行的完整命中区域");
+            let y = (top + bottom) as f32 / 2.0;
+            win.window().dispatch_event(WindowEvent::PointerMoved {
+                position: slint::LogicalPosition::new(100.0, y),
+            });
+            let position = slint::LogicalPosition::new(318.0, y);
+            win.window()
+                .dispatch_event(WindowEvent::PointerMoved { position });
+            let _ = win.window().take_snapshot().unwrap();
+            win.window().dispatch_event(WindowEvent::PointerPressed {
+                position,
+                button: PointerEventButton::Left,
+            });
+            win.window().dispatch_event(WindowEvent::PointerReleased {
+                position,
+                button: PointerEventButton::Left,
+            });
+            assert_eq!(row_clicks.get(), 0, "展开钮不能触发行点击上屏");
+            assert_eq!(win.get_actions_row(), row as i32, "应打开对应行的浮层");
+            assert_eq!(win.get_selected(), row as i32);
+            close_actions(app);
+        }
     }
 }

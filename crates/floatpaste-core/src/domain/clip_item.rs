@@ -241,25 +241,103 @@ pub struct PasteOption {
     pub mode: PasteMode,
 }
 
-/// 共用能力解析后的剪贴板发布模式。
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// 上屏动作：窗口与菜单传显式选择，发布链路按模式写入剪贴板。
+///
+/// `Original` 按条目本体发布（富文本同时发布 HTML 与纯文本、图片发布
+/// 位图、文件发布文件列表）；其余为变体：`PlainText` 只发布文字，
+/// `PathText` 发布路径文本（图片保存路径 / 文件逐行完整路径），
+/// `FileNameText` 发布逐行文件名，`ImageFile` 把图片以文件列表发布
+/// （CF_HDROP，目标应用按文件附件接收）。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PasteMode {
     #[default]
     Original,
     PlainText,
     PathText,
+    FileNameText,
+    ImageFile,
 }
 
-/// 窗口只传主/次动作；能力到发布模式的规则集中在这里。
-pub fn resolve_paste_mode(item: &ClipItemSummary, secondary: bool) -> PasteMode {
-    if !secondary {
-        return PasteMode::Original;
+/// 未知持久化值回退主动作：不让手改/旧库残留阻断设置读取（与
+/// PickerPositionMode 等设置枚举的降级策略一致）。
+impl<'de> Deserialize<'de> for PasteMode {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Option::<String>::deserialize(deserializer)?.unwrap_or_default();
+        Ok(match value.as_str() {
+            "plain_text" => Self::PlainText,
+            "path_text" => Self::PathText,
+            "file_name_text" => Self::FileNameText,
+            "image_file" => Self::ImageFile,
+            _ => Self::Original,
+        })
     }
+}
+
+/// 富文本（带 HTML 的文本）的可用动作：原格式、纯文本。
+pub const RICH_TEXT_PASTE_MODES: &[PasteMode] = &[PasteMode::Original, PasteMode::PlainText];
+/// 图片的可用动作：图片、图片路径、图片文件。
+pub const IMAGE_PASTE_MODES: &[PasteMode] = &[
+    PasteMode::Original,
+    PasteMode::PathText,
+    PasteMode::ImageFile,
+];
+/// 文件的可用动作：文件、完整路径、文件名。
+pub const FILE_PASTE_MODES: &[PasteMode] = &[
+    PasteMode::Original,
+    PasteMode::PathText,
+    PasteMode::FileNameText,
+];
+/// 普通文本只有原文一种形态，不重复提供「纯文本」凑选项。
+pub const PLAIN_TEXT_PASTE_MODES: &[PasteMode] = &[PasteMode::Original];
+
+/// 条目的可用上屏动作，首项为主动作；菜单、按钮与次级解析共用此目录。
+pub fn available_paste_modes(item: &ClipItemSummary) -> &'static [PasteMode] {
     match item.r#type.as_str() {
-        "image" | "file" => PasteMode::PathText,
-        "text" if item.has_html => PasteMode::PlainText,
-        _ => PasteMode::Original,
+        "image" => IMAGE_PASTE_MODES,
+        "file" => FILE_PASTE_MODES,
+        "text" if item.has_html => RICH_TEXT_PASTE_MODES,
+        _ => PLAIN_TEXT_PASTE_MODES,
+    }
+}
+
+/// 动作在界面上的名称（「更多上屏方式」菜单、按钮提示与设置页共用）。
+pub fn paste_mode_label(mode: PasteMode, clip_type: &str, has_html: bool) -> &'static str {
+    match mode {
+        PasteMode::Original => match clip_type {
+            "image" => "粘贴为图片",
+            "file" => "粘贴为文件",
+            "text" if has_html => "粘贴为原格式",
+            _ => "粘贴为文本",
+        },
+        PasteMode::PlainText => "粘贴为纯文本",
+        PasteMode::PathText if clip_type == "image" => "粘贴为图片路径",
+        PasteMode::PathText => "粘贴为完整路径",
+        PasteMode::FileNameText => "粘贴为文件名",
+        PasteMode::ImageFile => "粘贴为图片文件",
+    }
+}
+
+/// 解析条目的默认次级动作：取该类别配置值，不在可用目录（旧库或手改
+/// 配置残留）时回退该类别内置默认——富文本纯文本、图片与文件路径
+/// 文本，即次级动作可配置之前的既有行为。普通文本次级等同主动作。
+pub fn resolve_secondary_mode(
+    item: &ClipItemSummary,
+    defaults: &super::settings::SecondaryPasteDefaults,
+) -> PasteMode {
+    let (configured, fallback) = match item.r#type.as_str() {
+        "image" => (defaults.image, PasteMode::PathText),
+        "file" => (defaults.file, PasteMode::PathText),
+        "text" if item.has_html => (defaults.rich_text, PasteMode::PlainText),
+        _ => return PasteMode::Original,
+    };
+    if available_paste_modes(item).contains(&configured) {
+        configured
+    } else {
+        fallback
     }
 }
 
@@ -289,4 +367,159 @@ pub struct NormalizedClipText {
 pub struct NewClipTextItem {
     pub normalized: NormalizedClipText,
     pub source_app: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        available_paste_modes, paste_mode_label, resolve_secondary_mode, ClipItemSummary, PasteMode,
+    };
+    use crate::domain::settings::SecondaryPasteDefaults;
+
+    fn item(clip_type: &str, has_html: bool) -> ClipItemSummary {
+        ClipItemSummary {
+            has_html,
+            id: String::new(),
+            r#type: clip_type.to_string(),
+            content_preview: String::new(),
+            source_app: None,
+            is_favorited: false,
+            file_count: 0,
+            directory_count: 0,
+            created_at: String::new(),
+            updated_at: String::new(),
+            last_used_at: None,
+            image_path: None,
+            image_width: None,
+            image_height: None,
+            image_format: None,
+            file_size: None,
+            tags: vec![],
+            text_kind: Default::default(),
+        }
+    }
+
+    #[test]
+    fn catalog_lists_primary_first_per_type() {
+        assert_eq!(
+            available_paste_modes(&item("text", false)),
+            &[PasteMode::Original]
+        );
+        assert_eq!(
+            available_paste_modes(&item("text", true)),
+            &[PasteMode::Original, PasteMode::PlainText]
+        );
+        assert_eq!(
+            available_paste_modes(&item("image", false)),
+            &[
+                PasteMode::Original,
+                PasteMode::PathText,
+                PasteMode::ImageFile
+            ]
+        );
+        assert_eq!(
+            available_paste_modes(&item("file", false)),
+            &[
+                PasteMode::Original,
+                PasteMode::PathText,
+                PasteMode::FileNameText
+            ]
+        );
+    }
+
+    #[test]
+    fn labels_follow_the_paste_as_family() {
+        assert_eq!(
+            paste_mode_label(PasteMode::Original, "text", true),
+            "粘贴为原格式"
+        );
+        assert_eq!(
+            paste_mode_label(PasteMode::Original, "text", false),
+            "粘贴为文本"
+        );
+        // 图片与文件的路径文本同模式不同名，不混淆两个类别
+        assert_eq!(
+            paste_mode_label(PasteMode::PathText, "image", false),
+            "粘贴为图片路径"
+        );
+        assert_eq!(
+            paste_mode_label(PasteMode::PathText, "file", false),
+            "粘贴为完整路径"
+        );
+        assert_eq!(
+            paste_mode_label(PasteMode::FileNameText, "file", false),
+            "粘贴为文件名"
+        );
+        assert_eq!(
+            paste_mode_label(PasteMode::ImageFile, "image", false),
+            "粘贴为图片文件"
+        );
+    }
+
+    #[test]
+    fn secondary_resolves_configured_value_per_category() {
+        let defaults = SecondaryPasteDefaults {
+            rich_text: PasteMode::Original,
+            image: PasteMode::ImageFile,
+            file: PasteMode::FileNameText,
+        };
+        assert_eq!(
+            resolve_secondary_mode(&item("text", true), &defaults),
+            PasteMode::Original
+        );
+        assert_eq!(
+            resolve_secondary_mode(&item("image", false), &defaults),
+            PasteMode::ImageFile
+        );
+        assert_eq!(
+            resolve_secondary_mode(&item("file", false), &defaults),
+            PasteMode::FileNameText
+        );
+    }
+
+    #[test]
+    fn secondary_falls_back_when_configured_mode_unavailable() {
+        // 图片类别不可能出现 PlainText（sanitized 已挡，这里防旧库/手改残留）
+        let defaults = SecondaryPasteDefaults {
+            image: PasteMode::PlainText,
+            file: PasteMode::ImageFile,
+            ..SecondaryPasteDefaults::default()
+        };
+        assert_eq!(
+            resolve_secondary_mode(&item("image", false), &defaults),
+            PasteMode::PathText
+        );
+        assert_eq!(
+            resolve_secondary_mode(&item("file", false), &defaults),
+            PasteMode::PathText
+        );
+    }
+
+    #[test]
+    fn plain_text_secondary_stays_original() {
+        assert_eq!(
+            resolve_secondary_mode(&item("text", false), &SecondaryPasteDefaults::default()),
+            PasteMode::Original
+        );
+    }
+
+    #[test]
+    fn paste_mode_deserialize_falls_back_to_original() {
+        let mode: PasteMode = serde_json::from_str("\"no_such_mode\"").unwrap();
+        assert_eq!(mode, PasteMode::Original);
+        for value in ["\"original\"", "\"plain_text\"", "\"path_text\""] {
+            serde_json::from_str::<PasteMode>(value).unwrap();
+        }
+        // 序列化往返保持值（设置页草稿读取依赖）
+        for mode in [
+            PasteMode::Original,
+            PasteMode::PlainText,
+            PasteMode::PathText,
+            PasteMode::FileNameText,
+            PasteMode::ImageFile,
+        ] {
+            let json = serde_json::to_string(&mode).unwrap();
+            assert_eq!(serde_json::from_str::<PasteMode>(&json).unwrap(), mode);
+        }
+    }
 }

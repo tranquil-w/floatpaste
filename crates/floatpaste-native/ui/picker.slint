@@ -9,6 +9,115 @@
 import { Theme, Metrics, Motion, SoftShadow } from "theme.slint";
 import { AppMark } from "common.slint";
 
+// 上屏动作菜单项：动作名 + 快捷键提示（空串 = 无键，仅临时选择）。
+// 搜索窗口复用同一结构
+export struct PasteActionItem {
+    label: string,
+    shortcut: string,
+}
+
+// 搜索与速贴共用尺寸，Rust 的菜单翻转判定也从此读取。
+export global PasteMenuGeometry {
+    out property <length> row-height: 34px;
+    out property <length> padding: 6px;
+    out property <length> spacing: 2px;
+    out property <length> width: 248px;
+}
+
+export component PasteActionMenu inherits Rectangle {
+    in property <bool> open: false;
+    in property <[PasteActionItem]> actions;
+    in-out property <int> highlighted: 0;
+    callback activated(int);
+
+    // 节点常驻：从关闭态起算进场；收起立即撤销命中，不延迟后续操作。
+    // 关闭态也读取 reveal，确保首次展开从 0 起步（隐藏节点的属性按需求值）。
+    visible: root.reveal > 0 || root.open;
+    height: 2 * PasteMenuGeometry.padding + root.actions.length * PasteMenuGeometry.row-height
+        + Math.max(0, root.actions.length - 1) * PasteMenuGeometry.spacing;
+    property <float> reveal: root.open ? 1 : 0;
+    animate reveal { duration: root.open ? Motion.dur-enter : 0ms; easing: Motion.ease; }
+    opacity: root.reveal;
+
+    SoftShadow {
+        y: (1 - root.reveal) * 6px;
+        width: parent.width;
+        height: parent.height;
+        radius: Metrics.radius-lg;
+        layers: 6;
+        step: 1px;
+        offset-y: 2px;
+        alpha: 0.12;
+    }
+    Rectangle {
+        y: (1 - root.reveal) * 6px;
+        width: parent.width;
+        height: parent.height;
+        border-radius: Metrics.radius-lg;
+        border-width: 1px;
+        border-color: Theme.border-muted;
+        background: Theme.is-dark ? Theme.card-face : Theme.surface;
+        // 内边距也拦截点击，避免穿透到条目或外部关闭捕手。
+        TouchArea { clicked => { } }
+        VerticalLayout {
+            padding: PasteMenuGeometry.padding;
+            spacing: PasteMenuGeometry.spacing;
+            for action[idx] in root.actions: Rectangle {
+                height: PasteMenuGeometry.row-height;
+                border-radius: Metrics.radius-md;
+                background: idx == root.highlighted ? Theme.hover-bg : transparent;
+                if (idx == root.highlighted): Rectangle {
+                    x: 2px;
+                    y: (parent.height - self.height) / 2;
+                    width: 2px;
+                    height: 14px;
+                    border-radius: 1px;
+                    background: Theme.accent-fg;
+                }
+                HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 8px;
+                    padding-top: 7px;
+                    padding-bottom: 7px;
+                    spacing: 12px;
+                    Text {
+                        text: action.label;
+                        color: Theme.fg-default;
+                        font-size: Metrics.text-sm;
+                        font-weight: idx == root.highlighted
+                            ? Metrics.weight-medium : Metrics.weight-normal;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                    }
+                    if (action.shortcut != ""): Rectangle {
+                        height: 20px;
+                        border-radius: 4px;
+                        background: Theme.hover-bg;
+                        HorizontalLayout {
+                            padding-left: 6px;
+                            padding-right: 6px;
+                            Text {
+                                text: action.shortcut;
+                                color: Theme.fg-muted;
+                                font-size: Metrics.text-xs;
+                                font-family: "Consolas";
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+                action-ta := TouchArea {
+                    clicked => { root.activated(idx); }
+                    changed has-hover => {
+                        if (self.has-hover) { root.highlighted = idx; }
+                    }
+                }
+            }
+        }
+    }
+}
+
 export struct ClipRow {
     id: string,
     preview: string,
@@ -21,6 +130,8 @@ export struct ClipRow {
     thumb: image,
     tags: [string],
     tag-more: int,
+    // 「更多上屏方式」动作目录（首项为主动作）；仅一项时行内不显示展开钮
+    actions: [PasteActionItem],
 }
 
 // ── 面板结构几何：slint 布局与 Rust 首帧兜底共用的常量，禁双边手抄 ──
@@ -35,6 +146,7 @@ export global PanelGeometry {
     out property <length> row-frame: 2 * row-inset;       // 行卡片内容边距双层（Rust 裁排经 preview-pad-h 扣除）
     out property <length> row-pad-left: 12px;              // 行内左 padding
     out property <length> row-pad-right: Metrics.space-1_5; // 行内右 padding（单侧）
+    out property <length> row-action-width: 36px;         // 有多种动作时常驻预留展开钮空间
     out property <length> thumb-size: 72px;
     out property <length> thumb-gap: 10px;
     // 窗口卡片圆角（Rust 侧模糊底图按此烘焙圆角 alpha，见 core::backdrop）
@@ -146,6 +258,8 @@ export component ListScrollBar inherits Rectangle {
 component ClipRowCard inherits Rectangle {
     in property <ClipRow> data;
     in property <bool> selected;
+    in property <bool> actions-open;
+    property <length> action-reserve: data.actions.length > 1 ? PanelGeometry.row-action-width : 0px;
     in property <length> text-width;
     // Acrylic 档烘焙底上行卡半透（玻璃卡透底）；Mica 档（0.92 近实
     // 底）与「无」档实底保持不透明——底下是平色，透它没有意义
@@ -155,6 +269,8 @@ component ClipRowCard inherits Rectangle {
     callback hover(length, length);
     callback hover-left();
     callback scroll-into-view(length, length);
+    // 打开「更多上屏方式」动作浮层（仅该条目有可选动作时会出现入口）
+    callback actions-requested();
 
     property <bool> is-selected: selected;
     changed is-selected => {
@@ -224,7 +340,7 @@ component ClipRowCard inherits Rectangle {
             // 强调全部由外层墨色边框 + 字重承载）；悬停 = 墨色微叠层
             Rectangle {
                 border-radius: Metrics.radius-lg;
-                background: item-ta.has-hover && !selected
+                background: (item-ta.has-hover || more-ta.has-hover) && !selected
                     ? Theme.hover-bg
                     : transparent;
             }
@@ -252,7 +368,7 @@ component ClipRowCard inherits Rectangle {
 
             VerticalLayout {
                 padding-left: PanelGeometry.row-pad-left;
-                padding-right: PanelGeometry.row-pad-right;
+                padding-right: PanelGeometry.row-pad-right + root.action-reserve;
                 padding-top: Metrics.space-2;
                 padding-bottom: Metrics.space-2;
                 spacing: Metrics.space-1_5;
@@ -291,7 +407,7 @@ component ClipRowCard inherits Rectangle {
                         wrap: word-wrap;
                         // 宽度显式固定（实例化处按 preview-width-* 传入），
                         // 不给布局按首选宽分配的机会
-                        width: root.text-width;
+                        width: Math.max(40px, root.text-width - root.action-reserve);
                         // 高度取同行标尺实测（同文本/同字重/同宽度），
                         // 布局引擎的预选高度不反映字重加宽，不可依赖
                         height: min(82px, preview-ruler.height);
@@ -428,8 +544,7 @@ component ClipRowCard inherits Rectangle {
         border-color: Theme.fg-default.with-alpha(0.70);
     }
 
-    // 整行命中（含边框圈）：声明在内容之后以处于最上层，
-    // 行内其余元素无自身交互
+    // 整行命中（含边框圈）：声明在内容之后，展开钮位于其上层
     item-ta := TouchArea {
         clicked => { root.clicked(); }
         double-clicked => { root.double-clicked(); }
@@ -449,6 +564,43 @@ component ClipRowCard inherits Rectangle {
             if (!self.has-hover) {
                 root.hover-left();
             }
+        }
+    }
+
+    // ── 「更多上屏方式」展开钮：悬停/选中且目录有可选动作时出现 ──
+    // 声明在 item-ta 之后以处于最上层，点击只开浮层不触发行点击；
+    // 命中节点常驻并汇总自身悬停，避免指针进入按钮后整行失去悬停而撤销按钮
+    Rectangle {
+        visible: data.actions.length > 1
+            && (root.selected || item-ta.has-hover || more-ta.has-hover);
+        x: parent.width - self.width - 8px;
+        y: (parent.height - self.height) / 2;
+        width: 28px;
+        height: 28px;
+        border-radius: Metrics.radius-md;
+        border-width: 1px;
+        border-color: more-ta.has-hover || root.actions-open
+            ? Theme.fg-muted : Theme.border-muted;
+        opacity: more-ta.pressed ? 0.85 : 1.0;
+        background: more-ta.pressed || root.actions-open ? Theme.selected-bg
+            : more-ta.has-hover ? Theme.hover-bg : transparent;
+        animate background { duration: Motion.dur-color; easing: Motion.ease; }
+        animate border-color { duration: Motion.dur-color; easing: Motion.ease; }
+        more-ta := TouchArea {
+            clicked => { root.actions-requested(); }
+        }
+        Path {
+            width: 14px;
+            height: 14px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            viewbox-width: 24;
+            viewbox-height: 24;
+            stroke: Theme.fg-default;
+            stroke-width: 1.5px;
+            fill: transparent;
+            commands: root.actions-open ? "M 6.5 14.5 L 12 9 L 17.5 14.5"
+                : "M 6.5 9.5 L 12 15 L 17.5 9.5";
         }
     }
 }
@@ -493,6 +645,10 @@ export component QuickPasteWindow inherits Window {
     callback header-drag-finished();
     // 顶栏关闭按钮（同 Esc 会话关闭路径）
     callback close-clicked();
+    // 行内展开钮：为该行打开动作浮层
+    callback row-actions-requested(int);
+    // 浮层内点击动作（参数 = 目录序号，含主动作）
+    callback action-item-clicked(int);
     callback resize-started(int); // 0=N 1=S 2=W 3=E 4=NW 5=NE 6=SW 7=SE
     callback resize-moved();
     callback resize-finished();
@@ -518,6 +674,12 @@ export component QuickPasteWindow inherits Window {
     // 每次会话打开时把列表滚回顶部：Rust 递增该代数，列表区的监听元素重置滚动
     // （窗口经 hide/show 复用会保留滚动位置）
     in-out property <int> scroll-generation: 0;
+
+    // ── 「更多上屏方式」动作浮层：-1 = 收起；行号指向 rows ──
+    // 键盘经既有会话键驱动（↑↓ 选动作、Enter 执行、Esc 先收浮层），
+    // 面板无焦点，浮层不影响目标应用焦点
+    in-out property <int> actions-row: -1;
+    in-out property <int> action-selected: 0;
 
     SoftShadow {
         x: PanelGeometry.shadow-margin;
@@ -732,6 +894,7 @@ export component QuickPasteWindow inherits Window {
                             for row[i] in root.rows: ClipRowCard {
                                 data: row;
                                 selected: i == root.selected;
+                                actions-open: i == root.actions-row;
                                 glass-card: root.blur-active && !root.material-active;
                                 text-width: row.has-thumb
                                     ? root.preview-width-thumb
@@ -740,6 +903,7 @@ export component QuickPasteWindow inherits Window {
                                 double-clicked => { root.row-double-clicked(i); }
                                 hover(x, y) => { root.row-hover(i, x, y); }
                                 hover-left => { root.row-hover-left(); }
+                                actions-requested => { root.row-actions-requested(i); }
                                 scroll-into-view(row-y, row-height) => {
                                     if (row-y < -flick.content-y + 6px) {
                                         flick.content-y = -row-y + 6px;
@@ -772,6 +936,19 @@ export component QuickPasteWindow inherits Window {
                     }
                 }
             }
+        }
+
+        // ── 「更多上屏方式」动作浮层：面板内底部展开的紧凑列表 ──
+        // 不进布局（列表区高度不受影响）；盖在列表之上，收起即无痕。
+        // 悬停同步高亮（与键盘 ↑↓ 同一状态），点击等同 Enter
+        PasteActionMenu {
+            open: root.actions-row >= 0 && root.actions-row < root.rows.length;
+            actions: self.open ? root.rows[root.actions-row].actions : [];
+            highlighted <=> root.action-selected;
+            x: PanelGeometry.list-pad-left;
+            y: parent.height - self.height - Metrics.space-2;
+            width: parent.width - PanelGeometry.list-pad-left - PanelGeometry.scroll-slot;
+            activated(index) => { root.action-item-clicked(index); }
         }
 
         // ── 拉伸手柄（最顶层，几何对齐原版 PICKER_RESIZE_HANDLES）──

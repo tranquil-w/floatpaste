@@ -193,6 +193,28 @@ fn write_item_to_clipboard(
                 ));
             };
 
+            if mode == PasteMode::ImageFile {
+                // 图片文件形态：保存的 PNG 以文件列表（CF_HDROP）发布，
+                // 目标应用按文件附件接收；文件本体必须存在
+                let absolute_path = core.image_storage.resolve_existing_image_path(image_path)?;
+                let path_str = absolute_path.to_string_lossy().to_string();
+                let stats = analyze_file_paths(std::slice::from_ref(&path_str));
+                if let Some(normalized) = NormalizeService::normalize_files(
+                    vec![path_str.clone()],
+                    stats.directory_count,
+                    stats.total_size,
+                    None,
+                ) {
+                    core.self_write_guard()
+                        .suppress_hash(normalized.normalized.hash, Duration::from_secs(3))?;
+                }
+                return write_file_paths_to_clipboard(
+                    std::slice::from_ref(&path_str),
+                    owner_hwnd,
+                    previous,
+                );
+            }
+
             if mode == PasteMode::PathText {
                 let absolute_path = core.image_storage.resolve_existing_image_path(image_path)?;
                 let path_str = absolute_path.to_string_lossy().to_string();
@@ -224,9 +246,20 @@ fn write_item_to_clipboard(
                 return Err(AppError::Message("文件记录缺少文件路径".to_string()));
             }
 
-            // 次级形态「粘贴为文件路径」：路径列表作为文本上屏，不动文件本体
+            // 变体「粘贴为完整路径」：路径列表作为文本上屏，不动文件本体
             if mode == PasteMode::PathText {
                 let listing = file_paths_text(&detail.file_paths);
+                if let Some(normalized) = NormalizeService::normalize_text(&listing, None) {
+                    core.self_write_guard()
+                        .suppress_hash(normalized.normalized.hash, Duration::from_secs(3))?;
+                }
+
+                return write_text_formats_with_rollback(&listing, None, owner_hwnd, previous);
+            }
+
+            // 变体「粘贴为文件名」：仅文件名逐行文本，同样不动文件本体
+            if mode == PasteMode::FileNameText {
+                let listing = file_names_text(&detail.file_paths);
                 if let Some(normalized) = NormalizeService::normalize_text(&listing, None) {
                     core.self_write_guard()
                         .suppress_hash(normalized.normalized.hash, Duration::from_secs(3))?;
@@ -255,6 +288,21 @@ fn write_item_to_clipboard(
 /// 惯例，记事本等按行消费的目标应用才能正确换行）
 fn file_paths_text(paths: &[String]) -> String {
     paths.join("\r\n")
+}
+
+/// 文件条目「仅文件名」形态的文本：逐行文件名，与路径文本同为 CRLF
+/// 分隔。路径没有文件名分量（如根目录）时回退整条路径，条目不凭空少行
+fn file_names_text(paths: &[String]) -> String {
+    paths
+        .iter()
+        .map(|path| {
+            std::path::Path::new(path)
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.clone())
+        })
+        .collect::<Vec<_>>()
+        .join("\r\n")
 }
 
 /// 恢复原剪贴板时不引导手动粘贴，避免用户粘贴到此前的内容。
@@ -306,7 +354,7 @@ pub fn trigger_ctrl_v(session_id: u64, operation_id: u64) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{file_paths_text, paste_failure_hint};
+    use super::{file_names_text, file_paths_text, paste_failure_hint};
 
     #[test]
     fn manual_paste_hint_requires_preserving_the_selected_content() {
@@ -326,5 +374,22 @@ mod tests {
             "C:\\only.txt"
         );
         assert_eq!(file_paths_text(&[]), "");
+    }
+
+    #[test]
+    fn file_names_text_strips_directories_and_keeps_line_count() {
+        assert_eq!(
+            file_names_text(&["C:\\a.txt".to_string(), "D:\\dir\\b.txt".to_string()]),
+            "a.txt\r\nb.txt"
+        );
+        // 文件名与路径相同（裸文件名复制）时结果不变
+        assert_eq!(file_names_text(&["readme.md".to_string()]), "readme.md");
+        // 无文件名分量的路径回退整条路径，行数不丢
+        assert_eq!(file_names_text(&["C:\\".to_string()]), "C:\\");
+        assert_eq!(
+            file_names_text(&["C:\\dir\\a.txt".to_string(), "\\\\srv\\share\\".to_string()]),
+            "a.txt\r\n\\\\srv\\share\\"
+        );
+        assert_eq!(file_names_text(&[]), "");
     }
 }

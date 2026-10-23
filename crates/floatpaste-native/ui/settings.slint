@@ -932,6 +932,11 @@ export component SettingsWindow inherits Window {
     in-out property <string> picker-limit-text;
     in-out property <int> position-mode: 0;   // 0=mouse 1=lastPosition 2=caret
     in-out property <int> paste-trigger: 0;   // 0=click 1=doubleClick
+    // 默认次级动作（次级会话键执行的动作）：索引对应
+    // 各类别动作目录（富文本/图片/文件），Rust 侧按目录换算
+    in-out property <int> secondary-rich: 1;  // 0=原格式 1=纯文本
+    in-out property <int> secondary-image: 1; // 0=图片 1=图片路径 2=图片文件
+    in-out property <int> secondary-file: 1;  // 0=文件 1=完整路径 2=文件名
     in-out property <int> theme-mode: 0;      // 0=system 1=light 2=dark
     in-out property <int> window-material: 2; // 0=none 1=mica 2=acrylic
     in-out property <int> theme-preset: 0;    // THEME_PRESET_IDS 下标
@@ -1025,6 +1030,9 @@ export component SettingsWindow inherits Window {
     callback session-key-cancelled(int);
     callback position-mode-selected(int);
     callback paste-trigger-selected(int);
+    callback secondary-rich-selected(int);
+    callback secondary-image-selected(int);
+    callback secondary-file-selected(int);
     callback theme-mode-selected(int);
     callback window-material-selected(int);
     callback preset-selected(int);
@@ -1571,6 +1579,98 @@ export component SettingsWindow inherits Window {
                                                 value <=> root.paste-trigger;
                                                 selected(idx) => { root.paste-trigger-selected(idx); }
                                             }
+                                        }
+                                    }
+                                }
+                                RowGroup {
+                                    VerticalLayout {
+                                        padding: 16px;
+                                        spacing: 6px;
+                                        HorizontalLayout {
+                                            alignment: start;
+                                            spacing: 8px;
+                                            Text {
+                                                text: "默认次级动作";
+                                                color: Theme.fg-default;
+                                                font-size: Metrics.text-sm;
+                                                font-weight: Metrics.weight-medium;
+                                                vertical-alignment: center;
+                                            }
+                                            HorizontalLayout {
+                                                spacing: 4px;
+                                                for part in root.session-key-rows[1].parts: KbdBadge {
+                                                    key: part == "Super" ? "Win" : part;
+                                                }
+                                            }
+                                        }
+                                        Text {
+                                            text: "按此快捷键时，使用下方对应的粘贴方式。";
+                                            color: Theme.fg-muted;
+                                            font-size: Metrics.text-xs;
+                                            wrap: word-wrap;
+                                        }
+                                    }
+                                    RowDivider { }
+                                    SettingRow {
+                                        title: "富文本";
+                                        description: ["保留文字格式、链接等内容。",
+                                            "去除格式，只粘贴文字。"][root.secondary-rich];
+                                        Rectangle {
+                                            width: seg-secondary-rich.width;
+                                            seg-secondary-rich := Segmented {
+                                                x: 0;
+                                                y: (parent.height - self.height) / 2;
+                                                options: ["原格式", "纯文本"];
+                                                value <=> root.secondary-rich;
+                                                selected(idx) => { root.secondary-rich-selected(idx); }
+                                            }
+                                        }
+                                    }
+                                    RowDivider { }
+                                    SettingRow {
+                                        title: "图片";
+                                        description: ["直接粘贴图片内容。",
+                                            "将图片的本地保存路径粘贴为文字。",
+                                            "将图片作为 PNG 文件粘贴，可用于添加附件。"][root.secondary-image];
+                                        Rectangle {
+                                            width: seg-secondary-image.width;
+                                            seg-secondary-image := Segmented {
+                                                x: 0;
+                                                y: (parent.height - self.height) / 2;
+                                                options: ["图片", "图片路径", "图片文件"];
+                                                value <=> root.secondary-image;
+                                                selected(idx) => { root.secondary-image-selected(idx); }
+                                            }
+                                        }
+                                    }
+                                    RowDivider { }
+                                    SettingRow {
+                                        title: "文件";
+                                        description: ["粘贴文件，交由目标应用接收。",
+                                            "将完整路径逐行粘贴为文字。",
+                                            "仅粘贴文件名（含扩展名），每个文件一行。"][root.secondary-file];
+                                        Rectangle {
+                                            width: seg-secondary-file.width;
+                                            seg-secondary-file := Segmented {
+                                                x: 0;
+                                                y: (parent.height - self.height) / 2;
+                                                options: ["文件", "完整路径", "文件名"];
+                                                value <=> root.secondary-file;
+                                                selected(idx) => { root.secondary-file-selected(idx); }
+                                            }
+                                        }
+                                    }
+                                    RowDivider { }
+                                    VerticalLayout {
+                                        padding-left: 16px;
+                                        padding-right: 16px;
+                                        padding-top: 10px;
+                                        padding-bottom: 12px;
+                                        Text {
+                                            text: "条目下拉菜单中的选择仅对本次生效；普通文本始终按原文粘贴。";
+                                            color: Theme.fg-muted;
+                                            font-size: Metrics.text-xs;
+                                            wrap: word-wrap;
                                         }
                                     }
                                 }

@@ -3,7 +3,11 @@
 //! 纯文本派生，不依赖 GUI 运行时；速贴、搜索、编辑与预览窗口共用，
 //! 保证各窗口对同一条目的文案一致。
 
-use crate::domain::clip_item::{ClipItemSummary, TextKind};
+use crate::domain::clip_item::{
+    available_paste_modes, paste_mode_label, resolve_secondary_mode, ClipItemSummary, PasteMode,
+    TextKind,
+};
+use crate::domain::settings::SecondaryPasteDefaults;
 use crate::services::text_kind::http_url_parts;
 use crate::services::time_format::format_relative_time_or_unused;
 
@@ -171,10 +175,59 @@ pub fn format_file_size(bytes: Option<i64>) -> Option<String> {
     Some(format!("{value:.digits$} {}", UNITS[unit_index]))
 }
 
+/// 「更多上屏方式」菜单里的一项：动作名 + 快捷键提示（空串 = 无键）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PasteActionSummary {
+    pub label: String,
+    pub shortcut: String,
+}
+
+/// 条目上屏动作的菜单投影：目录顺序即菜单顺序；主动作标注主键、默认
+/// 次级动作标注次级键，其余动作仅临时选择、不带快捷键。
+pub fn paste_action_summaries(
+    item: &ClipItemSummary,
+    confirm_key: &str,
+    secondary_key: &str,
+    defaults: &SecondaryPasteDefaults,
+) -> Vec<PasteActionSummary> {
+    let secondary = resolve_secondary_mode(item, defaults);
+    available_paste_modes(item)
+        .iter()
+        .map(|mode| {
+            let shortcut = if *mode == PasteMode::Original {
+                confirm_key
+            } else if *mode == secondary {
+                secondary_key
+            } else {
+                ""
+            };
+            PasteActionSummary {
+                label: paste_mode_label(*mode, &item.r#type, item.has_html).to_string(),
+                shortcut: shortcut.to_string(),
+            }
+        })
+        .collect()
+}
+
+/// 默认次级动作的提示名；配置等同主动作（普通文本，或显式选了本体）时返回
+/// `None`，避免重复提示——主动作入口已覆盖该行为。
+pub fn secondary_action_label(
+    item: &ClipItemSummary,
+    defaults: &SecondaryPasteDefaults,
+) -> Option<String> {
+    let mode = resolve_secondary_mode(item, defaults);
+    (mode != PasteMode::Original)
+        .then(|| paste_mode_label(mode, &item.r#type, item.has_html).to_string())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{build_meta, clip_type_label, format_file_size, search_empty_state};
-    use crate::domain::clip_item::{ClipItemSummary, TextKind};
+    use super::{
+        build_meta, clip_type_label, format_file_size, paste_action_summaries, search_empty_state,
+        secondary_action_label, PasteActionSummary,
+    };
+    use crate::domain::clip_item::{ClipItemSummary, PasteMode, TextKind};
+    use crate::domain::settings::SecondaryPasteDefaults;
 
     #[test]
     fn text_summaries_emphasize_host_and_filename_but_keep_code_layout() {
@@ -295,5 +348,66 @@ mod tests {
             build_meta(&item),
             "资源管理器 · 刚刚 · 2 个文件 · 1 个文件夹"
         );
+    }
+
+    #[test]
+    fn action_menu_marks_primary_and_configured_secondary_keys() {
+        // 文件条目默认次级 = 完整路径：目录内其余动作不带快捷键
+        let summaries = paste_action_summaries(
+            &item_of("file", 1, 0),
+            "Enter",
+            "Shift+Enter",
+            &SecondaryPasteDefaults::default(),
+        );
+        assert_eq!(
+            summaries,
+            vec![
+                PasteActionSummary {
+                    label: "粘贴为文件".into(),
+                    shortcut: "Enter".into(),
+                },
+                PasteActionSummary {
+                    label: "粘贴为完整路径".into(),
+                    shortcut: "Shift+Enter".into(),
+                },
+                PasteActionSummary {
+                    label: "粘贴为文件名".into(),
+                    shortcut: String::new(),
+                },
+            ]
+        );
+
+        // 改配文件名后，快捷键提示跟随新默认
+        let summaries = paste_action_summaries(
+            &item_of("file", 1, 0),
+            "Enter",
+            "Shift+Enter",
+            &SecondaryPasteDefaults {
+                file: PasteMode::FileNameText,
+                ..SecondaryPasteDefaults::default()
+            },
+        );
+        assert_eq!(summaries[1].shortcut, "");
+        assert_eq!(summaries[2].shortcut, "Shift+Enter");
+    }
+
+    #[test]
+    fn secondary_label_hides_when_configured_mode_equals_primary() {
+        // 富文本显式配置为原格式：次级入口等同主动作，不重复提示
+        let defaults = SecondaryPasteDefaults {
+            rich_text: PasteMode::Original,
+            ..SecondaryPasteDefaults::default()
+        };
+        let mut item = item_of("text", 0, 0);
+        item.has_html = true;
+        assert_eq!(secondary_action_label(&item, &defaults), None);
+        assert_eq!(
+            secondary_action_label(&item, &SecondaryPasteDefaults::default()),
+            Some("粘贴为纯文本".into())
+        );
+
+        // 普通文本只有原文形态：恒隐藏
+        let plain = item_of("text", 0, 0);
+        assert_eq!(secondary_action_label(&plain, &defaults), None);
     }
 }

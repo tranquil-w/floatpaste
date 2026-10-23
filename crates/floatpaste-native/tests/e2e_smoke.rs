@@ -33,7 +33,7 @@ use floatpaste_core::{
 };
 use floatpaste_core::{
     domain::{
-        clip_item::{PasteMode, SearchQuery, SearchSort},
+        clip_item::{ClipType, PasteMode, SearchFilters, SearchQuery, SearchSort},
         error::AppError,
     },
     platform::windows::{
@@ -691,6 +691,17 @@ fn app_e2e_smoke_flow() {
     assert_eq!(retry_clipboard(|| clipboard.get_text()), oversized_fallback);
     let paths = vec![db_path.to_string_lossy().into_owned()];
     retry_clipboard(|| write_file_paths_to_clipboard(&paths, None, None));
+    // 后续发布契约复用监听录入的文件条目；必须等后台采集完成再覆盖剪贴板。
+    assert!(
+        wait_until(Duration::from_secs(10), Duration::from_millis(100), || {
+            count_rows(
+                &db_path,
+                "SELECT count(*) FROM clip_items WHERE type = 'file' AND deleted_at IS NULL",
+                None,
+            ) == 1
+        }),
+        "文件样本应经剪贴板监听录入后再验证发布"
+    );
     let files_snapshot = retry_clipboard(|| ClipboardSnapshot::capture(true));
     assert_eq!(files_snapshot.files.as_ref(), Some(&paths));
     retry_clipboard(|| clipboard.set_text("文件快照恢复前"));
@@ -700,6 +711,53 @@ fn app_e2e_smoke_flow() {
             .files
             .as_ref(),
         Some(&paths)
+    );
+
+    // 文件条目的路径/文件名文本形态：均逐行（CRLF）作为文本发布，
+    // 并登记自写抑制身份（发布内容不得再入库）
+    let file_items = driver
+        .repository
+        .search(SearchQuery {
+            keyword: String::new(),
+            filters: SearchFilters {
+                clip_type: Some(ClipType::File),
+                ..Default::default()
+            },
+            offset: 0,
+            limit: 10,
+            sort: SearchSort::RecentDesc,
+        })
+        .unwrap();
+    let file_detail = driver
+        .repository
+        .get_item_for_paste(&file_items.items[0].id)
+        .unwrap();
+    retry_clipboard(|| publish_item(&driver, &file_detail, PasteMode::PathText, None, None));
+    assert_eq!(
+        retry_clipboard(|| clipboard.get_text()),
+        paths.join("\r\n"),
+        "完整路径形态应逐行发布路径"
+    );
+    retry_clipboard(|| publish_item(&driver, &file_detail, PasteMode::FileNameText, None, None));
+    let expected_names: Vec<String> = paths
+        .iter()
+        .map(|path| {
+            std::path::Path::new(path)
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.clone())
+        })
+        .collect();
+    assert_eq!(
+        retry_clipboard(|| clipboard.get_text()),
+        expected_names.join("\r\n"),
+        "文件名形态应逐行只发布文件名"
+    );
+    assert!(
+        HistoryService::ingest_text(&driver, &expected_names.join("\r\n"), None)
+            .unwrap()
+            .is_none(),
+        "文件名发布须登记自写抑制身份"
     );
     drop(driver);
 
@@ -749,6 +807,55 @@ fn app_e2e_smoke_flow() {
         restored_image.rgba, image.rgba,
         "PNG/DIB 共用发布器应保留像素"
     );
+
+    // 图片文件形态：保存的 PNG 以文件列表（CF_HDROP）发布，目标应用按
+    // 文件附件接收；发布的文件必须真实存在
+    let image_driver = CoreState::new(
+        SqliteRepository::new(&db_path).unwrap(),
+        ImageStorage::new(app_dir.clone()).unwrap(),
+        UserSetting::default(),
+    );
+    let image_items = image_driver
+        .repository
+        .search(SearchQuery {
+            keyword: String::new(),
+            filters: SearchFilters {
+                clip_type: Some(ClipType::Image),
+                ..Default::default()
+            },
+            offset: 0,
+            limit: 10,
+            sort: SearchSort::RecentDesc,
+        })
+        .unwrap();
+    let image_detail = image_driver
+        .repository
+        .get_item_for_paste(&image_items.items[0].id)
+        .unwrap();
+    retry_clipboard(|| {
+        publish_item(
+            &image_driver,
+            &image_detail,
+            PasteMode::ImageFile,
+            None,
+            None,
+        )
+    });
+    let image_file_snapshot = retry_clipboard(|| ClipboardSnapshot::capture(true));
+    let published_image_files = image_file_snapshot
+        .files
+        .expect("图片文件形态应以 CF_HDROP 文件列表发布");
+    assert_eq!(published_image_files.len(), 1, "应只发布该图片的保存文件");
+    assert!(
+        published_image_files[0].to_lowercase().ends_with(".png"),
+        "发布引用的应是保存的 PNG：{}",
+        published_image_files[0]
+    );
+    assert!(
+        std::path::Path::new(&published_image_files[0]).is_file(),
+        "发布引用的图片文件必须存在"
+    );
+    drop(image_driver);
 
     // ── 场景 5：二次启动经唤醒事件开关速贴面板（屏内 ↔ 停屏）──
     cleanup.assert_running("唤醒面板");

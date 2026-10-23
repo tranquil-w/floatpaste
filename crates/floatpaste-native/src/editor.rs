@@ -1109,7 +1109,14 @@ pub(crate) mod load_error_tests {
         load_session(app, win, &rich.id);
         assert!(win.get_has_html());
         assert!(!win.get_is_dirty());
-        assert!(crate::search::make_row(&rich.to_summary()).has_html);
+        assert!(
+            crate::search::make_row(
+                &rich.to_summary(),
+                &floatpaste_core::domain::settings::SessionKeys::default(),
+                &floatpaste_core::domain::settings::SecondaryPasteDefaults::default(),
+            )
+            .has_html
+        );
         save(app);
         assert!(win.get_has_html(), "原文未改的保存保留格式提示");
         if std::env::var_os("FLOATPASTE_UI_SNAPSHOTS").is_some() {
@@ -1126,7 +1133,11 @@ pub(crate) mod load_error_tests {
                 win.show().unwrap();
                 let search = app.search.upgrade().unwrap();
                 search.set_rows(slint::ModelRc::new(std::rc::Rc::new(VecModel::from(vec![
-                    crate::search::make_row(&rich.to_summary()),
+                    crate::search::make_row(
+                        &rich.to_summary(),
+                        &floatpaste_core::domain::settings::SessionKeys::default(),
+                        &floatpaste_core::domain::settings::SecondaryPasteDefaults::default(),
+                    ),
                 ]))));
                 search.set_selected(0);
                 search.set_result_count(1);

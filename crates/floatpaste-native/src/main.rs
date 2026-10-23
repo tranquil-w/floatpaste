@@ -758,9 +758,11 @@ fn l2_headless_ui_contracts() {
     settings::copy_contract_tests::run();
     search::scroll_reset_tests::run();
     search::refresh_after_editor_tests::run();
+    search::action_menu_tests::run();
     tray_menu::headless_contract_tests::run();
     win32_ext::repaint_contract_tests::run();
     picker::reveal_contract_tests::run();
+    picker::action_sheet_tests::run();
 }
 
 #[cfg(test)]

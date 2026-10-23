@@ -16,10 +16,13 @@ use std::time::Duration;
 use slint::{ComponentHandle, Model, VecModel};
 use tracing::{info, warn};
 
-use floatpaste_core::domain::clip_item::TagInfo;
+use floatpaste_core::domain::clip_item::{
+    PasteMode, TagInfo, FILE_PASTE_MODES, IMAGE_PASTE_MODES, RICH_TEXT_PASTE_MODES,
+};
 use floatpaste_core::domain::error::AppError;
 use floatpaste_core::domain::settings::{
-    PasteTrigger, PickerPositionMode, SessionKeys, ThemeMode, UserSetting, WindowMaterial,
+    PasteTrigger, PickerPositionMode, SecondaryPasteDefaults, SessionKeys, ThemeMode, UserSetting,
+    WindowMaterial,
 };
 use floatpaste_core::launch_mode;
 use floatpaste_core::platform::windows::active_app::ActiveAppResolver;
@@ -53,8 +56,8 @@ const PROJECT_PAGE_URL: &str = "https://github.com/tranquil-w/floatpaste";
 const SESSION_KEY_DEFS: [(&str, &str); 8] = [
     ("上屏", "把选中条目粘贴到目标应用。"),
     (
-        "粘贴为纯文本 / 路径",
-        "带格式文本仅粘贴纯文本；图片粘贴保存路径，文件粘贴逐行路径。",
+        "执行默认次级动作",
+        "按「行为 → 默认次级动作」中的设置粘贴选中条目。",
     ),
     ("编辑内容", "打开编辑窗口，修改文本或管理标签。"),
     ("收藏 / 取消收藏", "切换选中条目的收藏状态。"),
@@ -314,6 +317,35 @@ pub fn wire(app: &App) {
         win.on_paste_trigger_selected(move |mode| {
             if let Some(win) = app_cb.settings.upgrade() {
                 win.set_paste_trigger(mode);
+                schedule_save(&app_cb);
+            }
+        });
+    }
+
+    // ── 默认次级动作（分段控件序号即类别动作目录序号）──
+    {
+        let app_cb = app.clone();
+        win.on_secondary_rich_selected(move |index| {
+            if let Some(win) = app_cb.settings.upgrade() {
+                win.set_secondary_rich(index);
+                schedule_save(&app_cb);
+            }
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_secondary_image_selected(move |index| {
+            if let Some(win) = app_cb.settings.upgrade() {
+                win.set_secondary_image(index);
+                schedule_save(&app_cb);
+            }
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_secondary_file_selected(move |index| {
+            if let Some(win) = app_cb.settings.upgrade() {
+                win.set_secondary_file(index);
                 schedule_save(&app_cb);
             }
         });
@@ -785,6 +817,21 @@ fn hydrate(app: &App, win: &SettingsWindow) {
         PasteTrigger::Click => 0,
         PasteTrigger::DoubleClick => 1,
     });
+    win.set_secondary_rich(paste_mode_index(
+        RICH_TEXT_PASTE_MODES,
+        settings.secondary_paste.rich_text,
+        1,
+    ));
+    win.set_secondary_image(paste_mode_index(
+        IMAGE_PASTE_MODES,
+        settings.secondary_paste.image,
+        1,
+    ));
+    win.set_secondary_file(paste_mode_index(
+        FILE_PASTE_MODES,
+        settings.secondary_paste.file,
+        1,
+    ));
     win.set_theme_mode(match settings.theme_mode {
         ThemeMode::System => 0,
         ThemeMode::Light => 1,
@@ -825,6 +872,22 @@ fn hydrate(app: &App, win: &SettingsWindow) {
 
 /* ───────────────── 草稿与保存 ───────────────── */
 
+/// 类别目录 → 分段控件序号；模式不在目录（异常残留）时回退默认序号
+fn paste_mode_index(catalog: &[PasteMode], mode: PasteMode, default_index: i32) -> i32 {
+    catalog
+        .iter()
+        .position(|candidate| *candidate == mode)
+        .map_or(default_index, |index| index as i32)
+}
+
+/// 分段控件序号 → 类别目录模式；越界（异常残留）时回退类别内置默认
+fn paste_mode_at(catalog: &[PasteMode], index: i32, fallback: PasteMode) -> PasteMode {
+    catalog
+        .get(index.max(0) as usize)
+        .copied()
+        .unwrap_or(fallback)
+}
+
 /// 从界面属性收集当前草稿（字段语义对齐旧版 toSettingsPayload）
 fn current_draft(win: &SettingsWindow) -> UserSetting {
     let launch_on_startup = win.get_launch_on_startup();
@@ -855,6 +918,23 @@ fn current_draft(win: &SettingsWindow) -> UserSetting {
         paste_trigger: match win.get_paste_trigger() {
             1 => PasteTrigger::DoubleClick,
             _ => PasteTrigger::Click,
+        },
+        secondary_paste: SecondaryPasteDefaults {
+            rich_text: paste_mode_at(
+                RICH_TEXT_PASTE_MODES,
+                win.get_secondary_rich(),
+                PasteMode::PlainText,
+            ),
+            image: paste_mode_at(
+                IMAGE_PASTE_MODES,
+                win.get_secondary_image(),
+                PasteMode::PathText,
+            ),
+            file: paste_mode_at(
+                FILE_PASTE_MODES,
+                win.get_secondary_file(),
+                PasteMode::PathText,
+            ),
         },
         excluded_apps: win
             .get_excluded_apps_text()
@@ -1690,5 +1770,51 @@ pub(crate) mod copy_contract_tests {
         assert!(!win.get_tag_rows().row_data(0).unwrap().conflict);
         update_tag_conflict(&win, 0, "life");
         assert!(win.get_tag_rows().row_data(0).unwrap().conflict);
+
+        if std::env::var_os("FLOATPASTE_UI_SNAPSHOTS").is_some() {
+            let dir =
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.artifacts/snapshot");
+            std::fs::create_dir_all(&dir).unwrap();
+            win.set_session_key_rows(slint::ModelRc::new(VecModel::from(session_key_rows(
+                &UserSetting::default(),
+            ))));
+            win.set_status_kind(STATUS_SAVED);
+            win.set_nav_override(1);
+            for (name, resolved) in [
+                ("light", ResolvedTheme::Light),
+                ("dark", ResolvedTheme::Dark),
+            ] {
+                slint::platform::update_timers_and_animations();
+                let tokens = theme::derive_tokens("default", "", resolved);
+                theme_bridge::apply_theme(None, None, None, None, None, Some(&win), &tokens);
+                for (state, index, key) in
+                    [("default", 1, "Shift+Enter"), ("files", 2, "Alt+Enter")]
+                {
+                    slint::platform::update_timers_and_animations();
+                    // 最小窗口宽度也要容纳较长的图片文件/文件名说明。
+                    win.window().set_size(slint::LogicalSize::new(880.0, 760.0));
+                    win.set_secondary_image(index);
+                    win.set_secondary_file(index);
+                    update_session_row(&win, 1, Some(key), None);
+                    let _ = win.window().take_snapshot().unwrap();
+                    win.set_scroll_y(530.0 - win.get_sec_y2());
+                    let _ = win.window().take_snapshot().unwrap();
+                    std::thread::sleep(Duration::from_millis(150));
+                    slint::platform::update_timers_and_animations();
+                    let pixels = win.window().take_snapshot().unwrap();
+                    image::save_buffer(
+                        dir.join(format!(
+                            "paste-settings-{state}-{name}-{}.png",
+                            (win.window().scale_factor() * 100.0).round() as u32
+                        )),
+                        pixels.as_bytes(),
+                        pixels.width(),
+                        pixels.height(),
+                        image::ColorType::Rgba8,
+                    )
+                    .unwrap();
+                }
+            }
+        }
     }
 }

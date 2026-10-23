@@ -1,5 +1,7 @@
 use serde::{Deserialize, Deserializer, Serialize};
 
+use super::clip_item::{PasteMode, FILE_PASTE_MODES, IMAGE_PASTE_MODES, RICH_TEXT_PASTE_MODES};
+
 const DEFAULT_MAIN_SHORTCUT: &str = "Ctrl+Q";
 const DEFAULT_SEARCH_SHORTCUT: &str = "Alt+S";
 /// 历史默认值：sanitized 时迁移到当前默认，未改过快捷键的用户无感升级
@@ -139,8 +141,8 @@ impl<'de> Deserialize<'de> for PasteTrigger {
 pub struct SessionKeys {
     /// 上屏
     pub confirm: String,
-    /// 次级上屏：粘贴为图片路径 / 文件路径（按条目类型）。字段名是
-    /// 持久化配置键，不可更名
+    /// 次级上屏：执行该类别配置的默认动作（见 SecondaryPasteDefaults）。
+    /// 字段名是持久化配置键，不可更名
     pub confirm_as_file: String,
     /// 打开编辑器
     pub open_editor: String,
@@ -213,6 +215,66 @@ impl SessionKeys {
             self.set_field(action, value);
         }
         self
+    }
+}
+
+/// 各类别条目在次级入口（次级会话键 / 次级按钮）执行的默认动作。
+/// 值为发布模式，必须落在该类别的可用目录内（见 clip_item 的
+/// `*_PASTE_MODES`）；普通文本只有原文一种形态，不单独配置。
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SecondaryPasteDefaults {
+    /// 富文本（带 HTML 的文本）
+    #[serde(default = "default_rich_text_secondary")]
+    pub rich_text: PasteMode,
+    #[serde(default = "default_image_secondary")]
+    pub image: PasteMode,
+    #[serde(default = "default_file_secondary")]
+    pub file: PasteMode,
+}
+
+fn default_rich_text_secondary() -> PasteMode {
+    PasteMode::PlainText
+}
+
+fn default_image_secondary() -> PasteMode {
+    PasteMode::PathText
+}
+
+fn default_file_secondary() -> PasteMode {
+    PasteMode::PathText
+}
+
+impl Default for SecondaryPasteDefaults {
+    fn default() -> Self {
+        Self {
+            rich_text: default_rich_text_secondary(),
+            image: default_image_secondary(),
+            file: default_file_secondary(),
+        }
+    }
+}
+
+impl SecondaryPasteDefaults {
+    /// 类别可用目录外的值回退内置默认（与条目侧解析的回退语义一致，
+    /// 防旧库/手改配置残留进入界面草稿）
+    pub fn sanitized(self) -> Self {
+        fn in_catalog_or(mode: PasteMode, catalog: &[PasteMode], fallback: PasteMode) -> PasteMode {
+            if catalog.contains(&mode) {
+                mode
+            } else {
+                fallback
+            }
+        }
+        Self {
+            rich_text: in_catalog_or(
+                self.rich_text,
+                RICH_TEXT_PASTE_MODES,
+                default_rich_text_secondary(),
+            ),
+            image: in_catalog_or(self.image, IMAGE_PASTE_MODES, default_image_secondary()),
+            file: in_catalog_or(self.file, FILE_PASTE_MODES, default_file_secondary()),
+        }
     }
 }
 
@@ -293,6 +355,10 @@ pub struct UserSetting {
     /// 会话期动作键位（上屏/编辑/收藏/关闭/导航/删除），见 [SessionKeys]
     #[serde(default)]
     pub session_keys: SessionKeys,
+    /// 各类别默认次级动作（次级会话键 / 次级按钮立即执行），见
+    /// [SecondaryPasteDefaults]
+    #[serde(default)]
+    pub secondary_paste: SecondaryPasteDefaults,
     #[serde(default = "default_theme_preset")]
     pub theme_preset: String,
     /// "default"=跟随预设 | 安全列表 id | 旧版迁移保留的 #RRGGBB；
@@ -329,6 +395,7 @@ impl Default for UserSetting {
             picker_digit_shortcuts_enabled: true,
             takeover_winv: false,
             session_keys: SessionKeys::default(),
+            secondary_paste: SecondaryPasteDefaults::default(),
             theme_preset: default_theme_preset(),
             theme_accent: default_theme_accent(),
             custom_theme_colors: CustomThemeColors::default(),
@@ -377,6 +444,7 @@ impl UserSetting {
         }
         self.resolve_search_shortcut_conflict();
         self.session_keys = std::mem::take(&mut self.session_keys).sanitized();
+        self.secondary_paste = self.secondary_paste.sanitized();
         self
     }
 
@@ -490,8 +558,10 @@ fn is_valid_hex_color(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        normalize_shortcut_for_compare, PickerPositionMode, ThemeMode, UserSetting, WindowMaterial,
+        normalize_shortcut_for_compare, PickerPositionMode, SecondaryPasteDefaults, ThemeMode,
+        UserSetting, WindowMaterial,
     };
+    use crate::domain::clip_item::PasteMode;
 
     #[test]
     fn sanitized_turns_off_silent_when_launch_on_startup_is_disabled() {
@@ -729,5 +799,57 @@ mod tests {
         let serialized = serde_json::to_string(&settings).unwrap();
         assert!(!serialized.contains("customThemeColors"));
         assert!(serialized.contains("themeAccent"));
+    }
+
+    #[test]
+    fn secondary_paste_defaults_match_legacy_secondary_behavior() {
+        let defaults = SecondaryPasteDefaults::default();
+        // 次级动作可配置之前的既有行为：富文本纯文本、图片/文件路径文本
+        assert_eq!(defaults.rich_text, PasteMode::PlainText);
+        assert_eq!(defaults.image, PasteMode::PathText);
+        assert_eq!(defaults.file, PasteMode::PathText);
+    }
+
+    #[test]
+    fn secondary_paste_defaults_round_trip_and_missing_fields_fall_back() {
+        let settings = UserSetting {
+            secondary_paste: SecondaryPasteDefaults {
+                rich_text: PasteMode::Original,
+                image: PasteMode::ImageFile,
+                file: PasteMode::FileNameText,
+            },
+            ..UserSetting::default()
+        };
+        let json = serde_json::to_string(&settings).unwrap();
+        assert!(json.contains("secondaryPaste"));
+        let parsed: UserSetting = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.secondary_paste, settings.secondary_paste);
+
+        // 旧配置没有该字段：整体回退默认
+        let legacy: UserSetting = serde_json::from_str(r#"{}"#).unwrap();
+        assert_eq!(legacy.secondary_paste, SecondaryPasteDefaults::default());
+
+        // 部分字段缺失：仅缺失项回退默认
+        let partial: UserSetting =
+            serde_json::from_str(r#"{"secondaryPaste":{"image":"image_file"}}"#).unwrap();
+        assert_eq!(partial.secondary_paste.image, PasteMode::ImageFile);
+        assert_eq!(partial.secondary_paste.rich_text, PasteMode::PlainText);
+    }
+
+    #[test]
+    fn sanitized_resets_secondary_values_outside_category_catalog() {
+        let settings = UserSetting {
+            secondary_paste: SecondaryPasteDefaults {
+                rich_text: PasteMode::PathText,
+                image: PasteMode::FileNameText,
+                file: PasteMode::PlainText,
+            },
+            ..UserSetting::default()
+        }
+        .sanitized();
+
+        assert_eq!(settings.secondary_paste.rich_text, PasteMode::PlainText);
+        assert_eq!(settings.secondary_paste.image, PasteMode::PathText);
+        assert_eq!(settings.secondary_paste.file, PasteMode::PathText);
     }
 }
