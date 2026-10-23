@@ -58,8 +58,6 @@ const REVEAL_DELAY_MS: u64 = if cfg!(debug_assertions) { 200 } else { 50 };
 // 定位和抓屏共用预算；冷 provider / GDI 不能把第一次呼出拖到秒级。
 const PREPARATION_BUDGET: Duration = Duration::from_millis(150);
 
-/// 预览最多显示行数（对齐原版 line-clamp-4）
-const PREVIEW_MAX_LINES: usize = 4;
 /// 入库预览的字符截断上限（normalize_service 同值）：达到即认为原文更长
 const PREVIEW_SOURCE_LIMIT: usize = 120;
 
@@ -751,7 +749,7 @@ thread_local! {
     static LIST_VERSION: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
-// 已知规模边界：行模型全量重建，且每行各带一把隐藏度量标尺；当前
+// 已知规模边界：行模型全量重建，且预览逐行裁排；当前
 // picker_record_limit（9..=1000）内够用，若要放开上限需先做裁排结果
 // 缓存与模型 diff 更新，否则软件渲染与逐行度量会成为刷新瓶颈
 
@@ -840,7 +838,7 @@ fn clamp_preview(
         avail_logical,
         source_truncated,
         line_height,
-        PREVIEW_MAX_LINES,
+        win.global::<PanelGeometry>().get_preview_max_lines() as usize,
     )
 }
 
@@ -930,12 +928,12 @@ fn build_rows(app: &App, win: &QuickPasteWindow, items: &[ClipItemSummary]) {
                     let shown: Vec<SharedString> = item
                         .tags
                         .iter()
-                        .take(2)
+                        .take(1)
                         .map(|tag| SharedString::from(tag.clone()))
                         .collect();
                     ModelRc::new(Rc::new(VecModel::from(shown)))
                 },
-                tag_more: item.tags.len().saturating_sub(2) as i32,
+                tag_more: item.tags.len().saturating_sub(1) as i32,
                 actions: action_items(&paste_action_summaries(
                     item,
                     &keys.confirm,
@@ -2157,6 +2155,7 @@ pub(crate) mod action_sheet_tests {
         assert_eq!(win.get_actions_row(), -1);
 
         pointer_actions_button(&app, &win);
+        equal_height_cards(&app, &win);
 
         let _ =
             std::fs::remove_dir_all(std::env::temp_dir().join(format!("floatpaste-sheet-{stamp}")));
@@ -2217,6 +2216,84 @@ pub(crate) mod action_sheet_tests {
             assert_eq!(win.get_actions_row(), row as i32, "应打开对应行的浮层");
             assert_eq!(win.get_selected(), row as i32);
             close_actions(app);
+        }
+    }
+
+    fn equal_height_cards(app: &App, win: &QuickPasteWindow) {
+        use slint::platform::WindowEvent;
+        use slint::Model;
+
+        let mut items = vec![file_summary(); 4];
+        items[0].content_preview = "短文本".into();
+        items[1].content_preview = "多行中文与 emoji 😀\n".repeat(12);
+        items[1].tags = vec![
+            "一个需要省略的长标签名称".into(),
+            "工作".into(),
+            "常用".into(),
+        ];
+        items[1].is_favorited = true;
+        items[1].created_at = "2026-01-01T00:00:00Z".into();
+        items[1].source_app = Some("一个需要省略的很长的来源应用名称".into());
+        items[2].r#type = "image".into();
+        items[2].content_preview = "图片预览".into();
+        items[3].content_preview.clear();
+        let hovered = Rc::new(std::cell::Cell::new(-1));
+        let hovered_cb = hovered.clone();
+        win.on_row_hover(move |row, _, _| hovered_cb.set(row));
+
+        for width in [360.0, 280.0] {
+            win.window().set_size(slint::LogicalSize::new(width, 600.0));
+            build_rows(app, win, &items);
+            let rows = win.get_rows();
+            assert_eq!(rows.row_data(1).unwrap().tags.row_count(), 1);
+            assert_eq!(rows.row_data(1).unwrap().tag_more, 2);
+            assert!(rows.row_data(1).unwrap().preview.ends_with('…'));
+            for with_thumb in [false, true] {
+                let mut image_row = rows.row_data(2).unwrap();
+                image_row.has_thumb = with_thumb;
+                image_row.thumb = slint::Image::from_rgba8(slint::SharedPixelBuffer::new(60, 60));
+                rows.set_row_data(2, image_row);
+                win.set_selected(if with_thumb { 2 } else { 0 });
+                let _ = win.window().take_snapshot().unwrap();
+                let mut bounds = [(i32::MAX, 0); 4];
+                for y in 0..580 {
+                    hovered.set(-1);
+                    win.window().dispatch_event(WindowEvent::PointerMoved {
+                        position: slint::LogicalPosition::new(100.0, y as f32),
+                    });
+                    if let Some(bound) = bounds.get_mut(hovered.get() as usize) {
+                        bound.0 = bound.0.min(y);
+                        bound.1 = y;
+                    }
+                }
+                let expected = win.global::<PanelGeometry>().get_row_height();
+                for (row, (top, bottom)) in bounds.into_iter().enumerate() {
+                    assert!(top < bottom, "应找到第 {row} 行的完整命中区域");
+                    assert!(
+                        ((bottom - top + 1) as f32 - expected).abs() <= 1.0,
+                        "行 {row} 在宽度 {width}、缩略图 {with_thumb} 时应保持等高：{top}..={bottom}"
+                    );
+                }
+                if with_thumb && std::env::var_os("FLOATPASTE_UI_SNAPSHOTS").is_some() {
+                    let tokens = theme::derive_tokens("default", "", theme::ResolvedTheme::Light);
+                    theme_bridge::reapply_theme(app, &tokens);
+                    let pixels = win.window().take_snapshot().unwrap();
+                    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                        .join("../../.artifacts/snapshot");
+                    std::fs::create_dir_all(&dir).unwrap();
+                    image::save_buffer(
+                        dir.join(format!(
+                            "picker-equal-height-{width}-{}.png",
+                            (win.window().scale_factor() * 100.0).round() as u32
+                        )),
+                        pixels.as_bytes(),
+                        pixels.width(),
+                        pixels.height(),
+                        image::ColorType::Rgba8,
+                    )
+                    .unwrap();
+                }
+            }
         }
     }
 }

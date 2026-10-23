@@ -74,16 +74,18 @@ fn row(
         thumb: slint::Image::default(),
         tags: slint::ModelRc::new(slint::VecModel::from(
             tags.iter()
+                .take(1)
                 .map(|t| SharedString::from(*t))
                 .collect::<Vec<_>>(),
         )),
-        tag_more: if tags.len() > 2 {
-            tags.len() as i32 - 2
-        } else {
-            0
-        },
+        tag_more: tags.len().saturating_sub(1) as i32,
         actions: slint::ModelRc::new(slint::VecModel::from(
             match type_label {
+                "图片" => vec![
+                    ("粘贴为图片", "Enter"),
+                    ("粘贴为图片路径", "Shift+Enter"),
+                    ("粘贴为图片文件", ""),
+                ],
                 "文件" => vec![
                     ("粘贴为文件", "Enter"),
                     ("粘贴为完整路径", "Shift+Enter"),
@@ -256,14 +258,20 @@ fn main() {
     theme.set_favorite(hex_color(&tokens.favorite));
     theme.set_shadow_color(rgba_color(tokens.shadow_color, 1.0));
 
-    let rows: Vec<ClipRow> = vec![
-        row("https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getcaretpos 深入浅出插入符定位", "链接", "Chrome", "刚刚", "1", false, vec![]),
+    let mut rows: Vec<ClipRow> = vec![
+        row("收到，谢谢。", "文本", "微信", "刚刚", "1", false, vec![]),
         row("浅色模式下速贴面板的前景、背景与卡片层次：行默认透明、悬停仅底色变化，玻璃底图与行卡半透叠加", "富文本", "微信", "2 分钟前", "2", true, vec!["工作", "常用"]),
-        row("cargo build --release -p floatpaste-native", "文本", "Windows 终端", "8 分钟前", "3", false, vec![]),
+        row("FloatPaste 图标\n512 × 512 · PNG", "图片", "资源管理器", "8 分钟前", "3", false, vec!["一个需要省略的长标签名称", "素材", "图标"]),
         row("会议纪要要点：1. 速贴浅色观感走查 2. 搜索窗操作条交互细节 3. 下个迭代排期待定", "文本", "Obsidian", "26 分钟前", "4", false, vec!["会议"]),
         row("let selected_bg = ink.with_alpha(is_light ? 0.12 : 0.16);", "文本", "VS Code", "1 小时前", "5", false, vec![]),
         row("D:/repos/floatpaste/docs/theme-system.md", "文件", "资源管理器", "3 小时前", "6", false, vec!["文档", "主题", "规范"]),
     ];
+    rows[2].has_thumb = true;
+    rows[2].thumb = slint::Image::load_from_path(std::path::Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/assets/icon-512.png"
+    )))
+    .unwrap();
     picker.set_rows(slint::ModelRc::new(slint::VecModel::from(rows)));
     picker.set_selected(1);
 

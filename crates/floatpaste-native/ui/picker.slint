@@ -2,8 +2,8 @@
 // - 无边框透明窗 + 圆角卡片 + 1px 窗口边框，四周 4px 留边内绘制短影
 // - 顶栏：软件图标 + 居中拖拽横条 + 关闭按钮，
 //   整条背景可拖拽移动窗口；操作失败提示走托盘系统通知，不占面板 UI
-// - 列表：多行预览（最多 4 行）、72px 缩略图、数字徽章、类型徽章、来源、
-//   相对时间、收藏星标、标签行（常显，行高不随选中变化）
+// - 列表：等高卡片、三行预览、60px 缩略图；底部常显数字徽章、类型、来源、
+//   标签摘要、相对时间与收藏星标，内容及交互状态均不改变行高
 // - 交互：单击选中 / 双击上屏 / 悬停 400ms 预览（Rust 调度）
 // - 键盘全程不经窗口焦点（LL 键盘钩子会话），窗口本身不抢焦点
 import { Theme, Metrics, Motion, SoftShadow } from "theme.slint";
@@ -147,7 +147,11 @@ export global PanelGeometry {
     out property <length> row-pad-left: 12px;              // 行内左 padding
     out property <length> row-pad-right: Metrics.space-1_5; // 行内右 padding（单侧）
     out property <length> row-action-width: 36px;         // 有多种动作时常驻预留展开钮空间
-    out property <length> thumb-size: 72px;
+    out property <int> preview-max-lines: 3;
+    out property <length> preview-height: 60px;
+    out property <length> row-height: row-frame + 2 * Metrics.space-2
+        + preview-height + Metrics.space-1_5 + 18px;
+    out property <length> thumb-size: preview-height;
     out property <length> thumb-gap: 10px;
     // 窗口卡片圆角（Rust 侧模糊底图按此烘焙圆角 alpha，见 core::backdrop）
     out property <length> card-radius: Metrics.radius-lg;
@@ -252,15 +256,15 @@ export component ListScrollBar inherits Rectangle {
 }
 
 // ── 行卡片：预览排版、元信息与选中态的完整行内 UI ──
-// 行高稳定性不变量收口在本组件：标尺与预览文本同文本、同宽度、
-// 同字重（Metrics.weight-semibold，与 Rust 裁排的 measure-preview 一致）；
-// 选中只切观感字重（500↔600），行高在两态间保持不变
+// 预览区与元信息区固定高度；Rust 按重字重裁排，短文本、缩略图回填、
+// 标签与选中态均不能改变行高。
 component ClipRowCard inherits Rectangle {
     in property <ClipRow> data;
     in property <bool> selected;
     in property <bool> actions-open;
     property <length> action-reserve: data.actions.length > 1 ? PanelGeometry.row-action-width : 0px;
     in property <length> text-width;
+    height: PanelGeometry.row-height;
     // Acrylic 档烘焙底上行卡半透（玻璃卡透底）；Mica 档（0.92 近实
     // 底）与「无」档实底保持不透明——底下是平色，透它没有意义
     in property <bool> glass-card: false;
@@ -348,32 +352,15 @@ component ClipRowCard inherits Rectangle {
             // 防止预览文本画穿条目边界（原版由 CSS overflow 保证）
             clip: true;
 
-            // 每行一把隐藏标尺：与预览 Text 同文本、同宽度，
-            // 高度喂回预览 Text。布局引擎对换行文本的
-            // 预选高度不反映字重加宽，溢出会把元信息行
-            // 挤出卡片被裁掉——高度必须实测。
-            // 字重固定 Metrics.weight-semibold：标尺若随选中切到 500，
-            // 加粗文本比标尺宽，会多折一行把整行撑高
-            // （预览串由 Rust 统一按重字重裁排，见 picker.rs measure-preview）
-            preview-ruler := Text {
-                opacity: 0;
-                x: 0;
-                y: 0;
-                text: data.preview;
-                font-size: Metrics.text-body;
-                font-weight: Metrics.weight-semibold;
-                wrap: word-wrap;
-                width: preview-text.width;
-            }
-
             VerticalLayout {
                 padding-left: PanelGeometry.row-pad-left;
-                padding-right: PanelGeometry.row-pad-right + root.action-reserve;
+                padding-right: PanelGeometry.row-pad-right;
                 padding-top: Metrics.space-2;
                 padding-bottom: Metrics.space-2;
                 spacing: Metrics.space-1_5;
 
                 HorizontalLayout {
+                    height: PanelGeometry.preview-height;
                     spacing: PanelGeometry.thumb-gap;
                     alignment: start;
 
@@ -401,27 +388,25 @@ component ClipRowCard inherits Rectangle {
                         // 由 ★ 星标承载，不再吃文字色档位
                         color: Theme.fg-default;
                         font-size: Metrics.text-body;
-                        // 原版 line-clamp-4：预览串由 Rust 用度量标尺
-                        // 按当前宽度裁到 4 行并加省略号
+                        // 预览串由 Rust 按当前宽度与三行预算裁排并加省略号
                         font-weight: selected ? Metrics.weight-semibold : Metrics.weight-medium;
                         wrap: word-wrap;
                         // 宽度显式固定（实例化处按 preview-width-* 传入），
                         // 不给布局按首选宽分配的机会
                         width: Math.max(40px, root.text-width - root.action-reserve);
-                        // 高度取同行标尺实测（同文本/同字重/同宽度），
-                        // 布局引擎的预选高度不反映字重加宽，不可依赖
-                        height: min(82px, preview-ruler.height);
+                        height: PanelGeometry.preview-height;
                         vertical-alignment: top;
                     }
                 }
 
                 // ── 元信息行 ──
                 HorizontalLayout {
-                    spacing: 8px;
+                    height: 18px;
+                    spacing: 6px;
                     alignment: start;
 
                     HorizontalLayout {
-                        spacing: 8px;
+                        spacing: 6px;
                         alignment: start;
                         horizontal-stretch: 1;
 
@@ -481,6 +466,38 @@ component ClipRowCard inherits Rectangle {
                         }
                     }
 
+                    // 标签与元信息同行：只展示一个限宽名称及剩余数量。
+                    if (data.tags.length > 0): HorizontalLayout {
+                        spacing: Metrics.space-1;
+                        alignment: start;
+                        for tag-name in data.tags: Rectangle {
+                            height: 18px;
+                            min-width: 24px;
+                            max-width: 56px;
+                            preferred-width: min(56px, tag-text.preferred-width + 12px);
+                            horizontal-stretch: 0;
+                            border-radius: Metrics.radius-pill;
+                            background: Theme.canvas-inset;
+                            clip: true;
+                            tag-text := Text {
+                                x: 6px;
+                                width: parent.width - 12px;
+                                height: parent.height;
+                                text: tag-name;
+                                color: Theme.fg-muted;
+                                font-size: Metrics.text-meta;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                        }
+                        if (data.tag-more > 0): Text {
+                            text: "+" + data.tag-more;
+                            color: Theme.fg-metadata;
+                            font-size: Metrics.text-meta;
+                            vertical-alignment: center;
+                        }
+                    }
+
                     Text {
                         text: data.time-text;
                         color: Theme.fg-metadata;
@@ -493,35 +510,6 @@ component ClipRowCard inherits Rectangle {
                         text: "★";
                         color: Theme.favorite;
                         font-size: selected ? 11px : 12px;
-                        vertical-alignment: center;
-                    }
-                }
-
-                // ── 标签行（最多 2 个 + 计数）──
-                // 常显、不随选中切换：选中才渲染会让行高突增 26px、把下方
-                // 行整体推动跳动；行高必须只由内容决定，与选中态无关
-                if (data.tags.length > 0): HorizontalLayout {
-                    spacing: Metrics.space-1;
-                    alignment: start;
-                    for tag-name in data.tags: Rectangle {
-                        height: 20px;
-                        border-radius: Metrics.radius-pill;
-                        background: Theme.canvas-inset;
-                        HorizontalLayout {
-                            padding-left: Metrics.space-1_5;
-                            padding-right: Metrics.space-1_5;
-                            Text {
-                                text: tag-name;
-                                color: Theme.fg-muted;
-                                font-size: Metrics.text-meta;
-                                vertical-alignment: center;
-                            }
-                        }
-                    }
-                    if (data.tag-more > 0): Text {
-                        text: "+" + data.tag-more;
-                        color: Theme.fg-metadata;
-                        font-size: Metrics.text-meta;
                         vertical-alignment: center;
                     }
                 }
