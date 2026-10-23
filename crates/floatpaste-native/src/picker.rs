@@ -1942,6 +1942,11 @@ pub(crate) mod reveal_contract_tests {
         let previous = ActiveAppResolver::current_foreground_hwnd();
         let source = crate::EditorWindow::new().unwrap();
         let other = SearchWindow::new().unwrap();
+        // 焦点契约只需要真实可见窗口；首次 show 前停屏，避免辅助窗在
+        // 默认位置闪出原生边框或空白内容。屏外窗口仍可取得前台。
+        for window in [source.window(), other.window()] {
+            window.set_position(slint::PhysicalPosition::new(-32000, -32000));
+        }
         source.show().unwrap();
         other.show().unwrap();
         pump(100);
@@ -1975,6 +1980,14 @@ pub(crate) mod reveal_contract_tests {
             eprintln!("速贴交互桌面前台恢复契约通过");
         } else {
             eprintln!("无可控交互前台，跳过速贴前台恢复契约");
+        }
+        for hwnd in [source_hwnd, other_hwnd] {
+            let rect = win32_ext::physical_rect(hwnd).unwrap();
+            assert_eq!(
+                (rect.left, rect.top),
+                (-32000, -32000),
+                "焦点辅助窗须保持屏外"
+            );
         }
         restore_after_editor(&app, app.state.picker_session());
         app.core().begin_quit();

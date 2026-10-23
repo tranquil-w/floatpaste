@@ -18,6 +18,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
+    sync::{atomic::AtomicBool, atomic::Ordering, Arc},
     thread,
     time::{Duration, Instant},
 };
@@ -257,7 +258,7 @@ fn expected_search_top_at_full_height(full_height: i32) -> i32 {
     center_in_work_area(work, 0, full_height).y
 }
 
-/// Esc 焦点还原断言的目标窗口：测试进程创建的真实可见顶层窗口。搜索窗
+/// Esc 焦点还原断言的目标窗口：测试进程创建的真实可见、屏外顶层窗口。搜索窗
 /// 打开瞬间捕获当前前台为会话目标，关闭后「前台还原给目标」的断言要求
 /// 该目标确定可控。无人值守会话（前台锁定策略拒绝转让，CI 断连环境必现）
 /// 拿不到前台时返回 None，调用方跳过焦点段——焦点语义只能在交互桌面
@@ -314,8 +315,8 @@ impl FocusTargetGuard {
                 PCWSTR::from_raw(class_name.as_ptr()),
                 PCWSTR::from_raw(title.as_ptr()),
                 WS_OVERLAPPEDWINDOW,
-                120,
-                120,
+                -32000,
+                -32000,
                 240,
                 160,
                 None,
@@ -363,6 +364,88 @@ impl Drop for FocusTargetGuard {
             let module = GetModuleHandleW(None).unwrap_or_default();
             let _ = UnregisterClassW(PCWSTR::from_raw(class_name.as_ptr()), Some(module.into()));
         }
+    }
+}
+
+/// 停屏浮层装配闪现守卫：启动到首次主动打开速贴前，主实例的全部
+/// 业务窗口必须停在屏外或隐藏；采样可见性和位置，防止先 show 后停屏。
+/// 活跃会话允许合法悬浮气泡，因此首次打开速贴前收口。
+struct RogueWindowGuard {
+    hit: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
+    worker: Option<thread::JoinHandle<()>>,
+}
+
+struct RogueScanState {
+    process_id: u32,
+    hit: Arc<AtomicBool>,
+}
+
+unsafe extern "system" fn rogue_window_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    let state = &mut *(lparam.0 as *mut RogueScanState);
+    let mut process_id = 0;
+    GetWindowThreadProcessId(hwnd, Some(&mut process_id));
+    if process_id != state.process_id {
+        return BOOL::from(true);
+    }
+    let mut text = [0u16; 64];
+    let len = GetWindowTextW(hwnd, &mut text);
+    if len > 0 {
+        let title = String::from_utf16_lossy(&text[..len as usize]);
+        if title.starts_with("FloatPaste") || title.eq_ignore_ascii_case("floatpaste") {
+            let mut rect = RECT::default();
+            if IsWindowVisible(hwnd).as_bool()
+                && GetWindowRect(hwnd, &mut rect).is_ok()
+                && rect.left > OFFSCREEN_THRESHOLD
+                && rect.top > OFFSCREEN_THRESHOLD
+            {
+                eprintln!("[e2e] 主实例停屏浮层意外上屏: {title}");
+                state.hit.store(true, Ordering::SeqCst);
+            }
+        }
+    }
+    BOOL::from(true)
+}
+
+impl RogueWindowGuard {
+    fn start(process_id: u32) -> Self {
+        let hit = Arc::new(AtomicBool::new(false));
+        let stop = Arc::new(AtomicBool::new(false));
+        let hit_for_worker = hit.clone();
+        let stop_for_worker = stop.clone();
+        let worker = thread::spawn(move || {
+            while !stop_for_worker.load(Ordering::Relaxed) {
+                let mut state = RogueScanState {
+                    process_id,
+                    hit: hit_for_worker.clone(),
+                };
+                unsafe {
+                    let _ = EnumWindows(
+                        Some(rogue_window_proc),
+                        LPARAM(&mut state as *mut _ as isize),
+                    );
+                }
+                thread::sleep(Duration::from_millis(15));
+            }
+        });
+        Self {
+            hit,
+            stop,
+            worker: Some(worker),
+        }
+    }
+
+    fn assert_no_rogue_window(self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(worker) = self.worker {
+            let _ = worker.join();
+        }
+        assert!(
+            !self.hit.load(Ordering::SeqCst),
+            "主实例在首次主动打开前的业务窗口不得屏内可见——\
+             装配顺序回归：silent_assemble_* 必须在 show 前先停屏，\
+             否则窗口在 winit 级联默认位闪现（overlay.rs）"
+        );
     }
 }
 
@@ -553,6 +636,8 @@ fn app_e2e_smoke_flow() {
         data_root: data_root.clone(),
     };
     let picker_pid = cleanup.child.as_ref().unwrap().id();
+    // 监测启动装配到首次主动打开速贴；活跃会话可能合法显示悬浮气泡。
+    let rogue_windows = RogueWindowGuard::start(picker_pid);
 
     // ── 场景 1：保留清理接线（启动 → 延迟 → 首轮溢出清理）──
     cleanup.assert_running("保留清理");
@@ -859,6 +944,7 @@ fn app_e2e_smoke_flow() {
 
     // ── 场景 5：二次启动经唤醒事件开关速贴面板（屏内 ↔ 停屏）──
     cleanup.assert_running("唤醒面板");
+    rogue_windows.assert_no_rogue_window();
     wake_via_second_launch(&envs);
     assert!(
         wait_until(Duration::from_secs(10), Duration::from_millis(150), || {

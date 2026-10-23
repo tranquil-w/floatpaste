@@ -38,13 +38,15 @@ pub enum ForegroundPolicy {
 /// [`silent_assemble_parked`]
 pub fn silent_assemble_focusable<W: ComponentHandle>(win: &W) -> Option<isize> {
     let previous_foreground = ActiveAppResolver::current_foreground_hwnd();
+    // HWND 尚未创建时 Slint/winit 也会缓存位置；始终在 show 前停屏，
+    // 防止延迟建窗后在屏内默认位置闪现。
+    park_offscreen(win);
     let _ = win.window().show();
     let hwnd = win32_ext::window_hwnd(win)?;
     win32_ext::apply_overlay_style(hwnd, false);
     win32_ext::apply_dwm_shadow(hwnd);
     let _ = window_control::remove_window_system_menu(hwnd);
     win32_ext::install_caption_strip_subclass(hwnd);
-    park_offscreen(win);
     surrender_startup_foreground(hwnd, previous_foreground);
     schedule_style_reassert(hwnd, false);
     Some(hwnd)
@@ -62,23 +64,16 @@ pub fn silent_assemble_content<W: ComponentHandle>(win: &W) -> Option<isize> {
     let previous_foreground = ActiveAppResolver::current_foreground_hwnd();
     // winit 窗口在事件循环恢复时已预建（隐藏态），show 前即可取 HWND：
     // 先写图标、移到屏外再 show——首次可见发生在屏外且形态已终，show 后
-    // 立即真隐藏进入停屏。预建不可得（Slint 行为变更）则回退 show 后取
-    // 句柄，首次可见发生在默认位置（有微秒级屏内闪现）
+    // 立即真隐藏进入停屏。句柄尚未创建时，Slint/winit 同样会缓存位置。
     let pre_assembled = win32_ext::window_hwnd(win);
     if let Some(hwnd) = pre_assembled {
         crate::app_icon::apply_window_icon(hwnd);
-        win.window()
-            .set_position(slint::PhysicalPosition::new(-32000, -32000));
     }
+    park_offscreen(win);
     let _ = win.window().show();
     let hwnd = match pre_assembled {
         Some(hwnd) => hwnd,
-        None => {
-            let hwnd = win32_ext::window_hwnd(win)?;
-            win.window()
-                .set_position(slint::PhysicalPosition::new(-32000, -32000));
-            hwnd
-        }
+        None => win32_ext::window_hwnd(win)?,
     };
     win32_ext::set_window_visible(hwnd, false);
     // no-frame 窗（WS_POPUP）：阴影与系统圆角都须显式挂载
@@ -172,12 +167,11 @@ pub fn silent_assemble_parked<W: ComponentHandle>(win: &W) -> Option<isize> {
     // 正在使用的窗口焦点，且此后「还原目标」语义会被污染（e2e 场景 8
     // 前台污染链的源头）
     let previous_foreground = ActiveAppResolver::current_foreground_hwnd();
+    park_offscreen(win);
     let _ = win.window().show();
     let hwnd = win32_ext::window_hwnd(win)?;
     win32_ext::apply_overlay_style(hwnd, true);
     let _ = window_control::remove_window_system_menu(hwnd);
-    win.window()
-        .set_position(slint::PhysicalPosition::new(-32000, -32000));
     surrender_startup_foreground(hwnd, previous_foreground);
     Some(hwnd)
 }

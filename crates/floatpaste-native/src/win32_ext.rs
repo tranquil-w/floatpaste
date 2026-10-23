@@ -82,12 +82,17 @@ pub(crate) mod repaint_contract_tests {
 
     pub(crate) fn run() {
         let win = crate::QuickPasteWindow::new().unwrap();
-        win.window()
-            .set_position(slint::PhysicalPosition::new(-32000, -32000));
-        win.show().unwrap();
+        let _ = crate::overlay::silent_assemble_parked(&win);
         let checked = Rc::new(Cell::new(false));
         let checked_cb = checked.clone();
         slint::Timer::single_shot(Duration::from_millis(100), move || {
+            let hwnd = window_hwnd(&win).unwrap();
+            let initial = physical_rect(hwnd).unwrap();
+            assert_eq!(
+                (initial.left, initial.top),
+                (-32000, -32000),
+                "静默装配须在首次 show 前设置停屏位置，包括延迟建窗路径"
+            );
             let hwnd = crate::overlay::silent_assemble_parked(&win).unwrap();
             let bounds = move || {
                 let r = physical_rect(hwnd).unwrap();
