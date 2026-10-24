@@ -2,7 +2,7 @@
 //!
 //! 原版行为（Tauri global-shortcut 会话热键）的同源复刻：
 //! - 面板可见期间全局接管 ↑↓ / Enter / Shift+Enter / Esc / Ctrl+Space /
-//!   Ctrl+Enter / 数字 1-9（可关），命中即吞、不再落到目标应用；
+//!   Ctrl+Enter / Delete / 数字 1-9（可关），命中即吞、不再落到目标应用；
 //! - ↑↓ 注册时不带 MOD_NOREPEAT，按住连发走系统按键重复速率（对齐旧壳
 //!   global-shortcut 行为）；其余键带 MOD_NOREPEAT，长按只触发一次；
 //! - 会话热键全局生效，不依赖前台焦点——「编辑窗停屏后残留焦点吃掉
@@ -45,6 +45,7 @@ pub enum SessionAction {
     Dismiss,
     ToggleFavorite,
     OpenEditor,
+    DeleteEntry,
     SelectIndex(u8),
 }
 
@@ -150,7 +151,7 @@ pub struct SessionKeyConfig {
 }
 
 impl SessionKeyConfig {
-    /// 从用户设置构建。删除条目键仅搜索窗口消费，不在会话拦截范围
+    /// 从用户设置构建，速贴与搜索窗口共用动作键位。
     pub fn from_settings(settings: &UserSetting) -> Self {
         let keys = &settings.session_keys;
         let bind = |text: &str, action: SessionAction| {
@@ -163,6 +164,7 @@ impl SessionKeyConfig {
             bind(&keys.confirm_as_file, SessionAction::ConfirmAsPath),
             bind(&keys.open_editor, SessionAction::OpenEditor),
             bind(&keys.toggle_favorite, SessionAction::ToggleFavorite),
+            bind(&keys.delete_entry, SessionAction::DeleteEntry),
             bind(&keys.dismiss, SessionAction::Dismiss),
         ]
         .into_iter()
@@ -381,8 +383,10 @@ mod tests {
         };
 
         let config = SessionKeyConfig::from_settings(&settings);
-        // 合法绑定 6 条（dismiss 非法被跳过）
-        assert_eq!(config.bindings.len(), 6);
+        // 合法绑定 7 条（dismiss 非法被跳过）
+        assert_eq!(config.bindings.len(), 7);
+        assert_eq!(config.bindings[6].0, super::SessionAction::DeleteEntry);
+        assert_eq!(config.bindings[6].1.virtual_key(), Some(0x2E));
         assert_eq!(config.bindings[0].1.virtual_key(), Some(0x21)); // PageUp
         assert!(config.digit_shortcuts_enabled);
     }

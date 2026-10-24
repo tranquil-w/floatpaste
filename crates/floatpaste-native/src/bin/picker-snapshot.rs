@@ -10,8 +10,8 @@
 //!   alpha 缺省取代码内 MICA_TINT_ALPHA
 //! - backdrop=#RRGGBB：用指定纯色替代合成彩底，校准不同背景下的材质
 //! - preset=<id>：使用指定风格预设（默认 default）
-//! - actions=<行号>：展开该行的动作浮层（从 0 起）；frame=<毫秒> 取进场帧
-//! - hover-x=<坐标>：与 hover-y 配合，检查行内展开钮的悬停
+//! - actions=<行号>：展开该行的更多操作菜单（从 0 起）；frame=<毫秒> 取进场帧
+//! - hover-x=<坐标>：与 hover-y 配合，检查行内更多按钮的悬停
 //!
 //! 输出 `.artifacts/snapshot/picker-<mode>-<tag>.png`（不入 Git）。
 //! 实底形态快照按中灰蓝桌面色合成材质残透，近似真机观感。
@@ -22,7 +22,7 @@
 use floatpaste_core::theme::{derive_tokens, ResolvedTheme};
 use slint::platform::software_renderer::MinimalSoftwareWindow;
 use slint::platform::{Platform, PlatformError, WindowAdapter};
-use slint::{ComponentHandle, SharedString};
+use slint::{ComponentHandle, Model, SharedString};
 
 slint::include_modules!();
 
@@ -256,6 +256,7 @@ fn main() {
         tokens.danger_subtle_rgb,
         tokens.danger_subtle_alpha,
     ));
+    theme.set_danger_fg(hex_color(&tokens.danger_fg));
     theme.set_favorite(hex_color(&tokens.favorite));
     theme.set_shadow_color(rgba_color(tokens.shadow_color, 1.0));
 
@@ -317,6 +318,30 @@ fn main() {
             .and_then(|s| s.parse::<i32>().ok())
     }) {
         picker.set_selected(row);
+        if let Some(item) = picker.get_rows().row_data(row as usize) {
+            // 与 picker::open_actions 的管理项追加保持一致；bin 不依赖主程序
+            // 模块树（无 lib target），暂不为这 3 项建共享层，改菜单结构时两处同步
+            let mut actions: Vec<_> = item.actions.iter().collect();
+            let keys = floatpaste_core::domain::settings::SessionKeys::default();
+            for (label, shortcut) in [
+                (
+                    if item.favorited {
+                        "取消收藏"
+                    } else {
+                        "收藏"
+                    },
+                    keys.toggle_favorite,
+                ),
+                ("编辑", keys.open_editor),
+                ("删除", keys.delete_entry),
+            ] {
+                actions.push(PasteActionItem {
+                    label: label.into(),
+                    shortcut: shortcut.into(),
+                });
+            }
+            picker.set_menu_actions(slint::ModelRc::new(slint::VecModel::from(actions)));
+        }
         picker.set_actions_row(row);
     }
     if !hover_y.is_nan() {

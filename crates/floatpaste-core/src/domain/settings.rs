@@ -154,7 +154,7 @@ pub struct SessionKeys {
     pub navigate_up: String,
     /// 向下选择
     pub navigate_down: String,
-    /// 删除条目（仅搜索窗口）
+    /// 删除条目（速贴与搜索窗口，两段式确认）
     pub delete_entry: String,
 }
 

@@ -275,6 +275,21 @@ pub fn signal_test_picker_favorite(instance_id: &str) -> bool {
     set_named_event(&with_suffix(TEST_PICKER_FAVORITE_EVENT_NAME, instance_id))
 }
 
+const TEST_PICKER_DELETE_EVENT_NAME: &str = "Local\\FloatPaste.TestPickerDelete";
+
+/// 被测实例侧：装载速贴删除事件（仅隔离实例装载，绕过按键分发）。
+pub fn listen_test_picker_delete(on_delete: impl Fn() + Send + 'static) -> Result<(), AppError> {
+    if instance_suffix().is_none() {
+        return Ok(());
+    }
+    spawn_named_event_listener(namespaced(TEST_PICKER_DELETE_EVENT_NAME), on_delete)
+}
+
+/// 测试侧：向指定实例发送速贴删除信号。
+pub fn signal_test_picker_delete(instance_id: &str) -> bool {
+    set_named_event(&with_suffix(TEST_PICKER_DELETE_EVENT_NAME, instance_id))
+}
+
 /// E2E 驱动钩子：仅当 FLOATPASTE_INSTANCE_ID 设置时装载（生产实例不装载）。
 /// 搜索窗两段式删除是键盘路径（不使用输入注入），测试经命名事件触发
 /// request_delete 回调——与删除键处理后的终点相同，仅绕过按键分发层

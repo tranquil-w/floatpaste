@@ -5,7 +5,7 @@
 // - 列表：等高卡片、三行预览、60px 缩略图；底部常显数字徽章、类型、来源、
 //   标签摘要、相对时间与收藏星标，内容及交互状态均不改变行高
 // - 交互：单击选中 / 双击上屏 / 悬停 400ms 预览（Rust 调度）
-// - 键盘全程不经窗口焦点（LL 键盘钩子会话），窗口本身不抢焦点
+// - 键盘全程不经窗口焦点（RegisterHotKey 会话），窗口本身不抢焦点
 import { Theme, Metrics, Motion, SoftShadow } from "theme.slint";
 import { AppMark } from "common.slint";
 
@@ -25,183 +25,7 @@ export global PasteMenuGeometry {
     out property <length> caption-height: 30px;
 }
 
-export component PasteActionMenu inherits Rectangle {
-    in property <bool> open: false;
-    in property <[PasteActionItem]> actions;
-    in-out property <int> highlighted: 0;
-    callback activated(int);
-
-    // 节点常驻：从关闭态起算进场；收起立即撤销命中，不延迟后续操作。
-    // 关闭态也读取 reveal，确保首次展开从 0 起步（隐藏节点的属性按需求值）。
-    visible: root.reveal > 0 || root.open;
-    height: PasteMenuGeometry.caption-height + 2 * PasteMenuGeometry.padding + root.actions.length * PasteMenuGeometry.row-height
-        + Math.max(0, root.actions.length - 1) * PasteMenuGeometry.spacing;
-    property <float> reveal: root.open ? 1 : 0;
-    animate reveal { duration: root.open ? Motion.dur-enter : 0ms; easing: Motion.ease; }
-    opacity: root.reveal;
-
-    SoftShadow {
-        y: (1 - root.reveal) * 6px;
-        width: parent.width;
-        height: parent.height;
-        radius: Metrics.radius-lg;
-        layers: 6;
-        step: 1px;
-        offset-y: 2px;
-        alpha: 0.12;
-    }
-    Rectangle {
-        y: (1 - root.reveal) * 6px;
-        width: parent.width;
-        height: parent.height;
-        border-radius: Metrics.radius-lg;
-        border-width: 1px;
-        border-color: Theme.border-muted;
-        background: Theme.is-dark ? Theme.card-face : Theme.surface;
-        // 内边距也拦截点击，避免穿透到条目或外部关闭捕手。
-        TouchArea { clicked => { } }
-        VerticalLayout {
-            padding: PasteMenuGeometry.padding;
-            spacing: PasteMenuGeometry.spacing;
-            Text {
-                height: PasteMenuGeometry.caption-height - PasteMenuGeometry.spacing;
-                text: "更多上屏方式 · 仅本次";
-                color: Theme.fg-muted;
-                font-size: Metrics.text-hint;
-                vertical-alignment: center;
-            }
-            for action[idx] in root.actions: Rectangle {
-                height: PasteMenuGeometry.row-height;
-                border-radius: Metrics.radius-md;
-                background: idx == root.highlighted ? Theme.hover-bg : transparent;
-                if (idx == root.highlighted): Rectangle {
-                    x: 2px;
-                    y: (parent.height - self.height) / 2;
-                    width: 2px;
-                    height: 14px;
-                    border-radius: 1px;
-                    background: Theme.accent-fg;
-                }
-                HorizontalLayout {
-                    padding-left: 12px;
-                    padding-right: 8px;
-                    padding-top: 2px;
-                    padding-bottom: 2px;
-                    spacing: 12px;
-                    Text {
-                        text: action.label;
-                        color: Theme.fg-default;
-                        font-size: Metrics.text-body;
-                        vertical-alignment: center;
-                        horizontal-stretch: 1;
-                        overflow: elide;
-                    }
-                    if (action.shortcut != ""): Rectangle {
-                        height: idx > 0 ? 30px : 20px;
-                        border-radius: 4px;
-                        background: Theme.hover-bg;
-                        VerticalLayout {
-                            padding-left: 6px;
-                            padding-right: 6px;
-                            Text {
-                                text: action.shortcut;
-                                color: Theme.fg-muted;
-                                font-size: Metrics.text-xs;
-                                font-family: "Consolas";
-                                vertical-alignment: center;
-                            }
-                            if (idx > 0): Text {
-                                text: "默认次级动作";
-                                color: Theme.fg-muted;
-                                font-size: Metrics.text-meta;
-                                horizontal-alignment: center;
-                            }
-                        }
-                    }
-                }
-                action-ta := TouchArea {
-                    clicked => { root.activated(idx); }
-                    changed has-hover => {
-                        if (self.has-hover) { root.highlighted = idx; }
-                    }
-                }
-            }
-        }
-    }
-}
-
-export struct ClipRow {
-    id: string,
-    preview: string,
-    is-code: bool,
-    type-label: string,
-    source-app: string,
-    time-text: string,
-    favorited: bool,
-    digit: string,
-    has-thumb: bool,
-    thumb: image,
-    tags: [string],
-    tag-more: int,
-    // 「更多上屏方式」动作目录（首项为主动作）；仅一项时行内不显示展开钮
-    actions: [PasteActionItem],
-}
-
-// ── 面板结构几何：slint 布局与 Rust 首帧兜底共用的常量，禁双边手抄 ──
-// Rust 读取经 global::<PanelGeometry>()；改这里即同时改变布局与裁排
-export global PanelGeometry {
-    out property <length> shadow-margin: 4px;
-    out property <length> card-border: 1px;                // 窗口卡片 1px 边框（两侧共 2px）
-    out property <length> scroll-slot: 10px;               // 列表右侧滚动槽
-    out property <length> list-pad-left: 14px;             // 原版 grid pl-[14px]
-    out property <length> list-pad-right: Metrics.space-1; // 原版 grid pr-1
-    out property <length> row-inset: 2px;                 // 行卡片内容边距（单侧）；选中描边向内画在卡片边缘内侧
-    out property <length> row-frame: 2 * row-inset;       // 行卡片内容边距双层（Rust 裁排经 preview-pad-h 扣除）
-    out property <length> row-pad-left: 12px;              // 行内左 padding
-    out property <length> row-pad-right: Metrics.space-1_5; // 行内右 padding（单侧）
-    out property <length> row-action-width: 36px;         // 有多种动作时常驻预留展开钮空间
-    out property <int> preview-max-lines: 3;
-    out property <length> preview-height: 60px;
-    out property <length> row-height: row-frame + 2 * Metrics.space-2
-        + preview-height + Metrics.space-1_5 + 18px;
-    out property <length> thumb-size: preview-height;
-    out property <length> thumb-gap: 10px;
-    // 窗口卡片圆角（Rust 侧模糊底图按此烘焙圆角 alpha，见 core::backdrop）
-    out property <length> card-radius: Metrics.radius-lg;
-    // 预览可用宽需从 flick 宽扣除的横向总量（Rust 首帧兜底同式）
-    out property <length> preview-pad-h:
-        list-pad-left + list-pad-right + row-frame + row-pad-left + row-pad-right;
-}
-
-// ── 拉伸手柄：八方向共用，direction 编码对齐 resize-started 回调 ──
-// 东西向手柄悬停显 accent-subtle 底（旧版 west/east 的 hover:bg-pg-accent-subtle）
-component ResizeHandle inherits Rectangle {
-    in property <int> direction; // 0=N 1=S 2=W 3=E 4=NW 5=NE 6=SW 7=SE
-    background: handle-ta.has-hover && (direction == 2 || direction == 3)
-        ? Theme.accent-subtle : transparent;
-    callback started();
-    callback drag-moved();
-    callback finished();
-
-    handle-ta := TouchArea {
-        mouse-cursor: direction == 0 || direction == 4 || direction == 5 ? n-resize
-            : direction == 1 || direction == 6 || direction == 7 ? s-resize
-            : direction == 2 ? w-resize
-            : e-resize;
-        pointer-event(e) => {
-            if (e.kind == PointerEventKind.down) {
-                root.started();
-            }
-            if (e.kind == PointerEventKind.up) {
-                root.finished();
-            }
-        }
-        moved => { root.drag-moved(); }
-    }
-}
-
-// ── 列表滚动条：10px 稳定槽 + 4px 视觉拇指（对齐原版 webkit 拇指全槽可抓）──
-// 搜索窗口复用同一组件
+// 列表与菜单共用滚动条，拇指和轨道均可拖动／点击。
 export component ListScrollBar inherits Rectangle {
     in property <length> content-height;
     in property <length> visible-height;
@@ -268,14 +92,243 @@ export component ListScrollBar inherits Rectangle {
     }
 }
 
-// ── 行卡片：预览排版、元信息与选中态的完整行内 UI ──
-// 预览区与元信息区固定高度；Rust 按重字重裁排，短文本、缩略图回填、
-// 标签与选中态均不能改变行高。
+// 搜索的上屏方式与速贴的更多操作共用菜单表面、键位提示和高亮。
+export component PasteActionMenu inherits Rectangle {
+    in property <bool> open: false;
+    in property <[PasteActionItem]> actions;
+    in-out property <int> highlighted: 0;
+    in property <string> caption: "更多上屏方式 · 仅本次";
+    // 搜索只包含上屏方式；速贴从此索引开始显示管理操作。
+    in property <int> management-start: -1;
+    in property <bool> delete-armed: false;
+    in property <length> height-limit: 1000px;
+    callback activated(int);
+
+    // 节点常驻：从关闭态起算进场；收起立即撤销命中，不延迟后续操作。
+    // 关闭态也读取 reveal，确保首次展开从 0 起步（隐藏节点的属性按需求值）。
+    visible: root.reveal > 0 || root.open;
+    property <length> natural-height: PasteMenuGeometry.caption-height + 2 * PasteMenuGeometry.padding + root.actions.length * PasteMenuGeometry.row-height
+        + Math.max(0, root.actions.length - 1) * PasteMenuGeometry.spacing + (root.management-start >= 0 ? 8px : 0px);
+    height: Math.min(root.natural-height, root.height-limit);
+    function reveal-highlight() {
+        if (root.open) {
+            let top = PasteMenuGeometry.caption-height
+                + root.highlighted * (PasteMenuGeometry.row-height + PasteMenuGeometry.spacing)
+                + (root.management-start >= 0 && root.highlighted >= root.management-start ? 8px : 0px);
+            if (root.highlighted == 0) {
+                menu-flick.content-y = 0px;
+            } else if (top < -menu-flick.content-y) {
+                menu-flick.content-y = -top;
+            } else if (top + PasteMenuGeometry.row-height > -menu-flick.content-y + menu-flick.height) {
+                menu-flick.content-y = -(top + PasteMenuGeometry.row-height - menu-flick.height);
+            }
+        }
+    }
+    changed open => { root.reveal-highlight(); }
+    changed highlighted => { root.reveal-highlight(); }
+    changed height => { root.reveal-highlight(); }
+    property <float> reveal: root.open ? 1 : 0;
+    animate reveal { duration: root.open ? Motion.dur-enter : 0ms; easing: Motion.ease; }
+    opacity: root.reveal;
+
+    SoftShadow {
+        y: (1 - root.reveal) * 6px;
+        width: parent.width;
+        height: parent.height;
+        radius: Metrics.radius-lg;
+        layers: 6;
+        step: 1px;
+        offset-y: 2px;
+        alpha: 0.12;
+    }
+    Rectangle {
+        y: (1 - root.reveal) * 6px;
+        width: parent.width;
+        height: parent.height;
+        border-radius: Metrics.radius-lg;
+        border-width: 1px;
+        border-color: Theme.border-muted;
+        background: Theme.is-dark ? Theme.card-face : Theme.surface;
+        // 内边距也拦截点击，避免穿透到条目或外部关闭捕手。
+        TouchArea { clicked => { } }
+        menu-flick := Flickable {
+            x: PasteMenuGeometry.padding;
+            y: PasteMenuGeometry.padding;
+            width: parent.width - 2 * PasteMenuGeometry.padding
+                - (root.natural-height > root.height ? 10px : 0px);
+            height: parent.height - 2 * PasteMenuGeometry.padding;
+            interactive: true;
+            VerticalLayout {
+                spacing: PasteMenuGeometry.spacing;
+                Text {
+                    height: PasteMenuGeometry.caption-height - PasteMenuGeometry.spacing;
+                    text: root.caption;
+                    color: Theme.fg-muted;
+                    font-size: Metrics.text-hint;
+                    vertical-alignment: center;
+                }
+                for action[idx] in root.actions: Rectangle {
+                    height: PasteMenuGeometry.row-height + (idx == root.management-start ? 8px : 0px);
+                    if (idx == root.management-start): Rectangle {
+                        y: 3px;
+                        height: 1px;
+                        background: Theme.border-muted;
+                    }
+                    action-face := Rectangle {
+                        y: idx == root.management-start ? 8px : 0px;
+                        width: parent.width;
+                        height: PasteMenuGeometry.row-height;
+                        property <bool> danger: root.management-start >= 0 && idx == root.actions.length - 1;
+                        border-radius: Metrics.radius-md;
+                        background: idx == root.highlighted
+                            ? (self.danger ? Theme.danger-subtle : Theme.hover-bg) : transparent;
+                        if (idx == root.highlighted): Rectangle {
+                            x: 2px;
+                            y: (parent.height - self.height) / 2;
+                            width: 2px;
+                            height: 14px;
+                            border-radius: 1px;
+                            background: parent.danger ? Theme.danger-fg : Theme.accent-fg;
+                        }
+                        HorizontalLayout {
+                            padding-left: 12px;
+                            padding-right: 8px;
+                            padding-top: 2px;
+                            padding-bottom: 2px;
+                            spacing: 12px;
+                            Text {
+                                text: action-face.danger && root.delete-armed ? "确认删除" : action.label;
+                                color: action-face.danger ? Theme.danger-fg : Theme.fg-default;
+                                font-size: Metrics.text-body;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                                overflow: elide;
+                            }
+                            if (action.shortcut != ""): VerticalLayout {
+                                alignment: center;
+                                Rectangle {
+                                    property <bool> secondary: idx > 0 && (root.management-start < 0 || idx < root.management-start);
+                                    height: self.secondary ? 30px : 20px;
+                                    border-radius: 4px;
+                                    background: Theme.hover-bg;
+                                    VerticalLayout {
+                                        padding-left: 6px;
+                                        padding-right: 6px;
+                                        Text {
+                                            text: action.shortcut;
+                                            color: Theme.fg-muted;
+                                            font-size: Metrics.text-xs;
+                                            font-family: "Consolas";
+                                            vertical-alignment: center;
+                                        }
+                                        if (parent.secondary): Text {
+                                            text: "默认次级动作";
+                                            color: Theme.fg-muted;
+                                            font-size: Metrics.text-meta;
+                                            horizontal-alignment: center;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        action-ta := TouchArea {
+                            clicked => { root.activated(idx); }
+                            changed has-hover => {
+                                if (self.has-hover) { root.highlighted = idx; }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (root.natural-height > root.height): ListScrollBar {
+            x: parent.width - PasteMenuGeometry.padding - 8px;
+            y: PasteMenuGeometry.padding;
+            width: 8px;
+            height: menu-flick.height;
+            content-height: menu-flick.content-height;
+            visible-height: menu-flick.height;
+            content-y <=> menu-flick.content-y;
+        }
+    }
+}
+
+export struct ClipRow {
+    id: string,
+    preview: string,
+    is-code: bool,
+    type-label: string,
+    source-app: string,
+    time-text: string,
+    favorited: bool,
+    digit: string,
+    has-thumb: bool,
+    thumb: image,
+    tags: [string],
+    tag-more: int,
+    // 上屏动作目录（首项为主动作），更多菜单还提供收藏、编辑与删除。
+    actions: [PasteActionItem],
+}
+
+// ── 面板结构几何：slint 布局与 Rust 首帧兜底共用的常量，禁双边手抄 ──
+// Rust 读取经 global::<PanelGeometry>()；改这里即同时改变布局与裁排
+export global PanelGeometry {
+    out property <length> shadow-margin: 4px;
+    out property <length> card-border: 1px;                // 窗口卡片 1px 边框（两侧共 2px）
+    out property <length> scroll-slot: 10px;               // 列表右侧滚动槽
+    out property <length> list-pad-left: 14px;             // 原版 grid pl-[14px]
+    out property <length> list-pad-right: Metrics.space-1; // 原版 grid pr-1
+    out property <length> row-inset: 2px;                 // 行卡片内容边距（单侧）；选中描边向内画在卡片边缘内侧
+    out property <length> row-frame: 2 * row-inset;       // 行卡片内容边距双层（Rust 裁排经 preview-pad-h 扣除）
+    out property <length> row-pad-left: 12px;              // 行内左 padding
+    out property <length> row-pad-right: Metrics.space-1_5; // 行内右 padding（单侧）
+    out property <length> row-action-width: 36px;         // 常驻预留更多按钮空间
+    out property <int> preview-max-lines: 3;
+    out property <length> preview-height: 60px;
+    out property <length> row-height: row-frame + 2 * Metrics.space-2
+        + preview-height + Metrics.space-1_5 + 18px;
+    out property <length> thumb-size: preview-height;
+    out property <length> thumb-gap: 10px;
+    // 窗口卡片圆角（Rust 侧模糊底图按此烘焙圆角 alpha，见 core::backdrop）
+    out property <length> card-radius: Metrics.radius-lg;
+    // 预览可用宽需从 flick 宽扣除的横向总量（Rust 首帧兜底同式）
+    out property <length> preview-pad-h:
+        list-pad-left + list-pad-right + row-frame + row-pad-left + row-pad-right;
+}
+
+// ── 拉伸手柄：八方向共用，direction 编码对齐 resize-started 回调 ──
+// 东西向手柄悬停显 accent-subtle 底（旧版 west/east 的 hover:bg-pg-accent-subtle）
+component ResizeHandle inherits Rectangle {
+    in property <int> direction; // 0=N 1=S 2=W 3=E 4=NW 5=NE 6=SW 7=SE
+    background: handle-ta.has-hover && (direction == 2 || direction == 3)
+        ? Theme.accent-subtle : transparent;
+    callback started();
+    callback drag-moved();
+    callback finished();
+
+    handle-ta := TouchArea {
+        mouse-cursor: direction == 0 || direction == 4 || direction == 5 ? n-resize
+            : direction == 1 || direction == 6 || direction == 7 ? s-resize
+            : direction == 2 ? w-resize
+            : e-resize;
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down) {
+                root.started();
+            }
+            if (e.kind == PointerEventKind.up) {
+                root.finished();
+            }
+        }
+        moved => { root.drag-moved(); }
+    }
+}
+
+// 行卡片的预览和元信息固定高度，选中、收藏及菜单开合均不改变行高。
 component ClipRowCard inherits Rectangle {
     in property <ClipRow> data;
     in property <bool> selected;
     in property <bool> actions-open;
-    property <length> action-reserve: data.actions.length > 1 ? PanelGeometry.row-action-width : 0px;
+    property <length> action-reserve: PanelGeometry.row-action-width;
     in property <length> text-width;
     height: PanelGeometry.row-height;
     // Acrylic 档烘焙底上行卡半透（玻璃卡透底）；Mica 档（0.92 近实
@@ -286,8 +339,10 @@ component ClipRowCard inherits Rectangle {
     callback hover(length, length);
     callback hover-left();
     callback scroll-into-view(length, length);
-    // 打开「更多上屏方式」动作浮层（仅该条目有可选动作时会出现入口）
+    // 所有条目共用更多操作入口。
     callback actions-requested();
+    callback button-hint(string, length, length);
+    callback button-hint-left();
 
     property <bool> is-selected: selected;
     changed is-selected => {
@@ -546,7 +601,7 @@ component ClipRowCard inherits Rectangle {
         border-color: Theme.fg-default.with-alpha(0.70);
     }
 
-    // 整行命中（含边框圈）：声明在内容之后，展开钮位于其上层
+    // 整行命中（含边框圈）：声明在内容之后，更多按钮位于其上层
     item-ta := TouchArea {
         clicked => { root.clicked(); }
         double-clicked => { root.double-clicked(); }
@@ -576,20 +631,19 @@ component ClipRowCard inherits Rectangle {
         }
     }
 
-    // ── 「更多上屏方式」展开钮：悬停/选中且目录有可选动作时出现 ──
+    // ── 更多操作：选中、悬停或菜单打开时出现 ──
     // 声明在 item-ta 之后以处于最上层，点击只开浮层不触发行点击；
     // 命中节点常驻并汇总自身悬停，避免指针进入按钮后整行失去悬停而撤销按钮
     Rectangle {
-        visible: data.actions.length > 1
-            && (root.selected || item-ta.has-hover || more-ta.has-hover);
+        visible: root.selected || root.actions-open || item-ta.has-hover || more-ta.has-hover;
         x: parent.width - self.width - 8px;
-        y: (parent.height - self.height) / 2;
+        y: 8px;
         width: 28px;
         height: 28px;
         border-radius: Metrics.radius-md;
         border-width: 1px;
         border-color: more-ta.has-hover || root.actions-open
-            ? Theme.fg-muted : Theme.border-muted;
+            ? Theme.fg-muted : transparent;
         opacity: more-ta.pressed ? 0.85 : 1.0;
         background: more-ta.pressed || root.actions-open ? Theme.selected-bg
             : more-ta.has-hover ? Theme.hover-bg : transparent;
@@ -597,21 +651,27 @@ component ClipRowCard inherits Rectangle {
         animate border-color { duration: Motion.dur-color; easing: Motion.ease; }
         more-ta := TouchArea {
             clicked => { root.actions-requested(); }
+            changed has-hover => {
+                if (self.has-hover) {
+                    root.button-hint("更多操作", self.absolute-position.x,
+                        self.absolute-position.y + self.height + Metrics.space-1);
+                } else {
+                    root.button-hint-left();
+                }
+            }
         }
         Path {
-            width: 14px;
-            height: 14px;
+            width: 18px;
+            height: 18px;
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             viewbox-width: 24;
             viewbox-height: 24;
-            stroke: Theme.fg-default;
-            stroke-width: 1.5px;
-            fill: transparent;
-            commands: root.actions-open ? "M 6.5 14.5 L 12 9 L 17.5 14.5"
-                : "M 6.5 9.5 L 12 15 L 17.5 9.5";
+            fill: Theme.fg-default;
+            commands: "M 6.5 12 A 1.5 1.5 0 1 1 3.5 12 A 1.5 1.5 0 1 1 6.5 12 Z M 13.5 12 A 1.5 1.5 0 1 1 10.5 12 A 1.5 1.5 0 1 1 13.5 12 Z M 20.5 12 A 1.5 1.5 0 1 1 17.5 12 A 1.5 1.5 0 1 1 20.5 12 Z";
         }
     }
+
 }
 
 export component QuickPasteWindow inherits Window {
@@ -648,13 +708,15 @@ export component QuickPasteWindow inherits Window {
     callback row-double-clicked(int);
     callback row-hover(int, length, length);
     callback row-hover-left();
+    callback button-hint(string, length, length);
+    callback button-hint-left();
     // 头部拖拽移动（非模态手势：down 开始 / moved 增量移动 / up 结束）
     callback header-drag-started();
     callback header-drag-moved();
     callback header-drag-finished();
     // 顶栏关闭按钮（同 Esc 会话关闭路径）
     callback close-clicked();
-    // 行内展开钮：为该行打开动作浮层
+    // 行内更多按钮：为该行打开操作菜单
     callback row-actions-requested(int);
     // 浮层内点击动作（参数 = 目录序号，含主动作）
     callback action-item-clicked(int);
@@ -685,11 +747,14 @@ export component QuickPasteWindow inherits Window {
     // （窗口经 hide/show 复用会保留滚动位置）
     in-out property <int> scroll-generation: 0;
 
-    // ── 「更多上屏方式」动作浮层：-1 = 收起；行号指向 rows ──
+    // ── 更多操作菜单锚定行：-1 = 收起；行号指向 rows ──
     // 键盘经既有会话键驱动（↑↓ 选动作、Enter 执行、Esc 先收浮层），
     // 面板无焦点，浮层不影响目标应用焦点
     in-out property <int> actions-row: -1;
     in-out property <int> action-selected: 0;
+    in property <[PasteActionItem]> menu-actions;
+    in-out property <int> delete-armed-row: -1;
+    in property <string> delete-shortcut: "Delete";
 
     SoftShadow {
         x: PanelGeometry.shadow-margin;
@@ -765,12 +830,13 @@ export component QuickPasteWindow inherits Window {
                     x: 38px;
                     width: parent.width - 84px;
                     height: parent.height;
-                    text: root.actions-row >= 0 ? "更多上屏方式"
+                    text: root.delete-armed-row >= 0 ? root.delete-shortcut + " 确认删除 · Esc 取消"
+                        : root.actions-row >= 0 ? "更多操作"
                         : (root.selected >= 0 && root.selected < root.rows.length
                             && root.rows[root.selected].actions.length > 0
-                            ? root.rows[root.selected].actions[0].shortcut + " · "
+                            ? root.rows[root.selected].actions[0].shortcut + " "
                                 + root.rows[root.selected].actions[0].label : "速贴");
-                    color: Theme.fg-muted;
+                    color: root.delete-armed-row >= 0 ? Theme.danger-fg : Theme.fg-muted;
                     font-size: Metrics.text-hint;
                     horizontal-alignment: center;
                     vertical-alignment: center;
@@ -921,6 +987,8 @@ export component QuickPasteWindow inherits Window {
                                 hover(x, y) => { root.row-hover(i, x, y); }
                                 hover-left => { root.row-hover-left(); }
                                 actions-requested => { root.row-actions-requested(i); }
+                                button-hint(text, x, y) => { root.button-hint(text, x, y); }
+                                button-hint-left => { root.button-hint-left(); }
                                 scroll-into-view(row-y, row-height) => {
                                     if (row-y < -flick.content-y + 6px) {
                                         flick.content-y = -row-y + 6px;
@@ -955,12 +1023,16 @@ export component QuickPasteWindow inherits Window {
             }
         }
 
-        // ── 「更多上屏方式」动作浮层：面板内底部展开的紧凑列表 ──
+        // ── 更多操作菜单：面板内底部展开，上屏方式与管理操作分组 ──
         // 不进布局（列表区高度不受影响）；盖在列表之上，收起即无痕。
         // 悬停同步高亮（与键盘 ↑↓ 同一状态），点击等同 Enter
         PasteActionMenu {
             open: root.actions-row >= 0 && root.actions-row < root.rows.length;
-            actions: self.open ? root.rows[root.actions-row].actions : [];
+            actions: root.menu-actions;
+            caption: "上屏方式 · 仅本次";
+            management-start: self.open ? root.rows[root.actions-row].actions.length : -1;
+            delete-armed: root.delete-armed-row >= 0;
+            height-limit: Math.max(60px, parent.height - 40px);
             highlighted <=> root.action-selected;
             x: PanelGeometry.list-pad-left;
             y: parent.height - self.height - Metrics.space-2;

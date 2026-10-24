@@ -332,6 +332,25 @@ fn main() {
         }
     }
 
+    {
+        let app_for_delete = app.clone();
+        if let Err(error) =
+            floatpaste_core::platform::windows::single_instance::listen_test_picker_delete(
+                move || {
+                    let app = app_for_delete.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        picker::handle_session_action(
+                            &app,
+                            floatpaste_core::platform::windows::session_keyboard::SessionAction::DeleteEntry,
+                        );
+                    });
+                },
+            )
+        {
+            tracing::warn!("装载测试速贴删除事件失败: {error}");
+        }
+    }
+
     picker::wire(&app);
     search::wire(&app);
     editor::wire(&app);

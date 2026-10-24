@@ -626,9 +626,9 @@ fn app_e2e_smoke_flow() {
         ("FLOATPASTE_RETENTION_FIRST_DELAY_MS", "1500".to_string()),
         ("FLOATPASTE_SKIP_AUTOSTART_SYNC", "1".to_string()),
     ];
-    // 场景 6/6b 托盘与收藏事件的信号侧副本（Cleanup 构造会 move 走原值）
+    // 场景 6/6b 托盘、速贴收藏与删除事件的信号侧副本（Cleanup 构造会 move 走原值）
     let instance_id_for_toggle = instance_id.clone();
-    let instance_id_for_favorite = instance_id.clone();
+    let instance_id_for_signals = instance_id.clone();
     let mut cleanup = Cleanup {
         child: Some(spawn_instance(&envs, true)),
         instance_id,
@@ -1060,7 +1060,7 @@ fn app_e2e_smoke_flow() {
     };
     assert!(
         floatpaste_core::platform::windows::single_instance::signal_test_picker_favorite(
-            &instance_id_for_favorite
+            &instance_id_for_signals
         ),
         "发送速贴收藏信号失败（被测实例未装载钩子）"
     );
@@ -1068,11 +1068,44 @@ fn app_e2e_smoke_flow() {
     thread::sleep(Duration::from_millis(400));
     assert!(
         floatpaste_core::platform::windows::single_instance::signal_test_picker_favorite(
-            &instance_id_for_favorite
+            &instance_id_for_signals
         ),
         "发送速贴取消收藏信号失败"
     );
     assert_favorited(&resumed_marker, false, "再次取消");
+
+    // 同一速贴会话内两段式删除：第一击保留条目，第二击软删且面板继续显示。
+    assert!(
+        floatpaste_core::platform::windows::single_instance::signal_test_picker_delete(
+            &instance_id_for_signals
+        )
+    );
+    thread::sleep(Duration::from_millis(400));
+    assert_eq!(
+        count_rows(
+            &db_path,
+            "SELECT COUNT(*) FROM clip_items WHERE deleted_at IS NULL AND full_text = ?1",
+            Some(&resumed_marker)
+        ),
+        1,
+        "首次速贴删除只进入待确认"
+    );
+    assert!(
+        floatpaste_core::platform::windows::single_instance::signal_test_picker_delete(
+            &instance_id_for_signals
+        )
+    );
+    assert!(
+        wait_until(Duration::from_secs(5), Duration::from_millis(100), || {
+            count_rows(
+                &db_path,
+                "SELECT COUNT(*) FROM clip_items WHERE deleted_at IS NOT NULL AND full_text = ?1",
+                Some(&resumed_marker),
+            ) == 1
+        }),
+        "再次确认后应软删除条目"
+    );
+    assert!(picker_onscreen(picker_pid), "删除后速贴应保持打开");
     wake_via_second_launch(&envs);
     assert!(
         wait_until(Duration::from_secs(10), Duration::from_millis(150), || {

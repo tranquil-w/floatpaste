@@ -1,4 +1,4 @@
-//! 速贴面板会话逻辑：显示/隐藏/切换、列表刷新、确认上屏、收藏、导航。
+//! 速贴面板会话逻辑：显示/隐藏/切换、列表刷新、确认上屏、收藏、删除、导航。
 //!
 //! 行为逐项对齐原版 WindowCoordinator / ShortcutManager / PickerShell：
 //! - 显隐不抢焦点（WS_EX_NOACTIVATE，hide/show 一律以屏幕外停屏复现），
@@ -398,6 +398,7 @@ fn save_window_geometry(app: &App, hwnd: isize) {
 
 /// 隐藏（对齐 WindowCoordinator::hide_picker + hide_picker_and_restore_target）
 pub fn hide(app: &App, restore_target: bool) {
+    reset_delete_arm(app);
     stop_topmost_guard();
     let Some(win) = app.picker.upgrade() else {
         return;
@@ -587,15 +588,26 @@ fn begin_input_session(app: &App, hwnd: isize, settings: &UserSetting) {
     );
 }
 
-fn handle_session_action(app: &App, action: session_keyboard::SessionAction) {
+pub(crate) fn handle_session_action(app: &App, action: session_keyboard::SessionAction) {
     use session_keyboard::SessionAction;
     if !app.state.is_picker_active() {
-        // 钩子常驻，会话残留动作（如窗口消失瞬间的按键）在此过滤；
+        // 会话残留动作（如窗口消失瞬间的按键）在此过滤；
         // 留痕用于诊断「面板已显但按键无响应」类问题
         info!("会话动作忽略（面板非活跃）: {action:?}");
         return;
     }
-    // 动作浮层展开：会话键先服务浮层（↑↓/Enter/Esc），见专属处理
+    if action == SessionAction::Dismiss
+        && app
+            .with_picker(|win| win.get_delete_armed_row() >= 0)
+            .unwrap_or(false)
+    {
+        reset_delete_arm(app);
+        return;
+    }
+    if !matches!(action, SessionAction::DeleteEntry | SessionAction::Confirm) {
+        reset_delete_arm(app);
+    }
+    // 菜单展开：会话键先服务菜单（↑↓/Enter/Esc），见专属处理
     let actions_row = app.with_picker(|win| win.get_actions_row()).unwrap_or(-1);
     if actions_row >= 0 {
         handle_session_action_with_actions(app, actions_row, action);
@@ -608,6 +620,7 @@ fn handle_session_action(app: &App, action: session_keyboard::SessionAction) {
         SessionAction::ConfirmAsPath => confirm(app, current_index(app), true),
         SessionAction::Dismiss => hide(app, true),
         SessionAction::ToggleFavorite => toggle_favorite(app),
+        SessionAction::DeleteEntry => request_delete(app, current_index(app)),
         SessionAction::OpenEditor => {
             // 打开编辑器（面板隐藏、会话让位，关闭后回到本面板；
             // 对齐旧版 PICKER_OPEN_EDITOR_EVENT）
@@ -637,6 +650,9 @@ fn current_index(app: &App) -> usize {
 
 pub fn set_selected(app: &App, index: usize) {
     let id = app.state.item_at(index).map(|item| item.id);
+    if id != app.state.selected_id() {
+        reset_delete_arm(app);
+    }
     app.state.set_selected_id(id);
     // 只写选中索引：预览统一按重字重裁排（见 build_rows），不随选中变化，
     // 行模型无需重建（重建还会打断行内悬停态）
@@ -678,6 +694,7 @@ pub fn refresh_after_editor(app: &App) {
 /// 重新查询列表并重建行模型。
 /// keep_anchor=true 时保持当前选中（按 id 恢复）；false 时选中归零
 fn refresh_list(app: &App, keep_anchor: bool) {
+    reset_delete_arm(app);
     let settings = app.state.current_settings();
     let limit = settings.picker_record_limit.clamp(9, 1000);
 
@@ -722,7 +739,7 @@ fn refresh_list(app: &App, keep_anchor: bool) {
             win.set_selected(selected_index as i32);
 
             // 行集整体重建（剪贴板变化/收藏刷新/缩略图回填）：浮层锚定的
-            // 行号可能已漂移，收起动作浮层，避免菜单作用到换位后的条目
+            // 行号可能已漂移，收起菜单，避免菜单作用到换位后的条目
             win.set_actions_row(-1);
 
             build_rows(app, &win, &items);
@@ -870,6 +887,7 @@ fn build_rows(app: &App, win: &QuickPasteWindow, items: &[ClipItemSummary]) {
     let digit_enabled = win.get_digit_shortcuts_enabled();
     let settings = app.state.current_settings();
     let keys = &settings.session_keys;
+    win.set_delete_shortcut(keys.delete_entry.clone().into());
     let (avail_no_thumb, avail_with_thumb) = preview_avail_widths(win);
     let line_height = preview_line_height(win, false);
     let code_line_height = preview_line_height(win, true);
@@ -885,11 +903,7 @@ fn build_rows(app: &App, win: &QuickPasteWindow, items: &[ClipItemSummary]) {
             let has_thumb = thumb.is_some();
             // 预览达到入库截断上限即认为原文更长，行末始终要有省略号
             let source_truncated = item.content_preview.chars().count() >= PREVIEW_SOURCE_LIMIT;
-            let action_reserve = if available_paste_modes(item).len() > 1 {
-                win.global::<PanelGeometry>().get_row_action_width()
-            } else {
-                0.0
-            };
+            let action_reserve = win.global::<PanelGeometry>().get_row_action_width();
             let preview_started = Instant::now();
             let is_code = item.r#type == "text" && item.text_kind == TextKind::Code;
             let preview = clamp_preview(
@@ -1049,25 +1063,56 @@ fn confirm_mode(app: &App, index: usize, mode: PasteMode) {
     }
 }
 
-/* ───────────────── 「更多上屏方式」动作浮层 ───────────────── */
+/* ───────────────── 更多操作菜单 ───────────────── */
 
-/// 为某行打开动作浮层：选中切到该行，高亮回到目录首项（主动作）。
+/// 为某行打开更多操作菜单：选中切到该行，高亮回到目录首项（主动作）。
 /// 临时选择不改变默认次级动作（快捷键行为不随上次操作漂移）
 fn open_actions(app: &App, index: usize) {
+    let Some(item) = app.state.item_at(index) else {
+        return;
+    };
+    reset_delete_arm(app);
     tooltip::cancel(app);
     set_selected(app, index);
+    let settings = app.state.current_settings();
+    let keys = &settings.session_keys;
+    let mut actions = paste_action_summaries(
+        &item,
+        &keys.confirm,
+        &keys.confirm_as_file,
+        &settings.secondary_paste,
+    );
+    for (label, shortcut) in [
+        (
+            if item.is_favorited {
+                "取消收藏"
+            } else {
+                "收藏"
+            },
+            &keys.toggle_favorite,
+        ),
+        ("编辑", &keys.open_editor),
+        ("删除", &keys.delete_entry),
+    ] {
+        actions.push(PasteActionSummary {
+            label: label.into(),
+            shortcut: shortcut.clone(),
+        });
+    }
     app.with_picker(|win| {
+        win.set_menu_actions(action_items(&actions));
         win.set_actions_row(index as i32);
         win.set_action_selected(0);
     });
 }
 
 fn close_actions(app: &App) {
+    reset_delete_arm(app);
     app.with_picker(|win| win.set_actions_row(-1));
 }
 
 /// 浮层展开期间的会话键：↑↓ 与 Enter 服务浮层，Esc 只收浮层（再按才
-/// 关面板）；编辑/收藏收起浮层后照常执行；其余上屏类动作（次级键、
+/// 关面板）；编辑/收藏收起浮层后执行，删除在菜单内确认；其余上屏类动作（次级键、
 /// 数字直达）只收浮层不上屏——浏览菜单时的误触不应立即改变剪贴板。
 fn handle_session_action_with_actions(
     app: &App,
@@ -1080,7 +1125,7 @@ fn handle_session_action_with_actions(
         close_actions(app);
         return;
     };
-    let count = available_paste_modes(&item).len().max(1);
+    let count = available_paste_modes(&item).len() + 3;
     let current = app
         .with_picker(|win| win.get_action_selected().max(0) as usize)
         .unwrap_or(0);
@@ -1093,14 +1138,7 @@ fn handle_session_action_with_actions(
             );
             app.with_picker(|win| win.set_action_selected(next as i32));
         }
-        SessionAction::Confirm => {
-            let mode = available_paste_modes(&item)
-                .get(current)
-                .copied()
-                .unwrap_or(PasteMode::Original);
-            close_actions(app);
-            confirm_mode(app, index, mode);
-        }
+        SessionAction::Confirm => activate_menu_item(app, index, current),
         SessionAction::Dismiss => close_actions(app),
         SessionAction::OpenEditor => {
             close_actions(app);
@@ -1110,8 +1148,102 @@ fn handle_session_action_with_actions(
             close_actions(app);
             toggle_favorite(app);
         }
+        SessionAction::DeleteEntry => request_delete(app, index),
         SessionAction::ConfirmAsPath | SessionAction::SelectIndex(_) => close_actions(app),
     }
+}
+
+/// 菜单上半部沿用上屏目录，分隔线下固定为收藏、编辑、删除。
+fn activate_menu_item(app: &App, index: usize, action_index: usize) {
+    let Some(item) = app.state.item_at(index) else {
+        close_actions(app);
+        return;
+    };
+    let modes = available_paste_modes(&item);
+    if let Some(mode) = modes.get(action_index) {
+        reset_delete_arm(app);
+        close_actions(app);
+        confirm_mode(app, index, *mode);
+        return;
+    }
+    match action_index.checked_sub(modes.len()) {
+        Some(0) => {
+            reset_delete_arm(app);
+            close_actions(app);
+            toggle_favorite(app);
+        }
+        Some(1) => {
+            reset_delete_arm(app);
+            close_actions(app);
+            crate::editor::open_from_picker(app, item.id);
+        }
+        Some(2) => request_delete(app, index),
+        _ => {}
+    }
+}
+
+/* ───────────────── 两段式删除 ───────────────── */
+
+const DELETE_ARM_TIMEOUT: Duration = Duration::from_secs(3);
+
+thread_local! {
+    // 按条目 ID 与时限确认，不能让列表行号漂移或延迟定时器导致错删。
+    static ARMED_DELETE: std::cell::RefCell<Option<(String, Instant)>> = const { std::cell::RefCell::new(None) };
+    static DELETE_TIMER: slint::Timer = slint::Timer::default();
+}
+
+fn reset_delete_arm(app: &App) {
+    DELETE_TIMER.with(|timer| timer.stop());
+    ARMED_DELETE.with(|slot| *slot.borrow_mut() = None);
+    app.with_picker(|win| win.set_delete_armed_row(-1));
+}
+
+pub fn request_delete(app: &App, index: usize) {
+    if !app.state.is_picker_active() {
+        return;
+    }
+    let Some(item) = app.state.item_at(index) else {
+        return;
+    };
+    tooltip::cancel(app);
+    set_selected(app, index);
+    let confirmed = ARMED_DELETE.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .is_some_and(|(id, started)| id == &item.id && started.elapsed() < DELETE_ARM_TIMEOUT)
+    });
+    reset_delete_arm(app);
+    if confirmed {
+        close_actions(app);
+        if let Err(error) = ClipService::delete(app.core(), &item.id) {
+            warn!("删除速贴条目失败: {error}");
+            crate::tray::notify_failure("删除条目失败，请稍后重试");
+            return;
+        }
+        thumbnails::evict(&item.id);
+        refresh_list(app, true);
+        search::notify_clips_changed(app);
+        return;
+    }
+    if app.with_picker(|win| win.get_actions_row()).unwrap_or(-1) != index as i32 {
+        open_actions(app, index);
+    }
+    let delete_index = available_paste_modes(&item).len() as i32 + 2;
+    ARMED_DELETE.with(|slot| *slot.borrow_mut() = Some((item.id, Instant::now())));
+    app.with_picker(|win| {
+        win.set_delete_armed_row(index as i32);
+        win.set_action_selected(delete_index);
+    });
+    let app = app.clone();
+    DELETE_TIMER.with(|timer| {
+        timer.start(
+            slint::TimerMode::SingleShot,
+            DELETE_ARM_TIMEOUT,
+            move || {
+                reset_delete_arm(&app);
+            },
+        );
+    });
 }
 
 /// 收藏当前选中（对齐 toggleFavoriteSelection：成功后刷新列表并提示）
@@ -1503,7 +1635,7 @@ pub fn wire(app: &App) {
         return;
     };
 
-    // 单击：单击触发模式下立即上屏，否则仅选中。动作浮层展开时先收
+    // 单击：单击触发模式下立即上屏，否则仅选中。菜单展开时先收
     // 浮层并吞掉本次点击——去点菜单外的第一击不应立即上屏
     {
         let app_cb = app.clone();
@@ -1565,15 +1697,43 @@ pub fn wire(app: &App) {
         });
     }
 
-    // 行内展开钮 → 动作浮层
+    // 行内按钮共用悬浮气泡，进入按钮时展示动作提示而非条目预览。
+    {
+        let app_cb = app.clone();
+        win.on_button_hint(move |text, x, y| {
+            let hwnd = app_cb.state.picker_hwnd.load(Ordering::SeqCst);
+            if hwnd != 0 {
+                tooltip::schedule_static(
+                    &app_cb,
+                    tooltip::HoverHost {
+                        hwnd,
+                        is_active: |app| app.state.is_picker_active(),
+                    },
+                    text.to_string(),
+                    x,
+                    y,
+                );
+            }
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_button_hint_left(move || tooltip::cancel(&app_cb));
+    }
+
+    // 行内更多按钮 → 更多操作菜单
     {
         let app_cb = app.clone();
         win.on_row_actions_requested(move |index| {
-            open_actions(&app_cb, index.max(0) as usize);
+            if app_cb.with_picker(|win| win.get_actions_row()) == Some(index) {
+                close_actions(&app_cb);
+            } else {
+                open_actions(&app_cb, index.max(0) as usize);
+            }
         });
     }
 
-    // 浮层内点击动作：按目录序号上屏（含主动作），浮层随上屏流程收起
+    // 菜单点击与键盘 Enter 共用路由：上屏方式或收藏、编辑、删除。
     {
         let app_cb = app.clone();
         win.on_action_item_clicked(move |action_index| {
@@ -1584,16 +1744,9 @@ pub fn wire(app: &App) {
                 return;
             }
             let index = row as usize;
-            let Some(item) = app_cb.state.item_at(index) else {
-                close_actions(&app_cb);
-                return;
-            };
-            let mode = available_paste_modes(&item)
-                .get(action_index.max(0) as usize)
-                .copied()
-                .unwrap_or(PasteMode::Original);
-            close_actions(&app_cb);
-            confirm_mode(&app_cb, index, mode);
+            if let Ok(action_index) = usize::try_from(action_index) {
+                activate_menu_item(&app_cb, index, action_index);
+            }
         });
     }
 
@@ -2091,9 +2244,9 @@ mod tests {
 
 #[cfg(test)]
 pub(crate) mod action_sheet_tests {
-    //! 速贴「更多上屏方式」动作浮层契约（docs/testing.md L2 层）：浮层
+    //! 速贴更多操作菜单契约（docs/testing.md L2 层）：菜单
     //! 展开期间会话键先服务浮层——↑↓ 移动高亮并循环，Esc 只收浮层，
-    //! 次级键/数字直达收浮层但不上屏；指针点击选中/未选中行的展开钮
+    //! 次级键/数字直达收浮层但不上屏；指针点击选中/未选中行的更多按钮
     //! 只开浮层。不执行真实上屏（系统剪贴板属 L3 串行资源）。
     //! 由 l2_headless_ui_contracts 单线程串行调用。
 
@@ -2158,15 +2311,16 @@ pub(crate) mod action_sheet_tests {
         assert_eq!(win.get_action_selected(), 0);
         assert_eq!(win.get_selected(), 0);
 
-        // ↑↓ 在 3 项目录内循环
+        // ↑↓ 在 3 项上屏方式与 3 项管理操作间循环
         use floatpaste_core::platform::windows::session_keyboard::SessionAction;
         handle_session_action_with_actions(&app, 0, SessionAction::NavigateDown);
         assert_eq!(win.get_action_selected(), 1);
-        handle_session_action_with_actions(&app, 0, SessionAction::NavigateDown);
-        handle_session_action_with_actions(&app, 0, SessionAction::NavigateDown);
+        for _ in 0..5 {
+            handle_session_action_with_actions(&app, 0, SessionAction::NavigateDown);
+        }
         assert_eq!(win.get_action_selected(), 0, "高亮循环回主动作");
         handle_session_action_with_actions(&app, 0, SessionAction::NavigateUp);
-        assert_eq!(win.get_action_selected(), 2, "向上移动循环");
+        assert_eq!(win.get_action_selected(), 5, "向上移动循环到删除");
 
         // 次级键与数字直达：只收浮层，不上屏（无剪贴板写入即通过）
         handle_session_action_with_actions(&app, 0, SessionAction::ConfirmAsPath);
@@ -2179,6 +2333,7 @@ pub(crate) mod action_sheet_tests {
 
         pointer_actions_button(&app, &win);
         equal_height_cards(&app, &win);
+        deletion_interactions(&app, &win);
 
         let _ =
             std::fs::remove_dir_all(std::env::temp_dir().join(format!("floatpaste-sheet-{stamp}")));
@@ -2204,7 +2359,7 @@ pub(crate) mod action_sheet_tests {
         let app_cb = app.clone();
         win.on_row_actions_requested(move |row| open_actions(&app_cb, row as usize));
 
-        // 用实际布局的悬停事件确定行中心，避免依赖字体与行高的固定像素。
+        // 用实际布局的悬停事件确定行顶部，再命中右上方更多按钮。
         let _ = win.window().take_snapshot().unwrap();
         let mut bounds = [(i32::MAX, 0); 2];
         for y in 40..320 {
@@ -2223,7 +2378,7 @@ pub(crate) mod action_sheet_tests {
             win.window().dispatch_event(WindowEvent::PointerMoved {
                 position: slint::LogicalPosition::new(100.0, y),
             });
-            let position = slint::LogicalPosition::new(318.0, y);
+            let position = slint::LogicalPosition::new(318.0, top as f32 + 20.0);
             win.window()
                 .dispatch_event(WindowEvent::PointerMoved { position });
             let _ = win.window().take_snapshot().unwrap();
@@ -2235,11 +2390,222 @@ pub(crate) mod action_sheet_tests {
                 position,
                 button: PointerEventButton::Left,
             });
-            assert_eq!(row_clicks.get(), 0, "展开钮不能触发行点击上屏");
+            assert_eq!(row_clicks.get(), 0, "更多按钮不能触发行点击上屏");
             assert_eq!(win.get_actions_row(), row as i32, "应打开对应行的浮层");
             assert_eq!(win.get_selected(), row as i32);
             close_actions(app);
         }
+    }
+
+    fn deletion_interactions(app: &App, win: &QuickPasteWindow) {
+        use floatpaste_core::services::normalize_service::NormalizeService;
+        use session_keyboard::SessionAction;
+        use slint::platform::{PointerEventButton, WindowEvent};
+
+        for text in ["速贴删除甲", "速贴删除乙", "速贴删除丙"] {
+            let item = NormalizeService::normalize_text(text, None).unwrap();
+            app.core().repository.save_text_item(&item).unwrap();
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        let mut settings = app.state.current_settings();
+        settings.session_keys.delete_entry = "Ctrl+D".into();
+        app.core().update_settings(settings).unwrap();
+        wire(app);
+        win.window().set_size(slint::LogicalSize::new(360.0, 420.0));
+        refresh_list(app, false);
+        assert_eq!(win.get_delete_shortcut(), "Ctrl+D");
+        request_delete(app, 0);
+        assert_eq!(win.get_delete_armed_row(), -1, "失活时不能删除");
+        app.state.begin_picker_activation();
+        set_selected(app, 1);
+        handle_session_action(app, SessionAction::DeleteEntry);
+        assert_eq!(win.get_delete_armed_row(), 1);
+        handle_session_action(app, SessionAction::Dismiss);
+        assert_eq!(win.get_delete_armed_row(), -1);
+        assert!(app.state.is_picker_active(), "Esc 先取消确认，不关闭面板");
+        request_delete(app, 1);
+        set_selected(app, 0);
+        assert_eq!(win.get_delete_armed_row(), -1, "切换条目取消确认");
+        request_delete(app, 0);
+        open_actions(app, 0);
+        assert_eq!(win.get_delete_armed_row(), -1, "打开浮层取消确认");
+        handle_session_action(app, SessionAction::DeleteEntry);
+        assert_eq!(win.get_actions_row(), 0);
+        assert_eq!(win.get_delete_armed_row(), 0, "Delete 在浮层内确认发起行");
+        refresh_list(app, true);
+        assert_eq!(win.get_delete_armed_row(), -1, "刷新取消确认，防止行号漂移");
+
+        // 即使事件循环尚未执行超时回调，超时的第二击也只能重新确认。
+        request_delete(app, 0);
+        ARMED_DELETE.with(|slot| {
+            slot.borrow_mut().as_mut().unwrap().1 = Instant::now() - DELETE_ARM_TIMEOUT
+        });
+        request_delete(app, 0);
+        assert_eq!(app.state.items().len(), 3);
+        slint::Timer::single_shot(DELETE_ARM_TIMEOUT + Duration::from_millis(50), || {
+            slint::quit_event_loop().unwrap();
+        });
+        slint::run_event_loop_until_quit().unwrap();
+        assert_eq!(win.get_delete_armed_row(), -1, "超时自动解除确认");
+
+        close_actions(app);
+        set_selected(app, 1);
+        let hovered = Rc::new(std::cell::Cell::new(-1));
+        let hovered_cb = hovered.clone();
+        win.on_row_hover(move |row, _, _| hovered_cb.set(row));
+        let clicks = Rc::new(std::cell::Cell::new(0));
+        let clicks_cb = clicks.clone();
+        win.on_row_clicked(move |_| clicks_cb.set(clicks_cb.get() + 1));
+        let double_clicks_cb = clicks.clone();
+        win.on_row_double_clicked(move |_| double_clicks_cb.set(double_clicks_cb.get() + 1));
+        let hint = Rc::new(std::cell::RefCell::new(String::new()));
+        let hint_cb = hint.clone();
+        win.on_button_hint(move |text, _, _| *hint_cb.borrow_mut() = text.to_string());
+        let _ = win.window().take_snapshot().unwrap();
+        let top = (0..180)
+            .find(|y| {
+                hovered.set(-1);
+                win.window().dispatch_event(WindowEvent::PointerMoved {
+                    position: slint::LogicalPosition::new(100.0, *y as f32),
+                });
+                hovered.get() == 0
+            })
+            .expect("找到首行顶部");
+        let position = slint::LogicalPosition::new(318.0, top as f32 + 20.0);
+        win.window()
+            .dispatch_event(WindowEvent::PointerMoved { position });
+        let _ = win.window().take_snapshot().unwrap();
+        assert_eq!(hint.borrow().as_str(), "更多操作", "普通文本也有更多入口");
+        win.window().dispatch_event(WindowEvent::PointerPressed {
+            position,
+            button: PointerEventButton::Left,
+        });
+        win.window().dispatch_event(WindowEvent::PointerReleased {
+            position,
+            button: PointerEventButton::Left,
+        });
+        assert_eq!(clicks.get(), 0, "更多按钮不能触发行点击或双击上屏");
+        assert_eq!(win.get_actions_row(), 0);
+        use slint::Model;
+        assert_eq!(win.get_menu_actions().row_count(), 4);
+        assert_eq!(
+            win.get_menu_actions().row_data(3).unwrap().shortcut,
+            "Ctrl+D"
+        );
+        activate_menu_item(app, 0, 1);
+        assert!(
+            app.state.item_at(0).unwrap().is_favorited,
+            "菜单收藏更新条目"
+        );
+        assert_eq!(win.get_actions_row(), -1);
+        open_actions(app, 0);
+        assert_eq!(
+            win.get_menu_actions().row_data(1).unwrap().label,
+            "取消收藏"
+        );
+        slint::Timer::single_shot(Duration::from_millis(180), || {
+            slint::quit_event_loop().unwrap()
+        });
+        slint::run_event_loop_until_quit().unwrap();
+        // 菜单底部删除项，首次点击不关闭菜单或上屏。
+        let position = slint::LogicalPosition::new(100.0, 385.0);
+        win.window()
+            .dispatch_event(WindowEvent::PointerMoved { position });
+        win.window().dispatch_event(WindowEvent::PointerPressed {
+            position,
+            button: PointerEventButton::Left,
+        });
+        win.window().dispatch_event(WindowEvent::PointerReleased {
+            position,
+            button: PointerEventButton::Left,
+        });
+        assert_eq!(win.get_delete_armed_row(), 0);
+        assert_eq!(win.get_actions_row(), 0);
+        assert_eq!(clicks.get(), 0, "菜单删除不能触发行上屏");
+
+        if std::env::var_os("FLOATPASTE_UI_SNAPSHOTS").is_some() {
+            for (mode, resolved) in [
+                ("light", theme::ResolvedTheme::Light),
+                ("dark", theme::ResolvedTheme::Dark),
+            ] {
+                theme_bridge::reapply_theme(app, &theme::derive_tokens("default", "", resolved));
+                for armed in [false, true] {
+                    win.set_delete_armed_row(if armed { 0 } else { -1 });
+                    slint::Timer::single_shot(Duration::from_millis(180), || {
+                        slint::quit_event_loop().unwrap()
+                    });
+                    slint::run_event_loop_until_quit().unwrap();
+                    let pixels = win.window().take_snapshot().unwrap();
+                    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+                        "../../.artifacts/snapshot/picker-more-{mode}-{armed}-{}.png",
+                        (win.window().scale_factor() * 100.0).round() as u32
+                    ));
+                    image::save_buffer(
+                        path,
+                        pixels.as_bytes(),
+                        pixels.width(),
+                        pixels.height(),
+                        image::ColorType::Rgba8,
+                    )
+                    .unwrap();
+                }
+            }
+        }
+        reset_delete_arm(app);
+        // 较矮窗口内，删除键应把最后一项滚入视口，点击仍命中删除。
+        win.window().set_size(slint::LogicalSize::new(280.0, 180.0));
+        open_actions(app, 0);
+        handle_session_action(app, SessionAction::DeleteEntry);
+        slint::Timer::single_shot(Duration::from_millis(180), || {
+            slint::quit_event_loop().unwrap()
+        });
+        slint::run_event_loop_until_quit().unwrap();
+        let activated = Rc::new(std::cell::Cell::new(-1));
+        let activated_cb = activated.clone();
+        win.on_action_item_clicked(move |index| activated_cb.set(index));
+        let position = slint::LogicalPosition::new(100.0, 145.0);
+        win.window()
+            .dispatch_event(WindowEvent::PointerMoved { position });
+        win.window().dispatch_event(WindowEvent::PointerPressed {
+            position,
+            button: PointerEventButton::Left,
+        });
+        win.window().dispatch_event(WindowEvent::PointerReleased {
+            position,
+            button: PointerEventButton::Left,
+        });
+        assert_eq!(activated.get(), 3, "窄窗口可滚动并点击菜单末项");
+        handle_session_action(app, SessionAction::Dismiss);
+        assert_eq!(win.get_delete_armed_row(), -1);
+        assert_eq!(win.get_actions_row(), 0, "Esc 先取消确认");
+        handle_session_action(app, SessionAction::Dismiss);
+        assert_eq!(win.get_actions_row(), -1, "再次 Esc 只收菜单");
+        assert!(app.state.is_picker_active());
+        activate_menu_item(app, 0, 99);
+        assert_eq!(app.state.items().len(), 3, "越界菜单项不能回退成上屏动作");
+        wire(app);
+        win.window().set_size(slint::LogicalSize::new(360.0, 420.0));
+        set_selected(app, 1);
+        let expected_next = app.state.item_at(2).unwrap().id;
+        request_delete(app, 1);
+        handle_session_action(app, SessionAction::Confirm);
+        assert_eq!(win.get_selected(), 1);
+        assert_eq!(
+            app.state.selected_id(),
+            Some(expected_next),
+            "删除中间项后选中下一条"
+        );
+        request_delete(app, 1);
+        request_delete(app, 1);
+        assert_eq!(win.get_selected(), 0, "删除末项后选中上一条");
+        request_delete(app, 0);
+        request_delete(app, 0);
+        assert!(app.state.items().is_empty());
+        assert_eq!(app.state.selected_id(), None);
+        assert!(app.state.is_picker_active(), "删空仍保持面板打开");
+        request_delete(app, 0);
+        assert_eq!(win.get_delete_armed_row(), -1, "空列表不能进入确认");
+        app.state.end_picker_activation();
     }
 
     fn equal_height_cards(app: &App, win: &QuickPasteWindow) {
@@ -2247,7 +2613,10 @@ pub(crate) mod action_sheet_tests {
         use slint::Model;
 
         let mut items = vec![file_summary(); 4];
+        items[0].r#type = "text".into();
         items[0].content_preview = "短文本".into();
+        items[1].r#type = "text".into();
+        items[1].has_html = true;
         items[1].content_preview = "多行中文与 emoji 😀\n".repeat(12);
         items[1].tags = vec![
             "一个需要省略的长标签名称".into(),
@@ -2262,6 +2631,7 @@ pub(crate) mod action_sheet_tests {
         items[3].r#type = "text".into();
         items[3].text_kind = TextKind::Code;
         items[3].content_preview = "fn main() {\n    println!(\"Hello, 浮贴 😀\");\n}".into();
+        app.state.set_items(items.clone());
         let hovered = Rc::new(std::cell::Cell::new(-1));
         let hovered_cb = hovered.clone();
         win.on_row_hover(move |row, _, _| hovered_cb.set(row));
@@ -2280,7 +2650,8 @@ pub(crate) mod action_sheet_tests {
                 image_row.has_thumb = with_thumb;
                 image_row.thumb = slint::Image::from_rgba8(slint::SharedPixelBuffer::new(60, 60));
                 rows.set_row_data(2, image_row);
-                win.set_selected(if with_thumb { 2 } else { 0 });
+                win.set_selected(if with_thumb { 1 } else { 0 });
+                close_actions(app);
                 let _ = win.window().take_snapshot().unwrap();
                 let mut bounds = [(i32::MAX, 0); 4];
                 for y in 0..580 {
@@ -2302,25 +2673,50 @@ pub(crate) mod action_sheet_tests {
                     );
                 }
                 if with_thumb && std::env::var_os("FLOATPASTE_UI_SNAPSHOTS").is_some() {
-                    let tokens = theme::derive_tokens("default", "", theme::ResolvedTheme::Light);
-                    theme_bridge::reapply_theme(app, &tokens);
-                    let pixels = win.window().take_snapshot().unwrap();
                     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                         .join("../../.artifacts/snapshot");
                     std::fs::create_dir_all(&dir).unwrap();
-                    image::save_buffer(
-                        dir.join(format!(
-                            "picker-equal-height-{width}-{}.png",
-                            (win.window().scale_factor() * 100.0).round() as u32
-                        )),
-                        pixels.as_bytes(),
-                        pixels.width(),
-                        pixels.height(),
-                        image::ColorType::Rgba8,
-                    )
-                    .unwrap();
+                    for (mode, resolved) in [
+                        ("light", theme::ResolvedTheme::Light),
+                        ("dark", theme::ResolvedTheme::Dark),
+                    ] {
+                        theme_bridge::reapply_theme(
+                            app,
+                            &theme::derive_tokens("default", "", resolved),
+                        );
+                        for armed in [false, true] {
+                            if armed {
+                                open_actions(app, 1);
+                                win.set_delete_armed_row(1);
+                                win.set_action_selected(
+                                    win.get_menu_actions().row_count() as i32 - 1,
+                                );
+                            } else {
+                                close_actions(app);
+                            }
+                            slint::Timer::single_shot(Duration::from_millis(180), || {
+                                slint::quit_event_loop().unwrap()
+                            });
+                            slint::run_event_loop_until_quit().unwrap();
+                            let pixels = win.window().take_snapshot().unwrap();
+                            image::save_buffer(
+                                dir.join(format!(
+                                    "picker-equal-height-{width}-{mode}{}-{}.png",
+                                    if armed { "-menu" } else { "-idle" },
+                                    (win.window().scale_factor() * 100.0).round() as u32
+                                )),
+                                pixels.as_bytes(),
+                                pixels.width(),
+                                pixels.height(),
+                                image::ColorType::Rgba8,
+                            )
+                            .unwrap();
+                            close_actions(app);
+                        }
+                    }
                 }
             }
         }
+        win.set_delete_armed_row(-1);
     }
 }
