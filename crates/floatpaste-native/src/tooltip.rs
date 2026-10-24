@@ -18,7 +18,9 @@ use floatpaste_core::platform::windows::picker_position::{
     primary_monitor_work_area, work_area_from_point, ScreenPoint, ScreenRect,
 };
 use floatpaste_core::platform::windows::window_control;
-use floatpaste_core::services::clip_display::clip_type_label;
+use floatpaste_core::services::clip_display::{
+    clip_type_label, file_preview_parts, format_file_size,
+};
 use floatpaste_core::services::time_format::format_relative_time_or_unused;
 
 use crate::overlay::{self, ForegroundPolicy};
@@ -122,6 +124,7 @@ fn park(app: &App) {
 
 enum Payload {
     Text(String),
+    Files(Vec<String>),
     /// None = 图片解码失败，清空旧图并显示失败文案
     Image(Option<slint::Image>),
 }
@@ -218,26 +221,22 @@ pub fn schedule_with(
                 });
             });
         } else {
-            let full_text = app
-                .core()
-                .repository
-                .get_item_detail(&item.id)
-                .ok()
-                .map(|detail| detail.full_text)
-                .filter(|text| !text.trim().is_empty())
-                .unwrap_or_else(|| item.content_preview.clone());
-            // 原版 HTML 的 pre-wrap 不为块尾换行生成行框，尾部空白不可见；
-            // Slint 会照排成空行，把元信息行顶出窗口下方，显示前裁掉
+            let detail = app.core().repository.get_item_detail(&item.id).ok();
+            let payload = match detail {
+                Some(detail) if item.r#type == "file" && !detail.file_paths.is_empty() => {
+                    Payload::Files(detail.file_paths)
+                }
+                detail => {
+                    let full_text = detail
+                        .map(|detail| detail.full_text)
+                        .filter(|text| !text.trim().is_empty())
+                        .unwrap_or_else(|| item.content_preview.clone());
+                    // 正文末尾空行不参与预览排版。
+                    Payload::Text(full_text.trim_end().to_owned())
+                }
+            };
             let (mouse_x, mouse_y) = current_anchor();
-            render(
-                &app,
-                host_hwnd,
-                &item,
-                mouse_x,
-                mouse_y,
-                Payload::Text(full_text.trim_end().to_owned()),
-                token,
-            );
+            render(&app, host_hwnd, &item, mouse_x, mouse_y, payload, token);
         }
     });
 }
@@ -323,17 +322,15 @@ fn render(
     // ── 元信息 ──
     let badges = build_badges(item);
     win.set_badges(ModelRc::new(Rc::new(VecModel::from(badges.clone()))));
-    win.set_source_app(
-        item.source_app
-            .clone()
-            .unwrap_or_else(|| "未知来源".into())
-            .into(),
-    );
+    win.set_source_app(item.source_app.as_deref().unwrap_or_default().into());
     win.set_time_text(
-        format_relative_time_or_unused(
-            item.last_used_at
-                .as_deref()
-                .or(Some(item.created_at.as_str())),
+        format!(
+            "最近活动 · {}",
+            format_relative_time_or_unused(
+                item.last_used_at
+                    .as_deref()
+                    .or(Some(item.created_at.as_str())),
+            )
         )
         .into(),
     );
@@ -354,7 +351,7 @@ fn render(
             + 6.0 * badges.len().saturating_sub(1) as f32;
         let source_w = win.invoke_measure_natural_width(win.get_source_app());
         let time_w = win.invoke_measure_natural_width(win.get_time_text());
-        badge_w + 6.0 + source_w + 6.0 + 6.0 + time_w
+        badge_w + 6.0 + source_w + 6.0 + time_w
     };
     win.set_content_font_family(content_font);
     let min_content_width =
@@ -368,6 +365,20 @@ fn render(
             layout_text(
                 &win,
                 text,
+                min_content_width,
+                max_width - inset_h,
+                content_budget,
+            )
+        }
+        Payload::Files(paths) => {
+            win.set_has_image(false);
+            let lines = paths.iter().flat_map(|path| {
+                let (name, parent) = file_preview_parts(path);
+                std::iter::once((name, false)).chain(parent.map(|parent| (parent, true)))
+            });
+            layout_lines(
+                &win,
+                lines,
                 min_content_width,
                 max_width - inset_h,
                 content_budget,
@@ -417,38 +428,74 @@ fn layout_text(
     max_width: f32,
     max_height: f32,
 ) -> (f32, f32) {
+    layout_lines(
+        win,
+        text.split('\n').map(|line| (line, false)),
+        min_width,
+        max_width,
+        max_height,
+    )
+}
+
+fn layout_lines<'a>(
+    win: &TooltipWindow,
+    mut source: impl Iterator<Item = (&'a str, bool)>,
+    min_width: f32,
+    max_width: f32,
+    max_height: f32,
+) -> (f32, f32) {
     const MAX_CHARS: usize = 4096;
     const MAX_SOURCE_LINES: usize = 32;
-    let end = text
-        .char_indices()
-        .nth(MAX_CHARS)
-        .map_or(text.len(), |(i, _)| i);
-    let mut source = text[..end].split('\n');
-    let raw_lines: Vec<SharedString> = source
-        .by_ref()
-        .take(MAX_SOURCE_LINES)
-        .map(|line| {
-            let line = line.trim_end();
-            if line.is_empty() {
+    let mut remaining = MAX_CHARS;
+    let mut raw_lines = Vec::new();
+    let mut source_truncated = false;
+    for (line, secondary) in source.by_ref().take(MAX_SOURCE_LINES) {
+        let end = line
+            .char_indices()
+            .nth(remaining)
+            .map_or(line.len(), |(i, _)| i);
+        let prefix = &line[..end];
+        remaining = remaining.saturating_sub(prefix.chars().count() + 1);
+        let text = prefix.trim_end();
+        raw_lines.push(TooltipLine {
+            text: if text.is_empty() {
                 " ".into()
             } else {
-                line.into()
-            }
-        })
-        .collect();
-    let source_truncated = end < text.len() || source.next().is_some();
+                text.into()
+            },
+            height: 0.0,
+            secondary,
+        });
+        if end < line.len() {
+            source_truncated = true;
+            break;
+        }
+    }
+    source_truncated |= source.next().is_some();
     let natural = raw_lines
         .iter()
-        .map(|line| win.invoke_measure_natural_width(line.clone()))
+        .map(|line| win.invoke_measure_natural_width(line.text.clone()))
         .fold(min_width, f32::max);
     let mut width = natural.clamp(min_width, max_width);
+    source_truncated |= raw_lines
+        .iter()
+        .any(|line| line.secondary && win.invoke_measure_natural_width(line.text.clone()) > width);
     let spacing = win.get_content_line_spacing();
     let measure = |width| {
         raw_lines
             .iter()
-            .map(|text| TooltipLine {
-                text: text.clone(),
-                height: win.invoke_measure_text(text.clone(), width).ceil(),
+            .map(|line| TooltipLine {
+                height: win
+                    .invoke_measure_text(
+                        if line.secondary {
+                            " ".into()
+                        } else {
+                            line.text.clone()
+                        },
+                        width,
+                    )
+                    .ceil(),
+                ..line.clone()
             })
             .collect::<Vec<_>>()
     };
@@ -506,6 +553,7 @@ fn layout_text(
                 lines.push(TooltipLine {
                     text,
                     height: clipped_height,
+                    secondary: line.secondary,
                 });
             }
             break;
@@ -743,7 +791,7 @@ fn fit_position(point: ScreenPoint, size: (u32, u32), area: ScreenRect, gap: i32
     )
 }
 
-/// 构建元信息徽章（类型徽章 / 图片尺寸 / 图片格式）；宽度计算复用同一数据
+/// 构建类型与内容属性；宽度计算复用同一数据。
 fn build_badges(item: &ClipItemSummary) -> Vec<TooltipMetaBadge> {
     let mut badges: Vec<TooltipMetaBadge> = Vec::new();
     badges.push(TooltipMetaBadge {
@@ -760,7 +808,30 @@ fn build_badges(item: &ClipItemSummary) -> Vec<TooltipMetaBadge> {
         if let Some(format) = &item.image_format {
             badges.push(TooltipMetaBadge {
                 kind: 2,
-                text: SharedString::from(format.clone()),
+                text: SharedString::from(format.to_uppercase()),
+            });
+        }
+        if let Some(size) = format_file_size(item.file_size) {
+            badges.push(TooltipMetaBadge {
+                kind: 1,
+                text: size.into(),
+            });
+        }
+    } else if item.r#type == "file" {
+        let total = item.file_count.max(0);
+        let directories = item.directory_count.clamp(0, total);
+        let files = total - directories;
+        let mut counts = Vec::new();
+        if files > 0 {
+            counts.push(format!("{files} 个文件"));
+        }
+        if directories > 0 {
+            counts.push(format!("{directories} 个文件夹"));
+        }
+        if !counts.is_empty() {
+            badges.push(TooltipMetaBadge {
+                kind: 1,
+                text: counts.join(" · ").into(),
             });
         }
     }
@@ -843,6 +914,7 @@ pub(crate) mod headless_contract_tests {
     use super::*;
     use crate::app_state::SharedState;
     use floatpaste_core::{
+        domain::clip_item::{NewClipFileItem, NormalizedClipFile},
         domain::settings::UserSetting,
         repository::sqlite_repository::SqliteRepository,
         services::{image_storage::ImageStorage, normalize_service::NormalizeService},
@@ -921,6 +993,8 @@ pub(crate) mod headless_contract_tests {
         wait_until(|| {
             win.get_appear() && win32_ext::physical_rect(hwnd).unwrap().left != PARKED_POS.0
         });
+        assert!(win.get_time_text().starts_with("最近活动 · "));
+        assert!(win.get_source_app().is_empty(), "缺失来源不占用文案空间");
         let rect = win32_ext::physical_rect(hwnd).unwrap();
         schedule_with(&app, host, item.clone(), 240.0, 240.0);
         pump(80);
@@ -951,6 +1025,56 @@ pub(crate) mod headless_contract_tests {
         pump(300);
         assert_eq!(win32_ext::physical_rect(hwnd).unwrap().left, PARKED_POS.0);
         app.state.begin_picker_activation();
+
+        let paths: Vec<String> = [
+            r"D:\项目资料\发布准备\产品使用说明🦀.pdf",
+            r"D:\项目资料\发布准备\产品界面截图.png",
+            r"\\server\share\设计资源\",
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect();
+        let file_item = app
+            .core()
+            .repository
+            .save_file_item(&NewClipFileItem {
+                normalized: NormalizedClipFile {
+                    preview_text: "2 个文件，1 个文件夹".into(),
+                    search_text: "产品资料".into(),
+                    hash: "tooltip-file-preview".into(),
+                    file_count: 3,
+                    directory_count: 1,
+                    total_size: None,
+                    file_paths: paths.clone(),
+                },
+                source_app: Some("资源管理器".into()),
+            })
+            .unwrap()
+            .to_summary();
+        schedule_with(&app, host, file_item.clone(), 100.0, 100.0);
+        wait_until(|| win.get_appear() && win.get_content_lines().row_count() == 6);
+        let file_lines: Vec<_> = win.get_content_lines().iter().collect();
+        assert_eq!(file_lines[0].text, "产品使用说明🦀.pdf");
+        assert!(!file_lines[0].secondary);
+        assert_eq!(file_lines[1].text, r"D:\项目资料\发布准备");
+        assert!(file_lines[1].secondary);
+        assert_eq!(
+            win.get_badges().row_data(1).unwrap().text,
+            "2 个文件 · 1 个文件夹"
+        );
+        cancel(&app);
+
+        let long_parent = r"D:\很长的目录\".repeat(1000);
+        let (_, height) = layout_lines(
+            &win,
+            [("说明🦀.txt", false), (long_parent.as_str(), true)].into_iter(),
+            120.0,
+            360.0,
+            180.0,
+        );
+        assert!(height < 100.0, "长父目录只占一行，不能挤占文件名预览");
+        assert!(win.get_preview_truncated());
+        assert_eq!(win.get_content_lines().row_count(), 2);
 
         for text in [
             "短文本 🦀".to_string(),
@@ -987,6 +1111,8 @@ pub(crate) mod headless_contract_tests {
         image_item.r#type = "image".into();
         image_item.image_width = Some(1920);
         image_item.image_height = Some(960);
+        image_item.image_format = Some("png".into());
+        image_item.file_size = Some(327_680);
         cancel(&app);
         let token = HOVER
             .with(|s| {
@@ -1008,6 +1134,8 @@ pub(crate) mod headless_contract_tests {
             win.get_image_width() <= IMAGE_MAX_WIDTH && win.get_image_height() <= IMAGE_MAX_HEIGHT
         );
         assert_eq!(win.get_image_width(), 2.0 * win.get_image_height());
+        assert_eq!(win.get_badges().row_data(2).unwrap().text, "PNG");
+        assert_eq!(win.get_badges().row_data(3).unwrap().text, "320 KB");
         for (w, h, expected) in [
             (8, 8, Some((160.0, 160.0))),
             (32, 16, Some((160.0, 80.0))),
@@ -1084,6 +1212,46 @@ pub(crate) mod headless_contract_tests {
             ] {
                 let tokens = floatpaste_core::theme::derive_tokens("default", "", theme);
                 crate::theme_bridge::reapply_theme(&app, &tokens);
+                for (case, sample_paths) in [
+                    ("files", paths.clone()),
+                    (
+                        "many-files",
+                        paths.iter().cycle().take(60).cloned().collect(),
+                    ),
+                    (
+                        "long-path",
+                        vec![format!(r"D:\{}\说明🦀.txt", "很长的目录\\".repeat(2000))],
+                    ),
+                ] {
+                    cancel(&app);
+                    let token = HOVER
+                        .with(|s| {
+                            s.borrow_mut().start(
+                                host,
+                                HoverTarget::Item(file_item.id.clone()),
+                                (100.0, 100.0),
+                            )
+                        })
+                        .unwrap();
+                    let mut sample = file_item.clone();
+                    sample.file_count = sample_paths.len() as i32;
+                    sample.directory_count = match case {
+                        "files" => 1,
+                        "many-files" => 20,
+                        _ => 0,
+                    };
+                    render(
+                        &app,
+                        0,
+                        &sample,
+                        100.0,
+                        100.0,
+                        Payload::Files(sample_paths),
+                        token,
+                    );
+                    assert_eq!(win.get_preview_truncated(), case != "files");
+                    snapshot(&win, case, name);
+                }
                 cancel(&app);
                 let token = HOVER
                     .with(|s| {
@@ -1104,6 +1272,22 @@ pub(crate) mod headless_contract_tests {
                     token,
                 );
                 snapshot(&win, "image", name);
+                let mut long_source = image_item.clone();
+                long_source.source_app = Some(
+                    "来源应用的名称非常长，用于检查元信息行是否会挤掉尺寸、大小和最近活动时间"
+                        .repeat(4),
+                );
+                long_source.last_used_at = Some("2020-01-01T12:00:00+08:00".into());
+                render(
+                    &app,
+                    0,
+                    &long_source,
+                    100.0,
+                    100.0,
+                    Payload::Image(Some(image.clone())),
+                    token,
+                );
+                snapshot(&win, "long-source", name);
                 cancel(&app);
                 let token = HOVER
                     .with(|s| {
@@ -1169,9 +1353,15 @@ pub(crate) mod headless_contract_tests {
     }
 
     fn snapshot(win: &TooltipWindow, case: &str, theme: &str) {
+        if let Ok(requested) = std::env::var("SLINT_SCALE_FACTOR") {
+            assert!((win.window().scale_factor() - requested.parse::<f32>().unwrap()).abs() < 0.01);
+        }
         win.set_appear(true);
         pump(160);
         let pixels = win.window().take_snapshot().unwrap();
+        let scale = win.window().scale_factor();
+        assert!(pixels.width() as f32 <= (MAX_WIDTH + 2.0 * win.get_shadow_margin()) * scale + 2.0);
+        assert!(pixels.height() as f32 <= (480.0 + 2.0 * win.get_shadow_margin()) * scale + 2.0);
         if win.get_has_image() {
             let expected_height = (win.get_image_height()
                 + win.get_content_bottom_gap()

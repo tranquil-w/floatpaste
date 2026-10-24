@@ -11,6 +11,19 @@ use crate::domain::settings::SecondaryPasteDefaults;
 use crate::services::text_kind::http_url_parts;
 use crate::services::time_format::format_relative_time_or_unused;
 
+/// 文件预览突出名称、弱化父目录；根目录没有名称时保留整条路径。
+pub fn file_preview_parts(path: &str) -> (&str, Option<&str>) {
+    let parsed = std::path::Path::new(path);
+    let Some(name) = parsed.file_name().and_then(|name| name.to_str()) else {
+        return (path, None);
+    };
+    let parent = parsed
+        .parent()
+        .and_then(|parent| parent.to_str())
+        .filter(|parent| !parent.is_empty());
+    (name, parent)
+}
+
 /// 列表摘要最多 120 字符；原文与上屏内容由 full_text 独立保存。
 pub fn text_preview(full_text: &str, kind: TextKind) -> String {
     let trimmed = full_text.trim();
@@ -228,6 +241,24 @@ mod tests {
     };
     use crate::domain::clip_item::{ClipItemSummary, PasteMode, TextKind};
     use crate::domain::settings::SecondaryPasteDefaults;
+
+    #[test]
+    fn file_preview_preserves_names_parents_and_roots() {
+        for (path, expected) in [
+            (r"C:\资料\报告🦀.pdf", ("报告🦀.pdf", Some(r"C:\资料"))),
+            (r"C:\a.txt", ("a.txt", Some(r"C:\"))),
+            (r"C:\资料\", ("资料", Some(r"C:\"))),
+            (
+                r"\\server\share\目录\a.txt",
+                ("a.txt", Some(r"\\server\share\目录")),
+            ),
+            (r"C:\", (r"C:\", None)),
+            (r"\\server\share\", (r"\\server\share\", None)),
+            ("readme.md", ("readme.md", None)),
+        ] {
+            assert_eq!(super::file_preview_parts(path), expected, "{path}");
+        }
+    }
 
     #[test]
     fn text_summaries_emphasize_host_and_filename_but_keep_code_layout() {

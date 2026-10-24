@@ -5,7 +5,7 @@
 import { Theme, Metrics, Motion, SoftShadow } from "theme.slint";
 
 export struct TooltipMetaBadge {
-    kind: int, // 0=类型徽章（带底色）1=尺寸 2=格式
+    kind: int, // 0=类型徽章（带底色），其他=内容属性
     text: string,
 }
 
@@ -13,6 +13,7 @@ export struct TooltipMetaBadge {
 export struct TooltipLine {
     text: string,
     height: length,
+    secondary: bool,
 }
 
 export component TooltipWindow inherits Window {
@@ -165,9 +166,10 @@ export component TooltipWindow inherits Window {
                 for line in root.content-lines: Text {
                     text: line.text;
                     font-family: root.content-font-family;
-                    color: Theme.fg-default;
+                    color: line.secondary ? Theme.fg-muted : Theme.fg-default;
                     font-size: Metrics.text-body;
-                    wrap: word-wrap;
+                    wrap: line.secondary ? no-wrap : word-wrap;
+                    overflow: elide;
                     min-width: 0px;
                     height: line.height;
                     vertical-alignment: top;
@@ -197,8 +199,7 @@ export component TooltipWindow inherits Window {
             }
 
             // ── 元信息行：类型与来源靠左成组，相对时间推到行尾 ──
-            // 不设 alignment（禁 stretch，规则：start 会让占位失效）；
-            // 除占位外全部 stretch=0，剩余宽度由占位独占、时间贴右
+            // 来源独占剩余宽度并允许省略，类型/内容属性与时间保持完整。
             if (!root.simple-mode): HorizontalLayout {
                 // 显式定高（行上间距 + 徽章高）：度量安全余量由底部弹性
                 // 占位吸收，不在此处变成不明空隙
@@ -230,7 +231,7 @@ export component TooltipWindow inherits Window {
                 }
 
                 Text {
-                    horizontal-stretch: 0;
+                    horizontal-stretch: 1;
                     text: root.source-app;
                     min-width: 0px;
                     overflow: elide;
@@ -238,10 +239,6 @@ export component TooltipWindow inherits Window {
                     font-size: Metrics.text-hint;
                     font-weight: Metrics.weight-medium;
                     vertical-alignment: center;
-                }
-
-                Rectangle {
-                    horizontal-stretch: 1;
                 }
 
                 Text {
