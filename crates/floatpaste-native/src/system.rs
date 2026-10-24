@@ -183,7 +183,7 @@ fn resolve_log_dir() -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-/// 初始化核心状态：与老 Tauri 壳共用同一数据目录（数据库/图片/设置无缝继承）。
+/// 初始化核心状态：日志与数据库共用数据目录解析及旧目录迁移。
 pub fn init_core() -> Result<CoreState, AppError> {
     let data_dir = resolve_data_dir()?;
     std::fs::create_dir_all(&data_dir)?;
@@ -195,8 +195,107 @@ pub fn init_core() -> Result<CoreState, AppError> {
 
 fn resolve_data_dir() -> Result<PathBuf, AppError> {
     if let Ok(appdata) = std::env::var("APPDATA") {
-        return Ok(PathBuf::from(appdata).join("com.floatpaste"));
+        return resolve_appdata_dir(Path::new(&appdata));
     }
 
     Ok(std::env::current_dir()?.join(".floatpaste-data"))
+}
+
+fn resolve_appdata_dir(appdata: &Path) -> Result<PathBuf, AppError> {
+    let data_dir = appdata.join("floatpaste");
+    let legacy_dir = appdata.join("com.floatpaste");
+    // 整目录重命名保留数据库旁车、图片及日志；两个目录并存时不合并或覆盖。
+    // 必须早于日志创建目录，否则空的新日志目录会挡住旧数据迁移。
+    if !data_dir.exists() && legacy_dir.exists() {
+        if let Err(error) = std::fs::rename(&legacy_dir, &data_dir) {
+            // 日志初始化早于单实例检查，另一个启动进程可能已完成迁移。
+            if legacy_dir.exists() || !data_dir.is_dir() {
+                return Err(AppError::Message(format!(
+                    "迁移旧数据目录失败（{} → {}）：{error}。请退出旧版 FloatPaste 后重试。",
+                    legacy_dir.display(),
+                    data_dir.display()
+                )));
+            }
+        }
+    }
+    Ok(data_dir)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_appdata_dir;
+    use std::{fs, os::windows::fs::OpenOptionsExt, time::SystemTime};
+
+    #[test]
+    fn data_directory_migration_preserves_files_and_existing_destination() {
+        let temp = std::env::temp_dir().canonicalize().unwrap();
+        let stamp = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = temp.join(format!(
+            "floatpaste-data-dir-{}-{stamp}",
+            std::process::id()
+        ));
+        fs::create_dir(&root).unwrap();
+        assert_eq!(resolve_appdata_dir(&root).unwrap(), root.join("floatpaste"));
+        assert!(!root.join("floatpaste").exists());
+
+        let old = root.join("com.floatpaste");
+        fs::create_dir_all(old.join("images")).unwrap();
+        fs::create_dir_all(old.join("logs")).unwrap();
+        for name in [
+            "floatpaste.db",
+            "floatpaste.db-wal",
+            "images/test.png",
+            "logs/test.log",
+        ] {
+            fs::write(old.join(name), name).unwrap();
+        }
+        let current = resolve_appdata_dir(&root).unwrap();
+        assert!(!old.exists());
+        for name in [
+            "floatpaste.db",
+            "floatpaste.db-wal",
+            "images/test.png",
+            "logs/test.log",
+        ] {
+            assert_eq!(fs::read_to_string(current.join(name)).unwrap(), name);
+        }
+        assert_eq!(resolve_appdata_dir(&root).unwrap(), current);
+
+        fs::create_dir(&old).unwrap();
+        fs::write(old.join("floatpaste.db"), "旧目录独有数据").unwrap();
+        assert_eq!(resolve_appdata_dir(&root).unwrap(), current);
+        assert_eq!(
+            fs::read_to_string(current.join("floatpaste.db")).unwrap(),
+            "floatpaste.db"
+        );
+        assert_eq!(
+            fs::read_to_string(old.join("floatpaste.db")).unwrap(),
+            "旧目录独有数据"
+        );
+
+        let blocked = root.join("blocked");
+        fs::create_dir_all(blocked.join("com.floatpaste")).unwrap();
+        let locked_path = blocked.join("com.floatpaste/floatpaste.db");
+        fs::write(&locked_path, "被旧版占用的数据").unwrap();
+        let lock = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&locked_path)
+            .unwrap();
+        assert!(resolve_appdata_dir(&blocked).is_err());
+        assert!(!blocked.join("floatpaste").exists());
+        drop(lock);
+        let migrated = resolve_appdata_dir(&blocked).unwrap();
+        assert_eq!(
+            fs::read_to_string(migrated.join("floatpaste.db")).unwrap(),
+            "被旧版占用的数据"
+        );
+
+        // 只清理本测试直接创建、位于临时目录下的唯一目录。
+        assert_eq!(root.canonicalize().unwrap().parent(), Some(temp.as_path()));
+        fs::remove_dir_all(&root).unwrap();
+    }
 }

@@ -57,7 +57,9 @@
 
 ## 数据模型
 
-SQLite（`%APPDATA%\com.floatpaste\floatpaste.db`）+ FTS5：`clip_items`（条目主表）、`clip_items_fts`（全文索引）、`settings`、`excluded_apps`、`tags`、`clip_item_tags`（条目-标签关联）、`clip_text_formats`（一对一 HTML 载荷）。表结构与字段以 `repository` 的迁移与 `schema.rs` 为唯一来源，不在此复述。
+数据目录统一为 `%APPDATA%\floatpaste`。首次启动且新目录不存在时，在打开日志、数据库之前把旧的 `%APPDATA%\com.floatpaste` 整目录重命名到新位置，保留数据库旁车、图片、设置与日志。新旧目录同时存在时使用新目录，不合并或覆盖旧目录；迁移失败时保留原目录并报告错误，不创建空库替代旧数据。`APPDATA` 缺失时仍使用当前目录下的 `.floatpaste-data`。旧版程序不会自动读取新目录；回退前先退出全部实例，备份并按旧版路径恢复所需数据。
+
+SQLite（`%APPDATA%\floatpaste\floatpaste.db`）+ FTS5：`clip_items`（条目主表）、`clip_items_fts`（全文索引）、`settings`、`excluded_apps`、`tags`、`clip_item_tags`（条目-标签关联）、`clip_text_formats`（一对一 HTML 载荷）。表结构与字段以 `repository` 的迁移与 `schema.rs` 为唯一来源，不在此复述。
 
 存储策略：文本进库，只有带 HTML 的条目在 `clip_text_formats` 中有对应行；HTML 不进入 FTS，列表与普通详情只查询能力标记，上屏详情按需读取载荷。软删保留格式，物理删除通过外键级联清理。仅改标签、收藏或保存未改变的文本保留格式；保存正文修改时，在同一事务内删除 HTML、重算用途与 hash、更新摘要和 FTS。图片以 PNG 存数据目录 `images/` 子目录；文件条目只记路径引用；删除为软删除。标签只经由条目关联成立：全量替换、重命名与物理删除路径上失去全部关联的标签行随之清理（孤儿清理）；仅被软删条目引用的标签保留——软删即保留期缓冲，清理不得改为 join `clip_items` 过滤，否则破坏恢复语义。
 

@@ -34,7 +34,7 @@ Rust 改动后，保证 `cargo test` 与 `cargo build -p floatpaste-native` 通�
 
 ## 调试与诊断
 
-- 日志写入 `%APPDATA%\com.floatpaste\logs`，文件以 `floatpaste-native.log` 为前缀按天滚动，最多保留 15 个文件；主目录不可用时写入 `%TEMP%\FloatPaste\logs`。
+- 日志写入 `%APPDATA%\floatpaste\logs`，文件以 `floatpaste-native.log` 为前缀按天滚动，最多保留 15 个文件；主目录不可用时写入 `%TEMP%\FloatPaste\logs`。
 - 默认不记录窗口标题或 UIA 元素名称；设置 `FLOATPASTE_DIAGNOSTIC_LOG=1` 后启用这些字段。共享诊断日志前检查其中的敏感信息。
 - 窗口生命周期用 `session_id` 关联，上屏异步操作同时记录 `operation_id`；日志队列丢弃计数每 30 秒检查并在新增丢弃时报告，panic 日志包含线程名与堆栈。实现见 [system.rs](crates/floatpaste-native/src/system.rs)。
 - 用「应用启动诊断」核对版本、PID、实际 exe 路径与敏感文本诊断开关；正常关闭后下次呼出的 `idle_ms` 表示实际闲置时长，首次呼出为空。

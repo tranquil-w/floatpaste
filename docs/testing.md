@@ -50,7 +50,7 @@
 - `FLOATPASTE_INSTANCE_ID`（仅字母数字与连字符）：给单实例互斥量与唤醒事件名追加后缀，被测实例与日常实例共存
 - `FLOATPASTE_RETENTION_FIRST_DELAY_MS`：覆盖保留清理首轮延迟（默认 60s），让接线验证落在测试时间尺度
 - `FLOATPASTE_SKIP_AUTOSTART_SYNC=1`：跳过自启同步——它操作真实系统的 Run 键与任务计划，不随 APPDATA 隔离
-- `FLOATPASTE_E2E_KEEP=1`（诊断用）：保留临时目录（实例日志在 `com.floatpaste/logs`），供间歇失败的事后取证；默认清理
+- `FLOATPASTE_E2E_KEEP=1`（诊断用）：保留临时目录（实例日志在 `floatpaste/logs`），供间歇失败的事后取证；默认清理
 - `FLOATPASTE_E2E_EXE=<程序绝对路径>`：指定交付程序作为全部启动与二次唤醒的目标；缺省使用 Cargo 提供的测试构建
 - `FLOATPASTE_E2E_STRICT=1`：发布门禁禁止因剪贴板不可用而跳过整个 E2E，环境不满足时必须失败；焦点段按下方交互桌面约束单独报告覆盖情况
 

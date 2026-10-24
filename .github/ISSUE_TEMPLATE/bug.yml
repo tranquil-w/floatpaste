@@ -56,7 +56,7 @@ body:
     id: logs
     attributes:
       label: 日志
-      description: 文件资源管理器地址栏输入 `%APPDATA%\com.floatpaste\logs`，把相关日志文件拖进此框上传
+      description: 文件资源管理器地址栏输入 `%APPDATA%\floatpaste\logs`，把相关日志文件拖进此框上传
       render: shell
 
   - type: textarea

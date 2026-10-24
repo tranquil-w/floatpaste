@@ -45,7 +45,7 @@
 
 从 [Releases](https://github.com/tranquil-w/floatpaste/releases) 下载最新版本：
 
-- **安装包**（Inno Setup）
+- **安装包**（Inno Setup），支持覆盖升级；卸载默认保留数据，也可选择清理历史记录与设置，具体行为见 [发布流程](docs/release/process.md#发布形态)
 - **便携版** zip，解压即用
 
 系统要求：Windows 10 / Windows 11 x64。

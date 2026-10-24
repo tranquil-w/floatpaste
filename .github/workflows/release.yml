@@ -110,9 +110,9 @@ jobs:
           path: |
             tmp/assets/*
             tmp/release-body.md
-            ${{ runner.temp }}/floatpaste-e2e-*/com.floatpaste/logs/*
-            ${{ runner.temp }}/floatpaste-e2e-search-*/com.floatpaste/logs/*
-            ${{ runner.temp }}/floatpaste-release-*/install.log
+            ${{ runner.temp }}/floatpaste-e2e-*/floatpaste/logs/*
+            ${{ runner.temp }}/floatpaste-e2e-search-*/floatpaste/logs/*
+            ${{ runner.temp }}/floatpaste-release-*/*.log
 
       - name: 上传、下载核验并公开 Release
         if: github.event_name == 'push'

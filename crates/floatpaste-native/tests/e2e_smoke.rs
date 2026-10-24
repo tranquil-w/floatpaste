@@ -533,7 +533,7 @@ impl Drop for Cleanup {
             thread::sleep(Duration::from_millis(200));
         }
         // 诊断开关：FLOATPASTE_E2E_KEEP=1 时保留临时目录（实例日志在
-        // com.floatpaste/logs），供间歇失败的事后取证；平时不留痕
+        // floatpaste/logs），供间歇失败的事后取证；平时不留痕
         if std::env::var("FLOATPASTE_E2E_KEEP").as_deref() != Ok("1") {
             // 句柄延迟释放时删除失败不视作测试失败，留给系统临时目录自清
             let _ = fs::remove_dir_all(&self.data_root);
@@ -571,7 +571,7 @@ fn app_e2e_smoke_flow() {
     // 唤醒开关面板链路而非定位模式本身
     let stamp = std::process::id();
     let data_root: PathBuf = std::env::temp_dir().join(format!("floatpaste-e2e-{stamp}"));
-    let app_dir = data_root.join("com.floatpaste");
+    let app_dir = data_root.join("floatpaste");
     fs::create_dir_all(&app_dir).unwrap();
     let db_path = app_dir.join("floatpaste.db");
 
@@ -1091,7 +1091,7 @@ fn app_e2e_smoke_flow() {
         let search_stamp = format!("e2e-search-{stamp}");
         let search_root: PathBuf =
             std::env::temp_dir().join(format!("floatpaste-e2e-search-{stamp}"));
-        let search_app_dir = search_root.join("com.floatpaste");
+        let search_app_dir = search_root.join("floatpaste");
         fs::create_dir_all(&search_app_dir).unwrap();
         {
             let repository = SqliteRepository::new(&search_app_dir.join("floatpaste.db")).unwrap();
