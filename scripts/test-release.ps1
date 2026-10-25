@@ -98,8 +98,9 @@ if ((Test-Path -LiteralPath $uninstallKey) -or (Test-Path -LiteralPath $legacyKe
 if ((Test-Path -LiteralPath $userDataDir) -or (Test-Path -LiteralPath $legacyUserDataDir)) {
     throw 'runner 已存在 FloatPaste 用户数据，停止数据清理验收。'
 }
-$originalRun = Get-ItemPropertyValue -LiteralPath $runKey -Name FloatPaste -ErrorAction SilentlyContinue
-$originalHotkeys = Get-ItemPropertyValue -LiteralPath $advancedKey -Name DisabledHotkeys -ErrorAction SilentlyContinue
+# 属性缺失时 Get-ItemPropertyValue 抛终止错误，-ErrorAction SilentlyContinue 无法抑制，须用 try/catch 取空
+try { $originalRun = Get-ItemPropertyValue -LiteralPath $runKey -Name FloatPaste } catch { $originalRun = $null }
+try { $originalHotkeys = Get-ItemPropertyValue -LiteralPath $advancedKey -Name DisabledHotkeys } catch { $originalHotkeys = $null }
 New-Item -ItemType Directory -Path $legacyDir, $foreignDir, (Split-Path -Parent $dataMarker) -Force | Out-Null
 Set-Content -LiteralPath $dataMarker -Value '保留历史记录和设置'
 $csc = Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
