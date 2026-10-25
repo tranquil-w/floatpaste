@@ -346,6 +346,7 @@ fn schedule_reveal(
                     input_setup_ms = input_started.elapsed().as_millis(),
                     "速贴显屏阶段完成"
                 );
+                // 到此仅表示已移入屏内并完成输入装配，不保证 DWM 已合成首帧
                 info!(
                     session_id = app.state.picker_session().session_id,
                     elapsed_ms = started.elapsed().as_millis(),
@@ -738,6 +739,7 @@ fn refresh_list(app: &App, keep_anchor: bool) {
             build_rows(app, &win, &items);
             let thumbnails_started = Instant::now();
             ensure_thumbnails(app, &items);
+            // dispatch_ms 只覆盖缓存检查与任务派发，不含后台线程的解码耗时
             tracing::debug!(
                 session_id = app.state.picker_session().session_id,
                 dispatch_ms = thumbnails_started.elapsed().as_millis(),

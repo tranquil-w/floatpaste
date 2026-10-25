@@ -21,7 +21,8 @@
 | 安装与开始使用 | [产品 README](../README.md) |
 | 准备环境、运行与贡献 | [开发与贡献](../CONTRIBUTING.md) |
 | 核对必需检查和交付证据 | [验证与交付](../CONTRIBUTING.md#验证与交付) |
-| 查看日志或排查慢呼出 | [调试与诊断](../CONTRIBUTING.md#调试与诊断) |
+| 查看日志与诊断开关 | [调试与诊断](../CONTRIBUTING.md#调试与诊断) |
+| 排查慢呼出与显屏 | [呼出缓慢与显屏延迟](no-focus-picker.md#呼出缓慢与显屏延迟) |
 | 理解领域命名 | [术语表](../CONTEXT.md) |
 | 定位模块与依赖关系 | [架构概览](architecture.md) |
 
