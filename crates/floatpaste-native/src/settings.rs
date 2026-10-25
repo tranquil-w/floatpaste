@@ -38,8 +38,8 @@ use floatpaste_core::services::tag_service::TagService;
 use floatpaste_core::theme;
 use floatpaste_core::theme::ResolvedTheme;
 
+use crate::app::App;
 use crate::overlay;
-use crate::picker::App;
 use crate::theme_bridge::hex_color;
 use crate::{theme_bridge, win32_ext, winv_takeover};
 use crate::{AccentSwatch, PresetCard, SessionKeyRow, SettingsWindow, TagRowData};

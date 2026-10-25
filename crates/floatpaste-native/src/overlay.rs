@@ -20,7 +20,7 @@ use floatpaste_core::domain::settings::WindowMaterial;
 use floatpaste_core::platform::windows::{active_app::ActiveAppResolver, window_control};
 use floatpaste_core::theme;
 
-use crate::picker::App;
+use crate::app::App;
 use crate::win32_ext;
 
 /// 显示后的前台归还策略

@@ -23,7 +23,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_LBUTTONUP, WM_RBUTTONUP, WNDCLASSW, WS_OVERLAPPED,
 };
 
-use crate::picker::App;
+use crate::app::App;
 
 /// 托盘回调消息：wParam=图标 id，lParam=鼠标消息
 const WM_APP_TRAY: u32 = WM_APP + 0x4E;

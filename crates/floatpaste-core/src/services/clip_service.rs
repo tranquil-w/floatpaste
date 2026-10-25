@@ -1,5 +1,3 @@
-use tracing::warn;
-
 use crate::{
     domain::{clip_item::ClipItemDetail, error::AppError},
     services::normalize_service::NormalizeService,
@@ -9,8 +7,7 @@ use crate::{
 /// 剪辑项的读取外变更服务（编辑、删除、收藏）。
 ///
 /// 与专注录入的 [`crate::services::history_service::HistoryService`] 互补，
-/// 将原本散落在命令层中的业务规则（类型校验、归一化、关联资源清理）
-/// 收敛到 service 层。跨进程事件广播仍由命令层负责。
+/// 统一类型校验、归一化与软删语义；各窗口的数据刷新由壳层负责。
 pub struct ClipService;
 
 impl ClipService {
@@ -37,19 +34,11 @@ impl ClipService {
         state.repository.update_text(id, &normalized)
     }
 
-    /// 删除剪辑项：先移除数据库记录，若是图片类型再尽力清理已存储的图片文件。
+    /// 软删条目并保留载荷；到期后由 RetentionService 物理回收。
     pub fn delete(state: &CoreState, id: &str) -> Result<(), AppError> {
-        let detail = state.repository.get_item_detail(id)?;
-        state.repository.delete_item(id)?;
-
-        if detail.r#type == "image" {
-            if let Some(image_path) = detail.image_path.as_deref() {
-                if let Err(error) = state.image_storage.delete_image(image_path) {
-                    warn!("删除图片文件失败: {image_path}, error={error}");
-                }
-            }
-        }
-        Ok(())
+        // 保留缺失条目的错误契约，不把不存在的 ID 当成删除成功。
+        state.repository.get_item_detail(id)?;
+        state.repository.delete_item(id)
     }
 
     /// 设置剪辑项的收藏状态。

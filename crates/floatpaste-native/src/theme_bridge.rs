@@ -133,7 +133,7 @@ pub fn apply_theme(
 /// 运行时主题重应用（设置保存后的联动路径）：从 App 弱引用升级全部窗口。
 /// 停屏窗口的旧主题残影由各 show 路径的
 /// [`crate::win32_ext::force_full_repaint`] 收口（此处泵帧不可靠）
-pub fn reapply_theme(app: &crate::picker::App, tokens: &ThemeTokens) {
+pub fn reapply_theme(app: &crate::app::App, tokens: &ThemeTokens) {
     apply_theme(
         app.picker.upgrade().as_ref(),
         app.tooltip.upgrade().as_ref(),

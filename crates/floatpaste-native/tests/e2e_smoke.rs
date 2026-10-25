@@ -88,11 +88,8 @@ fn wait_until(timeout: Duration, interval: Duration, mut probe: impl FnMut() -> 
     probe()
 }
 
-/// 测试启动前的剪贴板可用性探测：连续 ~1.2 秒打不开视为环境先在的
-/// 锁死/长占用态。此时测试与被测实例都还没碰过剪贴板，责任不在被测
-/// 物，重试无解——打印恢复指引后跳过，不把环境故障计成测试失败。
-/// 运行中途的写入失败仍由 retry_clipboard 短重试后 panic 兜底（那才
-/// 可能是被测实例的问题）
+/// 启动前约 1.2 秒内探测能否打开剪贴板，只反映当时的可用性，不判定占用原因。
+/// 普通模式可跳过并报告缺失覆盖，严格模式失败；运行中失败仍由短重试后 panic 兜底。
 fn clipboard_unusable_before_start() -> bool {
     for _ in 0..8 {
         if unsafe { OpenClipboard(None) }.is_ok() {
@@ -548,22 +545,20 @@ impl Drop for Cleanup {
 
 #[test]
 fn app_e2e_smoke_flow() {
-    // 前置：环境剪贴板已锁死/被长占用时跳过（探测时序保证责任不在
-    // 被测物，见 clipboard_unusable_before_start）
+    // 前置探测不提供根因结论；严格模式要求主要业务段实际执行。
     if clipboard_unusable_before_start() {
         assert!(
             std::env::var("FLOATPASTE_E2E_STRICT").as_deref() != Ok("1"),
-            "发布验收要求实际执行 E2E；系统剪贴板不可用，禁止跳过后发布"
+            "严格模式要求实际执行主要 E2E；启动前约 1.2 秒内无法打开剪贴板。取证与恢复见 docs/testing.md 的失败排查"
         );
         eprintln!(
-            "跳过 e2e_smoke：系统剪贴板被外部进程持续占用（~1.2 秒内无法打开，\n\
-             大概率已被锁死——外部进程持有剪贴板不释放或死在临界区，重试无法\n\
-             恢复，见 docs/testing.md「故障模式：系统剪贴板锁死」）。\n\
-             恢复命令：taskkill /f /im explorer.exe && start explorer.exe\n\
-             环境恢复后重跑即恢复完整验证。"
+            "[e2e] 普通模式跳过主要业务段：启动前约 1.2 秒内无法打开剪贴板，\n\
+             录入、清理与窗口工作流均未覆盖，原因尚未确定。\n\
+             取证与恢复见 docs/testing.md「失败排查 / 剪贴板持续不可用时的恢复」。"
         );
         return;
     }
+    eprintln!("[e2e] 主要业务段开始；真实快捷键分发和上屏注入不在本测试覆盖范围");
 
     // ── 预置：105 条未收藏 + 1 条收藏 + history_limit=100 + 记忆位置 ──
     // 定位模式取 LastPosition 并预置屏内记忆位置：Mouse/Caret 模式依赖
@@ -1250,6 +1245,7 @@ fn app_e2e_smoke_flow() {
                 }),
                 "Esc 关闭后前台应还原给会话目标窗口"
             );
+            eprintln!("[e2e] 焦点还原段通过（命名事件驱动，未覆盖真实按键分发）");
         }
 
         // ── 场景 9：搜索窗两段式删除（选中行 = 列表首行 = 最新条目）──
@@ -1326,5 +1322,6 @@ fn app_e2e_smoke_flow() {
         );
     }
 
+    eprintln!("[e2e] 主要业务段通过；焦点段结果见上方独立报告");
     // 收尾（终止被测实例、恢复剪贴板、清理临时目录）由 Cleanup 守卫统一执行
 }

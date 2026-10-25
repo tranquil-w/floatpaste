@@ -15,6 +15,9 @@ jobs:
   rust:
     name: Rust 测试
     runs-on: windows-latest
+    env:
+      FLOATPASTE_E2E_STRICT: "1"
+      FLOATPASTE_E2E_KEEP: "1"
     steps:
       - uses: actions/checkout@v7
 
@@ -28,11 +31,29 @@ jobs:
 
       - name: 安装 Rust 工具链
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
 
       - name: Rust 依赖缓存
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: .
 
-      - name: 运行 cargo test
-        run: cargo test -p floatpaste-core -p floatpaste-native --verbose
+      - name: 检查 Rust 格式
+        run: cargo fmt --all -- --check
+
+      - name: Rust 测试（禁止跳过主要 E2E）
+        run: cargo test --locked -p floatpaste-core -p floatpaste-native -- --nocapture
+
+      - name: 构建 native
+        run: cargo build --locked -p floatpaste-native
+
+      - name: 保存失败实例日志
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-e2e-logs
+          if-no-files-found: ignore
+          path: |
+            ${{ runner.temp }}/floatpaste-e2e-*/floatpaste/logs/*
+            ${{ runner.temp }}/floatpaste-e2e-search-*/floatpaste/logs/*

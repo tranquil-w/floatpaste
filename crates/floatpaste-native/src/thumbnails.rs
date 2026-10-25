@@ -11,7 +11,7 @@ use floatpaste_core::services::image_decode::decode_limits;
 use floatpaste_core::state::CoreState;
 use slint::{Rgba8Pixel, SharedPixelBuffer};
 
-use crate::picker::App;
+use crate::app::App;
 
 /// 缓存容量上限（条）。单张 144×144 RGBA 约 81KB，512 条 ≈ 42MB 封顶
 const MAX_CACHE_ENTRIES: usize = 512;

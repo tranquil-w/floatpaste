@@ -26,7 +26,6 @@ use floatpaste_core::domain::clip_item::{
     available_paste_modes, resolve_secondary_mode, ClipItemSummary, ClipType, PasteMode,
     PasteOption, SearchFilters, SearchQuery, SearchResult, SearchSort, TextKind,
 };
-use floatpaste_core::domain::error::AppError;
 use floatpaste_core::domain::settings::{PasteTrigger, SecondaryPasteDefaults, UserSetting};
 use floatpaste_core::platform::windows::active_app::ActiveAppResolver;
 use floatpaste_core::platform::windows::picker_position::{
@@ -38,14 +37,16 @@ use floatpaste_core::services::clip_display::{
     build_meta, paste_action_summaries, secondary_action_label,
 };
 use floatpaste_core::services::clip_service::ClipService;
-use floatpaste_core::services::paste_support;
+use floatpaste_core::services::list_navigation::next_navigation_index;
 use floatpaste_core::services::picker_position_service::center_in_work_area;
 use floatpaste_core::services::time_format::format_relative_time_or_unused;
 
+use crate::app::App;
 use crate::app_state::SearchSession;
 use crate::overlay;
+use crate::paste_actions::action_items;
 use crate::paste_flow;
-use crate::picker::{self, App};
+use crate::picker;
 use crate::thumbnails;
 use crate::tooltip::{self, HoverHost};
 use crate::win32_ext;
@@ -61,8 +62,6 @@ const INPUT_DEBOUNCE_MS: u64 = 200;
 const DELETE_ARM_TIMEOUT_MS: u64 = 3000;
 /// 焦点监视轮询间隔（对齐 SEARCH_FOCUS_WATCH_INTERVAL_MS）
 const FOCUS_WATCH_INTERVAL_MS: u64 = 120;
-const RESTORE_DELAY: Duration = Duration::from_millis(90);
-const INJECT_DELAY: Duration = Duration::from_millis(60);
 /// 关闭路径还原前台后的激活落地等待上限：正常几十毫秒内完成，超时则
 /// 尽力停屏（还原未落地时前台会由系统回收，不阻塞用户）
 const RESTORE_SETTLE_MAX: Duration = Duration::from_millis(200);
@@ -522,7 +521,7 @@ fn reset_session_state(app: &App) {
     let Some(win) = app.search.upgrade() else {
         return;
     };
-    QUERY.with(|state| *state.borrow_mut() = QueryState::default());
+    QUERY.with(|state| state.borrow_mut().reset_session());
     CANCEL_DEBOUNCE.with(|slot| *slot.borrow_mut() = None);
     SELECTED_ID.with(|slot| *slot.borrow_mut() = None);
     ARMED_DELETE.with(|slot| *slot.borrow_mut() = None);
@@ -633,6 +632,14 @@ struct QueryState {
 }
 
 impl QueryState {
+    fn reset_session(&mut self) {
+        // 代际不能归零；旧会话的在途响应仍可能在新会话首个查询后返回。
+        *self = Self {
+            seq: self.seq + 1,
+            ..Self::default()
+        };
+    }
+
     fn select_filter(&mut self, filter: u32) {
         if filter == 1 {
             self.favorited_only = !self.favorited_only;
@@ -880,16 +887,24 @@ pub fn fetch_next(app: &App) {
             Ok(result) => apply_page(&app_cb, result, seq, true),
             Err(error) => {
                 warn!("搜索翻页失败: {error}");
-                QUERY.with(|state| {
-                    let mut state = state.borrow_mut();
-                    if state.seq == seq {
-                        state.fetching_next = false;
-                    }
-                });
-                app_cb.with_search(|win| win.set_fetching_next(false));
+                apply_page_error(&app_cb, seq);
             }
         });
     });
+}
+
+fn apply_page_error(app: &App, seq: u64) {
+    let current = QUERY.with(|state| {
+        let mut state = state.borrow_mut();
+        if state.seq != seq {
+            return false;
+        }
+        state.fetching_next = false;
+        true
+    });
+    if current {
+        app.with_search(|win| win.set_fetching_next(false));
+    }
 }
 
 /// 新剪贴内容入库：在途分页失效，从第一页重查（关键词/筛选保持，
@@ -1069,15 +1084,6 @@ pub fn navigate(app: &App, up: bool) {
     set_selected(app, next_navigation_index(count, current, up));
 }
 
-/// 循环导航的下一索引（速贴 / 搜索共用，对齐 (i ± 1 + n) % n）
-pub(crate) fn next_navigation_index(count: usize, current: usize, up: bool) -> usize {
-    if up {
-        (current + count - 1) % count
-    } else {
-        (current + 1) % count
-    }
-}
-
 /// 单行数据构建（行高恒定：选中态由 slint 侧 selected 绑定驱动，
 /// 行数据不区分选中形态）。动作目录与次级动作提示随设置快照生成
 pub(crate) fn make_row(
@@ -1136,7 +1142,7 @@ pub(crate) fn make_row(
             ModelRc::new(Rc::new(VecModel::from(shown)))
         },
         tag_more: item.tags.len().saturating_sub(3) as i32,
-        actions: picker::action_items(&paste_action_summaries(
+        actions: action_items(&paste_action_summaries(
             item,
             &keys.confirm,
             &keys.confirm_as_file,
@@ -1292,7 +1298,9 @@ fn paste_with_mode(app: &App, item: &ClipItemSummary, mode: PasteMode) {
         paste_to_target: true,
         mode,
     };
-    if let Err(error) = execute_paste(app, &item.id, option) {
+    if let Err(error) =
+        paste_flow::paste_item(app, &item.id, option, paste_flow::PasteSource::Search)
+    {
         warn!("搜索粘贴失败: {error}");
         crate::tray::notify_failure(&format!("上屏失败：{error}"));
     }
@@ -1363,123 +1371,6 @@ fn confirm_actions_menu(app: &App) {
     }
     close_actions_menu(app);
     paste_menu_action(app, row as usize, highlight.max(0) as usize);
-}
-
-/// 上屏流（对齐 PasteExecutor 搜索分支）：趁搜索窗口可见写剪贴板 →
-/// 隐藏并还原会话目标 → 90ms → 恢复前台 → 60ms → 注入 Ctrl+V →
-/// 调度快照恢复 → mark_used。失败提示经托盘通知呈现。
-fn execute_paste(app: &App, id: &str, option: PasteOption) -> Result<(), AppError> {
-    let detail = app.core().repository.get_item_for_paste(id)?;
-    let session = app.state.search_session();
-
-    // 管理员目标：照常写入剪贴板并还原目标焦点（用户可手动 Ctrl+V），
-    // 仅跳过必然无效的按键注入，经托盘气泡一次性说明
-    let admin_target = paste_flow::paste_target_requires_elevation(session.target_window_hwnd);
-    let operation_id = paste_flow::next_paste_operation_id();
-    let operation_gate = paste_support::lock_paste_operation()?;
-    let previous_clipboard = paste_support::capture_snapshot_if_needed(&option)?;
-
-    let owner_hwnd = {
-        let hwnd = app.state.search_hwnd.load(Ordering::SeqCst);
-        (hwnd != 0).then_some(hwnd)
-    };
-    let written_sequence = paste_support::publish_item(
-        app.core(),
-        &detail,
-        option.mode,
-        owner_hwnd,
-        previous_clipboard.as_ref(),
-    )?;
-    drop(operation_gate);
-
-    if admin_target {
-        paste_flow::notify_admin_target_once(app, option.restore_clipboard_after_paste);
-    }
-    let failure_hint = paste_support::paste_failure_hint(option.restore_clipboard_after_paste);
-    hide(app, true);
-
-    let core = app.core().clone();
-    let id = id.to_string();
-    let session_id = session.session_id;
-    thread::spawn(move || {
-        let started = Instant::now();
-        let failure = match session.target_window_hwnd {
-            Some(target_hwnd) => {
-                thread::sleep(RESTORE_DELAY);
-                if core.is_quitting()
-                    || floatpaste_core::platform::windows::clipboard_formats::clipboard_sequence()
-                        != written_sequence
-                {
-                    return;
-                }
-                if ActiveAppResolver::restore_foreground_window_with_focus(target_hwnd, None) {
-                    if !admin_target {
-                        thread::sleep(INJECT_DELAY);
-                        if !paste_support::trigger_ctrl_v_if_current(
-                            written_sequence,
-                            session_id,
-                            operation_id,
-                        ) {
-                            warn!(session_id, operation_id, "搜索回贴 Ctrl+V 注入失败");
-                            Some("未能自动粘贴。")
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                } else {
-                    warn!(session_id, operation_id, "搜索回贴恢复目标窗口失败");
-                    Some("未能切回目标窗口。")
-                }
-            }
-            None => {
-                warn!(session_id, operation_id, "搜索会话没有可恢复的目标窗口");
-                Some("未找到需要粘贴的窗口。")
-            }
-        };
-        if let Some(snapshot) = previous_clipboard {
-            if let Err(error) = paste_support::schedule_clipboard_restore(
-                &core,
-                snapshot,
-                owner_hwnd,
-                session_id,
-                operation_id,
-                written_sequence,
-            ) {
-                warn!(session_id, operation_id, error = %error, "搜索上屏后安排剪贴板恢复失败");
-            }
-        }
-        if let Err(error) = core.repository.mark_used(&id) {
-            warn!(session_id, operation_id, error = %error, "搜索上屏后更新条目使用时间失败");
-        }
-        if let Some(reason) = &failure {
-            warn!(
-                operation_id,
-                session_id,
-                outcome = "failed",
-                reason,
-                elapsed_ms = started.elapsed().as_millis(),
-                "搜索上屏流程失败"
-            );
-        } else {
-            info!(
-                operation_id,
-                session_id,
-                outcome = "success",
-                elapsed_ms = started.elapsed().as_millis(),
-                "搜索上屏流程完成"
-            );
-        }
-        if let Some(reason) = failure.filter(|_| !admin_target) {
-            if let Err(error) = slint::invoke_from_event_loop(move || {
-                crate::tray::notify_failure(&format!("{reason}{failure_hint}"));
-            }) {
-                warn!(session_id, operation_id, error = %error, "搜索上屏结果回传 UI 失败");
-            }
-        }
-    });
-    Ok(())
 }
 
 /// 收藏切换（对齐 toggleFavorite：乐观更新 + 收藏视图内取消收藏即时移除）。
@@ -2107,11 +1998,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn navigation_wraps_in_both_directions() {
-        assert_eq!(next_navigation_index(5, 0, true), 4);
-        assert_eq!(next_navigation_index(5, 4, true), 3);
-        assert_eq!(next_navigation_index(5, 4, false), 0);
-        assert_eq!(next_navigation_index(1, 0, true), 0);
+    fn session_reset_never_reuses_an_inflight_query_sequence() {
+        let mut state = QueryState {
+            seq: 1,
+            keyword: "旧关键词".into(),
+            filter: 3,
+            ..Default::default()
+        };
+        let old_request = state.seq;
+        state.reset_session();
+        state.seq += 1; // 新会话发起首个查询。
+        assert_ne!(state.seq, old_request, "旧响应不得命中新会话请求");
+        assert!(state.keyword.is_empty());
+        assert_eq!(state.filter, 0);
     }
 
     #[test]
@@ -2269,6 +2168,23 @@ mod tests {
 struct TempDirGuard(std::path::PathBuf);
 
 #[cfg(test)]
+impl TempDirGuard {
+    fn new(prefix: &str) -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        loop {
+            let suffix = NEXT.fetch_add(1, Ordering::Relaxed);
+            let dir =
+                std::env::temp_dir().join(format!("{prefix}-{}-{suffix}", std::process::id()));
+            match std::fs::create_dir(&dir) {
+                Ok(()) => return Self(dir),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => panic!("创建隔离目录失败：{}: {error}", dir.display()),
+            }
+        }
+    }
+}
+
+#[cfg(test)]
 impl Drop for TempDirGuard {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
@@ -2296,9 +2212,8 @@ pub(crate) mod scroll_reset_tests {
     /// 单测试函数串行多段中的一段（见模块注释）
     pub(crate) fn run() {
         // 临时库预置文本条目：图片筛选下恒为空 → 空态可稳定复现
-        let stamp = std::process::id();
-        let dir = std::env::temp_dir().join(format!("floatpaste-scroll-{stamp}"));
-        std::fs::create_dir_all(&dir).unwrap();
+        let _cleanup = TempDirGuard::new("floatpaste-scroll");
+        let dir = _cleanup.0.clone();
         let db_path = dir.join("floatpaste.db");
         {
             let repository = SqliteRepository::new(&db_path).unwrap();
@@ -2308,8 +2223,6 @@ pub(crate) mod scroll_reset_tests {
                 repository.save_text_item(&item).unwrap();
             }
         }
-        let _cleanup = TempDirGuard(dir.clone());
-
         // 装配：真实 core（临时库）+ 仅搜索窗接线的 App
         let win = SearchWindow::new().expect("实例化搜索窗失败");
         win.window().set_size(slint::LogicalSize::new(780.0, 620.0));
@@ -2440,17 +2353,14 @@ pub(crate) mod refresh_after_editor_tests {
 
     /// 单测试函数串行多段中的一段（见模块注释）
     pub(crate) fn run() {
-        let stamp = std::process::id();
-        let dir = std::env::temp_dir().join(format!("floatpaste-editor-refresh-{stamp}"));
-        std::fs::create_dir_all(&dir).unwrap();
+        let _cleanup = TempDirGuard::new("floatpaste-editor-refresh");
+        let dir = _cleanup.0.clone();
         let db_path = dir.join("floatpaste.db");
         let item_id = {
             let repository = SqliteRepository::new(&db_path).unwrap();
             let item = NormalizeService::normalize_text("编辑后刷新用条目", None).unwrap();
             repository.save_text_item(&item).unwrap().id
         };
-        let _cleanup = TempDirGuard(dir.clone());
-
         let win = SearchWindow::new().expect("实例化搜索窗失败");
         win.window().set_size(slint::LogicalSize::new(780.0, 620.0));
         let editor_win = crate::EditorWindow::new().expect("实例化编辑窗失败");
@@ -2472,6 +2382,12 @@ pub(crate) mod refresh_after_editor_tests {
 
         // 串行前段（scroll_reset_tests）在 thread_local QUERY 留下筛选
         // 状态；等价新会话打开前的重置，保证本段从干净查询态起步
+        assert_eq!(
+            app.core().repository.list_recent(10).unwrap().len(),
+            1,
+            "编辑刷新测试必须使用全新隔离库：{}",
+            db_path.display()
+        );
         reset_session_state(&app);
 
         // 提示随设置更新，不能继续显示编译时的默认键位。
@@ -2533,6 +2449,19 @@ pub(crate) mod refresh_after_editor_tests {
             vec!["新标签".to_string()],
             "行卡应显示新标签"
         );
+        // 旧分页失败不得清除新分页的加载态；当前请求失败则应正常结束加载。
+        let seq = QUERY.with(|state| {
+            let mut state = state.borrow_mut();
+            state.fetching_next = true;
+            state.seq
+        });
+        win.set_fetching_next(true);
+        apply_page_error(&app, seq - 1);
+        assert!(win.get_fetching_next());
+        assert!(QUERY.with(|state| state.borrow().fetching_next));
+        apply_page_error(&app, seq);
+        assert!(!win.get_fetching_next());
+        assert!(!QUERY.with(|state| state.borrow().fetching_next));
         crate::editor::load_error_tests::run(&app, &editor_win, &db_path, &item_id);
     }
 }
@@ -2552,10 +2481,9 @@ pub(crate) mod action_menu_tests {
 
     use crate::app_state::SharedState;
 
-    fn headless_app() -> (App, SearchWindow) {
-        let stamp = std::process::id();
-        let dir = std::env::temp_dir().join(format!("floatpaste-menu-{stamp}"));
-        std::fs::create_dir_all(&dir).unwrap();
+    fn headless_app() -> (TempDirGuard, App, SearchWindow) {
+        let cleanup = TempDirGuard::new("floatpaste-menu");
+        let dir = cleanup.0.clone();
         let db_path = dir.join("floatpaste.db");
         let repository = SqliteRepository::new(&db_path).unwrap();
         let core = CoreState::new(
@@ -2574,7 +2502,7 @@ pub(crate) mod action_menu_tests {
             editor: Default::default(),
             settings: Default::default(),
         };
-        (app, win)
+        (cleanup, app, win)
     }
 
     fn summary(clip_type: &str, has_html: bool) -> ClipItemSummary {
@@ -2696,7 +2624,7 @@ pub(crate) mod action_menu_tests {
 
         // 菜单状态流转（不执行真实上屏）：直接注入 summary，
         // 等价一次查询落地后的行缓存
-        let (app, win) = headless_app();
+        let (_cleanup, app, win) = headless_app();
         app.state
             .set_search_items(vec![summary("text", false), summary("file", false)]);
 

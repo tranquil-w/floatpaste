@@ -27,8 +27,8 @@ use floatpaste_core::platform::windows::picker_position::{
 use floatpaste_core::platform::windows::session_keyboard::{self, SessionAction, SessionKeyConfig};
 use floatpaste_core::platform::windows::window_control;
 
+use crate::app::App;
 use crate::overlay::{self, ForegroundPolicy};
-use crate::picker::App;
 use crate::win32_ext;
 
 /// 菜单项索引（顺序对齐旧壳 MenuBuilder：速贴、搜索、设置、监听、退出）

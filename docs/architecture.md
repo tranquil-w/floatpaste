@@ -14,15 +14,17 @@ Cargo workspace 包含两个 crate：
 
 | 模块 | 职责与依赖约束 |
 |------|----------------|
-| `floatpaste-core/domain` | 纯数据与业务概念，不依赖基础设施 |
+| `floatpaste-core/domain` | 数据、业务概念与错误类型，不执行数据库、文件或 Win32 操作；`AppError` 保留 rusqlite、IO、JSON 与 Windows 错误转换 |
 | `floatpaste-core/repository` | rusqlite 数据访问、FTS5 与数据库迁移 |
-| `floatpaste-core/services` | 业务规则编排，仅依赖 domain/repository |
+| `floatpaste-core/services` | 业务规则、存储服务与平台流程编排；上屏、定位等流程直接调用 platform/windows |
 | `floatpaste-core/platform/windows` | 剪贴板、快捷键、单实例、窗口控制等 Win32 集成，通过回调暴露事件，不反向依赖窗口框架 |
 | `floatpaste-core/theme.rs` | 色板、语义 token 派生与对比度校正 |
 | `floatpaste-native/src` | 窗口会话与回调装配；各窗口提供 `wire()`，`main.rs` 负责启动顺序与模块接线 |
 | `floatpaste-native/ui` | Slint 界面与共享主题全局 |
 
 core 不依赖 Slint；不依赖 Slint 类型的纯逻辑（如展示格式化）放在 core，以便脱离 GUI 测试。
+
+native 的 `app.rs` 持有各窗口共享的应用上下文，窗口弱引用只在事件循环线程升级；`app_state.rs` 维护可跨线程访问的会话与缓存数据。纯列表导航由 core 的 `services/list_navigation.rs` 共用，Slint 上屏菜单模型由 native 的 `paste_actions.rs` 投影，避免让一个窗口模块成为其他窗口的公共依赖入口。
 
 ## 主要数据流
 
@@ -63,7 +65,7 @@ Rust 文件路径相对于对应 crate 的 `src/`；Slint 界面位于 native �
 | 录入、去重、搜索与标签 | core 的 `services/`、`repository/sqlite_repository.rs` | [运行行为与数据约定](runtime-behavior.md) |
 | HTML 采集、发布与恢复 | core 的 `platform/windows/clipboard_formats.rs`、`services/html_format.rs`、`services/paste_support.rs` | 白名单同会话采集，解析在锁外；HTML 只作载荷，不交界面执行，见 [运行行为与数据约定](runtime-behavior.md) |
 | 文本用途识别与内容身份 | core 的 `services/text_kind.rs`、`services/text_identity.rs` | 识别与搜索归一化分离；用途不参与 hash，见 [运行行为与数据约定](runtime-behavior.md) |
-| 启动、日志与共享状态 | native 的 `main.rs`、`system.rs`、`app_state.rs` | [开发与诊断](../CONTRIBUTING.md) |
+| 启动、日志与共享状态 | native 的 `main.rs`、`system.rs`、`app.rs`、`app_state.rs` | [开发与诊断](../CONTRIBUTING.md) |
 | 窗口与上屏 | native 的 `picker.rs`、`search.rs`、`overlay.rs`、`paste_flow.rs` | [窗口时序与防坑](no-focus-picker.md) |
 | 会话键与窗口外点击 | core 的 `platform/windows/session_keyboard.rs`（RegisterHotKey）、`mouse_monitor.rs`（LL 鼠标钩子） | [窗口时序与防坑](no-focus-picker.md) |
 | 插入符定位 | core 的 `platform/windows/picker_position.rs`、`uia_caret.rs`、`services/picker_position_service.rs` | [窗口时序与防坑](no-focus-picker.md) |

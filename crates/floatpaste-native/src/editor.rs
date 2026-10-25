@@ -28,9 +28,10 @@ use floatpaste_core::services::picker_position_service::center_in_work_area;
 use floatpaste_core::services::tag_service::{TagService, MAX_TAGS_PER_ITEM, MAX_TAG_NAME_LEN};
 use floatpaste_core::services::time_format::format_relative_time_or_unused;
 
+use crate::app::App;
 use crate::app_state::{EditorSession, TargetSession};
 use crate::overlay;
-use crate::picker::{self, App};
+use crate::picker;
 use crate::search;
 use crate::thumbnails;
 use crate::tooltip::HoverHost;

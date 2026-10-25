@@ -1,8 +1,7 @@
 //! 上屏支持：把剪辑项安全写入系统剪贴板，以及粘贴后的剪贴板快照恢复。
 //!
-//! 这里只承载与窗口框架无关的纯流程；"隐藏哪个窗口、恢复哪个目标窗口"
-//! 的编排由各 GUI 壳自行实现（壳层在写剪贴板前隐藏自身窗口，再把目标
-//! 窗口句柄交给 `restore_foreground_window_with_focus`）。
+//! 这里只承载与窗口框架无关的平台流程；窗口会话与目标焦点由 GUI 壳编排。
+//! 壳层须先趁属主窗口存活发布剪贴板，成功后再隐藏来源窗口、恢复目标焦点。
 
 use std::{
     sync::{Mutex, MutexGuard},
@@ -314,11 +313,37 @@ pub fn paste_failure_hint(restore_clipboard: bool) -> &'static str {
     }
 }
 
-/// 新复制或另一次发布到来后，旧操作不再注入当前剪贴板内容。
-pub fn trigger_ctrl_v_if_current(sequence: u32, session_id: u64, operation_id: u64) -> bool {
-    lock_paste_operation().is_ok_and(|_gate| {
-        clipboard_sequence() == sequence && trigger_ctrl_v(session_id, operation_id)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InjectionOutcome {
+    Injected,
+    ClipboardChanged,
+}
+
+/// 新复制或另一次发布到来后取消旧注入；锁失败和注入失败保留为错误。
+pub fn trigger_ctrl_v_if_current(
+    sequence: u32,
+    session_id: u64,
+    operation_id: u64,
+) -> Result<InjectionOutcome, AppError> {
+    let _gate = lock_paste_operation()?;
+    inject_if_current(sequence, clipboard_sequence(), || {
+        trigger_ctrl_v(session_id, operation_id)
     })
+}
+
+fn inject_if_current(
+    expected: u32,
+    actual: u32,
+    inject: impl FnOnce() -> bool,
+) -> Result<InjectionOutcome, AppError> {
+    if actual != expected {
+        return Ok(InjectionOutcome::ClipboardChanged);
+    }
+    if inject() {
+        Ok(InjectionOutcome::Injected)
+    } else {
+        Err(AppError::Message("未能自动粘贴。".to_string()))
+    }
 }
 
 /// 向前台窗口注入一次 Ctrl+V；返回注入是否成功。
@@ -354,7 +379,28 @@ pub fn trigger_ctrl_v(session_id: u64, operation_id: u64) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{file_names_text, file_paths_text, paste_failure_hint};
+    use super::{
+        file_names_text, file_paths_text, inject_if_current, paste_failure_hint, InjectionOutcome,
+    };
+
+    #[test]
+    fn changed_clipboard_cancels_without_injecting_and_failure_is_not_cancellation() {
+        assert_eq!(
+            inject_if_current(7, 8, || panic!("旧操作不得注入新内容")).unwrap(),
+            InjectionOutcome::ClipboardChanged
+        );
+        let mut injections = 0;
+        assert_eq!(
+            inject_if_current(7, 7, || {
+                injections += 1;
+                true
+            })
+            .unwrap(),
+            InjectionOutcome::Injected
+        );
+        assert_eq!(injections, 1);
+        assert!(inject_if_current(7, 7, || false).is_err());
+    }
 
     #[test]
     fn manual_paste_hint_requires_preserving_the_selected_content() {

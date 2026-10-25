@@ -23,8 +23,8 @@ use floatpaste_core::services::clip_display::{
 };
 use floatpaste_core::services::time_format::format_relative_time_or_unused;
 
+use crate::app::App;
 use crate::overlay::{self, ForegroundPolicy};
-use crate::picker::App;
 use crate::thumbnails;
 use crate::win32_ext;
 use crate::{TooltipLine, TooltipMetaBadge, TooltipWindow};

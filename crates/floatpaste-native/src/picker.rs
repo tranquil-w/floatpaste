@@ -10,7 +10,9 @@
 
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::mpsc;
+#[cfg(test)]
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
@@ -34,25 +36,31 @@ use floatpaste_core::services::clip_display::{
     clip_type_label, paste_action_summaries, PasteActionSummary,
 };
 use floatpaste_core::services::clip_service::ClipService;
+use floatpaste_core::services::list_navigation::next_navigation_index;
 use floatpaste_core::services::picker_position_service::{
     default_window_size, resolve_near_cursor, PickerPositionService, WindowGeometry,
     PICKER_MIN_HEIGHT, PICKER_MIN_WIDTH,
 };
 use floatpaste_core::services::time_format::format_relative_time_or_unused;
+#[cfg(test)]
 use floatpaste_core::state::CoreState;
 use floatpaste_core::theme;
 
-use crate::app_state::{SharedState, TargetSession};
+use crate::app::App;
+#[cfg(test)]
+use crate::app_state::SharedState;
+use crate::app_state::TargetSession;
 use crate::overlay::{self, ForegroundPolicy};
+use crate::paste_actions::action_items;
 use crate::paste_flow;
 use crate::search;
 use crate::theme_bridge;
 use crate::thumbnails;
 use crate::tooltip;
 use crate::win32_ext;
-use crate::{
-    ClipRow, PanelGeometry, PasteActionItem, QuickPasteWindow, SearchWindow, TooltipWindow,
-};
+#[cfg(test)]
+use crate::SearchWindow;
+use crate::{ClipRow, PanelGeometry, QuickPasteWindow};
 
 // debug 软件渲染冷帧较慢；发布构建保留短暂的屏外布局与呈现准备期。
 const REVEAL_DELAY_MS: u64 = if cfg!(debug_assertions) { 200 } else { 50 };
@@ -61,32 +69,6 @@ const PREPARATION_BUDGET: Duration = Duration::from_millis(150);
 
 /// 入库预览的字符截断上限（normalize_service 同值）：达到即认为原文更长
 const PREVIEW_SOURCE_LIMIT: usize = 120;
-
-/// 事件循环线程上的应用上下文（克隆廉价，闭包捕获后经 invoke 回到事件循环）
-#[derive(Clone)]
-pub struct App {
-    pub state: Arc<SharedState>,
-    pub picker: slint::Weak<QuickPasteWindow>,
-    pub tooltip: slint::Weak<TooltipWindow>,
-    pub tray_menu: slint::Weak<crate::TrayMenuWindow>,
-    pub search: slint::Weak<SearchWindow>,
-    pub editor: slint::Weak<crate::EditorWindow>,
-    pub settings: slint::Weak<crate::SettingsWindow>,
-}
-
-impl App {
-    pub fn with_picker<R>(&self, f: impl FnOnce(&QuickPasteWindow) -> R) -> Option<R> {
-        self.picker.upgrade().map(|win| f(&win))
-    }
-
-    pub fn with_search<R>(&self, f: impl FnOnce(&SearchWindow) -> R) -> Option<R> {
-        self.search.upgrade().map(|win| f(&win))
-    }
-
-    pub fn core(&self) -> &CoreState {
-        &self.state.core
-    }
-}
 
 /* ───────────────── 显示 / 隐藏 / 切换 ───────────────── */
 
@@ -995,18 +977,6 @@ fn build_rows(app: &App, win: &QuickPasteWindow, items: &[ClipItemSummary]) {
     );
 }
 
-/// 菜单投影 → 行模型字段（速贴与搜索同构转换）
-pub(crate) fn action_items(summaries: &[PasteActionSummary]) -> ModelRc<PasteActionItem> {
-    let items: Vec<PasteActionItem> = summaries
-        .iter()
-        .map(|summary| PasteActionItem {
-            label: summary.label.clone().into(),
-            shortcut: summary.shortcut.clone().into(),
-        })
-        .collect();
-    ModelRc::new(Rc::new(VecModel::from(items)))
-}
-
 thread_local! {
     /// 宽度变化重裁的防抖令牌：新触发使旧回调失效
     static RECLAMP_TOKEN: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
@@ -1069,7 +1039,9 @@ fn confirm_mode(app: &App, index: usize, mode: PasteMode) {
         mode,
     };
 
-    if let Err(error) = paste_flow::paste_item(app, &item.id, option) {
+    if let Err(error) =
+        paste_flow::paste_item(app, &item.id, option, paste_flow::PasteSource::Picker)
+    {
         warn!("粘贴失败: {error}");
         crate::tray::notify_failure(&format!("上屏失败：{error}"));
     }
@@ -1143,11 +1115,8 @@ fn handle_session_action_with_actions(
         .unwrap_or(0);
     match action {
         SessionAction::NavigateUp | SessionAction::NavigateDown => {
-            let next = search::next_navigation_index(
-                count,
-                current,
-                matches!(action, SessionAction::NavigateUp),
-            );
+            let next =
+                next_navigation_index(count, current, matches!(action, SessionAction::NavigateUp));
             app.with_picker(|win| win.set_action_selected(next as i32));
         }
         SessionAction::Confirm => activate_menu_item(app, index, current),
@@ -1298,7 +1267,7 @@ pub fn navigate(app: &App, up: bool) {
         return;
     }
     let current = current_index(app);
-    let next = search::next_navigation_index(count, current, up);
+    let next = next_navigation_index(count, current, up);
     set_selected(app, next);
 }
 

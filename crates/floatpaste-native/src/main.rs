@@ -8,10 +8,12 @@
 //! 导航 / 外击关闭 / 悬停预览 / 三种定位 / 尺寸记忆 / 主题 / 搜索会话 /
 //! 两段式删除 / 文本编辑与标签管理 / 设置防抖自动保存与运行时联动）。
 
+mod app;
 mod app_icon;
 mod app_state;
 mod editor;
 mod overlay;
+mod paste_actions;
 mod paste_flow;
 mod picker;
 mod search;
@@ -42,8 +44,8 @@ use floatpaste_core::platform::windows::single_instance;
 use floatpaste_core::platform::windows::winv_takeover;
 use floatpaste_core::theme;
 
+use app::App;
 use app_state::SharedState;
-use picker::App;
 
 slint::include_modules!();
 
@@ -778,6 +780,8 @@ fn l2_headless_ui_contracts() {
     settings_scroll_tests::run();
     settings::copy_contract_tests::run();
     search::scroll_reset_tests::run();
+    search::refresh_after_editor_tests::run();
+    // 同进程重复场景，核对临时库和跨段异步状态不会复用上次结果。
     search::refresh_after_editor_tests::run();
     search::action_menu_tests::run();
     tray_menu::headless_contract_tests::run();
