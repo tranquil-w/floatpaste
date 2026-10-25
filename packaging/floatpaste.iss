@@ -256,10 +256,40 @@ end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
-  I: Integer;
+  I, ResultCode: Integer;
 begin
   Result := '';
   CaptureRunEntry;
+  // 请求 {app} 同路径运行实例优雅退出（实例按自身路径创建同名事件，见
+  // core 的 listen_install_shutdown）；未运行、超时或脚本失败不阻断安装，
+  // 交由 Restart Manager 按既有行为兜底。
+  SetTaskEnv('FLOATPASTE_APP_EXE', ExpandConstant('{app}\{#AppExeName}'));
+  if SaveStringToFile(ExpandConstant('{tmp}\fp-shutdown.ps1'),
+                 '$appExe = $env:FLOATPASTE_APP_EXE' + #13#10 +
+                 '$name = ''FloatPaste.InstallShutdown.'' + $appExe.ToLowerInvariant().Replace([string][char]92, ''/'')' + #13#10 +
+                 'try {' + #13#10 +
+                 '  $evt = [System.Threading.EventWaitHandle]::OpenExisting($name)' + #13#10 +
+                 '  $evt.Set() | Out-Null' + #13#10 +
+                 '  $evt.Dispose()' + #13#10 +
+                 '} catch {' + #13#10 +
+                 '  exit 0' + #13#10 +
+                 '}' + #13#10 +
+                 '$target = $appExe.ToLowerInvariant()' + #13#10 +
+                 '$deadline = (Get-Date).AddSeconds(10)' + #13#10 +
+                 'while ((Get-Date) -lt $deadline) {' + #13#10 +
+                 '  $running = @(Get-CimInstance Win32_Process -Filter "Name=''floatpaste.exe''" |' + #13#10 +
+                 '    Where-Object { $_.ExecutablePath -and ($_.ExecutablePath.ToLower()) -eq $target })' + #13#10 +
+                 '  if ($running.Count -eq 0) { exit 0 }' + #13#10 +
+                 '  Start-Sleep -Milliseconds 200' + #13#10 +
+                 '}' + #13#10 +
+                 'exit 3' + #13#10,
+       False) then begin
+    if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+         '-NoProfile -ExecutionPolicy Bypass -File "' +
+         ExpandConstant('{tmp}\fp-shutdown.ps1') + '"', '',
+         SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
+      Log('请求运行实例优雅退出未完成，退出码=' + IntToStr(ResultCode));
+  end;
   if WizardIsTaskSelected('uninstallold') then
     for I := 0 to GetArrayLength(g_OldVersions) - 1 do
       if not TryUninstallEntry(g_OldVersions[I]) then begin

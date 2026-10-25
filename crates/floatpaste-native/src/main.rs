@@ -226,6 +226,23 @@ fn main() {
         }
     }
 
+    // ── 安装器退出请求：覆盖安装时按当前程序路径请求本实例退出，
+    //    走与托盘退出相同的收尾路径，避免强杀锁死系统剪贴板 ──
+    {
+        let core_for_shutdown = state.core.clone();
+        if let Err(error) =
+            floatpaste_core::platform::windows::single_instance::listen_install_shutdown(
+                move || {
+                    tracing::info!("收到安装器退出请求，请求事件循环退出");
+                    core_for_shutdown.begin_quit();
+                    let _ = slint::quit_event_loop();
+                },
+            )
+        {
+            tracing::warn!("装载安装器退出监听失败: {error}");
+        }
+    }
+
     // ── E2E 托盘命令：测试经命名事件驱动「切换监听」，走与托盘菜单选择
     //    相同的处理路径（模态菜单点击无法可靠自动化；未设置
     //    FLOATPASTE_INSTANCE_ID 时为空操作）──

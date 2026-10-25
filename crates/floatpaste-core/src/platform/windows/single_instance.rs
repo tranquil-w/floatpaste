@@ -191,6 +191,26 @@ pub fn signal_test_exit(instance_id: &str) -> bool {
     set_named_event(&with_suffix(TEST_EXIT_EVENT_NAME, instance_id))
 }
 
+/* ───────────────── 安装器退出事件 ───────────────── */
+
+/// 覆盖安装请求同路径运行实例优雅退出：事件名绑定当前 exe 路径
+/// （小写、`\` 转 `/`，内核对象名不允许反斜杠），按路径隔离，其他
+/// 目录的便携副本不受影响。不加 E2E 隔离后缀：安装器按安装路径寻址，
+/// 须能命中任何实例形态。退出走与托盘退出相同的收尾路径，不依赖强杀：
+/// 实例若正处于剪贴板打开临界区，进程死亡会把系统剪贴板锁死。
+const INSTALL_SHUTDOWN_EVENT_PREFIX: &str = "Local\\FloatPaste.InstallShutdown.";
+
+/// 运行实例侧：装载安装器退出请求监听（取不到自身路径或名称超限时
+/// 装载失败由调用方记日志，不影响启动）
+pub fn listen_install_shutdown(on_shutdown: impl Fn() + Send + 'static) -> Result<(), AppError> {
+    let exe = std::env::current_exe()?;
+    let path = exe.to_string_lossy().to_lowercase().replace('\\', "/");
+    spawn_named_event_listener(
+        format!("{INSTALL_SHUTDOWN_EVENT_PREFIX}{path}"),
+        on_shutdown,
+    )
+}
+
 /* ───────────────── E2E 托盘命令事件 ───────────────── */
 
 /// E2E 驱动钩子：仅当 FLOATPASTE_INSTANCE_ID 设置时装载（生产实例不装载）。
