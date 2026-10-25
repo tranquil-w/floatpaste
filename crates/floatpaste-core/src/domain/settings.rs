@@ -2,11 +2,13 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use super::clip_item::{PasteMode, FILE_PASTE_MODES, IMAGE_PASTE_MODES, RICH_TEXT_PASTE_MODES};
 
-const DEFAULT_MAIN_SHORTCUT: &str = "Ctrl+Q";
-const DEFAULT_SEARCH_SHORTCUT: &str = "Alt+S";
-/// 历史默认值：sanitized 时迁移到当前默认，未改过快捷键的用户无感升级
-const LEGACY_MAIN_SHORTCUTS: [&str; 2] = ["Ctrl+`", "Alt+Q"];
-const LEGACY_SEARCH_SHORTCUTS: [&str; 2] = ["Win+F", "Super+F"];
+pub const DEFAULT_MAIN_SHORTCUT: &str = "Alt+`";
+const DEFAULT_SEARCH_SHORTCUT: &str = "Alt+Q";
+const SESSION_KEYS_VERSION: u32 = 1;
+const GLOBAL_SHORTCUTS_VERSION: u32 = 2;
+/// 仅在旧配置首次加载时迁移，不能覆盖用户升级后重新录制的组合。
+const LEGACY_MAIN_SHORTCUTS: [&str; 3] = ["Ctrl+Q", "Alt+Q", "Ctrl+`"];
+const LEGACY_SEARCH_SHORTCUTS: [&str; 4] = ["Alt+S", "Win+F", "Super+F", "Ctrl+Q"];
 const DEFAULT_THEME_PRESET: &str = "default";
 const DEFAULT_THEME_ACCENT: &str = "default";
 /// 旧版自定义颜色的默认强调色；迁移时仅保留与默认不同的自定义值
@@ -134,7 +136,7 @@ impl<'de> Deserialize<'de> for PasteTrigger {
 
 /// 速贴/搜索会话期的动作键位（数字 1-9 直达除外，见
 /// `picker_digit_shortcuts_enabled`）。值为「修饰键+键名」串（如
-/// "Enter"、"Shift+Enter"、"Ctrl+Space"），键名与修饰键大小写不敏感；
+/// "Enter"、"Ctrl+Enter"、"Ctrl+D"），键名与修饰键大小写不敏感；
 /// 非法或缺失的值按字段回退默认，见 [SessionKeys::sanitized]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -142,7 +144,7 @@ pub struct SessionKeys {
     /// 上屏
     pub confirm: String,
     /// 次级上屏：执行该类别配置的默认动作（见 SecondaryPasteDefaults）。
-    /// 字段名是持久化配置键，不可更名
+    /// 字段名是持久化配置键，不可更名；默认 Ctrl+Enter
     pub confirm_as_file: String,
     /// 打开编辑器
     pub open_editor: String,
@@ -162,9 +164,9 @@ impl Default for SessionKeys {
     fn default() -> Self {
         Self {
             confirm: "Enter".to_string(),
-            confirm_as_file: "Shift+Enter".to_string(),
-            open_editor: "Ctrl+Enter".to_string(),
-            toggle_favorite: "Ctrl+Space".to_string(),
+            confirm_as_file: "Ctrl+Enter".to_string(),
+            open_editor: "Ctrl+E".to_string(),
+            toggle_favorite: "Ctrl+D".to_string(),
             dismiss: "Escape".to_string(),
             navigate_up: "Up".to_string(),
             navigate_down: "Down".to_string(),
@@ -172,6 +174,13 @@ impl Default for SessionKeys {
         }
     }
 }
+
+/// 仅用于带旧版本标记的配置；日常保存不迁移用户重新录制的旧键位。
+const LEGACY_SESSION_KEY_MIGRATIONS: [(usize, &str, &str); 3] = [
+    (1, "Shift+Enter", "Ctrl+Enter"),
+    (2, "Ctrl+Enter", "Ctrl+E"),
+    (3, "Ctrl+Space", "Ctrl+D"),
+];
 
 impl SessionKeys {
     /// 动作序号 → 字段的统一读写入口（设置界面按行模型存取用）
@@ -215,6 +224,17 @@ impl SessionKeys {
             self.set_field(action, value);
         }
         self
+    }
+
+    fn conflicts_with_shortcuts(&self, main: &str, search: Option<&str>) -> bool {
+        let values: Vec<String> = (0..8)
+            .map(|action| normalize_shortcut_for_compare(self.field(action)))
+            .collect();
+        let main = normalize_shortcut_for_compare(main);
+        let search = search.map(normalize_shortcut_for_compare);
+        values.iter().enumerate().any(|(index, value)| {
+            values[..index].contains(value) || *value == main || search.as_ref() == Some(value)
+        })
     }
 }
 
@@ -355,6 +375,12 @@ pub struct UserSetting {
     /// 会话期动作键位（上屏/编辑/收藏/关闭/导航/删除），见 [SessionKeys]
     #[serde(default)]
     pub session_keys: SessionKeys,
+    /// 会话键迁移版本；旧配置缺失时为 0，新设置直接使用当前版本。
+    #[serde(default)]
+    pub session_keys_version: u32,
+    /// 全局快捷键迁移版本；旧配置缺失时为 0。
+    #[serde(default)]
+    pub global_shortcuts_version: u32,
     /// 各类别默认次级动作（次级会话键 / 次级按钮立即执行），见
     /// [SecondaryPasteDefaults]
     #[serde(default)]
@@ -395,6 +421,8 @@ impl Default for UserSetting {
             picker_digit_shortcuts_enabled: true,
             takeover_winv: false,
             session_keys: SessionKeys::default(),
+            session_keys_version: SESSION_KEYS_VERSION,
+            global_shortcuts_version: GLOBAL_SHORTCUTS_VERSION,
             secondary_paste: SecondaryPasteDefaults::default(),
             theme_preset: default_theme_preset(),
             theme_accent: default_theme_accent(),
@@ -407,10 +435,6 @@ impl UserSetting {
     pub fn sanitized(mut self) -> Self {
         self.shortcut = self.shortcut.trim().to_string();
         if self.shortcut.is_empty() {
-            self.shortcut = DEFAULT_MAIN_SHORTCUT.to_string();
-        } else if LEGACY_MAIN_SHORTCUTS.iter().any(|legacy| {
-            normalize_shortcut_for_compare(&self.shortcut) == normalize_shortcut_for_compare(legacy)
-        }) {
             self.shortcut = DEFAULT_MAIN_SHORTCUT.to_string();
         }
 
@@ -430,11 +454,6 @@ impl UserSetting {
         self.search_shortcut = self.search_shortcut.trim().to_string();
         if self.search_shortcut.is_empty() {
             self.search_shortcut = DEFAULT_SEARCH_SHORTCUT.to_string();
-        } else if LEGACY_SEARCH_SHORTCUTS.iter().any(|legacy| {
-            normalize_shortcut_for_compare(&self.search_shortcut)
-                == normalize_shortcut_for_compare(legacy)
-        }) {
-            self.search_shortcut = DEFAULT_SEARCH_SHORTCUT.to_string();
         }
 
         self.theme_preset = default_theme_preset_if_blank(self.theme_preset);
@@ -442,10 +461,73 @@ impl UserSetting {
         if self.theme_accent == DEFAULT_THEME_ACCENT {
             self.theme_accent = migrate_legacy_theme_accent(&self.custom_theme_colors);
         }
-        self.resolve_search_shortcut_conflict();
         self.session_keys = std::mem::take(&mut self.session_keys).sanitized();
+        if self.global_shortcuts_version < GLOBAL_SHORTCUTS_VERSION {
+            self.migrate_global_shortcuts();
+            self.global_shortcuts_version = GLOBAL_SHORTCUTS_VERSION;
+        }
+        self.resolve_search_shortcut_conflict();
+        if self.session_keys_version < SESSION_KEYS_VERSION {
+            self.migrate_session_keys();
+            self.session_keys_version = SESSION_KEYS_VERSION;
+        }
         self.secondary_paste = self.secondary_paste.sanitized();
         self
+    }
+
+    fn migrate_global_shortcuts(&mut self) {
+        // v1 已完成更早的迁移，只识别它的默认值，保留当时重新录制的旧组合。
+        let (legacy_main, legacy_search): (&[&str], &[&str]) = if self.global_shortcuts_version == 0
+        {
+            (&LEGACY_MAIN_SHORTCUTS, &LEGACY_SEARCH_SHORTCUTS)
+        } else {
+            (&["Ctrl+`"], &["Ctrl+Q"])
+        };
+        let migrate = |value: &str, legacy: &[&str], default: &str| {
+            if legacy.iter().any(|old| {
+                normalize_shortcut_for_compare(value) == normalize_shortcut_for_compare(old)
+            }) {
+                default.to_string()
+            } else {
+                value.to_string()
+            }
+        };
+        let main = migrate(&self.shortcut, legacy_main, DEFAULT_MAIN_SHORTCUT);
+        let search = migrate(
+            &self.search_shortcut,
+            legacy_search,
+            DEFAULT_SEARCH_SHORTCUT,
+        );
+        if (self.search_shortcut_enabled
+            && normalize_shortcut_for_compare(&main) == normalize_shortcut_for_compare(&search))
+            || self.session_keys.conflicts_with_shortcuts(
+                &main,
+                self.search_shortcut_enabled.then_some(search.as_str()),
+            )
+        {
+            return;
+        }
+        self.shortcut = main;
+        self.search_shortcut = search;
+    }
+
+    fn migrate_session_keys(&mut self) {
+        let mut migrated = self.session_keys.clone();
+        for (action, legacy, next) in LEGACY_SESSION_KEY_MIGRATIONS {
+            if normalize_shortcut_for_compare(migrated.field(action))
+                == normalize_shortcut_for_compare(legacy)
+            {
+                migrated.set_field(action, next.to_string());
+            }
+        }
+        // Ctrl+Enter 同时涉及旧编辑键和新次级键，冲突时整组保留，避免级联占用。
+        if !migrated.conflicts_with_shortcuts(
+            &self.shortcut,
+            self.search_shortcut_enabled
+                .then_some(self.search_shortcut.as_str()),
+        ) {
+            self.session_keys = migrated;
+        }
     }
 
     fn resolve_search_shortcut_conflict(&mut self) {
@@ -465,11 +547,28 @@ impl UserSetting {
     }
 }
 
-fn normalize_shortcut_for_compare(shortcut: &str) -> String {
-    // 与 GUI 快捷键插件解耦后的等价规范化：先做注册名归一（win→Super 等）
-    // 再统一小写。原实现先经插件解析成规范串，解析失败时同样回退到小写，
-    // 比较语义（大小写不敏感的冲突检测）保持一致。
-    normalize_shortcut_for_registration(shortcut).to_lowercase()
+/// 快捷键比较口径：忽略大小写、修饰键顺序和平台支持的键名别名。
+pub fn normalize_shortcut_for_compare(shortcut: &str) -> String {
+    let mut parts: Vec<String> = shortcut
+        .split('+')
+        .map(|part| match part.trim().to_ascii_lowercase().as_str() {
+            "control" => "ctrl".to_string(),
+            "win" | "windows" | "super" => "win".to_string(),
+            "return" => "enter".to_string(),
+            "esc" => "escape".to_string(),
+            "del" => "delete".to_string(),
+            "backquote" => "`".to_string(),
+            "arrowup" => "up".to_string(),
+            "arrowdown" => "down".to_string(),
+            "arrowleft" => "left".to_string(),
+            "arrowright" => "right".to_string(),
+            other => other.to_string(),
+        })
+        .filter(|part| !part.is_empty())
+        .collect();
+    parts.sort_unstable();
+    parts.dedup();
+    parts.join("+")
 }
 
 /// 把用户书写习惯归一为可注册形式：token 去空白、`win`/`windows` 映射为 `Super`。
@@ -628,25 +727,83 @@ mod tests {
     }
 
     #[test]
-    fn sanitized_migrates_legacy_ctrl_backtick_to_default() {
+    fn sanitized_migrates_legacy_global_defaults_once() {
+        for (version, main, search) in [
+            (0, "Ctrl+Q", "Alt+S"),
+            (0, "Alt+Q", "Win+F"),
+            (0, "Ctrl+`", "Super+F"),
+            (1, "Ctrl+`", "Ctrl+Q"),
+            (1, "Control+`", "q+control"),
+        ] {
+            let settings = UserSetting {
+                shortcut: main.into(),
+                search_shortcut: search.into(),
+                global_shortcuts_version: version,
+                ..UserSetting::default()
+            }
+            .sanitized();
+            assert_eq!(settings.shortcut, "Alt+`");
+            assert_eq!(settings.search_shortcut, "Alt+Q");
+            assert_eq!(settings.global_shortcuts_version, 2);
+        }
         let settings = UserSetting {
-            shortcut: "Ctrl+`".to_string(),
+            shortcut: "Ctrl+Q".into(),
+            search_shortcut: "Alt+S".into(),
             ..UserSetting::default()
         }
         .sanitized();
-
-        assert_eq!(settings.shortcut, "Ctrl+Q");
+        assert_eq!(settings.shortcut, "Ctrl+Q", "新版主动恢复旧组合不再迁移");
+        assert_eq!(settings.search_shortcut, "Alt+S");
     }
 
     #[test]
-    fn sanitized_migrates_legacy_win_f_to_alt_s() {
+    fn global_shortcut_migration_preserves_customizations_and_conflicts() {
         let settings = UserSetting {
-            search_shortcut: "Win+F".to_string(),
+            shortcut: "Ctrl+R".into(),
+            search_shortcut: "Alt+S".into(),
+            global_shortcuts_version: 0,
             ..UserSetting::default()
         }
         .sanitized();
+        assert_eq!(settings.shortcut, "Ctrl+R");
+        assert_eq!(settings.search_shortcut, "Alt+Q");
 
+        let settings = UserSetting {
+            shortcut: "Ctrl+R".into(),
+            search_shortcut: "Alt+S".into(),
+            global_shortcuts_version: 1,
+            ..UserSetting::default()
+        }
+        .sanitized();
+        assert_eq!(settings.shortcut, "Ctrl+R");
+        assert_eq!(
+            settings.search_shortcut, "Alt+S",
+            "v1 自定义旧组合不能重新迁移"
+        );
+
+        // 搜索已自定义为新速贴键，整组保留原组合，不能改成重复键或停用搜索。
+        let settings = UserSetting {
+            shortcut: "Ctrl+Q".into(),
+            search_shortcut: "ALT+`".into(),
+            global_shortcuts_version: 0,
+            ..UserSetting::default()
+        }
+        .sanitized();
+        assert_eq!(settings.shortcut, "Ctrl+Q");
+        assert_eq!(settings.search_shortcut, "ALT+`");
+        assert!(settings.search_shortcut_enabled);
+
+        let mut settings = UserSetting {
+            shortcut: "Ctrl+Q".into(),
+            search_shortcut: "Alt+S".into(),
+            global_shortcuts_version: 0,
+            ..UserSetting::default()
+        };
+        settings.session_keys.delete_entry = "Alt+Backquote".into();
+        let settings = settings.sanitized();
+        assert_eq!(settings.shortcut, "Ctrl+Q");
         assert_eq!(settings.search_shortcut, "Alt+S");
+        assert_eq!(settings.session_keys.delete_entry, "Alt+Backquote");
     }
 
     #[test]
@@ -723,12 +880,100 @@ mod tests {
 
         assert_eq!(settings.session_keys.confirm, "Enter");
         assert_eq!(settings.session_keys.dismiss, "Escape");
-        assert_eq!(settings.session_keys.confirm_as_file, "Shift+Enter");
+        assert_eq!(settings.session_keys.confirm_as_file, "Ctrl+Enter");
+    }
+
+    #[test]
+    fn sanitized_migrates_legacy_session_key_defaults() {
+        // 旧配置文件保存的是旧默认：升级加载时迁移到新默认
+        let settings = UserSetting {
+            session_keys_version: 0,
+            session_keys: super::SessionKeys {
+                confirm_as_file: "shift+enter".to_string(),
+                open_editor: "Ctrl+Enter".to_string(),
+                toggle_favorite: "Ctrl+Space".to_string(),
+                ..super::SessionKeys::default()
+            },
+            ..UserSetting::default()
+        }
+        .sanitized();
+
+        assert_eq!(settings.session_keys.confirm_as_file, "Ctrl+Enter");
+        assert_eq!(settings.session_keys.open_editor, "Ctrl+E");
+        assert_eq!(settings.session_keys.toggle_favorite, "Ctrl+D");
+
+        // 用户自定义值不被迁移
+        let settings = UserSetting {
+            session_keys_version: 0,
+            session_keys: super::SessionKeys {
+                confirm_as_file: "Alt+Enter".to_string(),
+                ..super::SessionKeys::default()
+            },
+            ..UserSetting::default()
+        }
+        .sanitized();
+
+        assert_eq!(settings.session_keys.confirm_as_file, "Alt+Enter");
+    }
+
+    #[test]
+    fn session_key_migration_preserves_conflicting_customizations_and_runs_once() {
+        let legacy = super::SessionKeys {
+            confirm_as_file: "Shift+Enter".into(),
+            open_editor: "Ctrl+Enter".into(),
+            toggle_favorite: "Ctrl+Space".into(),
+            ..super::SessionKeys::default()
+        };
+        for (action, custom) in [(7, "D+Control"), (1, "Ctrl+E")] {
+            let mut keys = legacy.clone();
+            keys.set_field(action, custom.into());
+            let migrated = UserSetting {
+                session_keys: keys.clone(),
+                session_keys_version: 0,
+                ..UserSetting::default()
+            }
+            .sanitized();
+            assert_eq!(migrated.session_keys, keys);
+            assert_eq!(migrated.session_keys_version, super::SESSION_KEYS_VERSION);
+        }
+        for search_enabled in [false, true] {
+            let settings = UserSetting {
+                session_keys: legacy.clone(),
+                session_keys_version: 0,
+                shortcut: if search_enabled {
+                    "Ctrl+Q"
+                } else {
+                    "E+Control"
+                }
+                .into(),
+                search_shortcut: "Ctrl+D".into(),
+                search_shortcut_enabled: search_enabled,
+                ..UserSetting::default()
+            }
+            .sanitized();
+            assert_eq!(settings.session_keys, legacy);
+        }
+        let mut upgraded = UserSetting {
+            session_keys: legacy.clone(),
+            session_keys_version: 0,
+            ..UserSetting::default()
+        }
+        .sanitized();
+        upgraded.session_keys = legacy.clone();
+        let saved = upgraded.sanitized();
+        assert_eq!(saved.session_keys, legacy);
+        let reloaded: UserSetting =
+            serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
+        assert_eq!(reloaded.sanitized().session_keys, legacy);
+        assert_eq!(
+            normalize_shortcut_for_compare("Control+Alt+Return"),
+            normalize_shortcut_for_compare("Enter+ALT+Ctrl")
+        );
     }
 
     #[test]
     fn search_shortcut_resets_to_default_when_conflicts_with_main_shortcut() {
-        // 用非遗留组合：遗留值（如 Alt+Q）会先迁移到新默认，冲突随之消失
+        // 当前版本配置只处理冲突，不再按旧默认值重写用户组合。
         let settings = UserSetting {
             shortcut: "Ctrl+R".to_string(),
             search_shortcut: "Ctrl+R".to_string(),
@@ -737,14 +982,14 @@ mod tests {
         }
         .sanitized();
 
-        assert_eq!(settings.search_shortcut, "Alt+S");
+        assert_eq!(settings.search_shortcut, "Alt+Q");
     }
 
     #[test]
     fn search_shortcut_conflict_detection_uses_normalized_shortcuts() {
         let settings = UserSetting {
-            shortcut: "ALT+S".to_string(),
-            search_shortcut: "alt+s".to_string(),
+            shortcut: "ALT+Q".to_string(),
+            search_shortcut: "q+alt".to_string(),
             search_shortcut_enabled: true,
             ..UserSetting::default()
         }

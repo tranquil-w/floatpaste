@@ -62,6 +62,9 @@ fn row(
     favorited: bool,
     tags: Vec<&str>,
 ) -> ClipRow {
+    let keys = floatpaste_core::domain::settings::SessionKeys::default();
+    let primary = keys.confirm.as_str();
+    let secondary = keys.confirm_as_file.as_str();
     ClipRow {
         id: "1".into(),
         preview: SharedString::from(preview),
@@ -83,17 +86,17 @@ fn row(
         actions: slint::ModelRc::new(slint::VecModel::from(
             match type_label {
                 "图片" => vec![
-                    ("粘贴为图片", "Enter"),
-                    ("粘贴为图片路径", "Shift+Enter"),
+                    ("粘贴为图片", primary),
+                    ("粘贴为图片路径", secondary),
                     ("粘贴为图片文件", ""),
                 ],
                 "文件" => vec![
-                    ("粘贴为文件", "Enter"),
-                    ("粘贴为完整路径", "Shift+Enter"),
+                    ("粘贴为文件", primary),
+                    ("粘贴为完整路径", secondary),
                     ("粘贴为文件名", ""),
                 ],
-                "富文本" => vec![("粘贴为原格式", "Enter"), ("粘贴为纯文本", "Shift+Enter")],
-                _ => vec![("粘贴为文本", "Enter")],
+                "富文本" => vec![("粘贴为原格式", primary), ("粘贴为纯文本", secondary)],
+                _ => vec![("粘贴为文本", primary)],
             }
             .into_iter()
             .map(|(label, shortcut)| PasteActionItem {
@@ -229,6 +232,9 @@ fn main() {
     .unwrap();
 
     let picker = QuickPasteWindow::new().unwrap();
+    let keys = floatpaste_core::domain::settings::SessionKeys::default();
+    picker.set_delete_shortcut(keys.delete_entry.into());
+    picker.set_dismiss_shortcut(keys.dismiss.into());
     let theme = picker.global::<Theme>();
     theme.set_is_dark(!is_light);
     theme.set_canvas_default(hex_color(tokens.canvas_default));

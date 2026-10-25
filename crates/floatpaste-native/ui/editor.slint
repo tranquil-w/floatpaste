@@ -96,7 +96,7 @@ export component EditorWindow inherits Window {
     in-out property <bool> load-failed: false;
     in-out property <bool> is-text: false;
     // 引导键帽（"编辑内容"会话键，含 "+" 分隔符），Rust 按当前设置注入
-    in-out property <[string]> edit-key-parts: ["Ctrl", "+", "Enter"];
+    in-out property <[string]> edit-key-parts;
     in-out property <string> meta-source;
     in-out property <string> meta-time;
     in-out property <string> meta-extra;

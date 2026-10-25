@@ -1,8 +1,8 @@
 //! 速贴面板会话期快捷键：RegisterHotKey（专用线程装载/泵送/注销）。
 //!
 //! 原版行为（Tauri global-shortcut 会话热键）的同源复刻：
-//! - 面板可见期间全局接管 ↑↓ / Enter / Shift+Enter / Esc / Ctrl+Space /
-//!   Ctrl+Enter / Delete / 数字 1-9（可关），命中即吞、不再落到目标应用；
+//! - 面板可见期间全局接管 ↑↓ / Enter / Ctrl+Enter / Esc / Ctrl+D /
+//!   Ctrl+E / Delete / 数字 1-9（可关），命中即吞、不再落到目标应用；
 //! - ↑↓ 注册时不带 MOD_NOREPEAT，按住连发走系统按键重复速率（对齐旧壳
 //!   global-shortcut 行为）；其余键带 MOD_NOREPEAT，长按只触发一次；
 //! - 会话热键全局生效，不依赖前台焦点——「编辑窗停屏后残留焦点吃掉
@@ -39,7 +39,7 @@ pub enum SessionAction {
     NavigateUp,
     NavigateDown,
     Confirm,
-    /// 次级上屏（默认 Shift+Enter）：执行该类别配置的默认动作
+    /// 次级上屏（默认 Ctrl+Enter）：执行该类别配置的默认动作
     /// （见 settings::SecondaryPasteDefaults）
     ConfirmAsPath,
     Dismiss,
@@ -62,7 +62,7 @@ pub struct SessionCombo {
     pub win: bool,
 }
 
-/// 解析 "Shift+Enter" / "Ctrl+Space" / "K" 形式的会话键描述；无法识别
+/// 解析 "Ctrl+Enter" / "Ctrl+D" / "K" 形式的会话键描述；无法识别
 /// 时返回 `None`。键名支持：A~Z、0~9、F1~F24、反引号、Space、Enter、
 /// Escape/Esc、Tab、Backspace、Delete/Del、Insert、Home、End、
 /// PageUp/PageDown、Up/Down/Left/Right（含 ArrowUp 等别名）、

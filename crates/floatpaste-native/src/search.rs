@@ -1214,6 +1214,8 @@ pub fn refresh_copy(app: &App) {
             delete_entry: keys.delete_entry.into(),
         });
     });
+    reset_delete_arm(app);
+    build_rows(app);
     update_empty_state(app);
 }
 
@@ -1750,7 +1752,7 @@ pub fn retry(app: &App) {
     run_query(app);
 }
 
-/// Ctrl+Enter / 编辑按钮：打开编辑器（搜索窗停屏、会话让位，关闭后
+/// Ctrl+E / 编辑按钮：打开编辑器（搜索窗停屏、会话让位，关闭后
 /// 原样恢复选中与关键词；对齐旧版 SEARCH_EDIT_ITEM_EVENT）
 pub fn edit_requested(app: &App, index: usize) {
     let Some(item) = app.state.search_item_at(index) else {
@@ -2192,11 +2194,11 @@ mod tests {
             3
         );
         assert_eq!(
-            resolve_session_action(&settings, "\u{a}", false, false, true, false),
+            resolve_session_action(&settings, "\u{a}", true, false, false, false),
             4
         );
         assert_eq!(
-            resolve_session_action(&settings, "\u{a}", true, false, false, false),
+            resolve_session_action(&settings, "e", true, false, false, false),
             5
         );
         assert_eq!(
@@ -2212,20 +2214,17 @@ mod tests {
             2
         );
         assert_eq!(
-            resolve_session_action(&settings, "\u{20}", true, false, false, false),
+            resolve_session_action(&settings, "d", true, false, false, false),
             6
         );
         assert_eq!(
             resolve_session_action(&settings, "\u{7f}", false, false, false, false),
             8
         );
-        // 未配置组合放行（0），修饰键集合不一致不命中
+        // 未配置组合放行（0）；d 是 Ctrl+D 的键名但无修饰，修饰键
+        // 集合不一致也不命中
         assert_eq!(
-            resolve_session_action(&settings, "\u{20}", false, false, false, false),
-            0
-        );
-        assert_eq!(
-            resolve_session_action(&settings, "x", false, false, false, false),
+            resolve_session_action(&settings, "d", false, false, false, false),
             0
         );
     }
@@ -2479,10 +2478,20 @@ pub(crate) mod refresh_after_editor_tests {
         let mut settings = app.state.current_settings();
         settings.session_keys.confirm = "Alt+Enter".into();
         settings.session_keys.dismiss = "Ctrl+Escape".into();
+        settings.session_keys.open_editor = "Ctrl+Shift+E".into();
         app.core().update_settings(settings).unwrap();
         refresh_copy(&app);
         assert_eq!(win.get_action_keys().confirm, "Alt+Enter");
         assert_eq!(win.get_action_keys().dismiss, "Ctrl+Escape");
+        crate::editor::refresh_copy(&app);
+        assert_eq!(
+            editor_win
+                .get_edit_key_parts()
+                .iter()
+                .map(|part| part.to_string())
+                .collect::<Vec<_>>(),
+            ["Ctrl", "Shift", "E"]
+        );
 
         // 前置等价 bug 现场：搜索窗已建而 chips 未加载（编辑器路径不
         // 经过会话打开，无从加载）
@@ -2772,6 +2781,18 @@ pub(crate) mod action_menu_tests {
         win.set_result_count(2);
         win.set_result_total(2);
         set_selected(app, 1);
+        // 已构建的行目录和按钮悬浮提示也必须随保存更新，不能只更新 action-keys。
+        let mut settings = app.state.current_settings();
+        settings.session_keys.confirm = "Alt+Enter".into();
+        settings.session_keys.confirm_as_file = "Shift+Enter".into();
+        settings.session_keys.open_editor = "Ctrl+Shift+E".into();
+        settings.session_keys.toggle_favorite = "Ctrl+Shift+D".into();
+        settings.session_keys.delete_entry = "Ctrl+L".into();
+        app.core().update_settings(settings).unwrap();
+        refresh_copy(app);
+        let row = win.get_rows().row_data(1).unwrap();
+        assert_eq!(row.actions.row_data(0).unwrap().shortcut, "Alt+Enter");
+        assert_eq!(row.actions.row_data(1).unwrap().shortcut, "Shift+Enter");
         let _ = win.window().take_snapshot().unwrap();
 
         let hint = Rc::new(RefCell::new(None));
@@ -2796,17 +2817,31 @@ pub(crate) mod action_menu_tests {
         assert!(bounds.0 < bounds.1, "应找到文件行");
         let y = bounds.0 as f32 + 22.0;
         let (mut main, mut more) = (None, None);
+        let mut hints = Vec::new();
         for x in 400..760 {
             win.window().dispatch_event(WindowEvent::PointerMoved {
                 position: slint::LogicalPosition::new(x as f32, y),
             });
             if let Some((text, x, y)) = hint.borrow_mut().take() {
+                hints.push(text.clone());
                 if text.starts_with("更多上屏方式") {
                     more = Some(slint::LogicalPosition::new(x + 11.0, y - 17.0));
                 } else if text.starts_with("粘贴为文件") {
                     main = Some(slint::LogicalPosition::new(x + 34.0, y - 17.0));
                 }
             }
+        }
+        for expected in [
+            "粘贴为文件（Alt+Enter）",
+            "更多上屏方式 · 粘贴为完整路径（Shift+Enter）",
+            "编辑内容（Ctrl+Shift+E）",
+            "收藏（Ctrl+Shift+D）",
+            "删除条目（Ctrl+L）",
+        ] {
+            assert!(
+                hints.iter().any(|hint| hint == expected),
+                "缺少当前键位提示：{expected}；实际：{hints:?}"
+            );
         }
 
         // 截获发布回调以避免写系统剪贴板，其余菜单路由使用真实 wire。

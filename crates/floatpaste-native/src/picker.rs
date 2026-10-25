@@ -685,6 +685,17 @@ pub fn refresh_list_changed(app: &App) {
     refresh_list(app, true);
 }
 
+/// 设置保存后刷新提示和已缓存的动作目录，不重新查询或改变选中条目。
+pub(crate) fn refresh_copy(app: &App) {
+    close_actions(app);
+    let settings = app.state.current_settings();
+    app.with_picker(|win| {
+        win.set_monitoring_paused(settings.pause_monitoring);
+        win.set_digit_shortcuts_enabled(settings.picker_digit_shortcuts_enabled);
+        build_rows(app, win, &app.state.items());
+    });
+}
+
 /// 编辑器内保存/删除/改标签后的刷新：速贴此时处于失活态，
 /// 跳过活跃判定强制重排，保证返回时列表已反映变更
 pub fn refresh_after_editor(app: &App) {
@@ -888,6 +899,7 @@ fn build_rows(app: &App, win: &QuickPasteWindow, items: &[ClipItemSummary]) {
     let settings = app.state.current_settings();
     let keys = &settings.session_keys;
     win.set_delete_shortcut(keys.delete_entry.clone().into());
+    win.set_dismiss_shortcut(keys.dismiss.clone().into());
     let (avail_no_thumb, avail_with_thumb) = preview_avail_widths(win);
     let line_height = preview_line_height(win, false);
     let code_line_height = preview_line_height(win, true);
@@ -2407,19 +2419,28 @@ pub(crate) mod action_sheet_tests {
             app.core().repository.save_text_item(&item).unwrap();
             std::thread::sleep(Duration::from_millis(2));
         }
-        let mut settings = app.state.current_settings();
-        settings.session_keys.delete_entry = "Ctrl+D".into();
-        app.core().update_settings(settings).unwrap();
         wire(app);
         win.window().set_size(slint::LogicalSize::new(360.0, 420.0));
         refresh_list(app, false);
-        assert_eq!(win.get_delete_shortcut(), "Ctrl+D");
+        let mut settings = app.state.current_settings();
+        settings.session_keys.delete_entry = "Ctrl+L".into();
+        settings.session_keys.dismiss = "Ctrl+Escape".into();
+        settings.session_keys.confirm = "Alt+Enter".into();
+        settings.session_keys.open_editor = "Ctrl+Shift+E".into();
+        settings.session_keys.toggle_favorite = "Ctrl+Shift+D".into();
+        settings.picker_digit_shortcuts_enabled = false;
+        app.core().update_settings(settings).unwrap();
+        refresh_copy(app);
+        assert_eq!(win.get_delete_shortcut(), "Ctrl+L");
+        assert_eq!(win.get_header_hint(), "Alt+Enter 粘贴为文本");
+        assert_eq!(win.get_rows().row_data(0).unwrap().digit, "");
         request_delete(app, 0);
         assert_eq!(win.get_delete_armed_row(), -1, "失活时不能删除");
         app.state.begin_picker_activation();
         set_selected(app, 1);
         handle_session_action(app, SessionAction::DeleteEntry);
         assert_eq!(win.get_delete_armed_row(), 1);
+        assert_eq!(win.get_header_hint(), "Ctrl+L 确认删除 · Ctrl+Escape 取消");
         handle_session_action(app, SessionAction::Dismiss);
         assert_eq!(win.get_delete_armed_row(), -1);
         assert!(app.state.is_picker_active(), "Esc 先取消确认，不关闭面板");
@@ -2489,8 +2510,20 @@ pub(crate) mod action_sheet_tests {
         use slint::Model;
         assert_eq!(win.get_menu_actions().row_count(), 4);
         assert_eq!(
+            win.get_menu_actions().row_data(0).unwrap().shortcut,
+            "Alt+Enter"
+        );
+        assert_eq!(
+            win.get_menu_actions().row_data(1).unwrap().shortcut,
+            "Ctrl+Shift+D"
+        );
+        assert_eq!(
+            win.get_menu_actions().row_data(2).unwrap().shortcut,
+            "Ctrl+Shift+E"
+        );
+        assert_eq!(
             win.get_menu_actions().row_data(3).unwrap().shortcut,
-            "Ctrl+D"
+            "Ctrl+L"
         );
         activate_menu_item(app, 0, 1);
         assert!(

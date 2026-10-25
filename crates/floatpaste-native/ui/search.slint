@@ -5,7 +5,7 @@
 // - 筛选行：类型 chips（全部/收藏/文本/图片/文件）+ 标签 chips（多选 AND）
 // - 列表：单行省略恒定行高，选中仅高亮/左条/操作条浮层（不展开全文与大图）
 // - 键盘：根 FocusScope capture-key-pressed 先于输入框拦截会话键
-//   （↑↓/Enter/Shift+Enter/Ctrl+Enter/Ctrl+Space/Del/Esc），其余按键放行输入框
+//   （↑↓/Enter/Ctrl+Enter/Ctrl+D/Ctrl+E/Del/Esc），其余按键放行输入框
 // - 挂起态（键盘交给速贴面板）：输入框失焦
 // - 行高恒定：选中只换高亮/左条/操作条浮层，不展开（切换零跳动）
 import { Theme, Metrics, Motion } from "theme.slint";
@@ -603,7 +603,7 @@ component SearchRowCard inherits Rectangle {
                             }
                         }
                         // 编辑键：全类型通用（编辑器支持文本/图片/文件），
-                        // 与键盘 Ctrl+Enter 同一入口
+                        // 与键盘 Ctrl+E 同一入口
                         edit-btn := IconButton {
                             hint: "编辑内容（" + root.action-keys.open-editor + "）";
                             clicked => { root.edit(); }

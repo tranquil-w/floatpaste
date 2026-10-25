@@ -23,6 +23,7 @@ impl SqliteRepository {
             .optional()?;
 
         let mut setting = settings_json
+            .as_deref()
             .map(|raw| serde_json::from_str::<UserSetting>(&raw))
             .transpose()?
             .unwrap_or_default();
@@ -35,7 +36,23 @@ impl SqliteRepository {
             setting.excluded_apps = excluded_apps;
         }
 
-        Ok(setting.sanitized())
+        let previous_version = (
+            setting.session_keys_version,
+            setting.global_shortcuts_version,
+        );
+        let setting = setting.sanitized();
+        if settings_json.is_some()
+            && (
+                setting.session_keys_version,
+                setting.global_shortcuts_version,
+            ) != previous_version
+        {
+            connection.execute(
+                "UPDATE settings SET value = ?1 WHERE key = ?2",
+                params![serde_json::to_string(&setting)?, USER_SETTINGS_KEY],
+            )?;
+        }
+        Ok(setting)
     }
 
     pub fn load_picker_window_state(&self) -> Result<Option<StoredWindowPosition>, AppError> {
@@ -84,5 +101,79 @@ impl SqliteRepository {
             params![PICKER_WINDOW_STATE_KEY, serde_json::to_string(position)?],
         )?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::settings::SessionKeys;
+
+    #[test]
+    fn legacy_shortcuts_are_migrated_and_persisted_without_overwriting_later_edits() {
+        let repository = SqliteRepository::new(std::path::Path::new(":memory:")).unwrap();
+        let legacy = SessionKeys {
+            confirm_as_file: "Shift+Enter".into(),
+            open_editor: "Ctrl+Enter".into(),
+            toggle_favorite: "Ctrl+Space".into(),
+            ..SessionKeys::default()
+        };
+        let mut raw = serde_json::to_value(UserSetting {
+            shortcut: "Ctrl+Q".into(),
+            search_shortcut: "Alt+S".into(),
+            session_keys: legacy.clone(),
+            ..UserSetting::default()
+        })
+        .unwrap();
+        raw.as_object_mut().unwrap().remove("sessionKeysVersion");
+        raw.as_object_mut()
+            .unwrap()
+            .remove("globalShortcutsVersion");
+        repository
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO settings(key, value) VALUES(?1, ?2)",
+                params![USER_SETTINGS_KEY, raw.to_string()],
+            )
+            .unwrap();
+
+        let mut loaded = repository.load_settings().unwrap();
+        assert_eq!(loaded.session_keys, SessionKeys::default());
+        assert_eq!(loaded.shortcut, "Alt+`");
+        assert_eq!(loaded.search_shortcut, "Alt+Q");
+        let persisted: String = repository
+            .connection
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                [USER_SETTINGS_KEY],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<UserSetting>(&persisted)
+                .unwrap()
+                .session_keys_version,
+            loaded.session_keys_version
+        );
+        assert_eq!(
+            serde_json::from_str::<UserSetting>(&persisted)
+                .unwrap()
+                .global_shortcuts_version,
+            loaded.global_shortcuts_version
+        );
+
+        // 升级后用户主动恢复整套旧键位，保存和后续加载均不得再次迁移。
+        loaded.session_keys = legacy.clone();
+        loaded.shortcut = "Ctrl+Q".into();
+        loaded.search_shortcut = "Alt+S".into();
+        repository.save_settings(&loaded.sanitized()).unwrap();
+        let reloaded = repository.load_settings().unwrap();
+        assert_eq!(reloaded.session_keys, legacy);
+        assert_eq!(reloaded.shortcut, "Ctrl+Q");
+        assert_eq!(reloaded.search_shortcut, "Alt+S");
     }
 }

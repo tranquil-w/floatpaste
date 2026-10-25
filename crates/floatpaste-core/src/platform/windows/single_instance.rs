@@ -256,7 +256,7 @@ pub fn signal_test_search_escape(instance_id: &str) -> bool {
 
 /// E2E 驱动钩子：仅当 FLOATPASTE_INSTANCE_ID 设置时装载（生产实例不装载）。
 /// 速贴收藏切换是键盘/点击路径（不使用输入注入），测试经命名事件触发
-/// toggle_favorite 回调——与会话键（默认 Ctrl+Space）处理后的终点相同，
+/// toggle_favorite 回调——与会话键（默认 Ctrl+D）处理后的终点相同，
 /// 仅绕过按键分发层
 const TEST_PICKER_FAVORITE_EVENT_NAME: &str = "Local\\FloatPaste.TestPickerFavorite";
 

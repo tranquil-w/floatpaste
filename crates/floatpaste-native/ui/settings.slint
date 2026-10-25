@@ -181,7 +181,7 @@ component ShortcutInput inherits Rectangle {
                 root.cleared();
                 return accept;
             }
-            // 主键：单字符（字母/数字/空格/,./）与 Tab、上下方向键
+            // 主键：单字符（字母/数字/空格/反引号/,./）与 Tab、上下方向键
             root.main-key =
                 event.text.character-count == 1
                 && ((event.text >= "a" && event.text <= "z")
@@ -191,6 +191,7 @@ component ShortcutInput inherits Rectangle {
                 : event.text == "," ? "Comma"
                 : event.text == "." ? "Period"
                 : event.text == "/" ? "Slash"
+                : event.text == "`" ? "`"
                 : event.text == Key.Tab ? "Tab"
                 : event.text == Key.UpArrow ? "ArrowUp"
                 : event.text == Key.DownArrow ? "ArrowDown"
@@ -1927,6 +1928,8 @@ export component SettingsWindow inherits Window {
                                         description: "在任意应用中打开或收起速贴。";
                                         Rectangle {
                                             width: 224px;
+                                            // 提示参与行高度计算，避免居中后越出行卡被裁切。
+                                            height: sc1-ctrl.preferred-height;
                                             sc1-ctrl := VerticalLayout {
                                                 x: 0;
                                                 y: (parent.height - self.preferred-height) / 2;
@@ -1975,6 +1978,7 @@ export component SettingsWindow inherits Window {
                                         description: "在任意应用中打开或收起搜索窗口，可单独停用。";
                                         Rectangle {
                                             width: 46px + 16px + 224px;
+                                            height: sc2-ctrl.preferred-height;
                                             sc2-ctrl := VerticalLayout {
                                                 x: 62px;
                                                 y: (parent.height - self.preferred-height) / 2;
@@ -2064,7 +2068,8 @@ export component SettingsWindow inherits Window {
                                         description: row.description;
                                         Rectangle {
                                             width: 224px;
-                                            VerticalLayout {
+                                            height: sk-ctrl.preferred-height;
+                                            sk-ctrl := VerticalLayout {
                                                 x: 0;
                                                 y: (parent.height - self.preferred-height) / 2;
                                                 width: 224px;

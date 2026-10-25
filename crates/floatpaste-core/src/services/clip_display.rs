@@ -387,7 +387,7 @@ mod tests {
         let summaries = paste_action_summaries(
             &item_of("file", 1, 0),
             "Enter",
-            "Shift+Enter",
+            "Ctrl+Enter",
             &SecondaryPasteDefaults::default(),
         );
         assert_eq!(
@@ -399,7 +399,7 @@ mod tests {
                 },
                 PasteActionSummary {
                     label: "粘贴为完整路径".into(),
-                    shortcut: "Shift+Enter".into(),
+                    shortcut: "Ctrl+Enter".into(),
                 },
                 PasteActionSummary {
                     label: "粘贴为文件名".into(),
@@ -412,14 +412,14 @@ mod tests {
         let summaries = paste_action_summaries(
             &item_of("file", 1, 0),
             "Enter",
-            "Shift+Enter",
+            "Ctrl+Enter",
             &SecondaryPasteDefaults {
                 file: PasteMode::FileNameText,
                 ..SecondaryPasteDefaults::default()
             },
         );
         assert_eq!(summaries[1].shortcut, "");
-        assert_eq!(summaries[2].shortcut, "Shift+Enter");
+        assert_eq!(summaries[2].shortcut, "Ctrl+Enter");
     }
 
     #[test]

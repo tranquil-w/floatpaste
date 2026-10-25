@@ -30,6 +30,7 @@ use std::sync::Arc;
 use slint::ComponentHandle;
 
 use floatpaste_core::domain::error::AppError;
+use floatpaste_core::domain::settings::DEFAULT_MAIN_SHORTCUT;
 use floatpaste_core::launch_mode::{self, LaunchMode};
 use floatpaste_core::platform::windows::clipboard_monitor::ClipboardMonitor;
 use floatpaste_core::platform::windows::elevated_task;
@@ -645,7 +646,7 @@ pub(crate) fn sync_global_hotkeys(app: &App) {
     let shortcut_text = {
         let configured = settings.shortcut;
         if configured.trim().is_empty() {
-            "Ctrl+Q".to_string()
+            DEFAULT_MAIN_SHORTCUT.to_string()
         } else {
             configured
         }
@@ -654,7 +655,8 @@ pub(crate) fn sync_global_hotkeys(app: &App) {
     let search_shortcut_enabled = settings.search_shortcut_enabled;
     // 快捷键无法解析时只跳过注册，不退出进程：剪贴板监听与
     // 二次启动唤起仍可用
-    let main_spec = hotkey::parse_hotkey(&shortcut_text).or_else(|| hotkey::parse_hotkey("Ctrl+Q"));
+    let main_spec = hotkey::parse_hotkey(&shortcut_text)
+        .or_else(|| hotkey::parse_hotkey(DEFAULT_MAIN_SHORTCUT));
     let Some(main_spec) = main_spec else {
         tracing::error!("主快捷键无法解析（配置值与默认值均失败），跳过注册");
         return;

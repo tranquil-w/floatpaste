@@ -754,7 +754,15 @@ export component QuickPasteWindow inherits Window {
     in-out property <int> action-selected: 0;
     in property <[PasteActionItem]> menu-actions;
     in-out property <int> delete-armed-row: -1;
-    in property <string> delete-shortcut: "Delete";
+    in property <string> delete-shortcut;
+    in property <string> dismiss-shortcut;
+    out property <string> header-hint: root.delete-armed-row >= 0
+        ? root.delete-shortcut + " 确认删除 · " + root.dismiss-shortcut + " 取消"
+        : root.actions-row >= 0 ? "更多操作"
+        : (root.selected >= 0 && root.selected < root.rows.length
+            && root.rows[root.selected].actions.length > 0
+            ? root.rows[root.selected].actions[0].shortcut + " "
+                + root.rows[root.selected].actions[0].label : "速贴");
 
     SoftShadow {
         x: PanelGeometry.shadow-margin;
@@ -830,12 +838,7 @@ export component QuickPasteWindow inherits Window {
                     x: 38px;
                     width: parent.width - 84px;
                     height: parent.height;
-                    text: root.delete-armed-row >= 0 ? root.delete-shortcut + " 确认删除 · Esc 取消"
-                        : root.actions-row >= 0 ? "更多操作"
-                        : (root.selected >= 0 && root.selected < root.rows.length
-                            && root.rows[root.selected].actions.length > 0
-                            ? root.rows[root.selected].actions[0].shortcut + " "
-                                + root.rows[root.selected].actions[0].label : "速贴");
+                    text: root.header-hint;
                     color: root.delete-armed-row >= 0 ? Theme.danger-fg : Theme.fg-muted;
                     font-size: Metrics.text-hint;
                     horizontal-alignment: center;

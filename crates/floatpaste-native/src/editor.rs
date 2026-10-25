@@ -106,7 +106,7 @@ fn resolve_target_position(
 
 // ── 打开入口 ──────────────────────────────────────────────
 
-/// 速贴面板 Ctrl+Enter：收起面板（不还原前台，编辑器接管），打开编辑器
+/// 速贴面板 Ctrl+E：收起面板（不还原前台，编辑器接管），打开编辑器
 pub fn open_from_picker(app: &App, item_id: String) {
     let target = app.state.picker_session();
     // 锚点须在停屏前捕获：hide_for_editor 把速贴平移到屏外
@@ -125,7 +125,7 @@ pub fn open_from_picker(app: &App, item_id: String) {
     );
 }
 
-/// 搜索窗口 Ctrl+Enter / 铅笔按钮：隐藏窗口（保留列表状态），打开编辑器
+/// 搜索窗口 Ctrl+E / 铅笔按钮：隐藏窗口（保留列表状态），打开编辑器
 pub fn open_from_search(app: &App, item_id: String) {
     let target = app.state.search_session();
     let anchor = host_anchor(app.state.search_hwnd.load(Ordering::SeqCst));
@@ -145,7 +145,10 @@ pub fn open_from_search(app: &App, item_id: String) {
 
 /// 引导键帽按当前"编辑内容"会话键注入（无会话态的键位提示不可写死，
 /// 会话键在设置中可自定义）
-fn refresh_edit_key_parts(app: &App, win: &EditorWindow) {
+pub(crate) fn refresh_copy(app: &App) {
+    let Some(win) = app.editor.upgrade() else {
+        return;
+    };
     let value = app.state.current_settings().session_keys.open_editor;
     let parts = crate::settings::parts_vec(&value);
     win.set_edit_key_parts(slint::ModelRc::new(slint::VecModel::from(parts)));
@@ -161,7 +164,7 @@ fn show_editor(app: &App, session: EditorSession, anchor: Option<HostAnchor>) {
         );
         return;
     };
-    refresh_edit_key_parts(app, &win);
+    refresh_copy(app);
     let hwnd = app.state.editor_hwnd.load(Ordering::SeqCst);
     if hwnd == 0 {
         warn!(
@@ -945,7 +948,7 @@ pub fn wire(app: &App) {
     let Some(win) = app.editor.upgrade() else {
         return;
     };
-    refresh_edit_key_parts(app, &win);
+    refresh_copy(app);
 
     let app_cb = app.clone();
     win.on_retry_clicked(move || {

@@ -21,8 +21,8 @@ use floatpaste_core::domain::clip_item::{
 };
 use floatpaste_core::domain::error::AppError;
 use floatpaste_core::domain::settings::{
-    PasteTrigger, PickerPositionMode, SecondaryPasteDefaults, SessionKeys, ThemeMode, UserSetting,
-    WindowMaterial,
+    normalize_shortcut_for_compare, PasteTrigger, PickerPositionMode, SecondaryPasteDefaults,
+    SessionKeys, ThemeMode, UserSetting, WindowMaterial,
 };
 use floatpaste_core::launch_mode;
 use floatpaste_core::platform::windows::active_app::ActiveAppResolver;
@@ -969,24 +969,12 @@ fn current_draft(win: &SettingsWindow) -> UserSetting {
     }
 }
 
-/// 与后端比较口径对齐的快捷键归一化：忽略大小写与修饰键顺序
-/// （对齐旧版 normalizeShortcutValue）
-fn normalize_shortcut_value(value: &str) -> String {
-    let mut parts: Vec<String> = value
-        .split('+')
-        .map(|part| part.trim().to_lowercase())
-        .filter(|part| !part.is_empty())
-        .collect();
-    parts.sort();
-    parts.join("+")
-}
-
 /// 快捷键冲突（对齐旧版 shortcutConflict：搜索键启用且与主键相同）
 fn shortcut_conflict(win: &SettingsWindow) -> bool {
     win.get_search_shortcut_enabled()
         && !win.get_shortcut().trim().is_empty()
-        && normalize_shortcut_value(&win.get_shortcut())
-            == normalize_shortcut_value(&win.get_search_shortcut())
+        && normalize_shortcut_for_compare(&win.get_shortcut())
+            == normalize_shortcut_for_compare(&win.get_search_shortcut())
 }
 
 /// 会话键冲突：行间键位重复，或与全局快捷键相同。返回首个冲突的提示
@@ -997,7 +985,7 @@ fn session_conflict_reason(win: &SettingsWindow) -> Option<String> {
     let entries: Vec<(&str, String)> = SESSION_KEY_DEFS
         .iter()
         .enumerate()
-        .map(|(action, (title, _))| (*title, normalize_shortcut_value(keys.field(action))))
+        .map(|(action, (title, _))| (*title, normalize_shortcut_for_compare(keys.field(action))))
         .collect();
 
     for i in 0..entries.len() {
@@ -1010,9 +998,9 @@ fn session_conflict_reason(win: &SettingsWindow) -> Option<String> {
             }
         }
     }
-    let main = normalize_shortcut_value(&win.get_shortcut());
+    let main = normalize_shortcut_for_compare(&win.get_shortcut());
     let search_enabled = win.get_search_shortcut_enabled();
-    let search = normalize_shortcut_value(&win.get_search_shortcut());
+    let search = normalize_shortcut_for_compare(&win.get_search_shortcut());
     for (title, normalized) in &entries {
         if !main.is_empty() && *normalized == main {
             return Some(format!("「{title}」与速贴唤起快捷键相同。"));
@@ -1166,8 +1154,10 @@ fn flush_pending_save(app: &App) {
 /// 托盘菜单文案右键现建，无需推送刷新。
 pub fn apply_side_effects(app: &App) {
     let settings = app.state.current_settings();
+    crate::tooltip::cancel(app);
     crate::search::refresh_copy(app);
-    app.with_picker(|win| win.set_monitoring_paused(settings.pause_monitoring));
+    crate::picker::refresh_copy(app);
+    crate::editor::refresh_copy(app);
     crate::sync_global_hotkeys(app);
     // 自启任务同步（后台线程，串行锁防并发重建；失败异步回滚开关）
     spawn_autostart_sync(app, true);
@@ -1771,15 +1761,43 @@ pub(crate) mod copy_contract_tests {
         update_tag_conflict(&win, 0, "life");
         assert!(win.get_tag_rows().row_data(0).unwrap().conflict);
 
+        win.window().set_size(slint::LogicalSize::new(880.0, 760.0));
+        win.set_session_key_rows(slint::ModelRc::new(VecModel::from(session_key_rows(
+            &UserSetting::default(),
+        ))));
+        win.set_main_hotkey_status("".into());
+        win.set_search_hotkey_status("".into());
+        win.set_winv_enabled(false);
+        let section_height = || {
+            let _ = win.window().take_snapshot().unwrap();
+            win.get_sec_y4() - win.get_sec_y3()
+        };
+        let baseline = section_height();
+        let occupied = "注册失败：组合键已被其他程序占用，请换一组组合。";
+        win.set_main_hotkey_status(occupied.into());
+        assert!(
+            section_height() > baseline + 1.0,
+            "速贴快捷键的多行错误提示应撑高行卡，不能向上溢出被裁切"
+        );
+        win.set_main_hotkey_status("".into());
+        win.set_search_hotkey_status(occupied.into());
+        assert!(
+            section_height() > baseline + 1.0,
+            "搜索快捷键的多行错误提示应撑高行卡"
+        );
+        win.set_search_hotkey_status("".into());
+        update_session_row(&win, 0, None, Some(occupied));
+        assert!(
+            section_height() > baseline + 1.0,
+            "会话快捷键的多行错误提示应撑高行卡"
+        );
+        update_session_row(&win, 0, None, Some(""));
+
         if std::env::var_os("FLOATPASTE_UI_SNAPSHOTS").is_some() {
             let dir =
                 std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.artifacts/snapshot");
             std::fs::create_dir_all(&dir).unwrap();
-            win.set_session_key_rows(slint::ModelRc::new(VecModel::from(session_key_rows(
-                &UserSetting::default(),
-            ))));
             win.set_status_kind(STATUS_SAVED);
-            win.set_nav_override(1);
             for (name, resolved) in [
                 ("light", ResolvedTheme::Light),
                 ("dark", ResolvedTheme::Dark),
@@ -1787,6 +1805,40 @@ pub(crate) mod copy_contract_tests {
                 slint::platform::update_timers_and_animations();
                 let tokens = theme::derive_tokens("default", "", resolved);
                 theme_bridge::apply_theme(None, None, None, None, None, Some(&win), &tokens);
+                win.set_session_key_rows(slint::ModelRc::new(VecModel::from(session_key_rows(
+                    &UserSetting::default(),
+                ))));
+                win.set_nav_override(3);
+                win.set_main_hotkey_status(occupied.into());
+                win.set_search_hotkey_status(occupied.into());
+                win.set_shortcut_parts(slint::ModelRc::new(VecModel::from(parts_vec(
+                    &UserSetting::default().shortcut,
+                ))));
+                win.set_search_shortcut_parts(slint::ModelRc::new(VecModel::from(parts_vec(
+                    &UserSetting::default().search_shortcut,
+                ))));
+                update_session_row(&win, 0, None, Some(occupied));
+                let _ = win.window().take_snapshot().unwrap();
+                win.set_scroll_y(80.0 - win.get_sec_y3());
+                let _ = win.window().take_snapshot().unwrap();
+                std::thread::sleep(Duration::from_millis(150));
+                slint::platform::update_timers_and_animations();
+                let pixels = win.window().take_snapshot().unwrap();
+                image::save_buffer(
+                    dir.join(format!(
+                        "shortcut-errors-{name}-{}.png",
+                        (win.window().scale_factor() * 100.0).round() as u32
+                    )),
+                    pixels.as_bytes(),
+                    pixels.width(),
+                    pixels.height(),
+                    image::ColorType::Rgba8,
+                )
+                .unwrap();
+                win.set_main_hotkey_status("".into());
+                win.set_search_hotkey_status("".into());
+                update_session_row(&win, 0, None, Some(""));
+                win.set_nav_override(1);
                 for (state, index, key) in
                     [("default", 1, "Shift+Enter"), ("files", 2, "Alt+Enter")]
                 {
