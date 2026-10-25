@@ -105,6 +105,10 @@ begin
   Result := CompareText(ExtractFileExt(ExePath), '.exe') = 0;
 end;
 
+// Inno 无内建环境变量写入，声明 Kernel32 以向迁移脚本传 Unicode 任务名与路径
+procedure SetTaskEnv(Name: String; Value: String);
+  external 'SetEnvironmentVariableW@Kernel32.dll stdcall';
+
 function IsOldEntry(RootKey: Integer; SubKey: String): Boolean;
 var
   DisplayName: String;
@@ -269,7 +273,9 @@ procedure SyncStartupTasks(Remove: Boolean);
 var
   Service, Folder, Tasks, Task, Definition, Action: Variant;
   I: Integer;
-  ExePath, TaskName: String;
+  ExePath, TaskName, MigrationError: String;
+  ResultCode: Integer;
+  MigrationLog: TArrayOfString;
 begin
   Service := CreateOleObject('Schedule.Service');
   Service.Connect();
@@ -293,15 +299,50 @@ begin
           if Remove then begin
             if CompareText(ExePath, ExpandConstant('{app}\{#AppExeName}')) = 0 then begin
               Log('删除自启任务：' + TaskName);
-              Folder.DeleteTask(TaskName, 0);
+              if not Exec(ExpandConstant('{sys}\schtasks.exe'),
+                   '/Delete /TN "' + TaskName + '" /F', '',
+                   SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
+                RaiseException('删除自启任务失败：' + TaskName);
             end;
           end else if IsUpgradeExecutable(ExePath) and
                       (CompareText(ExePath, ExpandConstant('{app}\{#AppExeName}')) <> 0) then begin
-            Action.Path := ExpandConstant('{app}\{#AppExeName}');
-            // TASK_UPDATE=4，保留原任务安全描述符。
-            Folder.RegisterTaskDefinition(TaskName, Definition, 4,
-              Definition.Principal.UserId, Null, Definition.Principal.LogonType,
-              Task.GetSecurityDescriptor(4));
+            // Inno 6.7.1 的 Variant 封送调用 RegisterTaskDefinition 会触发访问冲突，
+            // 借道 PowerShell 执行同一 COM 序列：迁移路径，保留参数、主体与安全描述符。
+            // 任务名与路径经环境变量传入，脚本保持纯 ASCII，避免编码与引号问题。
+            SetTaskEnv('FLOATPASTE_TASK_NAME', TaskName);
+            SetTaskEnv('FLOATPASTE_TASK_PATH', ExpandConstant('{app}\{#AppExeName}'));
+            SetTaskEnv('FLOATPASTE_TASK_ERRFILE', ExpandConstant('{tmp}\fp-task-migrate.err'));
+            if not SaveStringToFile(ExpandConstant('{tmp}\fp-task-migrate.ps1'),
+                 '$ErrorActionPreference = ''Stop''' + #13#10 +
+                 'try {' + #13#10 +
+                 '  $svc = New-Object -ComObject Schedule.Service' + #13#10 +
+                 '  $svc.Connect()' + #13#10 +
+                 '  $folder = $svc.GetFolder(''\'')' + #13#10 +
+                 '  $name = $env:FLOATPASTE_TASK_NAME' + #13#10 +
+                 '  $task = $folder.GetTask($name)' + #13#10 +
+                 '  $def = $task.Definition' + #13#10 +
+                 '  $act = $def.Actions.Item(1)' + #13#10 +
+                 '  $act.Path = $env:FLOATPASTE_TASK_PATH' + #13#10 +
+                 '  $folder.RegisterTaskDefinition($name, $def, 4, $def.Principal.UserId, $null, $def.Principal.LogonType, $task.GetSecurityDescriptor(4)) | Out-Null' + #13#10 +
+                 '  exit 0' + #13#10 +
+                 '} catch {' + #13#10 +
+                 '  $_ | Out-String | Set-Content -Path $env:FLOATPASTE_TASK_ERRFILE' + #13#10 +
+                 '  exit 1' + #13#10 +
+                 '}', False) then
+              RaiseException('无法写入任务迁移临时脚本。');
+            MigrationError := '';
+            if LoadStringsFromFile(ExpandConstant('{tmp}\fp-task-migrate.err'), MigrationLog) then
+              for ResultCode := 0 to GetArrayLength(MigrationLog) - 1 do
+                MigrationError := MigrationError + MigrationLog[ResultCode] + #13#10;
+            DeleteFile(ExpandConstant('{tmp}\fp-task-migrate.err'));
+            if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+                 '-NoProfile -ExecutionPolicy Bypass -File "' +
+                 ExpandConstant('{tmp}\fp-task-migrate.ps1') + '"', '',
+                 SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then begin
+              Log('自启任务迁移脚本失败，退出码=' + IntToStr(ResultCode) + '，错误=' + MigrationError);
+              RaiseException('程序已安装，但迁移自启任务失败，请在应用设置中重新开启开机自启。');
+            end;
+            DeleteFile(ExpandConstant('{tmp}\fp-task-migrate.ps1'));
           end;
         end;
       end;
