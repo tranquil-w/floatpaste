@@ -2,17 +2,19 @@
 //!
 //! 与 GUI 快捷键插件（tauri-plugin-global-shortcut）无依赖关系，供原生壳
 //! 直接使用。所有快捷键在同一线程注册并接收 `WM_HOTKEY`，触发时以快捷键
-//! id 回调；回调在快捷键线程上执行，需自行转发到 UI 线程。
+//! id 回调；回调在快捷键线程上执行，需自行转发到 UI 线程。含 Alt 的组合
+//! 命中时先注入菜单屏蔽键再回调（见 `send_alt_menu_mask`）。
 
 use std::sync::Mutex;
 use std::thread::JoinHandle;
 
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use windows::Win32::Foundation::{GetLastError, LPARAM, WPARAM};
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    RegisterHotKey, UnregisterHotKey, HOT_KEY_MODIFIERS, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT,
-    MOD_SHIFT, MOD_WIN,
+    RegisterHotKey, SendInput, UnregisterHotKey, HOT_KEY_MODIFIERS, INPUT, INPUT_KEYBOARD,
+    KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, MOD_WIN,
+    VIRTUAL_KEY,
 };
 use windows::Win32::UI::WindowsAndMessaging::WM_HOTKEY;
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -123,6 +125,41 @@ fn modifiers_mask(spec: &HotkeySpec) -> HOT_KEY_MODIFIERS {
     mask
 }
 
+/// 菜单屏蔽键取未分配的虚拟键（AutoHotkey 同用途机制的默认选择），
+/// 注入它不产生任何常用按键功能。
+const ALT_MENU_MASK_VK: u16 = 0xE8;
+
+/// 含 Alt 的全局快捷键命中后注入菜单屏蔽键。
+///
+/// `RegisterHotKey` 只吞掉组合键第二键的 keydown，Alt 的按下与抬起仍会
+/// 送达前台窗口；当 Alt 比第二键先释放时，前台窗口只见 Alt 孤立的按下
+/// 与抬起，其默认窗口过程据此次操作在 Alt 释放时激活菜单栏
+/// （`SC_KEYMENU`）。补一对屏蔽键事件后，无论松键顺序，前台窗口都已在
+/// Alt 释放前见过另一个按键的按下，不再识别成单按 Alt；正常单按 Alt、
+/// Alt+Tab 与其他软件的菜单快捷键不经此路径，不受影响。前台为更高权限
+/// 窗口时注入被系统丢弃，屏蔽不生效。
+fn send_alt_menu_mask() {
+    let inputs = alt_menu_mask_inputs();
+    let sent = unsafe { SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) };
+    if sent != 2 {
+        warn!(sent, "Alt 菜单屏蔽键未完整注入，原软件可能仍进入菜单模式");
+    }
+}
+
+fn alt_menu_mask_inputs() -> [INPUT; 2] {
+    unsafe {
+        let mut inputs: [INPUT; 2] = std::mem::zeroed();
+        inputs[0].r#type = INPUT_KEYBOARD;
+        inputs[0].Anonymous.ki.wVk = VIRTUAL_KEY(ALT_MENU_MASK_VK);
+        inputs[0].Anonymous.ki.dwFlags = KEYBD_EVENT_FLAGS(0);
+
+        inputs[1].r#type = INPUT_KEYBOARD;
+        inputs[1].Anonymous.ki.wVk = VIRTUAL_KEY(ALT_MENU_MASK_VK);
+        inputs[1].Anonymous.ki.dwFlags = KEYEVENTF_KEYUP;
+        inputs
+    }
+}
+
 /// 一批快捷键的注册结果：`registered` 为已注册并监听触发的 id，
 /// `failed` 为注册失败的 (id, Win32 错误码)（如 1409=组合已被占用）。
 /// 部分失败不阻塞其余热键照常工作
@@ -182,7 +219,13 @@ pub fn register_hotkeys(
                     break;
                 }
                 if message.message == WM_HOTKEY {
-                    on_trigger(message.wParam.0 as u32);
+                    let id = message.wParam.0 as u32;
+                    // 屏蔽键必须在回调前注入：列表准备与窗口显示都在回调之后，
+                    // 等它们完成会错过 Alt 释放的时机
+                    if specs.iter().any(|(spec_id, spec)| *spec_id == id && spec.alt) {
+                        send_alt_menu_mask();
+                    }
+                    on_trigger(id);
                 }
                 let _ = TranslateMessage(&message);
                 DispatchMessageW(&message);
@@ -269,6 +312,20 @@ mod tests {
     }
 
     #[test]
+    fn alt_menu_mask_pairs_keydown_and_keyup_of_unassigned_key() {
+        let inputs = alt_menu_mask_inputs();
+        // 读取 INPUT 的联合体字段需要 unsafe；值来自本模块刚构造的载荷
+        unsafe {
+            assert_eq!(inputs[0].r#type, INPUT_KEYBOARD);
+            assert_eq!(inputs[0].Anonymous.ki.wVk, VIRTUAL_KEY(ALT_MENU_MASK_VK));
+            assert_eq!(inputs[0].Anonymous.ki.dwFlags, KEYBD_EVENT_FLAGS(0));
+            assert_eq!(inputs[1].r#type, INPUT_KEYBOARD);
+            assert_eq!(inputs[1].Anonymous.ki.wVk, VIRTUAL_KEY(ALT_MENU_MASK_VK));
+            assert_eq!(inputs[1].Anonymous.ki.dwFlags, KEYEVENTF_KEYUP);
+        }
+    }
+
+    #[test]
     fn stop_releases_hotkeys_before_immediate_reregistration() {
         use std::time::Duration;
 
@@ -279,7 +336,9 @@ mod tests {
             }
         }
         let _cleanup = Cleanup;
-        let shortcut = parse_hotkey("Ctrl+Alt+Shift+F23").unwrap();
+        // 组合不含 Alt：本测试直接投递 WM_HOTKEY，含 Alt 会让菜单屏蔽键
+        // 向当前桌面注入真实按键
+        let shortcut = parse_hotkey("Ctrl+Shift+F23").unwrap();
         let (entered_tx, entered_rx) = std::sync::mpsc::channel();
         let (release_tx, release_rx) = std::sync::mpsc::channel();
         let outcome = register_hotkeys(vec![(1, shortcut)], move |_| {
