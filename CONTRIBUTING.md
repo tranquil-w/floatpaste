@@ -36,6 +36,12 @@ Rust 改动须通过 `cargo fmt --all -- --check`、`cargo test` 与 `cargo buil
 
 交付说明对应实际文件、版本或程序，区分实现进展与验收结果；必要覆盖缺失时说明原因和剩余动作。具体结果状态与授权边界遵循 [协作约定](AGENTS.md#执行与验证)。
 
+### 交付前自审
+
+- 审查本任务的最终 diff（含新增文件），确认改动与目标、验收一致；检查遗漏调用方或活文档、无关修改、调试代码与临时内容，保留协作者已有改动。
+- 检查新增状态、依赖、配置、抽象和兼容分支是否有当前用途，是否重复已有能力；检查吞错、默认成功及遗漏取消或资源回收的路径，按目标简化，保留必要的失败处理。
+- 确认验证结果对应最终代码或交付程序及实际环境；验证后又改变被测行为时，按影响补跑相关检查。提交动作本身不要求重复已通过且仍有效的验证，旧快照的通过结果不能代替新行为验收。
+
 ## 调试与诊断
 
 - 日志写入 `%APPDATA%\floatpaste\logs`，文件以 `floatpaste-native.log` 为前缀按天滚动，最多保留 15 个文件；主目录不可用时写入 `%TEMP%\FloatPaste\logs`。
@@ -55,7 +61,9 @@ Rust 改动须通过 `cargo fmt --all -- --check`、`cargo test` 与 `cargo buil
 - 操作前查看 `git status --short`、`git diff` 和 `git diff --cached`，确认工作区与暂存区中的改动归属。提交时用 `git add -- <本任务文件路径>` 明确选择文件，并检查暂存 diff；同一文件混有其他任务修改时按 hunk 暂存。未获授权，不提交已有的其他修改。
 - 混合工作区不使用 `git add .`、`git add -A`、`git commit -a`，也不执行整仓恢复、清理或 stash（如 `git reset --hard`、`git restore .`、`git checkout -- .`、`git clean -fd`、`git stash`）；不要为方便验证而收走或丢弃协作者的修改。
 - 评审先使用 `git diff`、`git show` 等只读方式；除非任务需要切换检出，不为查看另一个分支或 PR 直接切换当前工作树。
-- 提交以中文摘要为主，可带 `feat:`、`fix:`、`docs:` 等前缀，或直接使用简洁中文动宾句。
+- 提交信息与 PR 标题统一使用 `type(scope): 中文摘要`；`type` 使用 `feat`、`fix`、`perf`、`docs`、`refactor`、`test`、`build`、`ci`、`chore` 或 `revert`，按实际变化选择。`scope` 可省略，按受影响模块填写，如 `core`、`native`、`hotkey`、`ui`、`release`。
+- 摘要简短说明实际变化，不加句号，例如 `fix(hotkey): 防止 Alt 快捷键触发菜单`、`docs: 完善贡献指南`。
+- 破坏性变化使用 `!` 或 `BREAKING CHANGE:` 标记，并说明影响与迁移方式；发布说明的分类与生成规则见 [发布流程](docs/release/process.md#发布说明)。
 - PR 说明用户可见变化、涉及模块与关联问题，附自动检查结果；自动化未覆盖的相关行为提供手动验证步骤及结果。
 - 界面改动附截图或录屏。
 - 涉及数据库、快捷键或系统权限时，说明迁移与回退影响。
