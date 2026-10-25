@@ -116,11 +116,12 @@ try {
         Register-ScheduledTask -TaskName $entry.Name -Action $action -Principal $principal -Force | Out-Null
     }
     $foreignProcess = Start-Process -FilePath $foreignExe -ArgumentList '/wait' -PassThru -WindowStyle Hidden
-    New-Item -Path $legacyKey | Out-Null
+    # 全新 runner profile 可能没有 HKCU Uninstall 父键，-Force 会补建中间键
+    New-Item -Path $legacyKey -Force | Out-Null
     New-ItemProperty -LiteralPath $legacyKey -Name DisplayName -Value FloatPaste -Force | Out-Null
     # 未加引号且含空格的卸载路径，以及带必要参数的 QuietUninstallString。
     New-ItemProperty -LiteralPath $legacyKey -Name UninstallString -Value "$legacyExe /kept" -Force | Out-Null
-    if (!(Test-Path -LiteralPath $runKey)) { New-Item -Path $runKey | Out-Null }
+    if (!(Test-Path -LiteralPath $runKey)) { New-Item -Path $runKey -Force | Out-Null }
     Set-ItemProperty -LiteralPath $runKey -Name FloatPaste -Value ('"{0}" --silent' -f $legacyApp)
 
     foreach ($failure in @('fail', 'keep')) {
@@ -155,7 +156,7 @@ try {
     Assert-ForeignCopy
     Test-App $installedExe
 
-    if (!(Test-Path -LiteralPath $advancedKey)) { New-Item -Path $advancedKey | Out-Null }
+    if (!(Test-Path -LiteralPath $advancedKey)) { New-Item -Path $advancedKey -Force | Out-Null }
     Set-ItemProperty -LiteralPath $advancedKey -Name DisabledHotkeys -Value 'AvSV'
     New-Item -ItemType Directory -Path $legacyUserDataDir | Out-Null
     $legacyDataMarker = Join-Path $legacyUserDataDir 'retained.txt'
@@ -164,7 +165,8 @@ try {
     Uninstall-App
     if (!$installedProcess.WaitForExit(10000)) { throw '卸载后当前安装实例仍在运行。' }
     if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) { throw '卸载后自启任务残留。' }
-    if (Get-ItemPropertyValue -LiteralPath $runKey -Name FloatPaste -ErrorAction SilentlyContinue) {
+    try { $residualRun = Get-ItemPropertyValue -LiteralPath $runKey -Name FloatPaste } catch { $residualRun = $null }
+    if ($null -ne $residualRun) {
         throw '卸载后旧 Run 项残留。'
     }
     if ((Get-ItemPropertyValue -LiteralPath $advancedKey -Name DisabledHotkeys) -ne 'AS') {
