@@ -4,11 +4,13 @@
 use floatpaste_core::platform::windows::window_control;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use slint::ComponentHandle;
+use windows::core::BOOL;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{
     DwmExtendFrameIntoClientArea, DwmSetWindowAttribute, DWMSBT_MAINWINDOW, DWMSBT_TRANSIENTWINDOW,
-    DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE,
-    DWMWCP_DONOTROUND, DWMWCP_ROUND, DWM_SYSTEMBACKDROP_TYPE, DWM_WINDOW_CORNER_PREFERENCE,
+    DWMWA_CLOAK, DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_USE_IMMERSIVE_DARK_MODE,
+    DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND, DWMWCP_ROUND, DWM_SYSTEMBACKDROP_TYPE,
+    DWM_WINDOW_CORNER_PREFERENCE,
 };
 use windows::Win32::Graphics::Gdi::{ClientToScreen, InvalidateRect, UpdateWindow};
 use windows::Win32::UI::Controls::MARGINS;
@@ -257,6 +259,20 @@ pub fn set_window_visible(hwnd: isize, visible: bool) {
     let cmd = if visible { SW_SHOWNOACTIVATE } else { SW_HIDE };
     unsafe {
         let _ = ShowWindow(HWND(hwnd as *mut _), cmd);
+    }
+}
+
+/// 暂时遮住内容窗，但保留 DWM 合成；用于在最终位置完成首帧后再显露。
+/// 与 SW_HIDE 不同，cloak 不终止窗口的表面合成（Windows 8 起支持）。
+pub fn set_window_cloaked(hwnd: isize, cloaked: bool) -> windows::core::Result<()> {
+    let value = BOOL::from(cloaked);
+    unsafe {
+        DwmSetWindowAttribute(
+            HWND(hwnd as *mut _),
+            DWMWA_CLOAK,
+            &value as *const BOOL as *const _,
+            std::mem::size_of::<BOOL>() as u32,
+        )
     }
 }
 

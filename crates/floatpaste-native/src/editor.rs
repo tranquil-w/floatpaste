@@ -44,6 +44,8 @@ const MAX_SUGGESTIONS: usize = 8;
 /// 编辑窗口逻辑尺寸（对齐旧版 inner_size(800,600)）
 const EDITOR_LOGICAL_WIDTH: f32 = 800.0;
 const EDITOR_LOGICAL_HEIGHT: f32 = 600.0;
+// 软件渲染冷帧在 debug 较慢，遮住首帧期间让事件循环正常跑帧。
+const REVEAL_DELAY_MS: u64 = if cfg!(debug_assertions) { 200 } else { 50 };
 
 thread_local! {
     static NOTICE_TOKEN: Cell<u64> = const { Cell::new(0) };
@@ -51,8 +53,8 @@ thread_local! {
     static DELETE_ARMED: Cell<bool> = const { Cell::new(false) };
     /// 全部标签缓存（name, item_count）：建议浮层的数据源
     static ALL_TAGS: RefCell<Vec<(String, u32)>> = const { RefCell::new(Vec::new()) };
-    /// 编辑窗口本会话位置记忆（物理像素）。SLINT_DESTROY_WINDOW_ON_HIDE
-    /// 在 hide 时销毁 winit 窗口、位置随之丢失，须在 hide 前读取暂存。
+    static REVEAL_TIMER: RefCell<slint::Timer> = slint::Timer::default().into();
+    /// 编辑窗口本会话位置记忆（物理像素），须在停屏前读取暂存。
     /// 仅在同屏唤起时生效——跨屏唤起跟宿主屏走，首开（None）落在宿主
     /// 所在屏工作区中央，见 resolve_target_position
     static LAST_POSITION: Cell<Option<(i32, i32)>> = const { Cell::new(None) };
@@ -156,6 +158,7 @@ pub(crate) fn refresh_copy(app: &App) {
 }
 
 fn show_editor(app: &App, session: EditorSession, anchor: Option<HostAnchor>) {
+    cancel_reveal();
     app.state.set_editor_session(Some(session.clone()));
     let Some(win) = app.editor.upgrade() else {
         app.state.set_editor_session(None);
@@ -186,8 +189,7 @@ fn show_editor(app: &App, session: EditorSession, anchor: Option<HostAnchor>) {
     let width_px = (EDITOR_LOGICAL_WIDTH as f32 * scale).round() as i32;
     let height_px = (EDITOR_LOGICAL_HEIGHT as f32 * scale).round() as i32;
     window_control::set_window_size_no_activate(hwnd, width_px, height_px);
-    // 位置先只计算不上屏：上屏动作（移动到目标位置）必须放在内容就绪
-    // 与暖帧之后——停屏窗口 Win32 可见，移动即显示
+    // 位置先只计算：内容就绪并遮住窗口之后，才能移动到目标位置准备首帧。
     let memory = LAST_POSITION.get();
     let memory_area = memory.and_then(|(x, y)| work_area_from_point(ScreenPoint { x, y }).ok());
     let anchor = anchor.and_then(|anchor| {
@@ -206,31 +208,54 @@ fn show_editor(app: &App, session: EditorSession, anchor: Option<HostAnchor>) {
         warn!("编辑窗口无可用位置，保持停屏");
         return;
     };
-    // 数据就绪：停屏期属性更新不渲染，warm 时一次成帧
+    // 先加载数据，再在屏外恢复可见性，让事件循环布局与渲染新内容。
     load_session(app, &win, &session.item_id);
     info!(session_id = session.session_id, item_id = %session.item_id, "打开 Editor");
 
-    // 上屏序列（对齐设置窗）：SW_SHOW → 重挂材质 → 暖帧 → 移动上屏 →
-    // 抢前台。按钮生灭由真实可见性驱动（样式从创建起不变，任务栏在
-    // 首次可见的瞬间完成分类，见 silent_assemble_content）；显示发生在
-    // 屏外，暖帧与全量重绘渲染出完整内容后再移动上屏，首帧不闪透明，
-    // 抢前台激活发生在最终位置
+    // softbuffer 在屏外 BitBlt 不能保证完整客户区落到 DWM 表面。
+    // 先 cloak 遮住窗口，在最终位置渲染，准备后再显露并抢前台。
+    if let Err(error) = win32_ext::set_window_cloaked(hwnd, true) {
+        warn!("编辑窗口首帧遮罩失败: {error}");
+        hide_and_restore_source(app);
+        return;
+    }
     win32_ext::set_window_visible(hwnd, true);
     win.set_material_active(overlay::apply_material(app, hwnd));
-    win32_ext::warm_surface(hwnd);
-    win32_ext::force_full_repaint(&win);
     win.window()
         .set_position(slint::PhysicalPosition::new(x, y));
-    // 从速贴打开时本进程不是前台（前台在目标应用上），裸
-    // SetForegroundWindow 会被前台锁拒绝——force_foreground_window 经
-    // AttachThreadInput + BringWindowToTop 绕过（对齐旧版
-    // window.set_focus() 语义），仍失败时以 TOPMOST 提升→回落保底可见，
-    // 且不常驻置顶
-    if !ActiveAppResolver::force_foreground_window(hwnd) {
-        warn!("编辑窗口获取前台失败");
-    }
-    overlay::schedule_caption_strip(hwnd);
-    win.invoke_focus_root_scope();
+    win32_ext::force_full_repaint(&win);
+    let app = app.clone();
+    REVEAL_TIMER.with(|timer| {
+        timer.borrow().start(
+            slint::TimerMode::SingleShot,
+            Duration::from_millis(REVEAL_DELAY_MS),
+            move || {
+                if app.core().is_quitting() || app.state.editor_session().is_none() {
+                    return;
+                }
+                let Some(win) = app.editor.upgrade() else {
+                    return;
+                };
+                win32_ext::warm_surface(hwnd);
+                if let Err(error) = win32_ext::set_window_cloaked(hwnd, false) {
+                    warn!("编辑窗口首帧显露失败: {error}");
+                    close_editor(&app, "reveal_failed");
+                    return;
+                }
+                // 从速贴打开时前台仍在目标应用；沿用绕过前台锁的获取方式。
+                if !ActiveAppResolver::force_foreground_window(hwnd) {
+                    warn!("编辑窗口获取前台失败");
+                }
+                overlay::schedule_caption_strip(hwnd);
+                win.invoke_focus_root_scope();
+            },
+        );
+    });
+}
+
+fn cancel_reveal() {
+    // 丢弃定时器及其捕获的会话；stop() 本身不会释放回调。
+    REVEAL_TIMER.with(|timer| timer.replace(slint::Timer::default()));
 }
 
 /// 载入条目详情并填充界面（同步读库：单条查询延迟可忽略，省去加载态）
@@ -528,6 +553,8 @@ pub fn cancel_confirm(app: &App) {
 }
 
 pub fn close_editor(app: &App, source: &str) {
+    let preparing = REVEAL_TIMER.with(|timer| timer.borrow().running());
+    cancel_reveal();
     let Some(win) = app.editor.upgrade() else {
         return;
     };
@@ -542,7 +569,9 @@ pub fn close_editor(app: &App, source: &str) {
     win.set_error_text("".into());
     // 位置记忆须在停屏前读取
     let position = win.window().position();
-    LAST_POSITION.set(Some((position.x, position.y)));
+    if !preparing && (position.x, position.y) != (-32000, -32000) {
+        LAST_POSITION.set(Some((position.x, position.y)));
+    }
     // 停屏：真隐藏（任务栏按钮与 Alt+Tab 随可见性消失）+ 平移屏外。
     // 不走 Slint hide——SLINT_DESTROY_WINDOW_ON_HIDE 下 hide 即销毁
     // winit 窗口，下次打开重建是首开无材质、透明首帧等问题的根源；
@@ -551,6 +580,9 @@ pub fn close_editor(app: &App, source: &str) {
     win32_ext::set_window_visible(hwnd, false);
     win.window()
         .set_position(slint::PhysicalPosition::new(-32000, -32000));
+    if let Err(error) = win32_ext::set_window_cloaked(hwnd, false) {
+        warn!("编辑窗口停屏后解除首帧遮罩失败: {error}");
+    }
     hide_and_restore_source(app);
 }
 
@@ -1209,7 +1241,137 @@ pub(crate) mod load_error_tests {
         assert!(!win.get_item_missing());
         assert!(win.get_is_text());
         assert!(!win.get_draft_text().is_empty());
+        reveal_tests::run(app, win, item_id);
         app.state.set_editor_session(None);
+    }
+}
+
+#[cfg(test)]
+mod reveal_tests {
+    use super::*;
+
+    fn pump(ms: u64) {
+        slint::Timer::single_shot(Duration::from_millis(ms), || {
+            slint::quit_event_loop().unwrap();
+        });
+        slint::run_event_loop_until_quit().unwrap();
+    }
+
+    fn parked(hwnd: isize) -> bool {
+        let rect = win32_ext::physical_rect(hwnd).unwrap();
+        (rect.left, rect.top) == (-32000, -32000)
+    }
+
+    fn cloaked(hwnd: isize) -> bool {
+        use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
+        let mut value = 0u32;
+        unsafe {
+            DwmGetWindowAttribute(
+                windows::Win32::Foundation::HWND(hwnd as *mut _),
+                DWMWA_CLOAKED,
+                &mut value as *mut u32 as *mut _,
+                std::mem::size_of::<u32>() as u32,
+            )
+            .unwrap();
+        }
+        value & 1 != 0
+    }
+
+    pub(super) fn run(app: &App, win: &EditorWindow, item_id: &str) {
+        let _ = overlay::silent_assemble_content(win);
+        pump(80);
+        let hwnd = overlay::silent_assemble_content(win).unwrap();
+        app.state.editor_hwnd.store(hwnd, Ordering::SeqCst);
+        let open = || {
+            show_editor(
+                app,
+                EditorSession {
+                    item_id: item_id.into(),
+                    ..Default::default()
+                },
+                Some(HostAnchor {
+                    center: (100, 100),
+                    dpi: win.window().scale_factor(),
+                }),
+            );
+        };
+        LAST_POSITION.set(None);
+        for (label, theme) in [
+            ("light", floatpaste_core::theme::ResolvedTheme::Light),
+            ("dark", floatpaste_core::theme::ResolvedTheme::Dark),
+        ] {
+            let tokens = floatpaste_core::theme::derive_tokens("default", "", theme);
+            crate::theme_bridge::reapply_theme(app, &tokens);
+            open();
+            assert!(cloaked(hwnd), "新内容未经过事件循环渲染前必须遮住");
+            let deadline = std::time::Instant::now() + Duration::from_secs(3);
+            while cloaked(hwnd) && std::time::Instant::now() < deadline {
+                pump(10);
+            }
+            assert!(
+                !parked(hwnd) && !cloaked(hwnd),
+                "准备完成后编辑窗口必须实际显示"
+            );
+            assert!(win.get_is_text());
+            assert!(!win.get_is_dirty());
+            assert!(!win.get_draft_text().is_empty());
+            if std::env::var_os("FLOATPASTE_UI_SNAPSHOTS").is_some() {
+                let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../.artifacts/snapshot");
+                std::fs::create_dir_all(&dir).unwrap();
+                // 真实桌面合成帧：不能用 take_snapshot 推定打开瞬间没有闪烁。
+                for frame in 0..4 {
+                    let rect = win32_ext::physical_rect(hwnd).unwrap();
+                    let (w, h) = (rect.right - rect.left, rect.bottom - rect.top);
+                    let pixels =
+                        floatpaste_core::platform::windows::screen_capture::capture_region_rgba(
+                            rect.left, rect.top, w, h,
+                        )
+                        .expect("交互桌面抓屏失败");
+                    image::save_buffer(
+                        dir.join(format!("editor-reveal-{label}-{frame}.png")),
+                        &pixels,
+                        w as u32,
+                        h as u32,
+                        image::ColorType::Rgba8,
+                    )
+                    .unwrap();
+                    // 首个合成采样也须包含静态标题文字，不能只有背景与光标脏区。
+                    let scale = win.window().scale_factor();
+                    let (mut darkest, mut lightest) = (255u8, 0u8);
+                    for y in (8.0 * scale) as usize..(24.0 * scale) as usize {
+                        for x in (34.0 * scale) as usize..(120.0 * scale) as usize {
+                            let offset = (y * w as usize + x) * 4;
+                            darkest = darkest.min(pixels[offset]);
+                            lightest = lightest.max(pixels[offset]);
+                        }
+                    }
+                    assert!(
+                        lightest.saturating_sub(darkest) > 40,
+                        "{label} 第 {frame} 个桌面采样缺少静态标题文字"
+                    );
+                    pump(16);
+                }
+            }
+            close_editor(app, "reveal_test");
+            assert!(parked(hwnd));
+            assert!(!cloaked(hwnd));
+            assert!(app.state.editor_session().is_none());
+        }
+
+        // 同条目、同 session_id 快速重开，旧回调不能在关闭后把窗口弹回。
+        let memory = LAST_POSITION.get();
+        open();
+        close_editor(app, "cancel_reveal_test");
+        open();
+        close_editor(app, "cancel_reopen_test");
+        pump(500);
+        assert!(parked(hwnd), "准备期关闭必须取消延迟显示");
+        assert!(!cloaked(hwnd));
+        assert_eq!(LAST_POSITION.get(), memory, "准备期关闭保留上次位置");
+        assert!(app.state.editor_session().is_none());
+        LAST_POSITION.set(None);
+        app.state.editor_hwnd.store(0, Ordering::SeqCst);
     }
 }
 
