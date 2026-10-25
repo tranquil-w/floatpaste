@@ -1584,6 +1584,25 @@ export component SettingsWindow inherits Window {
                                     }
                                 }
                                 RowGroup {
+                                    // 速贴窗口显示位置
+                                    SettingRow {
+                                        title: "速贴显示位置";
+                                        description: ["在鼠标附近打开速贴。",
+                                            "记住上次拖动或关闭时的位置，首次使用时在屏幕中央打开。",
+                                            "在输入光标附近打开速贴，无法获取输入光标时跟随鼠标。"][root.position-mode];
+                                        Rectangle {
+                                            width: seg-position.width;
+                                            seg-position := Segmented {
+                                                x: 0;
+                                                y: (parent.height - self.height) / 2;
+                                                options: ["鼠标附近", "记住上次位置", "输入光标附近"];
+                                                value <=> root.position-mode;
+                                                selected(idx) => { root.position-mode-selected(idx); }
+                                            }
+                                        }
+                                    }
+                                }
+                                RowGroup {
                                     VerticalLayout {
                                         padding: 16px;
                                         spacing: 6px;
@@ -1672,25 +1691,6 @@ export component SettingsWindow inherits Window {
                                             color: Theme.fg-muted;
                                             font-size: Metrics.text-xs;
                                             wrap: word-wrap;
-                                        }
-                                    }
-                                }
-                                RowGroup {
-                                    // 速贴窗口显示位置
-                                    SettingRow {
-                                        title: "速贴显示位置";
-                                        description: ["在鼠标附近打开速贴。",
-                                            "记住上次拖动或关闭时的位置，首次使用时在屏幕中央打开。",
-                                            "在输入光标附近打开速贴，无法获取输入光标时跟随鼠标。"][root.position-mode];
-                                        Rectangle {
-                                            width: seg-position.width;
-                                            seg-position := Segmented {
-                                                x: 0;
-                                                y: (parent.height - self.height) / 2;
-                                                options: ["鼠标附近", "记住上次位置", "输入光标附近"];
-                                                value <=> root.position-mode;
-                                                selected(idx) => { root.position-mode-selected(idx); }
-                                            }
                                         }
                                     }
                                 }
