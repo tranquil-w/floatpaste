@@ -675,6 +675,7 @@ pub(crate) fn refresh_copy(app: &App) {
     app.with_picker(|win| {
         win.set_monitoring_paused(settings.pause_monitoring);
         win.set_digit_shortcuts_enabled(settings.picker_digit_shortcuts_enabled);
+        apply_card_height(win, settings.picker_card_height);
         build_rows(app, win, &app.state.items());
     });
 }
@@ -772,6 +773,19 @@ fn preview_line_height(win: &QuickPasteWindow, is_code: bool) -> f32 {
     let one = win.invoke_measure_preview("文本Ag".into(), 1000.0, is_code);
     let two = win.invoke_measure_preview("文本Ag\n文本Ag".into(), 1000.0, is_code);
     (two - one).max(1.0)
+}
+
+/// 应用「速贴卡片高度」设置：写入 PanelGeometry 后读回派生的预览高度，
+/// 按实测正文行高派生预览行数预算——布局与裁排共用 PanelGeometry，
+/// 卡片铬件公式只在 slint 一侧维护。行数取 round：默认档（预览 60px）
+/// 在正文行高 19.4–20.7px 区间恒得三行，与既有固定三行行为一致；
+/// floor 会在行高略超 20px 时无谓退到两行
+fn apply_card_height(win: &QuickPasteWindow, card_height: u32) {
+    let geo = win.global::<PanelGeometry>();
+    geo.set_card_height(card_height as f32);
+    let preview_height = geo.get_preview_height().max(0.0);
+    let line_height = preview_line_height(win, false);
+    geo.set_preview_max_lines((preview_height / line_height).round().max(1.0) as i32);
 }
 
 /// 用 Slint 排版引擎把预览裁到 max_lines 行的纯裁排核心。
@@ -1617,6 +1631,9 @@ pub fn wire(app: &App) {
     let Some(win) = app.picker.upgrade() else {
         return;
     };
+
+    // 启动先按持久化设置定形几何；后续变更经 refresh_copy 重入
+    apply_card_height(&win, app.state.current_settings().picker_card_height);
 
     // 单击：单击触发模式下立即上屏，否则仅选中。菜单展开时先收
     // 浮层并吞掉本次点击——去点菜单外的第一击不应立即上屏
@@ -2722,5 +2739,38 @@ pub(crate) mod action_sheet_tests {
             }
         }
         win.set_delete_armed_row(-1);
+
+        // 「速贴卡片高度」设置项：注入非默认总高后，行高与裁排行数预算
+        // 跟随变化且各行保持等高；结束后恢复默认几何不影响后续用例
+        win.window().set_size(slint::LogicalSize::new(360.0, 760.0));
+        apply_card_height(win, 140);
+        build_rows(app, win, &items);
+        let geo = win.global::<PanelGeometry>();
+        assert_eq!(geo.get_row_height(), 140.0);
+        assert!(
+            geo.get_preview_max_lines() > 3,
+            "更高卡片的预览行数预算应增加"
+        );
+        win.set_selected(0);
+        let _ = win.window().take_snapshot().unwrap();
+        let mut tall_bounds = [(i32::MAX, 0); 4];
+        for y in 0..740 {
+            hovered.set(-1);
+            win.window().dispatch_event(WindowEvent::PointerMoved {
+                position: slint::LogicalPosition::new(100.0, y as f32),
+            });
+            if let Some(bound) = tall_bounds.get_mut(hovered.get() as usize) {
+                bound.0 = bound.0.min(y);
+                bound.1 = y;
+            }
+        }
+        for (row, (top, bottom)) in tall_bounds.into_iter().enumerate() {
+            assert!(top < bottom, "应找到第 {row} 行的完整命中区域");
+            assert!(
+                ((bottom - top + 1) as f32 - 140.0).abs() <= 1.0,
+                "行 {row} 在卡片高度 140 时应保持等高：{top}..={bottom}"
+            );
+        }
+        apply_card_height(win, app.state.current_settings().picker_card_height);
     }
 }

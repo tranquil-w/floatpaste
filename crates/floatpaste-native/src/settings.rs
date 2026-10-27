@@ -351,24 +351,66 @@ pub fn wire(app: &App) {
         });
     }
 
-    // ── 数字字段（逐键钳制，对齐 toBoundedNumber）──
+    // ── 数字字段：edited 实时防抖保存（值经 current_draft 钳制兜底，
+    // 不依赖失焦——点击普通控件不转移 Slint 焦点）；回车/失焦提交时
+    // 才把文本规范化为钳制值 ──
     {
         let app_cb = app.clone();
-        win.on_history_limit_edited(move |text| {
+        win.on_history_limit_edited(move |_| schedule_save(&app_cb));
+    }
+    {
+        let app_cb = app.clone();
+        win.on_picker_limit_edited(move |_| schedule_save(&app_cb));
+    }
+    {
+        let app_cb = app.clone();
+        win.on_picker_card_height_edited(move |_| schedule_save(&app_cb));
+    }
+    {
+        let app_cb = app.clone();
+        win.on_history_limit_committed(move |text| {
             if let Some(win) = app_cb.settings.upgrade() {
-                let clamped = clamp_number_text(&text, 100, 10_000, 1_000);
-                win.set_history_limit_text(clamped.into());
-                schedule_save(&app_cb);
+                commit_number_text(
+                    &win,
+                    &app_cb,
+                    &text,
+                    100,
+                    10_000,
+                    1_000,
+                    SettingsWindow::set_history_limit_text,
+                );
             }
         });
     }
     {
         let app_cb = app.clone();
-        win.on_picker_limit_edited(move |text| {
+        win.on_picker_limit_committed(move |text| {
             if let Some(win) = app_cb.settings.upgrade() {
-                let clamped = clamp_number_text(&text, 9, 1_000, 50);
-                win.set_picker_limit_text(clamped.into());
-                schedule_save(&app_cb);
+                commit_number_text(
+                    &win,
+                    &app_cb,
+                    &text,
+                    9,
+                    1_000,
+                    50,
+                    SettingsWindow::set_picker_limit_text,
+                );
+            }
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_picker_card_height_committed(move |text| {
+            if let Some(win) = app_cb.settings.upgrade() {
+                commit_number_text(
+                    &win,
+                    &app_cb,
+                    &text,
+                    80,
+                    160,
+                    104,
+                    SettingsWindow::set_picker_card_height_text,
+                );
             }
         });
     }
@@ -808,6 +850,7 @@ fn hydrate(app: &App, win: &SettingsWindow) {
     refresh_hotkey_status_hints(win, &failures);
     win.set_history_limit_text(settings.history_limit.to_string().into());
     win.set_picker_limit_text(settings.picker_record_limit.to_string().into());
+    win.set_picker_card_height_text(settings.picker_card_height.to_string().into());
     win.set_position_mode(match settings.picker_position_mode {
         PickerPositionMode::Mouse => 0,
         PickerPositionMode::LastPosition => 1,
@@ -898,6 +941,9 @@ fn current_draft(win: &SettingsWindow) -> UserSetting {
     let picker_limit = clamp_number_text(&win.get_picker_limit_text(), 9, 1_000, 50)
         .parse::<u32>()
         .unwrap_or(50);
+    let picker_card_height = clamp_number_text(&win.get_picker_card_height_text(), 80, 160, 104)
+        .parse::<u32>()
+        .unwrap_or(104);
     UserSetting {
         shortcut: win.get_shortcut().to_string(),
         launch_on_startup,
@@ -910,6 +956,7 @@ fn current_draft(win: &SettingsWindow) -> UserSetting {
         always_run_elevated,
         history_limit: history,
         picker_record_limit: picker_limit,
+        picker_card_height,
         picker_position_mode: match win.get_position_mode() {
             1 => PickerPositionMode::LastPosition,
             2 => PickerPositionMode::Caret,
@@ -1663,6 +1710,30 @@ fn clamp_number_text(text: &str, min: u32, max: u32, fallback: u32) -> String {
     value.to_string()
 }
 
+/// 数字输入提交（回车/失焦）的规范化结果：文本与规范串不一致（空、
+/// 越界、带空白或前导零）时返回钳制值供回写并保存，已是规范值则跳过
+fn normalized_number(text: &str, min: u32, max: u32, fallback: u32) -> Option<String> {
+    let clamped = clamp_number_text(text, min, max, fallback);
+    (clamped != text).then_some(clamped)
+}
+
+/// 数字输入的提交收口：仅当文本需要规范化时回写并安排保存，
+/// 未修改的失焦/回车不触发保存
+fn commit_number_text(
+    win: &SettingsWindow,
+    app: &App,
+    text: &str,
+    min: u32,
+    max: u32,
+    fallback: u32,
+    apply: fn(&SettingsWindow, slint::SharedString),
+) {
+    if let Some(clamped) = normalized_number(text, min, max, fallback) {
+        apply(win, clamped.into());
+        schedule_save(app);
+    }
+}
+
 /// 录制结果归一化公共步：单字母主键转大写（Slint 侧按下档字母原样上报）
 fn uppercase_main_key(value: &str) -> String {
     let mut parts: Vec<String> = value.split('+').map(str::to_string).collect();
@@ -1732,6 +1803,17 @@ pub(crate) mod copy_contract_tests {
 
     pub(crate) fn run() {
         let win = SettingsWindow::new().expect("实例化设置窗失败");
+
+        // 数字输入提交规范化（回车/失焦收口；编辑中间态不回写，
+        // 多位数如 150 不再被逐键钳制成 80/160）
+        assert_eq!(normalized_number("104", 80, 160, 104), None);
+        for (text, expected) in [("1", "80"), ("999", "160"), ("", "104"), (" 150 ", "150")] {
+            assert_eq!(
+                normalized_number(text, 80, 160, 104).as_deref(),
+                Some(expected)
+            );
+        }
+
         let failures = [(crate::HOTKEY_ID_MAIN, crate::ERROR_HOTKEY_OCCUPIED)];
         win.set_shortcut("Win+Q".into());
         refresh_hotkey_status_hints(&win, &failures);

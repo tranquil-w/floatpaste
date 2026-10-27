@@ -351,6 +351,10 @@ pub struct UserSetting {
     pub always_run_elevated: bool,
     pub history_limit: u32,
     pub picker_record_limit: u32,
+    /// 速贴行卡片总高（逻辑像素），允许 80–160；预览区高度、缩略图尺寸
+    /// 与预览行数预算由其派生（native 的 PanelGeometry 与
+    /// picker::apply_card_height），默认 104 对应 60px 预览与三行裁排
+    pub picker_card_height: u32,
     pub picker_position_mode: PickerPositionMode,
     /// 速贴/搜索条目的鼠标上屏触发方式，见 [PasteTrigger]
     pub paste_trigger: PasteTrigger,
@@ -405,6 +409,7 @@ impl Default for UserSetting {
             always_run_elevated: false,
             history_limit: 1_000,
             picker_record_limit: 50,
+            picker_card_height: 104,
             picker_position_mode: PickerPositionMode::Mouse,
             paste_trigger: PasteTrigger::Click,
             excluded_apps: vec![
@@ -444,6 +449,7 @@ impl UserSetting {
 
         self.history_limit = self.history_limit.clamp(100, 10_000);
         self.picker_record_limit = self.picker_record_limit.clamp(9, 1_000);
+        self.picker_card_height = self.picker_card_height.clamp(80, 160);
         self.excluded_apps = self
             .excluded_apps
             .into_iter()
@@ -702,8 +708,21 @@ mod tests {
         assert!(settings.launch_on_startup);
         assert!(!settings.silent_on_startup);
         assert_eq!(settings.picker_record_limit, 50);
+        assert_eq!(settings.picker_card_height, 104);
         assert_eq!(settings.picker_position_mode, PickerPositionMode::Mouse);
         assert_eq!(settings.theme_mode, ThemeMode::System);
+    }
+
+    #[test]
+    fn sanitized_clamps_picker_card_height() {
+        for (input, expected) in [(0, 80), (79, 80), (104, 104), (160, 160), (999, 160)] {
+            let settings = UserSetting {
+                picker_card_height: input,
+                ..UserSetting::default()
+            }
+            .sanitized();
+            assert_eq!(settings.picker_card_height, expected);
+        }
     }
 
     #[test]

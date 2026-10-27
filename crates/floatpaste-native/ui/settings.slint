@@ -103,7 +103,11 @@ component KbdBadge inherits Rectangle {
 component NumberInput inherits Rectangle {
     in-out property <string> text;
     in property <bool> disabled: false;
+    // 编辑期间不回写文本（多位数的中间态必须能保留）：edited 实时
+    // 上抛由 Rust 防抖自动保存（值经钳制兜底），回车或失焦时 committed
+    // 再由 Rust 把文本规范化为钳制值
     callback edited(string);
+    callback committed(string);
     height: 32px;
     width: 96px;
     horizontal-stretch: 0;
@@ -125,6 +129,10 @@ component NumberInput inherits Rectangle {
         horizontal-alignment: right;
         enabled: !root.disabled;
         edited() => { root.edited(self.text); }
+        accepted => { root.committed(root.text); }
+        changed has-focus => {
+            if (!self.has-focus) { root.committed(root.text); }
+        }
     }
 }
 
@@ -931,6 +939,7 @@ export component SettingsWindow inherits Window {
     in-out property <bool> picker-digit-enabled: true;
     in-out property <string> history-limit-text;
     in-out property <string> picker-limit-text;
+    in-out property <string> picker-card-height-text;
     in-out property <int> position-mode: 0;   // 0=mouse 1=lastPosition 2=caret
     in-out property <int> paste-trigger: 0;   // 0=click 1=doubleClick
     // 默认次级动作（次级会话键执行的动作）：索引对应
@@ -1002,7 +1011,11 @@ export component SettingsWindow inherits Window {
 
     /* ── 编辑回调（Rust 统一防抖保存） ── */
     callback history-limit-edited(string);
+    callback history-limit-committed(string);
     callback picker-limit-edited(string);
+    callback picker-limit-committed(string);
+    callback picker-card-height-edited(string);
+    callback picker-card-height-committed(string);
     callback shortcut-edited(string);
     callback shortcut-cancelled();
     callback search-shortcut-edited(string);
@@ -1432,6 +1445,7 @@ export component SettingsWindow inherits Window {
                                                 y: (parent.height - self.height) / 2;
                                                 text <=> root.history-limit-text;
                                                 edited(text) => { root.history-limit-edited(text); }
+                                                committed(text) => { root.history-limit-committed(text); }
                                             }
                                         }
                                     }
@@ -1447,6 +1461,23 @@ export component SettingsWindow inherits Window {
                                                 y: (parent.height - self.height) / 2;
                                                 text <=> root.picker-limit-text;
                                                 edited(text) => { root.picker-limit-edited(text); }
+                                                committed(text) => { root.picker-limit-committed(text); }
+                                            }
+                                        }
+                                    }
+                                }
+                                RowGroup {
+                                    SettingRow {
+                                        title: "速贴卡片高度";
+                                        description: "速贴中每张卡片的高度（像素），更高的卡片显示更多预览内容。";
+                                        Rectangle {
+                                            width: 96px;
+                                            NumberInput {
+                                                x: 0;
+                                                y: (parent.height - self.height) / 2;
+                                                text <=> root.picker-card-height-text;
+                                                edited(text) => { root.picker-card-height-edited(text); }
+                                                committed(text) => { root.picker-card-height-committed(text); }
                                             }
                                         }
                                     }

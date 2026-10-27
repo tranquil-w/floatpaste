@@ -283,10 +283,15 @@ export global PanelGeometry {
     out property <length> row-pad-left: 12px;              // 行内左 padding
     out property <length> row-pad-right: Metrics.space-1_5; // 行内右 padding（单侧）
     out property <length> row-action-width: 36px;         // 常驻预留更多按钮空间
-    out property <int> preview-max-lines: 3;
-    out property <length> preview-height: 60px;
-    out property <length> row-height: row-frame + 2 * Metrics.space-2
-        + preview-height + Metrics.space-1_5 + 18px;
+    // 行卡片总高由「速贴卡片高度」设置项控制：Rust 经
+    // picker::apply_card_height 注入，默认值与 UserSetting 的
+    // picker_card_height 一致（未注入路径按默认几何渲染）
+    in-out property <length> card-height: 104px;
+    // 预览行数预算由 Rust 按注入后的预览高度与实测字体行高派生
+    in-out property <int> preview-max-lines: 3;
+    out property <length> preview-height: card-height - row-frame
+        - 2 * Metrics.space-2 - Metrics.space-1_5 - 18px;
+    out property <length> row-height: card-height;
     out property <length> thumb-size: preview-height;
     out property <length> thumb-gap: 10px;
     // 窗口卡片圆角（Rust 侧模糊底图按此烘焙圆角 alpha，见 core::backdrop）
