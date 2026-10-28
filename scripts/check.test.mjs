@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync, execFileSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,7 +10,8 @@ const script = fileURLToPath(new URL("./check.ps1", import.meta.url));
 
 // 只替换外部命令，在真实 Git 临时仓库和 PowerShell 子进程验证调度与失败语义。
 function fixture(t) {
-  const root = mkdtempSync(join(tmpdir(), "floatpaste-check-"));
+  // Windows runner 的 TEMP 可能采用 8.3 短路径，统一真实路径后核对目录恢复。
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), "floatpaste-check-")));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const repo = join(root, "repo");
   const bin = join(root, "bin");
