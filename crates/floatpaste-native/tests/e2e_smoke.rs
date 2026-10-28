@@ -20,7 +20,7 @@ use std::{
     process::{Child, Command, Stdio},
     sync::{atomic::AtomicBool, atomic::Ordering, Arc},
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use floatpaste_core::{
@@ -519,16 +519,25 @@ impl Drop for Cleanup {
             }
             let _ = child.wait();
         }
-        for _ in 0..5 {
-            if self
-                .original_clipboard
-                .as_ref()
-                .is_none_or(|snapshot| snapshot.restore(None, None).is_ok())
-            {
-                break;
+        let clipboard_restored = self.original_clipboard.as_ref().is_none_or(|snapshot| {
+            for _ in 0..5 {
+                if snapshot.restore(None, None).is_ok() {
+                    return true;
+                }
+                thread::sleep(Duration::from_millis(200));
             }
-            thread::sleep(Duration::from_millis(200));
-        }
+            // 恢复失败时尽力移除测试内容，不能静默成功后让日常实例采集它。
+            let mut cleared = false;
+            for _ in 0..5 {
+                if arboard::Clipboard::new().and_then(|mut clipboard| clipboard.clear()).is_ok() {
+                    cleared = true;
+                    break;
+                }
+                thread::sleep(Duration::from_millis(200));
+            }
+            eprintln!("[e2e] 恢复原剪贴板失败；测试内容清空结果={cleared}。请确认剪贴板已无测试内容后再启动日常实例");
+            false
+        });
         // 诊断开关：FLOATPASTE_E2E_KEEP=1 时保留临时目录（实例日志在
         // floatpaste/logs），供间歇失败的事后取证；平时不留痕
         if std::env::var("FLOATPASTE_E2E_KEEP").as_deref() != Ok("1") {
@@ -540,11 +549,31 @@ impl Drop for Cleanup {
                 self.data_root.display()
             );
         }
+        // 已在 unwind 时只记录错误，避免 Drop 再次 panic 导致进程 abort。
+        if !clipboard_restored && !thread::panicking() {
+            panic!("E2E 未能恢复原剪贴板，不能视为验证通过");
+        }
     }
 }
 
 #[test]
 fn app_e2e_smoke_flow() {
+    // APPDATA 只能隔离被测实例的直接写入，挡不住日常实例采集测试剪贴板。
+    // 持有日常单实例入口到 Cleanup 完成，堵住启动前检查与测试期间启动的竞态。
+    let _daily_instance_slot =
+        match floatpaste_core::platform::windows::single_instance::reserve_clipboard_test_session()
+            .expect("无法确认日常实例是否运行，禁止读写测试剪贴板")
+        {
+            Some(guard) => guard,
+            None => {
+                assert!(
+                    std::env::var("FLOATPASTE_E2E_STRICT").as_deref() != Ok("1"),
+                    "日常 FloatPaste 正在运行，禁止写入测试剪贴板以免污染个人数据库；请手动退出日常实例或使用专用 Windows 会话后重试"
+                );
+                eprintln!("::warning::日常 FloatPaste 正在运行，E2E 主要业务段已跳过以保护个人数据库和配置；未读写剪贴板、未启动被测实例");
+                return;
+            }
+        };
     // 前置探测不提供根因结论；严格模式要求主要业务段实际执行。
     if clipboard_unusable_before_start() {
         assert!(
@@ -564,10 +593,25 @@ fn app_e2e_smoke_flow() {
     // 定位模式取 LastPosition 并预置屏内记忆位置：Mouse/Caret 模式依赖
     // 运行环境的光标与前台窗口（E2E 会话里不稳定），本测试验证的是
     // 唤醒开关面板链路而非定位模式本身
-    let stamp = std::process::id();
+    let stamp = format!(
+        "{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
     let data_root: PathBuf = std::env::temp_dir().join(format!("floatpaste-e2e-{stamp}"));
     let app_dir = data_root.join("floatpaste");
-    fs::create_dir_all(&app_dir).unwrap();
+    fs::create_dir(&data_root).unwrap();
+    let instance_id = format!("e2e-{stamp}");
+    let mut cleanup = Cleanup {
+        child: None,
+        instance_id: instance_id.clone(),
+        original_clipboard: None,
+        data_root: data_root.clone(),
+    };
+    fs::create_dir(&app_dir).unwrap();
     let db_path = app_dir.join("floatpaste.db");
 
     {
@@ -605,10 +649,9 @@ fn app_e2e_smoke_flow() {
     // spawn 前清空剪贴板：被测实例启动即主动核对一次当前剪贴板，
     // 残留内容会作为首条录入污染计数
     let mut clipboard = arboard::Clipboard::new().unwrap();
-    let original_clipboard = retry_clipboard(|| ClipboardSnapshot::capture(true));
+    cleanup.original_clipboard = Some(retry_clipboard(|| ClipboardSnapshot::capture(true)));
     retry_clipboard(|| clipboard.clear());
 
-    let instance_id = format!("e2e-{stamp}");
     let envs = [
         (
             "APPDATA",
@@ -621,15 +664,10 @@ fn app_e2e_smoke_flow() {
         ("FLOATPASTE_RETENTION_FIRST_DELAY_MS", "1500".to_string()),
         ("FLOATPASTE_SKIP_AUTOSTART_SYNC", "1".to_string()),
     ];
-    // 场景 6/6b 托盘、速贴收藏与删除事件的信号侧副本（Cleanup 构造会 move 走原值）
+    // 场景 6/6b 托盘、速贴收藏与删除事件的信号侧副本。
     let instance_id_for_toggle = instance_id.clone();
     let instance_id_for_signals = instance_id.clone();
-    let mut cleanup = Cleanup {
-        child: Some(spawn_instance(&envs, true)),
-        instance_id,
-        original_clipboard: Some(original_clipboard),
-        data_root: data_root.clone(),
-    };
+    cleanup.child = Some(spawn_instance(&envs, true));
     let picker_pid = cleanup.child.as_ref().unwrap().id();
     // 监测启动装配到首次主动打开速贴；活跃会话可能合法显示悬浮气泡。
     let rogue_windows = RogueWindowGuard::start(picker_pid);
@@ -1120,7 +1158,14 @@ fn app_e2e_smoke_flow() {
         let search_root: PathBuf =
             std::env::temp_dir().join(format!("floatpaste-e2e-search-{stamp}"));
         let search_app_dir = search_root.join("floatpaste");
-        fs::create_dir_all(&search_app_dir).unwrap();
+        fs::create_dir(&search_root).unwrap();
+        let mut search_cleanup = Cleanup {
+            child: None,
+            instance_id: search_stamp.clone(),
+            original_clipboard: None,
+            data_root: search_root.clone(),
+        };
+        fs::create_dir(&search_app_dir).unwrap();
         {
             let repository = SqliteRepository::new(&search_app_dir.join("floatpaste.db")).unwrap();
             for index in 0..3 {
@@ -1144,12 +1189,7 @@ fn app_e2e_smoke_flow() {
             ("FLOATPASTE_INSTANCE_ID", search_stamp.clone()),
             ("FLOATPASTE_SKIP_AUTOSTART_SYNC", "1".to_string()),
         ];
-        let mut search_cleanup = Cleanup {
-            child: Some(spawn_instance(&search_envs, true)),
-            instance_id: search_stamp.clone(),
-            original_clipboard: None,
-            data_root: search_root,
-        };
+        search_cleanup.child = Some(spawn_instance(&search_envs, true));
         let search_pid = search_cleanup.child.as_ref().unwrap().id();
 
         // 场景 8 前置：目标窗口持前台后再开窗，被测实例捕获的会话目标即它。

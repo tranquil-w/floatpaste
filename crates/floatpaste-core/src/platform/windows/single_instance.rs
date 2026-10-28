@@ -58,20 +58,48 @@ pub fn acquire_or_focus_existing(
     launch_mode: LaunchMode,
     focus_existing: impl Fn() -> bool,
 ) -> Result<Option<SingleInstanceGuard>, AppError> {
-    let mutex_name = to_wide(&namespaced(SINGLE_INSTANCE_MUTEX_NAME));
+    let guard = acquire_mutex(&namespaced(SINGLE_INSTANCE_MUTEX_NAME))?;
+
+    if guard.is_none() && !launch_mode.is_silent() && !focus_existing() {
+        return Err(AppError::Message(
+            "检测到已有实例，但唤醒现有窗口失败".to_string(),
+        ));
+    }
+    Ok(guard)
+}
+
+/// E2E 在首次访问剪贴板前占住日常实例的入口，持有至子进程退出且剪贴板恢复。
+/// 已有日常实例时返回 None；不唤醒、不暂停、不修改它的配置。
+/// 必须忽略 FLOATPASTE_INSTANCE_ID，否则只能锁住测试实例，无法保护日常库。
+pub fn reserve_clipboard_test_session() -> Result<Option<SingleInstanceGuard>, AppError> {
+    acquire_mutex(SINGLE_INSTANCE_MUTEX_NAME)
+}
+
+fn acquire_mutex(name: &str) -> Result<Option<SingleInstanceGuard>, AppError> {
+    let mutex_name = to_wide(name);
     let handle = unsafe { CreateMutexW(None, false, PCWSTR::from_raw(mutex_name.as_ptr())) }?;
 
     if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
         let _ = unsafe { CloseHandle(handle) };
-        if !launch_mode.is_silent() && !focus_existing() {
-            return Err(AppError::Message(
-                "检测到已有实例，但唤醒现有窗口失败".to_string(),
-            ));
-        }
         return Ok(None);
     }
 
     Ok(Some(SingleInstanceGuard { handle }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::acquire_mutex;
+
+    #[test]
+    fn instance_slot_is_exclusive_until_guard_is_dropped() {
+        // 独立名字，不占用这台电脑日常实例的互斥量。
+        let name = format!("Local\\FloatPaste.MutexContract.{}", uuid::Uuid::new_v4());
+        let guard = acquire_mutex(&name).unwrap().unwrap();
+        assert!(acquire_mutex(&name).unwrap().is_none());
+        drop(guard);
+        assert!(acquire_mutex(&name).unwrap().is_some());
+    }
 }
 
 /// 反复尝试唤醒（窗口可能仍在创建中）；全部失败返回 false。
