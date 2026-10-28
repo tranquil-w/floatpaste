@@ -155,7 +155,10 @@ fn delete_disabled_hotkeys() -> Result<(), AppError> {
 }
 
 /// 重启 Explorer 使 DisabledHotkeys 变更生效（任务栏会短暂消失）。
-/// 经 cmd 分离执行：taskkill 后 start 重启 shell，本进程不受影响
+/// 经 cmd 分离执行：taskkill 后 start 重启 shell，本进程不受影响。
+/// cmd 内的 taskkill/timeout 是控制台程序，须给它们一个共享的隐藏
+/// 控制台（CREATE_NO_WINDOW）；DETACHED_PROCESS 会让每个子进程各自
+/// 新建可见控制台窗口
 pub fn restart_explorer() {
     use std::os::windows::process::CommandExt;
 
@@ -164,6 +167,6 @@ pub fn restart_explorer() {
             "/C",
             "taskkill /F /IM explorer.exe & timeout /T 1 /NOBREAK >NUL & start explorer.exe",
         ])
-        .creation_flags(0x0000_0008) // DETACHED_PROCESS
+        .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
         .spawn();
 }
