@@ -4,10 +4,11 @@
 
 ## 环境与常用命令
 
-使用 Windows 10/11 x64 和 Rust MSVC 工具链（含 C++ 构建工具与 Windows SDK）。发布说明等 Node 脚本使用 Node.js 22，无需安装 npm 依赖。
+使用 Windows 10/11 x64 和 Rust MSVC 工具链（含 C++ 构建工具与 Windows SDK）。统一检查入口使用 PowerShell 7.2+（`pwsh`）；发布说明与检查入口的回归脚本使用 Node.js 22，无需安装 npm 依赖。
 
 | 命令 | 说明 |
 |------|------|
+| `pwsh -NoProfile -File scripts/check.ps1` | 与日常 CI 共用的完整检查入口；范围与报告见下文 |
 | `cargo run -p floatpaste-native --bin floatpaste` | 启动桌面应用（debug） |
 | `cargo test` | 运行全部 Rust 测试（覆盖 `floatpaste-core` 与 `floatpaste-native`，含端到端） |
 | `cargo test -p floatpaste-native --test e2e_smoke` | 单跑真进程端到端（运行十余秒；期间短暂占用全局快捷键并读写系统剪贴板；体系见 [docs/testing.md](docs/testing.md)） |
@@ -37,6 +38,23 @@ Rust 改动须通过 `cargo fmt --all -- --check`、`cargo test` 与 `cargo buil
 日常 CI 用锁定依赖执行与本地相同的三项门槛；E2E 以严格模式运行，不放过跳过主要业务段，焦点段跳过单独报告，失败实例日志作为 Artifact 保留。发版步骤、交付程序验收与失败恢复统一见 [发布流程](docs/release/process.md)。
 
 交付说明对应实际文件、版本或程序，区分实现进展与验收结果；必要覆盖缺失时说明原因和剩余动作。具体结果状态与授权边界遵循 [协作约定](AGENTS.md#执行与验证)。
+
+### 统一检查入口
+
+本地与日常 CI 共用 `scripts/check.ps1`，从任意工作目录调用均以脚本所在仓库为准；不依赖用户 skill。开发流程 skill 可读取本仓库规范并调用此入口，业务契约与验收门槛始终由仓库维护。
+
+| 命令参数 | 检查范围 |
+| --- | --- |
+| 无参数或 `-Scope All` | 检查入口与发布说明脚本回归 → Rust 格式 → 完整 Rust 测试 → 独立 native 构建，顺序执行 |
+| `-Scope Rust` | 仅后三项 Rust 门槛 |
+| `-Scope Scripts` | `node --test scripts/check.test.mjs scripts/release-notes.test.mjs`；不代表 Rust 验收完成 |
+| `-UiSnapshots` | 在所选范围后追加 100%、125%、150% 三档 L2 深浅主题截图检查，每档重新通过 Cargo 运行；覆盖与呈现验收见 [测试体系](docs/testing.md#l2-无头驱动约束) |
+
+Rust 测试和构建使用 `--locked`；测试启用严格 E2E 和隔离目录保留，仍会短暂使用系统剪贴板与全局快捷键，不与其他桌面测试并行。脚本临时设置相关环境变量，结束时恢复调用环境；常规门槛使用当前源码的测试程序、默认缩放且不启用额外截图，不继承 `FLOATPASTE_E2E_EXE` 对交付程序的覆盖。截图模式需要可抓屏的交互桌面，不替代真实按键、上屏注入、材质或第三方接收验收。
+
+每次运行独占创建 `.artifacts/checks/<时间>-<随机后缀>/`，保存逐步日志与 `result.json`。报告记录所选范围、命令、退出码、通过/失败/未运行、时间、系统与 PowerShell 版本、覆盖缺失提示，以及执行前后的 Git 提交、工作区状态和源码 SHA256（含未跟踪文件，不含忽略产物）。首个失败停止后续步骤并返回非零退出码；执行期间源码状态变化同样返回失败，需按影响重新验证。报告中的通过仅表示所选自动检查通过，覆盖提示与相关桌面验收仍须单独核对。中断或进程被终止时，不将残留的 `running` 报告视为完成。
+
+日常 CI 无参数调用，始终上传报告和隔离实例日志到 `ci-checks` Artifact。脚本回归在独立临时仓库内替换外部命令，仅验证调度、失败与证据语义，不替代真实 Rust 检查。修改入口时运行 `node --test scripts/check.test.mjs`，涉及实际门槛或 CI 接线时再运行完整入口。
 
 ### 交付前自审
 

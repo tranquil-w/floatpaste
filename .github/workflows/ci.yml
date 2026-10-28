@@ -15,9 +15,6 @@ jobs:
   rust:
     name: Rust 测试
     runs-on: windows-latest
-    env:
-      FLOATPASTE_E2E_STRICT: "1"
-      FLOATPASTE_E2E_KEEP: "1"
     steps:
       - uses: actions/checkout@v7
 
@@ -25,9 +22,6 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: 22
-
-      - name: 检查发布说明脚本
-        run: node --test scripts/release-notes.test.mjs
 
       - name: 安装 Rust 工具链
         uses: dtolnay/rust-toolchain@stable
@@ -39,21 +33,18 @@ jobs:
         with:
           workspaces: .
 
-      - name: 检查 Rust 格式
-        run: cargo fmt --all -- --check
+      - name: 统一检查（脚本、格式、严格 E2E 与 native 构建）
+        shell: pwsh
+        run: ./scripts/check.ps1
 
-      - name: Rust 测试（禁止跳过主要 E2E）
-        run: cargo test --locked -p floatpaste-core -p floatpaste-native -- --nocapture
-
-      - name: 构建 native
-        run: cargo build --locked -p floatpaste-native
-
-      - name: 保存失败实例日志
-        if: failure()
+      - name: 保存检查报告与实例日志
+        if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: ci-e2e-logs
+          name: ci-checks
           if-no-files-found: ignore
+          include-hidden-files: true
           path: |
+            .artifacts/checks/**
             ${{ runner.temp }}/floatpaste-e2e-*/floatpaste/logs/*
             ${{ runner.temp }}/floatpaste-e2e-search-*/floatpaste/logs/*
