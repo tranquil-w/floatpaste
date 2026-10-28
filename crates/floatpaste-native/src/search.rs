@@ -1267,7 +1267,7 @@ pub fn paste_index(app: &App, index: usize, secondary: bool) {
     paste_with_mode(app, &item, mode);
 }
 
-/// 「更多上屏方式」菜单：按目录序号显式选一次（含主动作），不改默认
+/// 「更多动作」菜单：按目录序号显式选一次（含主动作），不改默认
 fn paste_menu_action(app: &App, index: usize, action_index: usize) {
     let Some(item) = app.state.search_item_at(index) else {
         return;
@@ -1302,11 +1302,11 @@ fn paste_with_mode(app: &App, item: &ClipItemSummary, mode: PasteMode) {
         paste_flow::paste_item(app, &item.id, option, paste_flow::PasteSource::Search)
     {
         warn!("搜索粘贴失败: {error}");
-        crate::tray::notify_failure(&format!("上屏失败：{error}"));
+        crate::tray::notify_failure(&paste_flow::failure_notice(mode, &error));
     }
 }
 
-/* ───────────────── 「更多上屏方式」菜单 ───────────────── */
+/* ───────────────── 「更多动作」菜单 ───────────────── */
 
 /// 锚定并打开动作菜单：锚点取展开箭头左下角、向下展开；贴近窗口底边
 /// 时改为向上展开，菜单高度取共享尺寸与实际动作数；Rust 侧只钳纵向，横向钳制
@@ -1846,7 +1846,7 @@ pub fn wire(app: &App) {
             paste_index(&app_cb, index.max(0) as usize, false);
         });
     }
-    // ── 「更多上屏方式」菜单 ──
+    // ── 「更多动作」菜单 ──
     {
         let app_cb = app.clone();
         win.on_action_menu_requested(move |row, x, y| {
@@ -2468,7 +2468,7 @@ pub(crate) mod refresh_after_editor_tests {
 
 #[cfg(test)]
 pub(crate) mod action_menu_tests {
-    //! 「更多上屏方式」菜单契约（docs/testing.md L2 层）：行级动作目录
+    //! 「更多动作」菜单契约（docs/testing.md L2 层）：行级动作目录
     //! 投影、菜单开合、键盘高亮与跨行 Delete 路由，不执行真实上屏
     //! （系统剪贴板属 L3 串行资源）。由 l2_headless_ui_contracts 单线程串行调用。
 
@@ -2574,7 +2574,12 @@ pub(crate) mod action_menu_tests {
         let file = make_row(&summary("file", false), &keys, &defaults);
         assert_eq!(
             row_labels(&file),
-            vec!["粘贴为文件", "粘贴为完整路径", "粘贴为文件名"]
+            vec![
+                "粘贴为文件",
+                "粘贴为完整路径",
+                "粘贴为文件名",
+                "打开所在文件夹"
+            ]
         );
         assert_eq!(file.secondary_label, "粘贴为完整路径");
 
@@ -2590,7 +2595,12 @@ pub(crate) mod action_menu_tests {
         assert_eq!(file_named.secondary_label, "粘贴为文件名");
         assert_eq!(
             row_labels(&file_named),
-            vec!["粘贴为文件", "粘贴为完整路径", "粘贴为文件名"]
+            vec![
+                "粘贴为文件",
+                "粘贴为完整路径",
+                "粘贴为文件名",
+                "打开所在文件夹"
+            ]
         );
         let shortcuts: Vec<String> = (0..file_named.actions.row_count())
             .filter_map(|index| {
@@ -2605,10 +2615,22 @@ pub(crate) mod action_menu_tests {
             vec![
                 keys.confirm.clone(),
                 String::new(),
-                keys.confirm_as_file.clone()
+                keys.confirm_as_file.clone(),
+                String::new()
             ],
             "次级键提示应跟随新默认（文件名），主动作恒带主键提示"
         );
+
+        // 配置「打开所在文件夹」为默认次级：提示名与次级键提示跟随
+        let file_revealed = make_row(
+            &summary("file", false),
+            &keys,
+            &SecondaryPasteDefaults {
+                file: PasteMode::RevealInFolder,
+                ..defaults
+            },
+        );
+        assert_eq!(file_revealed.secondary_label, "打开所在文件夹");
 
         // 配置等同主动作（富文本选原格式）：不重复提示，菜单仍完整
         let rich_original = make_row(
@@ -2652,9 +2674,11 @@ pub(crate) mod action_menu_tests {
         move_actions_menu(&app, 1);
         assert_eq!(win.get_actions_menu_highlight(), 2);
         move_actions_menu(&app, 1);
+        assert_eq!(win.get_actions_menu_highlight(), 3);
+        move_actions_menu(&app, 1);
         assert_eq!(win.get_actions_menu_highlight(), 0, "高亮循环回主动作");
         move_actions_menu(&app, -1);
-        assert_eq!(win.get_actions_menu_highlight(), 2, "向上移动循环");
+        assert_eq!(win.get_actions_menu_highlight(), 3, "向上移动循环");
 
         // 收起
         close_actions_menu(&app);
@@ -2752,7 +2776,7 @@ pub(crate) mod action_menu_tests {
             });
             if let Some((text, x, y)) = hint.borrow_mut().take() {
                 hints.push(text.clone());
-                if text.starts_with("更多上屏方式") {
+                if text.starts_with("更多动作") {
                     more = Some(slint::LogicalPosition::new(x + 11.0, y - 17.0));
                 } else if text.starts_with("粘贴为文件") {
                     main = Some(slint::LogicalPosition::new(x + 34.0, y - 17.0));
@@ -2761,7 +2785,7 @@ pub(crate) mod action_menu_tests {
         }
         for expected in [
             "粘贴为文件（Alt+Enter）",
-            "更多上屏方式 · 粘贴为完整路径（Shift+Enter）",
+            "更多动作 · 粘贴为完整路径（Shift+Enter）",
             "编辑内容（Ctrl+Shift+E）",
             "收藏（Ctrl+Shift+D）",
             "删除条目（Ctrl+L）",

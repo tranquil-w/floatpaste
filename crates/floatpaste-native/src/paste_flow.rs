@@ -8,11 +8,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::Duration;
 
-use floatpaste_core::domain::clip_item::PasteOption;
+use floatpaste_core::domain::clip_item::{ClipItemDetail, PasteMode, PasteOption};
 use floatpaste_core::domain::error::AppError;
 use floatpaste_core::platform::windows::active_app::ActiveAppResolver;
 use floatpaste_core::platform::windows::clipboard_formats::clipboard_sequence;
 use floatpaste_core::platform::windows::elevation;
+use floatpaste_core::platform::windows::shell_open;
 use floatpaste_core::services::paste_support::{self, InjectionOutcome};
 use tracing::{info, warn};
 
@@ -51,6 +52,40 @@ fn notify_admin_target_once(app: &App, restore_clipboard: bool) {
     }
 }
 
+/// 「打开所在文件夹」：不是剪贴板形态，不经发布与注入。在资源管理器中
+/// 定位条目引用的第一个仍存在的路径（多选跨目录没有单一所在目录）；
+/// 定位成功才收来源窗口，失败保留窗口并把错误交回调用方提示。资源
+/// 管理器接管前台，不还原速贴呼出前的目标窗口。
+fn reveal_item_location(
+    app: &App,
+    detail: &ClipItemDetail,
+    source: PasteSource,
+) -> Result<(), AppError> {
+    let existing = detail
+        .file_paths
+        .iter()
+        .find(|path| std::path::Path::new(path).exists())
+        .ok_or_else(|| AppError::Message("文件已被移动或删除".into()))?;
+    shell_open::reveal_in_explorer(existing)?;
+    match source {
+        PasteSource::Picker if app.state.is_picker_active() => picker::hide(app, false),
+        PasteSource::Search => search::hide(app, false),
+        _ => {}
+    }
+    Ok(())
+}
+
+/// 窗口层失败提示的统一文案：「打开所在文件夹」失败不是上屏失败，
+/// 前缀按动作名区分，两窗口共用
+pub(crate) fn failure_notice(mode: PasteMode, error: &AppError) -> String {
+    let action = if mode == PasteMode::RevealInFolder {
+        "打开所在文件夹失败"
+    } else {
+        "上屏失败"
+    };
+    format!("{action}：{error}")
+}
+
 pub(crate) fn paste_item(
     app: &App,
     id: &str,
@@ -58,6 +93,9 @@ pub(crate) fn paste_item(
     source: PasteSource,
 ) -> Result<(), AppError> {
     let detail = app.core().repository.get_item_for_paste(id)?;
+    if option.mode == PasteMode::RevealInFolder {
+        return reveal_item_location(app, &detail, source);
+    }
     let (session, owner_hwnd) = match source {
         PasteSource::Picker => (
             app.state.picker_session(),

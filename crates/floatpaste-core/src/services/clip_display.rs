@@ -188,7 +188,7 @@ pub fn format_file_size(bytes: Option<i64>) -> Option<String> {
     Some(format!("{value:.digits$} {}", UNITS[unit_index]))
 }
 
-/// 「更多上屏方式」菜单里的一项：动作名 + 快捷键提示（空串 = 无键）。
+/// 「更多动作」菜单里的一项：动作名 + 快捷键提示（空串 = 无键）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PasteActionSummary {
     pub label: String,
@@ -405,10 +405,15 @@ mod tests {
                     label: "粘贴为文件名".into(),
                     shortcut: String::new(),
                 },
+                PasteActionSummary {
+                    label: "打开所在文件夹".into(),
+                    shortcut: String::new(),
+                },
             ]
         );
 
-        // 改配文件名后，快捷键提示跟随新默认
+        // 改配文件名后，快捷键提示跟随新默认；配置「打开所在文件夹」
+        // 时次级键提示落到该动作
         let summaries = paste_action_summaries(
             &item_of("file", 1, 0),
             "Enter",
@@ -420,6 +425,16 @@ mod tests {
         );
         assert_eq!(summaries[1].shortcut, "");
         assert_eq!(summaries[2].shortcut, "Ctrl+Enter");
+        assert_eq!(
+            secondary_action_label(
+                &item_of("file", 1, 0),
+                &SecondaryPasteDefaults {
+                    file: PasteMode::RevealInFolder,
+                    ..SecondaryPasteDefaults::default()
+                }
+            ),
+            Some("打开所在文件夹".into())
+        );
     }
 
     #[test]

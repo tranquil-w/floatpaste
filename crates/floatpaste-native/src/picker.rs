@@ -1040,7 +1040,7 @@ pub fn confirm(app: &App, index: usize, secondary: bool) {
     confirm_mode(app, index, mode);
 }
 
-/// 按显式动作上屏：「更多上屏方式」浮层与菜单的选择路径。
+/// 按显式动作上屏：「更多动作」浮层与菜单的选择路径。
 fn confirm_mode(app: &App, index: usize, mode: PasteMode) {
     let Some(item) = app.state.item_at(index) else {
         return;
@@ -1059,7 +1059,7 @@ fn confirm_mode(app: &App, index: usize, mode: PasteMode) {
         paste_flow::paste_item(app, &item.id, option, paste_flow::PasteSource::Picker)
     {
         warn!("粘贴失败: {error}");
-        crate::tray::notify_failure(&format!("上屏失败：{error}"));
+        crate::tray::notify_failure(&paste_flow::failure_notice(mode, &error));
     }
 }
 
@@ -1150,7 +1150,8 @@ fn handle_session_action_with_actions(
     }
 }
 
-/// 菜单上半部沿用上屏目录，分隔线下固定为收藏、编辑、删除。
+/// 菜单上半部沿用上屏目录（文件条目含非上屏的「打开所在文件夹」，
+/// 由 `paste_flow` 分流执行），分隔线下固定为收藏、编辑、删除。
 fn activate_menu_item(app: &App, index: usize, action_index: usize) {
     let Some(item) = app.state.item_at(index) else {
         close_actions(app);
@@ -2311,18 +2312,31 @@ pub(crate) mod action_sheet_tests {
         assert_eq!(win.get_action_selected(), 0);
         assert_eq!(win.get_selected(), 0);
 
-        // ↑↓ 在 3 项上屏方式与 3 项管理操作间循环
+        // 文件条目菜单 = 4 项动作目录（含「打开所在文件夹」）+ 3 项管理操作
+        use slint::Model;
+        assert_eq!(win.get_menu_actions().row_count(), 7);
+        let reveal = win.get_menu_actions().row_data(3).unwrap();
+        assert_eq!(reveal.label, "打开所在文件夹");
+        assert_eq!(reveal.shortcut, "");
+
+        // ↑↓ 在 7 项间循环
         use floatpaste_core::platform::windows::session_keyboard::SessionAction;
         handle_session_action_with_actions(&app, 0, SessionAction::NavigateDown);
         assert_eq!(win.get_action_selected(), 1);
-        for _ in 0..5 {
+        for _ in 0..6 {
             handle_session_action_with_actions(&app, 0, SessionAction::NavigateDown);
         }
         assert_eq!(win.get_action_selected(), 0, "高亮循环回主动作");
         handle_session_action_with_actions(&app, 0, SessionAction::NavigateUp);
-        assert_eq!(win.get_action_selected(), 5, "向上移动循环到删除");
+        assert_eq!(win.get_action_selected(), 6, "向上移动循环到删除");
+
+        // 激活「打开所在文件夹」收起菜单；该测试条目无库详情，读取
+        // 详情即失败，不会真开资源管理器（真开属桌面验收）
+        activate_menu_item(&app, 0, 3);
+        assert_eq!(win.get_actions_row(), -1);
 
         // 次级键与数字直达：只收浮层，不上屏（无剪贴板写入即通过）
+        open_actions(&app, 0);
         handle_session_action_with_actions(&app, 0, SessionAction::ConfirmAsPath);
         assert_eq!(win.get_actions_row(), -1);
 

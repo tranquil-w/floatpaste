@@ -145,6 +145,11 @@ pub fn publish_item(
     owner: Option<isize>,
     previous: Option<&ClipboardSnapshot>,
 ) -> Result<u32, AppError> {
+    if mode == PasteMode::RevealInFolder {
+        // 非剪贴板形态：发布链路拒绝，由上屏流程分流执行，防止漏分流
+        // 时静默按本体上屏
+        return Err(AppError::Message("打开所在文件夹不经剪贴板发布".into()));
+    }
     let needs_rollback =
         mode == PasteMode::Original && (detail.has_html || detail.r#type == "image");
     let rollback = if needs_rollback && previous.is_none() {
@@ -380,7 +385,8 @@ pub fn trigger_ctrl_v(session_id: u64, operation_id: u64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        file_names_text, file_paths_text, inject_if_current, paste_failure_hint, InjectionOutcome,
+        file_names_text, file_paths_text, inject_if_current, paste_failure_hint, publish_item,
+        InjectionOutcome,
     };
 
     #[test]
@@ -407,6 +413,53 @@ mod tests {
         assert!(paste_failure_hint(false).contains("Ctrl+V"));
         assert!(!paste_failure_hint(true).contains("Ctrl+V"));
         assert!(!paste_failure_hint(true).contains("内容已复制"));
+    }
+
+    #[test]
+    fn publish_rejects_reveal_in_folder_without_opening_clipboard() {
+        use crate::domain::clip_item::{ClipItemDetail, PasteMode};
+        use crate::repository::sqlite_repository::SqliteRepository;
+        use crate::services::image_storage::ImageStorage;
+        use crate::state::CoreState;
+
+        let stamp = std::process::id();
+        let dir = std::env::temp_dir().join(format!("floatpaste-reveal-pub-{stamp}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let core = CoreState::new(
+            SqliteRepository::new(&dir.join("db.sqlite")).unwrap(),
+            ImageStorage::new(dir.clone()).unwrap(),
+            Default::default(),
+        );
+        let detail = ClipItemDetail {
+            has_html: false,
+            html_bytes: None,
+            id: "reveal".into(),
+            r#type: "file".into(),
+            content_preview: String::new(),
+            full_text: String::new(),
+            search_text: String::new(),
+            source_app: None,
+            is_favorited: false,
+            created_at: String::new(),
+            updated_at: String::new(),
+            last_used_at: None,
+            hash: String::new(),
+            image_path: None,
+            image_width: None,
+            image_height: None,
+            image_format: None,
+            file_size: None,
+            file_paths: vec![r"C:\不存在\b.txt".into()],
+            file_count: 1,
+            directory_count: 0,
+            total_size: None,
+            tags: Vec::new(),
+            text_kind: Default::default(),
+        };
+        let error = publish_item(&core, &detail, PasteMode::RevealInFolder, None, None)
+            .expect_err("发布链路必须拒绝非剪贴板形态");
+        assert!(error.to_string().contains("不经剪贴板发布"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

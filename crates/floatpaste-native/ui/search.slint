@@ -27,7 +27,7 @@ export struct SearchRow {
     thumb: image,
     tags: [string],
     tag-more: int,
-    // 「更多上屏方式」动作目录（首项为主动作）；仅一项时不显示展开箭头
+    // 「更多动作」动作目录（首项为主动作）；仅一项时不显示展开箭头
     actions: [PasteActionItem],
     // 默认次级动作的提示名（空串 = 配置等同主动作）
     secondary-label: string,
@@ -248,7 +248,7 @@ component SearchRowCard inherits Rectangle {
     callback button-hint(string, length, length);
     callback button-hint-left();
     callback paste();
-    // 展开箭头命中（按钮左下角锚点），由窗口打开「更多上屏方式」菜单
+    // 展开箭头命中（按钮左下角锚点），由窗口打开「更多动作」菜单
     callback menu-requested(length, length);
     callback edit();
     callback toggle-favorite();
@@ -580,7 +580,7 @@ component SearchRowCard inherits Rectangle {
                                 y: 1px;
                                 width: 23px;
                                 height: 26px;
-                                hint: "更多上屏方式" + (data.secondary-label != ""
+                                hint: "更多动作" + (data.secondary-label != ""
                                     ? " · " + data.secondary-label + "（" + root.action-keys.confirm-as-file + "）" : "");
                                 background: root.menu-open || self.pointer-hover ? Theme.hover-bg : transparent;
                                 clicked => {
@@ -703,7 +703,7 @@ export component SearchWindow inherits Window {
     // 待确认标记只落在发起行上，不会同时染到其他行的操作条
     in-out property <int> delete-armed-row: -1;
     in-out property <bool> has-next-page: false;
-    // ── 「更多上屏方式」菜单：-1 = 收起；行号指向 rows ──
+    // ── 「更多动作」菜单：-1 = 收起；行号指向 rows ──
     // 高亮与锚点由 Rust 维护（键盘 ↑↓/Enter/Esc 与点击共用一套状态）
     in-out property <int> actions-menu-row: -1;
     in-out property <int> actions-menu-highlight: 0;
@@ -1406,7 +1406,7 @@ export component SearchWindow inherits Window {
                 }
             }
 
-            // ── 「更多上屏方式」菜单浮层（行级展开箭头触发）──
+            // ── 「更多动作」菜单浮层（行级展开箭头触发）──
             // 点击捕手盖满面板：点菜单外即收起；菜单本身在其上。
             // 悬停同步高亮（与键盘 ↑↓ 同一状态），点击项等同 Enter。
             // 临时选择只作用当次上屏，不改变默认次级动作

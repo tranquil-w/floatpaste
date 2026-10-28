@@ -946,7 +946,7 @@ export component SettingsWindow inherits Window {
     // 各类别动作目录（富文本/图片/文件），Rust 侧按目录换算
     in-out property <int> secondary-rich: 1;  // 0=原格式 1=纯文本
     in-out property <int> secondary-image: 1; // 0=图片 1=图片路径 2=图片文件
-    in-out property <int> secondary-file: 1;  // 0=文件 1=完整路径 2=文件名
+    in-out property <int> secondary-file: 1;  // 0=文件 1=完整路径 2=文件名 3=打开文件夹
     in-out property <int> theme-mode: 0;      // 0=system 1=light 2=dark
     in-out property <int> window-material: 2; // 0=none 1=mica 2=acrylic
     in-out property <int> theme-preset: 0;    // THEME_PRESET_IDS 下标
@@ -1699,13 +1699,14 @@ export component SettingsWindow inherits Window {
                                         title: "文件";
                                         description: ["粘贴文件，交由目标应用接收。",
                                             "将完整路径逐行粘贴为文字。",
-                                            "仅粘贴文件名（含扩展名），每个文件一行。"][root.secondary-file];
+                                            "仅粘贴文件名（含扩展名），每个文件一行。",
+                                            "在资源管理器中定位并选中文件，不写剪贴板。"][root.secondary-file];
                                         Rectangle {
                                             width: seg-secondary-file.width;
                                             seg-secondary-file := Segmented {
                                                 x: 0;
                                                 y: (parent.height - self.height) / 2;
-                                                options: ["文件", "完整路径", "文件名"];
+                                                options: ["文件", "完整路径", "文件名", "打开文件夹"];
                                                 value <=> root.secondary-file;
                                                 selected(idx) => { root.secondary-file-selected(idx); }
                                             }

@@ -97,8 +97,9 @@ export component PasteActionMenu inherits Rectangle {
     in property <bool> open: false;
     in property <[PasteActionItem]> actions;
     in-out property <int> highlighted: 0;
-    in property <string> caption: "更多上屏方式 · 仅本次";
-    // 搜索只包含上屏方式；速贴从此索引开始显示管理操作。
+    in property <string> caption: "更多动作 · 仅本次";
+    // 搜索仅含动作目录（上屏方式与文件条目的「打开所在文件夹」）；
+    // 速贴从此索引开始显示管理操作。
     in property <int> management-start: -1;
     in property <bool> delete-armed: false;
     in property <length> height-limit: 1000px;
@@ -1037,7 +1038,7 @@ export component QuickPasteWindow inherits Window {
         PasteActionMenu {
             open: root.actions-row >= 0 && root.actions-row < root.rows.length;
             actions: root.menu-actions;
-            caption: "上屏方式 · 仅本次";
+            caption: "更多动作 · 仅本次";
             management-start: self.open ? root.rows[root.actions-row].actions.length : -1;
             delete-armed: root.delete-armed-row >= 0;
             height-limit: Math.max(60px, parent.height - 40px);
