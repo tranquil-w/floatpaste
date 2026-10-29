@@ -4,12 +4,28 @@
 //! 可声明超大尺寸，解码瞬间分配上 GB 的 RGBA。统一在此收紧，超限按
 //! 解码失败处理（UI 走占位/失败态，录入走既有错误路径）。
 
+use crate::domain::error::AppError;
 use image::Limits;
 
 /// 单边像素上限：覆盖 8K 屏截图（7680×4320）留足余量
 pub const MAX_IMAGE_EDGE: u32 = 16384;
 /// 解码期像素分配上限（字节）
 pub const MAX_DECODE_ALLOC: u64 = 512 * 1024 * 1024;
+
+pub fn validate_pixels(width: usize, height: usize) -> Result<usize, AppError> {
+    let bytes = width
+        .checked_mul(height)
+        .and_then(|pixels| pixels.checked_mul(4));
+    if width == 0
+        || height == 0
+        || width > MAX_IMAGE_EDGE as usize
+        || height > MAX_IMAGE_EDGE as usize
+        || bytes.is_none_or(|bytes| bytes as u64 > MAX_DECODE_ALLOC)
+    {
+        return Err(AppError::InputLimit("图片尺寸或像素内存超过限制"));
+    }
+    Ok(bytes.unwrap())
+}
 
 pub fn decode_limits() -> Limits {
     let mut limits = Limits::default();

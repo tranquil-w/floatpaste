@@ -130,6 +130,9 @@ fn stop_topmost_guard() {
 
 /// 打开速贴面板（对齐 WindowCoordinator::activate_picker）
 pub fn activate(app: &App) {
+    if app.core().session_locked() {
+        return;
+    }
     let started = Instant::now();
     let Some(win) = app.picker.upgrade() else {
         return;
@@ -443,6 +446,14 @@ pub fn hide(app: &App, restore_target: bool) {
 /// 进入编辑器前复用收起流程，保留目标会话并让编辑器接管前台。
 pub fn hide_for_editor(app: &App) {
     hide(app, false);
+}
+
+pub(crate) fn discard_history_view(app: &App) {
+    hide(app, false);
+    app.state.set_picker_session(Default::default());
+    app.state.set_items(Vec::new());
+    app.state.set_selected_id(None);
+    app.with_picker(|win| win.set_rows(slint::ModelRc::default()));
 }
 
 /// 主快捷键命中：活跃则关闭并恢复目标，否则打开。

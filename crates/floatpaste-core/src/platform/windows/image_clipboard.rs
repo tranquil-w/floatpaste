@@ -63,6 +63,7 @@ where
         .set_limits(crate::services::image_decode::decode_limits())
         .map_err(|error| AppError::Message(format!("剪贴板图片尺寸超出支持范围: {error}")))?;
     let (width, height) = decoder.dimensions();
+    crate::services::image_decode::validate_pixels(width as usize, height as usize)?;
     let image = DynamicImage::from_decoder(decoder)
         .map_err(|error| AppError::Message(format!("读取剪贴板图片像素失败: {error}")))?;
 

@@ -278,6 +278,16 @@ pub fn cancel(app: &App) {
     park(app);
 }
 
+pub(crate) fn discard_history_view(app: &App) {
+    cancel(app);
+    if let Some(win) = app.tooltip.upgrade() {
+        win.set_content_text("".into());
+        win.set_source_app("".into());
+        win.set_time_text("".into());
+        win.set_image(slint::Image::default());
+    }
+}
+
 fn render(
     app: &App,
     host_hwnd: isize,

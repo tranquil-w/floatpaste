@@ -158,6 +158,14 @@ pub(crate) fn refresh_copy(app: &App) {
 }
 
 fn show_editor(app: &App, session: EditorSession, anchor: Option<HostAnchor>) {
+    if app
+        .settings
+        .upgrade()
+        .is_some_and(|win| win.get_clear_history_busy())
+        || app.core().session_locked()
+    {
+        return;
+    }
     cancel_reveal();
     app.state.set_editor_session(Some(session.clone()));
     let Some(win) = app.editor.upgrade() else {
@@ -471,6 +479,26 @@ pub fn open_file_path_at(app: &App, index: usize) {
 pub fn editor_is_active(app: &App) -> bool {
     // 编辑窗显示期间会话恒存在（close_editor 先清会话再还原来源）
     app.state.editor_session().is_some()
+}
+
+pub(crate) fn discard_history_view(app: &App) {
+    cancel_reveal();
+    app.state.set_editor_session(None);
+    if let Some(win) = app.editor.upgrade() {
+        win.set_has_session(false);
+        win.set_draft_text("".into());
+        win.set_saved_text("".into());
+        win.set_image_path("".into());
+        win.set_image_preview(slint::Image::default());
+        win.set_file_paths(slint::ModelRc::default());
+        win.set_tags(slint::ModelRc::default());
+        win.set_tag_suggestions(slint::ModelRc::default());
+        win.set_tag_input_text("".into());
+        win.set_meta_source("".into());
+        win.set_meta_extra("".into());
+        win.set_meta_time("".into());
+    }
+    ALL_TAGS.with(|tags| tags.borrow_mut().clear());
 }
 
 fn button_hint(app: &App, text: &str, x: f32, y: f32) {

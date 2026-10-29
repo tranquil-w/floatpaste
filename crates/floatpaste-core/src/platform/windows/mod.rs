@@ -10,6 +10,7 @@ pub mod mouse_monitor;
 pub mod picker_position;
 pub mod screen_capture;
 pub mod session_keyboard;
+pub mod session_privacy;
 pub mod shell_open;
 pub mod single_instance;
 pub mod start_menu;

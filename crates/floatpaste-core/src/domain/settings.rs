@@ -350,6 +350,10 @@ pub struct UserSetting {
     #[serde(default)]
     pub always_run_elevated: bool,
     pub history_limit: u32,
+    /// 未收藏历史按最后复制/使用时间保留天数；0 表示不按时间清理。
+    pub history_retention_days: u32,
+    /// 普通删除的缓冲天数；0 表示下一轮清理即可物理回收。
+    pub deleted_retention_days: u32,
     pub picker_record_limit: u32,
     /// 速贴行卡片总高（逻辑像素），允许 80–160；预览区高度、缩略图尺寸
     /// 与预览行数预算由其派生（native 的 PanelGeometry 与
@@ -408,6 +412,8 @@ impl Default for UserSetting {
             silent_on_startup: false,
             always_run_elevated: false,
             history_limit: 1_000,
+            history_retention_days: 0,
+            deleted_retention_days: 30,
             picker_record_limit: 50,
             picker_card_height: 104,
             picker_position_mode: PickerPositionMode::Mouse,
@@ -448,6 +454,8 @@ impl UserSetting {
         }
 
         self.history_limit = self.history_limit.clamp(100, 10_000);
+        self.history_retention_days = self.history_retention_days.min(3650);
+        self.deleted_retention_days = self.deleted_retention_days.min(365);
         self.picker_record_limit = self.picker_record_limit.clamp(9, 1_000);
         self.picker_card_height = self.picker_card_height.clamp(80, 160);
         self.excluded_apps = self
@@ -456,6 +464,9 @@ impl UserSetting {
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty())
             .collect();
+        self.excluded_apps.sort_by_key(|name| name.to_lowercase());
+        self.excluded_apps
+            .dedup_by(|a, b| a.eq_ignore_ascii_case(b));
 
         self.search_shortcut = self.search_shortcut.trim().to_string();
         if self.search_shortcut.is_empty() {

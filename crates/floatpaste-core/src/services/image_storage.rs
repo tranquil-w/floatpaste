@@ -1,6 +1,6 @@
 use std::{
     fs,
-    io::Cursor,
+    io::{Cursor, Read},
     path::{Component, Path, PathBuf},
 };
 
@@ -56,10 +56,21 @@ impl ImageStorage {
         height: usize,
         pre_encoded_png: Option<&[u8]>,
     ) -> Result<PreparedImage, AppError> {
+        let expected = super::image_decode::validate_pixels(width, height)?;
+        if rgba.len() != expected {
+            return Err(AppError::Message("图片像素数据长度与尺寸不匹配".into()));
+        }
+        if pre_encoded_png.is_some_and(|bytes| bytes.len() > super::input_limits::MAX_FORMAT_BYTES)
+        {
+            return Err(AppError::InputLimit("PNG 超过 256 MiB"));
+        }
         let png_bytes = match pre_encoded_png {
             Some(bytes) => bytes.to_vec(),
             None => encode_png(rgba, width, height)?,
         };
+        if png_bytes.len() > super::input_limits::MAX_FORMAT_BYTES {
+            return Err(AppError::InputLimit("PNG 超过 256 MiB"));
+        }
         let file_size = i64::try_from(png_bytes.len())
             .map_err(|_| AppError::Message("图片数据过大，无法保存".to_string()))?;
         let width = i32::try_from(width)
@@ -94,11 +105,38 @@ impl ImageStorage {
     }
 
     pub fn load_image(&self, image_path: &str) -> Result<DecodedImage, AppError> {
-        let png_bytes = fs::read(self.resolve_existing_image_path(image_path)?)?;
+        let mut png_bytes = Vec::new();
+        fs::File::open(self.resolve_existing_image_path(image_path)?)?
+            .take(super::input_limits::MAX_FORMAT_BYTES as u64 + 1)
+            .read_to_end(&mut png_bytes)?;
+        if png_bytes.len() > super::input_limits::MAX_FORMAT_BYTES {
+            return Err(AppError::InputLimit("PNG 超过 256 MiB"));
+        }
         decode_png_bytes(&png_bytes)
     }
 
     pub fn delete_image(&self, image_path: &str) -> Result<(), AppError> {
+        // 只删除应用生成的图片名；损坏的数据库引用不能变成任意文件删除。
+        let path = Path::new(image_path);
+        if path.parent() != Some(Path::new(IMAGE_DIR_NAME))
+            || path.extension().and_then(|value| value.to_str()) != Some(PNG_EXTENSION)
+            || path
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .and_then(|value| Uuid::parse_str(value).ok())
+                .is_none()
+        {
+            return Err(AppError::Message("拒绝清理非应用图片路径".into()));
+        }
+        use std::os::windows::fs::MetadataExt;
+        let directory = match fs::symlink_metadata(self.base_dir.join(IMAGE_DIR_NAME)) {
+            Ok(directory) => directory,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error.into()),
+        };
+        if directory.file_attributes() & 0x400 != 0 {
+            return Err(AppError::Message("拒绝通过重解析目录清理图片".into()));
+        }
         match fs::remove_file(self.resolve_image_path(image_path)?) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -136,9 +174,17 @@ fn decode_png_bytes(png_bytes: &[u8]) -> Result<DecodedImage, AppError> {
         .read_info()
         .map_err(|error| AppError::Message(format!("读取 PNG 图片失败: {error}")))?;
 
+    super::image_decode::validate_pixels(
+        reader.info().width as usize,
+        reader.info().height as usize,
+    )?;
+
     let buffer_size = reader
         .output_buffer_size()
         .ok_or_else(|| AppError::Message("图片尺寸超出支持范围".to_string()))?;
+    if buffer_size as u64 > super::image_decode::MAX_DECODE_ALLOC {
+        return Err(AppError::InputLimit("图片解码内存超过限制"));
+    }
     let mut rgba = vec![0; buffer_size];
     let info = reader
         .next_frame(&mut rgba)

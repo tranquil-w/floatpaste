@@ -26,6 +26,9 @@ use super::{
     clipboard_error::map_clipboard_error,
     image_clipboard::{decode_dib_bytes, decode_png_bytes, ClipboardImageData},
 };
+use crate::services::input_limits::{
+    MAX_FILE_COUNT, MAX_FORMAT_BYTES, MAX_PATH_UNITS, MAX_SNAPSHOT_BYTES, MAX_TEXT_BYTES,
+};
 use crate::{domain::error::AppError, services::html_format::MAX_HTML_BYTES};
 
 const CF_UNICODETEXT: u32 = 13;
@@ -37,6 +40,8 @@ const CF_DIBV5: u32 = 17;
 pub struct ClipboardSnapshot {
     pub sequence: u32,
     pub html_available: bool,
+    pub excluded_from_history: bool,
+    pub source_app: Option<String>,
     formats: Vec<(u32, Vec<u8>)>,
     pub files: Option<Vec<String>>,
     html_format: u32,
@@ -123,11 +128,48 @@ pub(super) fn registered_format(name: windows::core::PCWSTR) -> Result<u32, AppE
 impl ClipboardSnapshot {
     /// 恢复快照要求完整保留白名单内的 HTML；超限须在清空剪贴板前拒绝。
     pub fn capture(require_restorable: bool) -> Result<Self, AppError> {
+        Self::capture_with_policy(require_restorable, &[])
+    }
+
+    pub fn capture_for_history(excluded_apps: &[String]) -> Result<Self, AppError> {
+        Self::capture_with_policy(false, excluded_apps)
+    }
+
+    fn capture_with_policy(
+        require_restorable: bool,
+        excluded_apps: &[String],
+    ) -> Result<Self, AppError> {
         let html_format = registered_format(w!("HTML Format"))?;
         let png_format = registered_format(w!("PNG"))?;
         let _session = open_clipboard(fallback_owner()?)?;
         let sequence = clipboard_sequence();
-        let mut formats = Vec::new();
+        let source_app = super::active_app::ActiveAppResolver::process_name_for_window(
+            unsafe { GetClipboardOwner() }.unwrap_or_default(),
+        );
+        let mut formats = read_privacy_formats()?;
+        let exclude_format = registered_format(w!("ExcludeClipboardContentFromMonitorProcessing"))?;
+        let history_format = registered_format(w!("CanIncludeInClipboardHistory"))?;
+        let excluded_from_history = source_app.as_ref().is_some_and(|source| {
+            excluded_apps
+                .iter()
+                .any(|app| app.eq_ignore_ascii_case(source))
+        }) || formats.iter().any(|(format, bytes)| {
+            *format == exclude_format
+                || (*format == history_format && bytes.as_slice() == [0, 0, 0, 0])
+        });
+        if !require_restorable && excluded_from_history {
+            return Ok(Self {
+                sequence,
+                html_available: false,
+                excluded_from_history,
+                source_app,
+                formats: Vec::new(),
+                files: None,
+                html_format,
+                png_format,
+            });
+        }
+        let mut total_bytes = 0usize;
         let mut files = None;
         let mut html_available = false;
         for format in [
@@ -180,6 +222,15 @@ impl ClipboardSnapshot {
             if size == 0 {
                 continue;
             }
+            if size > MAX_FORMAT_BYTES
+                || (format == CF_UNICODETEXT && size > MAX_TEXT_BYTES * 2 + 2)
+            {
+                return Err(AppError::InputLimit("剪贴板单格式载荷超过限制"));
+            }
+            total_bytes = total_bytes
+                .checked_add(size)
+                .filter(|total| *total <= MAX_SNAPSHOT_BYTES)
+                .ok_or(AppError::InputLimit("剪贴板快照超过 512 MiB"))?;
             let ptr = unsafe { GlobalLock(global) }.cast::<u8>();
             if ptr.is_null() {
                 if format == html_format && !require_restorable {
@@ -208,9 +259,15 @@ impl ClipboardSnapshot {
             if format == CF_HDROP {
                 let hdrop = HDROP(handle.0);
                 let count = unsafe { DragQueryFileW(hdrop, u32::MAX, None) };
+                if count as usize > MAX_FILE_COUNT {
+                    return Err(AppError::InputLimit("文件列表超过 1024 项"));
+                }
                 let mut paths = Vec::new();
                 for index in 0..count {
                     let len = unsafe { DragQueryFileW(hdrop, index, None) };
+                    if len as usize > MAX_PATH_UNITS {
+                        return Err(AppError::InputLimit("文件路径超过长度限制"));
+                    }
                     let mut buf = vec![0u16; len as usize + 1];
                     let copied = unsafe { DragQueryFileW(hdrop, index, Some(&mut buf)) };
                     if copied > 0 {
@@ -218,6 +275,7 @@ impl ClipboardSnapshot {
                     }
                 }
                 if !paths.is_empty() {
+                    crate::services::input_limits::validate_files(&paths)?;
                     files = Some(paths);
                 }
             }
@@ -229,6 +287,8 @@ impl ClipboardSnapshot {
         Ok(Self {
             sequence,
             html_available,
+            excluded_from_history,
+            source_app,
             formats,
             files,
             html_format,
@@ -278,6 +338,41 @@ impl ClipboardSnapshot {
     ) -> Result<Option<u32>, AppError> {
         write_formats(&self.formats, owner, expected, None)
     }
+}
+
+/// 隐私标记先于正文读取；恢复快照同时保留系统历史和云同步策略。
+fn read_privacy_formats() -> Result<Vec<(u32, Vec<u8>)>, AppError> {
+    let mut formats = Vec::new();
+    for (name, presence_only) in [
+        (w!("ExcludeClipboardContentFromMonitorProcessing"), true),
+        (w!("CanIncludeInClipboardHistory"), false),
+        (w!("CanUploadToCloudClipboard"), false),
+    ] {
+        let format = registered_format(name)?;
+        if unsafe { IsClipboardFormatAvailable(format) }.is_err() {
+            continue;
+        }
+        let bytes = if presence_only {
+            vec![1]
+        } else {
+            let handle = unsafe { GetClipboardData(format) }.map_err(map_clipboard_error)?;
+            let global = HGLOBAL(handle.0);
+            if unsafe { GlobalSize(global) } < 4 {
+                return Err(AppError::Clipboard("剪贴板隐私标记无效，已取消读取".into()));
+            }
+            let ptr = unsafe { GlobalLock(global) }.cast::<u8>();
+            if ptr.is_null() {
+                return Err(AppError::Clipboard("无法读取剪贴板隐私标记".into()));
+            }
+            let bytes = unsafe { slice::from_raw_parts(ptr, 4) }.to_vec();
+            unsafe {
+                let _ = GlobalUnlock(global);
+            }
+            bytes
+        };
+        formats.push((format, bytes));
+    }
+    Ok(formats)
 }
 
 pub fn write_text_formats(

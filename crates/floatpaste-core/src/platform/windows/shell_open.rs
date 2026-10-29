@@ -66,7 +66,7 @@ pub fn open_path(path: &str) -> Result<(), AppError> {
         return Err(AppError::Message("路径为空".into()));
     }
     if !std::path::Path::new(path).exists() {
-        return Err(AppError::Message(format!("路径不存在：{path}")));
+        return Err(AppError::Message("路径不存在，文件可能已移动或删除".into()));
     }
     shell_execute_open(path, None)
 }
@@ -82,7 +82,7 @@ pub fn reveal_in_explorer(path: &str) -> Result<(), AppError> {
     }
     let target = std::path::Path::new(path);
     if !target.exists() {
-        return Err(AppError::Message(format!("路径不存在：{path}")));
+        return Err(AppError::Message("路径不存在，文件可能已移动或删除".into()));
     }
     // 根目录（盘符、UNC share 根）没有所在文件夹，也没有可复用的父
     // 视图：直接打开目录本身；也规避 `/select,"C:\"` 的尾随反斜杠把

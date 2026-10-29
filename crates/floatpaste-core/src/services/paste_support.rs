@@ -57,12 +57,20 @@ pub fn schedule_clipboard_restore(
     session_id: u64,
     operation_id: u64,
     written_sequence: u32,
+    privacy_generation: u64,
 ) -> Result<(), AppError> {
     let core = core.clone();
     thread::spawn(move || {
         thread::sleep(Duration::from_millis(550));
         let result = (|| {
             let _gate = lock_paste_operation()?;
+            let privacy = core.privacy_read()?;
+            if privacy.session_locked
+                || privacy.generation != privacy_generation
+                || core.is_quitting()
+            {
+                return Ok(());
+            }
             if clipboard_sequence() != written_sequence {
                 return Ok(());
             }
@@ -145,6 +153,24 @@ pub fn publish_item(
     owner: Option<isize>,
     previous: Option<&ClipboardSnapshot>,
 ) -> Result<u32, AppError> {
+    publish_item_if_current(core, detail, mode, owner, previous, None)
+}
+
+pub fn publish_item_if_current(
+    core: &CoreState,
+    detail: &ClipItemDetail,
+    mode: PasteMode,
+    owner: Option<isize>,
+    previous: Option<&ClipboardSnapshot>,
+    generation: Option<u64>,
+) -> Result<u32, AppError> {
+    let privacy = core.privacy_read()?;
+    if privacy.session_locked
+        || generation.is_some_and(|value| value != privacy.generation)
+        || core.is_quitting()
+    {
+        return Err(AppError::OperationCancelled);
+    }
     if mode == PasteMode::RevealInFolder {
         // 非剪贴板形态：发布链路拒绝，由上屏流程分流执行，防止漏分流
         // 时静默按本体上屏
@@ -322,15 +348,22 @@ pub fn paste_failure_hint(restore_clipboard: bool) -> &'static str {
 pub enum InjectionOutcome {
     Injected,
     ClipboardChanged,
+    PrivacyChanged,
 }
 
 /// 新复制或另一次发布到来后取消旧注入；锁失败和注入失败保留为错误。
 pub fn trigger_ctrl_v_if_current(
+    core: &CoreState,
+    privacy_generation: u64,
     sequence: u32,
     session_id: u64,
     operation_id: u64,
 ) -> Result<InjectionOutcome, AppError> {
     let _gate = lock_paste_operation()?;
+    let privacy = core.privacy_read()?;
+    if privacy.session_locked || privacy.generation != privacy_generation || core.is_quitting() {
+        return Ok(InjectionOutcome::PrivacyChanged);
+    }
     inject_if_current(sequence, clipboard_sequence(), || {
         trigger_ctrl_v(session_id, operation_id)
     })

@@ -116,6 +116,124 @@ fn retry_clipboard<T, E: std::fmt::Debug>(mut op: impl FnMut() -> Result<T, E>) 
     panic!("剪贴板操作短重试后仍失败: {last:?}；保留隔离目录与实例日志，区分占用、格式转换和实例行为，排查步骤见 docs/testing.md");
 }
 
+/// 单次锁内发布文本与隐私标记，避免监听先看到未加标记的中间态。
+fn write_marked_text(text: &str, name: &str, value: u32) -> Result<(), AppError> {
+    use windows::Win32::{
+        Foundation::{GlobalFree, HANDLE},
+        System::{
+            DataExchange::{EmptyClipboard, RegisterClipboardFormatW, SetClipboardData},
+            Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE},
+        },
+    };
+    let name: Vec<u16> = name.encode_utf16().chain([0]).collect();
+    let owner = unsafe {
+        CreateWindowExW(
+            WINDOW_EX_STYLE::default(),
+            windows::core::w!("STATIC"),
+            windows::core::w!("FloatPastePrivacyTest"),
+            Default::default(),
+            0,
+            0,
+            0,
+            0,
+            Some(windows::Win32::UI::WindowsAndMessaging::HWND_MESSAGE),
+            None,
+            None,
+            None,
+        )?
+    };
+    let result = (|| {
+        unsafe {
+            OpenClipboard(Some(owner))?;
+        }
+        let result = (|| {
+            unsafe {
+                EmptyClipboard()?;
+            }
+            let format = unsafe { RegisterClipboardFormatW(PCWSTR(name.as_ptr())) };
+            if format == 0 {
+                return Err(AppError::Message("注册测试标记失败".into()));
+            }
+            let bytes: Vec<u8> = text
+                .encode_utf16()
+                .chain([0])
+                .flat_map(u16::to_le_bytes)
+                .collect();
+            let html_format = unsafe { RegisterClipboardFormatW(windows::core::w!("HTML Format")) };
+            for (format, bytes) in [
+                (format, value.to_le_bytes().to_vec()),
+                (13, bytes),
+                (html_format, encode_html_fragment("<b>受保护富文本</b>")),
+            ] {
+                let global = unsafe { GlobalAlloc(GMEM_MOVEABLE, bytes.len())? };
+                let ptr = unsafe { GlobalLock(global) }.cast::<u8>();
+                if ptr.is_null() {
+                    unsafe {
+                        let _ = GlobalFree(Some(global));
+                    }
+                    return Err(AppError::Message("测试载荷分配失败".into()));
+                }
+                unsafe {
+                    std::ptr::copy_nonoverlapping(bytes.as_ptr(), ptr, bytes.len());
+                    let _ = GlobalUnlock(global);
+                    if let Err(error) = SetClipboardData(format, Some(HANDLE(global.0))) {
+                        let _ = GlobalFree(Some(global));
+                        return Err(AppError::Windows(error));
+                    }
+                }
+            }
+            Ok(())
+        })();
+        unsafe {
+            let _ = CloseClipboard();
+        }
+        result
+    })();
+    unsafe {
+        let _ = DestroyWindow(owner);
+    }
+    result
+}
+
+fn signal_session_change(process_id: u32, locked: bool) {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        FindWindowExW, SendMessageW, HWND_MESSAGE, WM_WTSSESSION_CHANGE, WTS_SESSION_LOCK,
+        WTS_SESSION_UNLOCK,
+    };
+    let mut after = None;
+    loop {
+        let hwnd = unsafe {
+            FindWindowExW(
+                Some(HWND_MESSAGE),
+                after,
+                windows::core::w!("FloatPasteClipboardMonitor"),
+                PCWSTR::null(),
+            )
+        }
+        .expect("找到隔离实例剪贴板消息窗");
+        let mut pid = 0;
+        unsafe {
+            GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        }
+        if pid == process_id {
+            unsafe {
+                SendMessageW(
+                    hwnd,
+                    WM_WTSSESSION_CHANGE,
+                    Some(WPARAM(if locked {
+                        WTS_SESSION_LOCK
+                    } else {
+                        WTS_SESSION_UNLOCK
+                    } as usize)),
+                    Some(LPARAM(0)),
+                );
+            }
+            break;
+        }
+        after = Some(hwnd);
+    }
+}
+
 /// 只读连接查隔离库；被测实例持有写连接（短事务），busy_timeout 兜并发
 fn count_rows(db_path: &Path, sql: &str, param: Option<&str>) -> i64 {
     let connection =
@@ -704,6 +822,59 @@ fn app_e2e_smoke_flow() {
         clipboard.get_text().is_ok_and(|text| text == marker)
     );
 
+    // 隐私标记必须拒绝整条；不能经 HTML/图片回退等分支录入。
+    for (name, value, reject) in [
+        ("ExcludeClipboardContentFromMonitorProcessing", 1, true),
+        ("CanIncludeInClipboardHistory", 0, true),
+        ("CanIncludeInClipboardHistory", 1, false),
+        ("CanUploadToCloudClipboard", 0, false),
+    ] {
+        let marked = format!("e2e-privacy-{name}-{stamp}");
+        retry_clipboard(|| write_marked_text(&marked, name, value));
+        let snapshot = retry_clipboard(|| ClipboardSnapshot::capture(true));
+        assert_eq!(snapshot.excluded_from_history, reject);
+        // 先清空再恢复同一快照，核对恢复没有丢失禁止历史/云同步标记。
+        retry_clipboard(|| clipboard.clear());
+        retry_clipboard(|| snapshot.restore(None, None));
+        assert_eq!(
+            retry_clipboard(|| ClipboardSnapshot::capture(false)).excluded_from_history,
+            reject
+        );
+        if reject {
+            thread::sleep(Duration::from_millis(1000));
+            assert!(
+                !active_full_text_exists(&db_path, &marked),
+                "禁止历史标记不得进入数据库"
+            );
+        } else {
+            assert!(
+                wait_until(Duration::from_secs(5), Duration::from_millis(100), || {
+                    active_full_text_exists(&db_path, &marked)
+                }),
+                "云同步策略不能错误地禁止本地采集"
+            );
+        }
+    }
+    // 合成会话通知只验证进程接线，不锁用户桌面，也不替代真实锁屏验收。
+    signal_session_change(picker_pid, true);
+    let locked_marker = format!("e2e-locked-secret-{stamp}");
+    retry_clipboard(|| clipboard.set_text(locked_marker.clone()));
+    thread::sleep(Duration::from_millis(500));
+    assert!(!active_full_text_exists(&db_path, &locked_marker));
+    signal_session_change(picker_pid, false);
+    thread::sleep(Duration::from_millis(500));
+    assert!(
+        !active_full_text_exists(&db_path, &locked_marker),
+        "解锁不得补采锁屏内容"
+    );
+    let unlocked_marker = format!("e2e-unlocked-{stamp}");
+    retry_clipboard(|| clipboard.set_text(unlocked_marker.clone()));
+    assert!(wait_until(
+        Duration::from_secs(5),
+        Duration::from_millis(100),
+        || active_full_text_exists(&db_path, &unlocked_marker)
+    ));
+
     // ── 场景 3：重复复制去重（bump 置顶而非新增）──
     cleanup.assert_running("去重");
     let count_before = count_active_unfavorited(&db_path);
@@ -766,7 +937,36 @@ fn app_e2e_smoke_flow() {
             .is_none(),
         "发布须登记纯文本回退身份"
     );
-    schedule_clipboard_restore(&driver, snapshot.clone(), None, 0, 1, plain_sequence).unwrap();
+    // 锁屏后快速解锁也不能让旧的延迟恢复重新生效。
+    schedule_clipboard_restore(
+        &driver,
+        snapshot.clone(),
+        None,
+        0,
+        0,
+        plain_sequence,
+        driver.privacy_generation(),
+    )
+    .unwrap();
+    driver.set_session_locked(true).unwrap();
+    driver.set_session_locked(false).unwrap();
+    thread::sleep(Duration::from_millis(700));
+    assert!(
+        retry_clipboard(|| ClipboardSnapshot::capture(true))
+            .html()
+            .is_none(),
+        "隐私代际变化应取消延迟恢复"
+    );
+    schedule_clipboard_restore(
+        &driver,
+        snapshot.clone(),
+        None,
+        0,
+        1,
+        plain_sequence,
+        driver.privacy_generation(),
+    )
+    .unwrap();
     let newer = format!("e2e-user-new-copy-{stamp}");
     retry_clipboard(|| clipboard.set_text(newer.clone()));
     thread::sleep(Duration::from_millis(700));
@@ -1362,6 +1562,17 @@ fn app_e2e_smoke_flow() {
         );
     }
 
+    for entry in fs::read_dir(app_dir.join("logs")).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_file() {
+            let log = fs::read_to_string(path).unwrap();
+            assert!(
+                !log.contains(&locked_marker),
+                "默认日志不得记录锁屏时的剪贴正文"
+            );
+            assert!(!log.contains(&html_text), "默认日志不得记录富文本正文");
+        }
+    }
     eprintln!("[e2e] 主要业务段通过；焦点段结果见上方独立报告");
     // 收尾（终止被测实例、恢复剪贴板、清理临时目录）由 Cleanup 守卫统一执行
 }

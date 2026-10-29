@@ -186,18 +186,7 @@ pub fn notify_elevation_declined() {
 /// 无需旧壳时代的菜单事件去抖（那针对 Tauri 菜单库的双触发缺陷）。
 /// E2E 测试经命名事件复用同一路径（main.rs 装载，见 single_instance 模块）。
 pub(crate) fn toggle_monitoring(app: &App) {
-    let mut settings = app.state.current_settings();
-    settings.pause_monitoring = !settings.pause_monitoring;
-    match app.state.core.update_settings(settings) {
-        Ok(saved) => {
-            info!(
-                "托盘切换监听已生效：pause_monitoring={}",
-                saved.pause_monitoring
-            );
-            crate::settings::apply_side_effects(app);
-        }
-        Err(error) => warn!("托盘更新监听状态失败: {error}"),
-    }
+    crate::settings::set_monitoring_paused(app, !app.state.current_settings().pause_monitoring);
 }
 
 /// 退出：置退出标志并结束事件循环，main 在循环退出后统一收尾

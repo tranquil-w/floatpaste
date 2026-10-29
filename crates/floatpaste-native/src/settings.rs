@@ -360,6 +360,44 @@ pub fn wire(app: &App) {
     }
     {
         let app_cb = app.clone();
+        win.on_history_retention_edited(move |_| schedule_save(&app_cb));
+        let app_cb = app.clone();
+        win.on_deleted_retention_edited(move |_| schedule_save(&app_cb));
+        let app_cb = app.clone();
+        win.on_history_retention_committed(move |text| {
+            if let Some(win) = app_cb.settings.upgrade() {
+                commit_number_text(
+                    &win,
+                    &app_cb,
+                    &text,
+                    0,
+                    3650,
+                    0,
+                    SettingsWindow::set_history_retention_text,
+                );
+            }
+        });
+        let app_cb = app.clone();
+        win.on_deleted_retention_committed(move |text| {
+            if let Some(win) = app_cb.settings.upgrade() {
+                commit_number_text(
+                    &win,
+                    &app_cb,
+                    &text,
+                    0,
+                    365,
+                    30,
+                    SettingsWindow::set_deleted_retention_text,
+                );
+            }
+        });
+        let app_cb = app.clone();
+        win.on_clear_history_requested(move || request_clear_history(&app_cb));
+        let app_cb = app.clone();
+        win.on_clear_history_confirmed(move || clear_history(&app_cb));
+    }
+    {
+        let app_cb = app.clone();
         win.on_picker_limit_edited(move |_| schedule_save(&app_cb));
     }
     {
@@ -527,10 +565,7 @@ pub fn wire(app: &App) {
     {
         let app_cb = app.clone();
         win.on_pause_monitoring_toggled(move |checked| {
-            if let Some(win) = app_cb.settings.upgrade() {
-                win.set_pause_monitoring(checked);
-                schedule_save(&app_cb);
-            }
+            set_monitoring_paused(&app_cb, checked);
         });
     }
     {
@@ -849,6 +884,11 @@ fn hydrate(app: &App, win: &SettingsWindow) {
     let failures = app.state.hotkey_failures();
     refresh_hotkey_status_hints(win, &failures);
     win.set_history_limit_text(settings.history_limit.to_string().into());
+    win.set_history_retention_text(settings.history_retention_days.to_string().into());
+    win.set_deleted_retention_text(settings.deleted_retention_days.to_string().into());
+    if !win.get_clear_history_busy() {
+        win.set_clear_history_dialog_open(false);
+    }
     win.set_picker_limit_text(settings.picker_record_limit.to_string().into());
     win.set_picker_card_height_text(settings.picker_card_height.to_string().into());
     win.set_position_mode(match settings.picker_position_mode {
@@ -955,6 +995,12 @@ fn current_draft(win: &SettingsWindow) -> UserSetting {
         },
         always_run_elevated,
         history_limit: history,
+        history_retention_days: clamp_number_text(&win.get_history_retention_text(), 0, 3650, 0)
+            .parse()
+            .unwrap_or(0),
+        deleted_retention_days: clamp_number_text(&win.get_deleted_retention_text(), 0, 365, 30)
+            .parse()
+            .unwrap_or(30),
         picker_record_limit: picker_limit,
         picker_card_height,
         picker_position_mode: match win.get_position_mode() {
@@ -1141,6 +1187,106 @@ fn schedule_save(app: &App) {
 
 fn stop_save_timer() {
     SAVE_TIMER.with(|slot| *slot.borrow_mut() = None);
+}
+
+/// 暂停必须立即生效，并且不被其他草稿中的快捷键冲突阻塞。
+pub(crate) fn set_monitoring_paused(app: &App, paused: bool) {
+    let result = app.core().current_settings().and_then(|mut settings| {
+        settings.pause_monitoring = paused;
+        app.core().update_settings(settings)
+    });
+    match result {
+        Ok(saved) => {
+            if let Some(win) = app.settings.upgrade() {
+                win.set_pause_monitoring(saved.pause_monitoring);
+            }
+            SAVED.with(|slot| {
+                if let Some(settings) = slot.borrow_mut().as_mut() {
+                    settings.pause_monitoring = saved.pause_monitoring;
+                }
+            });
+            crate::picker::refresh_copy(app);
+            crate::search::refresh_copy(app);
+            info!(
+                pause_monitoring = saved.pause_monitoring,
+                "监听状态已立即保存"
+            );
+        }
+        Err(error) => {
+            warn!(error = %error, "切换监听失败");
+            if let Some(win) = app.settings.upgrade() {
+                win.set_pause_monitoring(app.state.current_settings().pause_monitoring);
+                win.set_privacy_notice("切换监听失败，请重试。".into());
+            }
+            crate::tray::notify_failure("切换监听失败，请重试。");
+        }
+    }
+}
+
+fn request_clear_history(app: &App) {
+    if let Some(win) = app.settings.upgrade() {
+        if crate::editor::editor_is_active(app) {
+            win.set_privacy_notice("请先保存或放弃编辑并关闭编辑窗口，再清除历史。".into());
+            return;
+        }
+        if !win.get_clear_history_busy() {
+            win.set_clear_history_dialog_open(true);
+        }
+    }
+}
+
+fn clear_history(app: &App) {
+    let Some(win) = app.settings.upgrade() else {
+        return;
+    };
+    if !win.get_clear_history_dialog_open()
+        || win.get_clear_history_busy()
+        || crate::editor::editor_is_active(app)
+    {
+        return;
+    }
+    win.set_clear_history_busy(true);
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let generation = app.core().privacy_generation();
+        let result =
+            floatpaste_core::services::clip_service::ClipService::clear_history(app.core());
+        let _ = slint::invoke_from_event_loop(move || {
+            if app.core().privacy_generation() != generation {
+                crate::picker::discard_history_view(&app);
+                crate::search::discard_history_view(&app);
+                crate::editor::discard_history_view(&app);
+                crate::thumbnails::clear();
+                crate::tooltip::discard_history_view(&app);
+            }
+            let Some(win) = app.settings.upgrade() else {
+                return;
+            };
+            win.set_clear_history_busy(false);
+            win.set_clear_history_dialog_open(false);
+            match result {
+                Ok(result) => {
+                    let mut message =
+                        "历史已清除，设置、系统剪贴板及用户源文件已保留。".to_string();
+                    if result.pending_images > 0 {
+                        message.push_str(&format!(
+                            "仍有 {} 个应用图片待重试清理。",
+                            result.pending_images
+                        ));
+                    }
+                    if !result.storage_compacted {
+                        message.push_str("数据库压缩未完成；不影响历史移除。 ");
+                    }
+                    win.set_privacy_notice(message.into());
+                }
+                Err(error) => {
+                    warn!(error = %error, "清除历史未全部完成");
+                    win.set_privacy_notice("清除未全部完成，请重试；图片清理任务会保留。".into());
+                }
+            }
+            reload_tags(&app, &win);
+        });
+    });
 }
 
 /// 立即保存当前草稿并应用运行时副作用（防抖回调 / 重试 / Esc flush 共用）
@@ -1847,6 +1993,17 @@ pub(crate) mod copy_contract_tests {
         win.set_session_key_rows(slint::ModelRc::new(VecModel::from(session_key_rows(
             &UserSetting::default(),
         ))));
+        win.set_history_retention_text("0".into());
+        win.set_deleted_retention_text("30".into());
+        let draft = current_draft(&win);
+        assert_eq!(draft.history_retention_days, 0);
+        assert_eq!(draft.deleted_retention_days, 30);
+        win.set_history_retention_text("9999".into());
+        win.set_deleted_retention_text("9999".into());
+        assert_eq!(current_draft(&win).history_retention_days, 3650);
+        assert_eq!(current_draft(&win).deleted_retention_days, 365);
+        win.set_history_retention_text("0".into());
+        win.set_deleted_retention_text("30".into());
         win.set_main_hotkey_status("".into());
         win.set_search_hotkey_status("".into());
         win.set_winv_enabled(false);
@@ -1948,7 +2105,153 @@ pub(crate) mod copy_contract_tests {
                     )
                     .unwrap();
                 }
+                win.set_nav_override(4);
+                let _ = win.window().take_snapshot().unwrap();
+                win.set_scroll_y(80.0 - win.get_sec_y4());
+                for dialog in [false, true] {
+                    win.set_clear_history_dialog_open(dialog);
+                    let _ = win.window().take_snapshot().unwrap();
+                    std::thread::sleep(Duration::from_millis(150));
+                    slint::platform::update_timers_and_animations();
+                    let pixels = win.window().take_snapshot().unwrap();
+                    image::save_buffer(
+                        dir.join(format!(
+                            "privacy-{name}-{dialog}-{}.png",
+                            (win.window().scale_factor() * 100.0).round() as u32
+                        )),
+                        pixels.as_bytes(),
+                        pixels.width(),
+                        pixels.height(),
+                        image::ColorType::Rgba8,
+                    )
+                    .unwrap();
+                }
+                win.set_clear_history_dialog_open(false);
             }
         }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod privacy_contract_tests {
+    use super::*;
+    pub(crate) fn run() {
+        let dir = std::env::temp_dir().join(format!(
+            "floatpaste-privacy-ui-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&dir).unwrap();
+        let core = floatpaste_core::state::CoreState::new(
+            floatpaste_core::repository::sqlite_repository::SqliteRepository::new(
+                &dir.join("history.db"),
+            )
+            .unwrap(),
+            floatpaste_core::services::image_storage::ImageStorage::new(dir.clone()).unwrap(),
+            UserSetting::default(),
+        );
+        let win = SettingsWindow::new().unwrap();
+        let editor_win = crate::EditorWindow::new().unwrap();
+        let app = App {
+            state: std::sync::Arc::new(crate::app_state::SharedState::new(core)),
+            picker: Default::default(),
+            tooltip: Default::default(),
+            tray_menu: Default::default(),
+            search: Default::default(),
+            editor: editor_win.as_weak(),
+            settings: win.as_weak(),
+        };
+        wire(&app);
+        hydrate(&app, &win);
+        let item = floatpaste_core::services::history_service::HistoryService::ingest_text(
+            app.core(),
+            "隐私清除测试",
+            None,
+        )
+        .unwrap()
+        .unwrap();
+        // 暂停单独持久化，不能被其他设置的冲突阻塞，也不吞掉草稿。
+        win.set_search_shortcut(win.get_shortcut());
+        assert!(shortcut_conflict(&win));
+        win.invoke_pause_monitoring_toggled(true);
+        assert!(
+            app.core()
+                .repository
+                .load_settings()
+                .unwrap()
+                .pause_monitoring
+        );
+        assert!(win.get_pause_monitoring());
+        win.invoke_pause_monitoring_toggled(false);
+        assert!(
+            !app.core()
+                .repository
+                .load_settings()
+                .unwrap()
+                .pause_monitoring
+        );
+        hydrate(&app, &win);
+        win.invoke_clear_history_requested();
+        assert!(win.get_clear_history_dialog_open());
+        assert_eq!(
+            app.core().repository.list_recent(10).unwrap().len(),
+            1,
+            "只打开确认框不得清除数据"
+        );
+        win.set_clear_history_dialog_open(false);
+        win.invoke_clear_history_confirmed();
+        assert_eq!(
+            app.core().repository.list_recent(10).unwrap().len(),
+            1,
+            "确认框关闭时回调不得清除数据"
+        );
+        app.state
+            .set_editor_session(Some(crate::app_state::EditorSession {
+                item_id: item.id,
+                ..Default::default()
+            }));
+        editor_win.set_saved_text("原文".into());
+        editor_win.set_draft_text("未保存草稿".into());
+        win.invoke_clear_history_requested();
+        assert!(!win.get_clear_history_dialog_open());
+        assert_eq!(editor_win.get_draft_text(), "未保存草稿");
+        app.state.set_editor_session(None);
+        win.invoke_clear_history_requested();
+        win.invoke_clear_history_confirmed();
+        assert!(win.get_clear_history_busy());
+        crate::editor::open_from_picker(&app, "清除期间不得开启编辑".into());
+        assert!(
+            app.state.editor_session().is_none(),
+            "清除期间的新编辑请求必须取消"
+        );
+        let weak = win.as_weak();
+        let timer = slint::Timer::default();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        timer.start(
+            slint::TimerMode::Repeated,
+            Duration::from_millis(20),
+            move || {
+                if std::time::Instant::now() >= deadline
+                    || weak
+                        .upgrade()
+                        .is_none_or(|win| !win.get_clear_history_busy())
+                {
+                    let _ = slint::quit_event_loop();
+                }
+            },
+        );
+        let _ = slint::run_event_loop_until_quit();
+        timer.stop();
+        assert!(!win.get_clear_history_busy(), "清除结果应回到事件循环");
+        assert!(app.core().repository.list_recent(10).unwrap().is_empty());
+        assert!(win.get_privacy_notice().contains("历史已清除"));
+        assert_eq!(editor_win.get_draft_text(), "");
+        drop(app);
+        drop(win);
+        drop(editor_win);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

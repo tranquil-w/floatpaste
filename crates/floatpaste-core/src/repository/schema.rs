@@ -4,7 +4,7 @@ use crate::services::text_identity::text_content_hash;
 use crate::services::text_kind::detect_text_kind;
 use crate::{domain::error::AppError, services::normalize_service::space_cjk_text};
 
-const CURRENT_SCHEMA_VERSION: i32 = 8;
+const CURRENT_SCHEMA_VERSION: i32 = 9;
 const CLIP_ITEMS_MEDIA_COLUMNS: [(&str, &str); 7] = [
     ("image_path", "TEXT NULL"),
     ("image_width", "INTEGER NULL"),
@@ -90,6 +90,12 @@ fn apply_schema_upgrades(connection: &Connection, current_version: i32) -> Resul
                 ],
             )?;
         }
+    }
+
+    if current_version < 9 {
+        transaction.execute_batch(
+            "CREATE TABLE IF NOT EXISTS pending_image_deletions (image_path TEXT PRIMARY KEY);",
+        )?;
     }
 
     set_schema_version(&transaction, CURRENT_SCHEMA_VERSION)?;

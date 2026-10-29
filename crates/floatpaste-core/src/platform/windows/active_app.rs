@@ -206,6 +206,10 @@ impl ActiveAppResolver {
 
     pub fn current_foreground_process_name() -> Option<String> {
         let hwnd = unsafe { GetForegroundWindow() };
+        Self::process_name_for_window(hwnd)
+    }
+
+    pub fn process_name_for_window(hwnd: HWND) -> Option<String> {
         if hwnd.0.is_null() {
             return None;
         }

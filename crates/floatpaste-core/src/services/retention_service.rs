@@ -4,8 +4,6 @@ use tracing::{info, warn};
 
 use crate::{domain::error::AppError, state::CoreState};
 
-/// 软删除记录的物理清除保留期：给误删恢复与问题排查留出缓冲窗口。
-const SOFT_DELETE_RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 /// 清理周期：与"每天启动一次"的桌面使用节奏对齐。
 const RETENTION_INTERVAL_SECS: u64 = 24 * 60 * 60;
 /// 启动后延迟执行首轮清理，避开启动高峰（窗口创建、设置副作用、首批剪贴采集）。
@@ -58,20 +56,16 @@ impl RetentionService {
         let settings = state.current_settings()?;
         let purged = state
             .repository
-            .purge_soft_deleted(SOFT_DELETE_RETENTION_MS)?;
+            .purge_soft_deleted(i64::from(settings.deleted_retention_days) * 86_400_000)?;
+        let expired = state
+            .repository
+            .purge_expired_history(settings.history_retention_days)?;
         let overflow = state
             .repository
             .enforce_history_limit(settings.history_limit)?;
 
-        let removed_count = purged.len() + overflow.len();
-        for path in purged.iter().chain(overflow.iter()) {
-            if path.is_empty() {
-                continue;
-            }
-            if let Err(error) = state.image_storage.delete_image(path) {
-                warn!("清理图片文件失败: {path}, error={error}");
-            }
-        }
+        let removed_count = purged.len() + overflow.len() + expired;
+        Self::retry_image_deletions(state)?;
 
         if removed_count >= VACUUM_THRESHOLD {
             if let Err(error) = state.repository.vacuum() {
@@ -87,5 +81,20 @@ impl RetentionService {
             );
         }
         Ok(())
+    }
+
+    /// 队列与行删除同事务提交；进程重启或文件被占用都不会遗失清理任务。
+    pub fn retry_image_deletions(state: &CoreState) -> Result<usize, AppError> {
+        let mut pending = 0;
+        for path in state.repository.pending_image_deletions()? {
+            match state.image_storage.delete_image(&path) {
+                Ok(()) => state.repository.finish_image_deletion(&path)?,
+                Err(error) => {
+                    pending += 1;
+                    warn!(error = %error, "应用图片清理失败，保留任务等待重试");
+                }
+            }
+        }
+        Ok(pending)
     }
 }

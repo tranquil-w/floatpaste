@@ -10,7 +10,34 @@ use crate::{
 /// 统一类型校验、归一化与软删语义；各窗口的数据刷新由壳层负责。
 pub struct ClipService;
 
+pub struct ClearHistoryResult {
+    pub pending_images: usize,
+    pub storage_compacted: bool,
+}
+
 impl ClipService {
+    /// 用户明确确认后的全部历史清除；不清空系统剪贴板或用户源文件。
+    pub fn clear_history(state: &CoreState) -> Result<ClearHistoryResult, AppError> {
+        let mut privacy = state.privacy_write()?;
+        state.repository.clear_history()?;
+        privacy.generation += 1;
+        privacy.ignored_clipboard_sequence =
+            Some(crate::platform::windows::clipboard_formats::clipboard_sequence());
+        let pending_images =
+            super::retention_service::RetentionService::retry_image_deletions(state)?;
+        let storage_compacted = match state.repository.vacuum() {
+            Ok(()) => true,
+            Err(error) => {
+                tracing::warn!(error = %error, "历史已移除，数据库压缩失败");
+                false
+            }
+        };
+        Ok(ClearHistoryResult {
+            pending_images,
+            storage_compacted,
+        })
+    }
+
     /// 编辑文本类型的剪辑项：校验类型、归一化后落库，返回最新详情。
     pub fn update_text(
         state: &CoreState,
@@ -28,6 +55,8 @@ impl ClipService {
         if existing.full_text == text {
             return Ok(existing);
         }
+
+        super::input_limits::validate_text(text)?;
 
         let normalized = NormalizeService::normalize_text(text, None)
             .ok_or_else(|| AppError::Message("更新内容不能为空".to_string()))?;

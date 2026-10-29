@@ -225,7 +225,7 @@ pub fn analyze_file_paths(file_paths: &[String]) -> FileSelectionStats {
         let metadata = match fs::metadata(path) {
             Ok(metadata) => metadata,
             Err(error) => {
-                debug!("读取文件元数据失败，无法统计文件总大小: {path}, {error}");
+                debug!(error = %error, "读取文件元数据失败，无法统计文件总大小");
                 size_available = false;
                 continue;
             }
@@ -240,7 +240,7 @@ pub fn analyze_file_paths(file_paths: &[String]) -> FileSelectionStats {
         let file_size = match i64::try_from(metadata.len()) {
             Ok(file_size) => file_size,
             Err(_) => {
-                debug!("文件大小超出 i64 支持范围，无法统计文件总大小: {path}");
+                debug!("文件大小超出 i64 支持范围，无法统计文件总大小");
                 size_available = false;
                 continue;
             }

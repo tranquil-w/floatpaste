@@ -41,7 +41,7 @@ flowchart LR
     Paste --> Target[恢复目标窗口并注入 Ctrl+V]
 ```
 
-平台回调和后台结果转发到事件循环后更新窗口属性与模型；缩略图与速贴底图跨线程传原始像素，Slint 图像在 UI 线程创建。速贴定位与底图准备在后台执行，采用时限与回退规则见 [无焦点速贴指南](no-focus-picker.md)。
+平台回调和后台结果转发到事件循环后更新窗口属性与模型；缩略图与速贴底图跨线程传原始像素，Slint 图像在 UI 线程创建。剪贴板消息线程同时处理 Windows 会话通知，core 的共享隐私代际串联录入、发布、注入与恢复；窗口收口回到事件循环执行。清理服务经仓储事务登记待删除图片，再由文件存储完成回收和重试；具体边界见[运行行为](runtime-behavior.md#隐私边界与输入上限)。速贴定位与底图准备在后台执行，采用时限与回退规则见 [无焦点速贴指南](no-focus-picker.md)。
 
 ## 窗口职责
 
@@ -63,6 +63,7 @@ Rust 文件路径相对于对应 crate 的 `src/`；Slint 界面位于 native �
 | 改动范围 | 主要入口 | 当前约束 |
 |----------|----------|----------|
 | 录入、去重、搜索与标签 | core 的 `services/`、`repository/sqlite_repository.rs` | [运行行为与数据约定](runtime-behavior.md) |
+| 采集隐私、保留与清除 | core 的 `state.rs`、`platform/windows/clipboard_monitor.rs`、`session_privacy.rs`、`services/privacy_service.rs`、`input_limits.rs`、`clip_service.rs`、`retention_service.rs`；native 的 `settings.rs` | [隐私边界](runtime-behavior.md#隐私边界与输入上限)与[数据模型](runtime-behavior.md#数据模型) |
 | HTML 采集、发布与恢复 | core 的 `platform/windows/clipboard_formats.rs`、`services/html_format.rs`、`services/paste_support.rs` | 白名单同会话采集，解析在锁外；HTML 只作载荷，不交界面执行，见 [运行行为与数据约定](runtime-behavior.md) |
 | 文本用途识别与内容身份 | core 的 `services/text_kind.rs`、`services/text_identity.rs` | 识别与搜索归一化分离；用途不参与 hash，见 [运行行为与数据约定](runtime-behavior.md) |
 | 启动、日志与共享状态 | native 的 `main.rs`、`system.rs`、`app.rs`、`app_state.rs` | [开发与诊断](../CONTRIBUTING.md) |

@@ -184,6 +184,9 @@ fn apply_preset_filter(app: &App, preset_tags: Vec<String>) {
 }
 
 fn open_inner(app: &App, preset_tags: Vec<String>) {
+    if app.core().session_locked() {
+        return;
+    }
     let hwnd = app.state.search_hwnd.load(Ordering::SeqCst);
     if hwnd == 0 {
         warn!("搜索窗口 HWND 尚未就绪，无法显示");
@@ -412,6 +415,16 @@ pub fn hide_for_editor(app: &App) {
         session_id = app.state.search_session().session_id,
         "隐藏 Search（进入编辑器）"
     );
+}
+
+pub(crate) fn discard_history_view(app: &App) {
+    hide(app, false);
+    reset_session_state(app);
+    app.state.set_search_items(Vec::new());
+    app.with_search(|win| {
+        win.set_loading(false);
+        win.invoke_blur_input();
+    });
 }
 
 /// 从编辑器返回搜索：仅恢复窗口可见性与焦点，**不发会话开始**

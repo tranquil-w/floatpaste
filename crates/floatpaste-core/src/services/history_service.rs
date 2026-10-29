@@ -53,6 +53,24 @@ impl HistoryService {
         html_bytes: Option<Vec<u8>>,
         source_app: Option<String>,
     ) -> Result<Option<ClipItemDetail>, AppError> {
+        Self::ingest_text_formats_at_generation(state, text, html_bytes, source_app, None)
+    }
+
+    pub(crate) fn ingest_text_formats_at_generation(
+        state: &CoreState,
+        text: &str,
+        html_bytes: Option<Vec<u8>>,
+        source_app: Option<String>,
+        generation: Option<u64>,
+    ) -> Result<Option<ClipItemDetail>, AppError> {
+        let privacy = state.privacy_read()?;
+        if privacy.session_locked
+            || generation.is_some_and(|value| value != privacy.generation)
+            || state.is_quitting()
+        {
+            return Ok(None);
+        }
+        super::input_limits::validate_text(text)?;
         let settings = state.current_settings()?;
         let Some(mut normalized) = NormalizeService::normalize_text(text, source_app.clone())
         else {
@@ -89,6 +107,29 @@ impl HistoryService {
         prepared_image: PreparedImage,
         source_app: Option<String>,
     ) -> Result<Option<ClipItemDetail>, AppError> {
+        Self::ingest_image_at_generation(state, prepared_image, source_app, None)
+    }
+
+    pub(crate) fn ingest_image_at_generation(
+        state: &CoreState,
+        prepared_image: PreparedImage,
+        source_app: Option<String>,
+        generation: Option<u64>,
+    ) -> Result<Option<ClipItemDetail>, AppError> {
+        let privacy = state.privacy_read()?;
+        if privacy.session_locked
+            || generation.is_some_and(|value| value != privacy.generation)
+            || state.is_quitting()
+        {
+            return Ok(None);
+        }
+        super::image_decode::validate_pixels(
+            prepared_image.width as usize,
+            prepared_image.height as usize,
+        )?;
+        if prepared_image.png_bytes.len() > super::input_limits::MAX_FORMAT_BYTES {
+            return Err(AppError::InputLimit("PNG 超过 256 MiB"));
+        }
         let settings = state.current_settings()?;
         let Some(mut normalized) = NormalizeService::normalize_image(
             None,
@@ -122,7 +163,17 @@ impl HistoryService {
                 match state.repository.save_image_item(&normalized) {
                     Ok(detail) => Ok(Some(detail)),
                     Err(error) => {
-                        let _ = state.image_storage.delete_image(&stored.image_path);
+                        if state
+                            .image_storage
+                            .delete_image(&stored.image_path)
+                            .is_err()
+                        {
+                            if let Err(cleanup_error) =
+                                state.repository.queue_image_deletion(&stored.image_path)
+                            {
+                                tracing::warn!(error = %cleanup_error, "保存失败后的图片未能登记清理任务");
+                            }
+                        }
                         Err(error)
                     }
                 }
@@ -137,6 +188,32 @@ impl HistoryService {
         total_size: Option<i64>,
         source_app: Option<String>,
     ) -> Result<Option<ClipItemDetail>, AppError> {
+        Self::ingest_files_at_generation(
+            state,
+            file_paths,
+            directory_count,
+            total_size,
+            source_app,
+            None,
+        )
+    }
+
+    pub(crate) fn ingest_files_at_generation(
+        state: &CoreState,
+        file_paths: Vec<String>,
+        directory_count: i32,
+        total_size: Option<i64>,
+        source_app: Option<String>,
+        generation: Option<u64>,
+    ) -> Result<Option<ClipItemDetail>, AppError> {
+        let privacy = state.privacy_read()?;
+        if privacy.session_locked
+            || generation.is_some_and(|value| value != privacy.generation)
+            || state.is_quitting()
+        {
+            return Ok(None);
+        }
+        super::input_limits::validate_files(&file_paths)?;
         let settings = state.current_settings()?;
         let Some(normalized) = NormalizeService::normalize_files(
             file_paths,

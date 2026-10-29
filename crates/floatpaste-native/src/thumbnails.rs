@@ -72,6 +72,11 @@ pub fn evict(id: &str) {
     });
 }
 
+pub fn clear() {
+    bump_list_version();
+    CACHE.with(|cache| cache.borrow_mut().clear());
+}
+
 /// 列表版本号：递增并返回新值（重建行模型时调用）
 pub fn bump_list_version() -> u64 {
     LIST_VERSION.with(|version| {

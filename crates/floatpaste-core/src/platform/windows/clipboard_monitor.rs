@@ -10,13 +10,17 @@ use windows::Win32::System::DataExchange::{
     AddClipboardFormatListener, RemoveClipboardFormatListener,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::System::RemoteDesktop::{
+    WTSRegisterSessionNotification, WTSUnRegisterSessionNotification, NOTIFY_FOR_THIS_SESSION,
+};
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW,
     GetWindowLongPtrW, KillTimer, PostThreadMessageW, RegisterClassW, SetTimer, SetWindowLongPtrW,
     TranslateMessage, UnregisterClassW, CREATESTRUCTW, GWLP_USERDATA, HWND_MESSAGE, MSG,
     WINDOW_EX_STYLE, WINDOW_STYLE, WM_CLIPBOARDUPDATE, WM_DESTROY, WM_NCCREATE, WM_QUIT, WM_TIMER,
-    WNDCLASSW,
+    WM_WTSSESSION_CHANGE, WNDCLASSW, WTS_CONSOLE_CONNECT, WTS_CONSOLE_DISCONNECT,
+    WTS_REMOTE_CONNECT, WTS_REMOTE_DISCONNECT, WTS_SESSION_LOCK, WTS_SESSION_UNLOCK,
 };
 
 use crate::{
@@ -47,26 +51,33 @@ struct MonitorContext {
     core: CoreState,
     on_upsert: ClipUpsertSink,
     retry_count: u32,
+    on_session_changed: Arc<dyn Fn(bool) + Send + Sync>,
 }
 
 pub struct ClipboardMonitor;
 
 impl ClipboardMonitor {
-    pub fn start(core: CoreState, on_upsert: ClipUpsertSink) -> Result<(), AppError> {
+    pub fn start(
+        core: CoreState,
+        on_upsert: ClipUpsertSink,
+        on_session_changed: Arc<dyn Fn(bool) + Send + Sync>,
+    ) -> Result<(), AppError> {
         let (ready_tx, ready_rx) = mpsc::channel();
 
         // 独立线程承载 message-only 窗口与消息循环：AddClipboardFormatListener 让系统在
         // 剪贴板变化时投递 WM_CLIPBOARDUPDATE，取代固定间隔轮询 GetClipboardSequenceNumber
         // 的做法（复制到入屏零延迟，空闲零唤醒）。
         thread::spawn(move || unsafe {
-            let (hwnd, hinstance) = match setup_monitor_window(&core, &on_upsert) {
-                Ok(handles) => handles,
-                Err(error) => {
-                    error!("初始化剪贴板监听窗口失败: {error}");
-                    let _ = ready_tx.send(Err(error));
-                    return;
-                }
-            };
+            let (hwnd, hinstance) =
+                match setup_monitor_window(&core, &on_upsert, on_session_changed) {
+                    Ok(handles) => handles,
+                    Err(error) => {
+                        let _ = core.set_session_locked(true);
+                        error!("初始化剪贴板监听窗口失败: {error}");
+                        let _ = ready_tx.send(Err(error));
+                        return;
+                    }
+                };
 
             MONITOR_THREAD_ID.store(GetCurrentThreadId(), Ordering::SeqCst);
             let _ = ready_tx.send(Ok(()));
@@ -93,6 +104,7 @@ impl ClipboardMonitor {
             // 收尾：移除监听并销毁窗口（WM_DESTROY 内回收上下文），再注销窗口类，
             // 避免残留已注册的窗口类。
             let _ = RemoveClipboardFormatListener(hwnd);
+            let _ = WTSUnRegisterSessionNotification(hwnd);
             let _ = DestroyWindow(hwnd);
             let _ = UnregisterClassW(CLIPBOARD_MONITOR_CLASS_NAME, Some(hinstance.into()));
             MONITOR_THREAD_ID.store(0, Ordering::SeqCst);
@@ -120,6 +132,7 @@ impl ClipboardMonitor {
 unsafe fn setup_monitor_window(
     core: &CoreState,
     on_upsert: &ClipUpsertSink,
+    on_session_changed: Arc<dyn Fn(bool) + Send + Sync>,
 ) -> Result<(HWND, windows::Win32::Foundation::HMODULE), WindowsError> {
     let hinstance = GetModuleHandleW(None)?;
     let class = WNDCLASSW {
@@ -136,6 +149,7 @@ unsafe fn setup_monitor_window(
         core: core.clone(),
         on_upsert: Arc::clone(on_upsert),
         retry_count: 0,
+        on_session_changed,
     }));
     let hwnd = match CreateWindowExW(
         WINDOW_EX_STYLE(0),
@@ -167,6 +181,19 @@ unsafe fn setup_monitor_window(
         return Err(error);
     }
 
+    if let Err(error) = WTSRegisterSessionNotification(hwnd, NOTIFY_FOR_THIS_SESSION) {
+        let _ = core.set_session_locked(true);
+        let _ = RemoveClipboardFormatListener(hwnd);
+        let _ = DestroyWindow(hwnd);
+        let _ = UnregisterClassW(CLIPBOARD_MONITOR_CLASS_NAME, Some(hinstance.into()));
+        return Err(error);
+    }
+    let locked = super::session_privacy::current_session_locked().unwrap_or_else(|error| {
+        warn!(error = %error, "无法确认会话状态，暂停采集和上屏直到解锁通知");
+        true
+    });
+    let _ = core.set_session_locked(locked);
+
     Ok((hwnd, hinstance))
 }
 
@@ -185,6 +212,26 @@ unsafe extern "system" fn monitor_wnd_proc(
         }
         WM_CLIPBOARDUPDATE => {
             handle_clipboard_update(hwnd);
+            LRESULT(0)
+        }
+        WM_WTSSESSION_CHANGE => {
+            let locked = match wparam.0 as u32 {
+                WTS_SESSION_LOCK | WTS_CONSOLE_DISCONNECT | WTS_REMOTE_DISCONNECT => Some(true),
+                WTS_SESSION_UNLOCK => Some(false),
+                WTS_CONSOLE_CONNECT | WTS_REMOTE_CONNECT => {
+                    Some(super::session_privacy::current_session_locked().unwrap_or(true))
+                }
+                _ => None,
+            };
+            if let Some(locked) = locked {
+                let context = &mut *(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut MonitorContext);
+                match context.core.set_session_locked(locked) {
+                    Ok(()) => (context.on_session_changed)(locked),
+                    Err(error) => warn!(error = %error, "更新会话隐私状态失败"),
+                }
+                context.retry_count = 0;
+                let _ = KillTimer(Some(hwnd), CLIPBOARD_RETRY_TIMER_ID);
+            }
             LRESULT(0)
         }
         // SetTimer 为周期触发，入口先杀掉，是否重设由处理结果决定
@@ -222,7 +269,7 @@ unsafe fn handle_clipboard_update(hwnd: HWND) {
             return;
         }
     };
-    if settings.pause_monitoring {
+    if settings.pause_monitoring || context.core.session_locked() {
         // 暂停期间的变化直接丢弃（含遗留的重试）；恢复监控后不补采暂停期间的内容
         context.retry_count = 0;
         let _ = KillTimer(Some(hwnd), CLIPBOARD_RETRY_TIMER_ID);
@@ -234,6 +281,11 @@ unsafe fn handle_clipboard_update(hwnd: HWND) {
         Ok(()) => {
             context.retry_count = 0;
             let _ = KillTimer(Some(hwnd), CLIPBOARD_RETRY_TIMER_ID);
+        }
+        Err(AppError::InputLimit(reason)) => {
+            context.retry_count = 0;
+            let _ = KillTimer(Some(hwnd), CLIPBOARD_RETRY_TIMER_ID);
+            info!(reason, "跳过超限剪贴板内容");
         }
         Err(error) => {
             debug!("处理剪贴板变更失败，将延迟重试: {error}");
@@ -290,6 +342,7 @@ fn process_clipboard_change(
     source_app: Option<String>,
 ) -> Result<(), AppError> {
     let settings = core.current_settings()?;
+    let generation = core.privacy_generation();
     // 排除规则本体在 privacy_service（入库前仍会生效）；此处前置短路，
     // 避免为排除来源白白捕获多格式快照。暂停监测由调用方先行丢弃。
     if source_app.as_deref().is_some_and(|app| {
@@ -300,18 +353,32 @@ fn process_clipboard_change(
     }) {
         return Ok(());
     }
-    let snapshot = ClipboardSnapshot::capture(false)?;
+    let snapshot = ClipboardSnapshot::capture_for_history(&settings.excluded_apps)?;
+    if snapshot.excluded_from_history {
+        return Ok(());
+    }
+    {
+        let privacy = core.privacy_read()?;
+        if privacy.session_locked
+            || privacy.generation != generation
+            || privacy.ignored_clipboard_sequence == Some(snapshot.sequence)
+        {
+            return Ok(());
+        }
+    }
+    let source_app = snapshot.source_app.clone().or(source_app);
     if let Some(file_paths) = snapshot.files.as_ref() {
         let file_selection = analyze_file_paths(file_paths);
         if clipboard_sequence() != snapshot.sequence {
             return Ok(());
         }
-        if let Some(detail) = HistoryService::ingest_files(
+        if let Some(detail) = HistoryService::ingest_files_at_generation(
             core,
             file_paths.clone(),
             file_selection.directory_count,
             file_selection.total_size,
             source_app,
+            Some(generation),
         )? {
             on_upsert(detail);
         }
@@ -331,11 +398,12 @@ fn process_clipboard_change(
         if clipboard_sequence() != snapshot.sequence {
             return Ok(());
         }
-        if let Some(detail) = HistoryService::ingest_text_formats(
+        if let Some(detail) = HistoryService::ingest_text_formats_at_generation(
             core,
             text,
             snapshot.html().map(<[u8]>::to_vec),
             source_app,
+            Some(generation),
         )? {
             on_upsert(detail);
         }
@@ -346,7 +414,13 @@ fn process_clipboard_change(
             if clipboard_sequence() != snapshot.sequence {
                 return Ok(());
             }
-            if let Some(detail) = HistoryService::ingest_text(core, text, source_app)? {
+            if let Some(detail) = HistoryService::ingest_text_formats_at_generation(
+                core,
+                text,
+                None,
+                source_app,
+                Some(generation),
+            )? {
                 on_upsert(detail);
             }
             return Ok(());
@@ -362,7 +436,12 @@ fn process_clipboard_change(
         if clipboard_sequence() != snapshot.sequence {
             return Ok(());
         }
-        if let Some(detail) = HistoryService::ingest_image(core, prepared, source_app)? {
+        if let Some(detail) = HistoryService::ingest_image_at_generation(
+            core,
+            prepared,
+            source_app,
+            Some(generation),
+        )? {
             on_upsert(detail);
         }
         return Ok(());
@@ -371,7 +450,13 @@ fn process_clipboard_change(
         if clipboard_sequence() != snapshot.sequence {
             return Ok(());
         }
-        if let Some(detail) = HistoryService::ingest_text(core, &text, source_app)? {
+        if let Some(detail) = HistoryService::ingest_text_formats_at_generation(
+            core,
+            &text,
+            None,
+            source_app,
+            Some(generation),
+        )? {
             on_upsert(detail);
         }
     }

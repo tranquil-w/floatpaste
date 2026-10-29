@@ -364,9 +364,10 @@ impl SqliteRepository {
     /// 软删来自用户的显式删除操作，不豁免收藏；`history_limit` 溢出清理才豁免收藏。
     pub fn purge_soft_deleted(&self, retention_ms: i64) -> Result<Vec<String>, AppError> {
         let cutoff = Utc::now().timestamp_millis() - retention_ms;
+        let connection = self.connection.lock()?;
+        let transaction = connection.unchecked_transaction()?;
         let expired: Vec<(String, String)> = {
-            let connection = self.connection.lock()?;
-            let mut statement = connection.prepare(
+            let mut statement = transaction.prepare(
                 "SELECT id, COALESCE(image_path, '') FROM clip_items
                  WHERE deleted_at IS NOT NULL AND deleted_at < ?1",
             )?;
@@ -381,9 +382,8 @@ impl SqliteRepository {
         }
 
         let image_paths: Vec<String> = expired.iter().map(|(_, path)| path.clone()).collect();
-        let connection = self.connection.lock()?;
-        let transaction = connection.unchecked_transaction()?;
-        for (id, _) in &expired {
+        for (id, path) in &expired {
+            queue_image_deletion(&transaction, path)?;
             transaction.execute("DELETE FROM clip_items WHERE id = ?1", [id])?;
             transaction.execute("DELETE FROM clip_items_fts WHERE item_id = ?1", [id])?;
         }
@@ -397,9 +397,10 @@ impl SqliteRepository {
     /// 其余物理删除（收藏项始终豁免，失去全部关联的标签行同步回收）。
     /// 返回被删记录的 image_path 供图片文件清理。
     pub fn enforce_history_limit(&self, limit: u32) -> Result<Vec<String>, AppError> {
+        let connection = self.connection.lock()?;
+        let transaction = connection.unchecked_transaction()?;
         let overflow: Vec<(String, String)> = {
-            let connection = self.connection.lock()?;
-            let mut statement = connection.prepare(&format!(
+            let mut statement = transaction.prepare(&format!(
                 "SELECT id, COALESCE(image_path, '') FROM clip_items ci
                  WHERE ci.deleted_at IS NULL AND ci.is_favorited = 0
                  ORDER BY {}
@@ -417,9 +418,8 @@ impl SqliteRepository {
         }
 
         let image_paths: Vec<String> = overflow.iter().map(|(_, path)| path.clone()).collect();
-        let connection = self.connection.lock()?;
-        let transaction = connection.unchecked_transaction()?;
-        for (id, _) in &overflow {
+        for (id, path) in &overflow {
+            queue_image_deletion(&transaction, path)?;
             transaction.execute("DELETE FROM clip_items WHERE id = ?1", [id])?;
             transaction.execute("DELETE FROM clip_items_fts WHERE item_id = ?1", [id])?;
         }
@@ -439,6 +439,62 @@ impl SqliteRepository {
         // 主连接的写事务都是短事务，5 秒足以等到空档；自身超时则本轮清理放弃
         connection.busy_timeout(Duration::from_secs(5))?;
         connection.execute("VACUUM", [])?;
+        Ok(())
+    }
+
+    /// 按最后复制/上屏的活动时间清理未收藏历史；0 不启用时间限制。
+    pub fn purge_expired_history(&self, days: u32) -> Result<usize, AppError> {
+        if days == 0 {
+            return Ok(0);
+        }
+        let cutoff = Utc::now().timestamp_millis() - i64::from(days) * 86_400_000;
+        let connection = self.connection.lock()?;
+        let transaction = connection.unchecked_transaction()?;
+        transaction.execute("INSERT OR IGNORE INTO pending_image_deletions(image_path)
+            SELECT image_path FROM clip_items WHERE deleted_at IS NULL AND is_favorited = 0
+            AND COALESCE(last_used_at, created_at) <= ?1 AND image_path IS NOT NULL AND image_path != ''", [cutoff])?;
+        transaction.execute("DELETE FROM clip_items_fts WHERE item_id IN
+            (SELECT id FROM clip_items WHERE deleted_at IS NULL AND is_favorited = 0 AND COALESCE(last_used_at, created_at) <= ?1)", [cutoff])?;
+        let removed = transaction.execute("DELETE FROM clip_items WHERE deleted_at IS NULL AND is_favorited = 0 AND COALESCE(last_used_at, created_at) <= ?1", [cutoff])?;
+        prune_orphan_tags(&transaction)?;
+        transaction.commit()?;
+        Ok(removed)
+    }
+
+    /// 显式清除包含收藏、软删的全部历史；只回收应用图片，文件条目仅移除引用。
+    pub fn clear_history(&self) -> Result<(), AppError> {
+        let connection = self.connection.lock()?;
+        let transaction = connection.unchecked_transaction()?;
+        transaction.execute(
+            "INSERT OR IGNORE INTO pending_image_deletions(image_path)
+            SELECT image_path FROM clip_items WHERE image_path IS NOT NULL AND image_path != ''",
+            [],
+        )?;
+        transaction.execute("DELETE FROM clip_items_fts", [])?;
+        transaction.execute("DELETE FROM clip_items", [])?;
+        prune_orphan_tags(&transaction)?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn queue_image_deletion(&self, path: &str) -> Result<(), AppError> {
+        let connection = self.connection.lock()?;
+        queue_image_deletion(&connection, path)
+    }
+
+    pub fn pending_image_deletions(&self) -> Result<Vec<String>, AppError> {
+        let connection = self.connection.lock()?;
+        let mut statement = connection
+            .prepare("SELECT image_path FROM pending_image_deletions ORDER BY image_path")?;
+        let rows = statement.query_map([], |row| row.get(0))?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    pub fn finish_image_deletion(&self, path: &str) -> Result<(), AppError> {
+        self.connection.lock()?.execute(
+            "DELETE FROM pending_image_deletions WHERE image_path = ?1",
+            [path],
+        )?;
         Ok(())
     }
 
@@ -722,6 +778,16 @@ fn tag_affected_item_ids(
 /// 软删条目的 `clip_item_tags` 关联保留（保留期即误删缓冲），因此仅被
 /// 软删条目引用的标签不会被清——勿改成 join clip_items 过滤，那会破坏
 /// 恢复语义。
+fn queue_image_deletion(connection: &Connection, path: &str) -> Result<(), AppError> {
+    if !path.is_empty() {
+        connection.execute(
+            "INSERT OR IGNORE INTO pending_image_deletions(image_path) VALUES(?1)",
+            [path],
+        )?;
+    }
+    Ok(())
+}
+
 fn prune_orphan_tags(transaction: &Connection) -> Result<(), AppError> {
     transaction.execute(
         "DELETE FROM tags WHERE NOT EXISTS (
@@ -1164,7 +1230,7 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
             .unwrap()
             .query_row("PRAGMA user_version", [], |row| row.get::<_, i32>(0))
             .unwrap();
-        assert_eq!(version, 8);
+        assert_eq!(version, 9);
 
         // v6 迁移按原文回填用途并重算 hash：ID、标签、收藏保持不变
         let legacy_detail = repository.get_item_detail("legacy-item").unwrap();

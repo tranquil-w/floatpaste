@@ -92,6 +92,11 @@ pub(crate) fn paste_item(
     option: PasteOption,
     source: PasteSource,
 ) -> Result<(), AppError> {
+    let privacy_generation = app.core().privacy_generation();
+    if app.core().session_locked() {
+        info!(?source, "锁屏期间取消上屏");
+        return Ok(());
+    }
     let detail = app.core().repository.get_item_for_paste(id)?;
     if option.mode == PasteMode::RevealInFolder {
         return reveal_item_location(app, &detail, source);
@@ -119,13 +124,20 @@ pub(crate) fn paste_item(
     let operation_id = NEXT_PASTE_OPERATION_ID.fetch_add(1, Ordering::Relaxed);
     let operation_gate = paste_support::lock_paste_operation()?;
     let previous_clipboard = paste_support::capture_snapshot_if_needed(&option)?;
-    let written_sequence = paste_support::publish_item(
+    let written_sequence = match paste_support::publish_item_if_current(
         app.core(),
         &detail,
         option.mode,
         owner_hwnd,
         previous_clipboard.as_ref(),
-    )?;
+        Some(privacy_generation),
+    ) {
+        Err(AppError::OperationCancelled) => {
+            info!(?source, operation_id, "隐私状态已变化，取消剪贴板发布");
+            return Ok(());
+        }
+        result => result?,
+    };
     drop(operation_gate);
 
     if admin_target {
@@ -160,6 +172,13 @@ pub(crate) fn paste_item(
                         operation_id,
                         outcome = "quitting",
                         "退出时取消上屏"
+                    );
+                    return;
+                }
+                if core.session_locked() || core.privacy_generation() != privacy_generation {
+                    info!(
+                        ?source,
+                        session_id, operation_id, "隐私状态已变化，取消上屏"
                     );
                     return;
                 }
@@ -201,6 +220,8 @@ pub(crate) fn paste_item(
                             return;
                         }
                         match paste_support::trigger_ctrl_v_if_current(
+                            &core,
+                            privacy_generation,
                             written_sequence,
                             session_id,
                             operation_id,
@@ -208,6 +229,13 @@ pub(crate) fn paste_item(
                             Ok(InjectionOutcome::Injected) => PasteOutcome::Injected,
                             Ok(InjectionOutcome::ClipboardChanged) => {
                                 PasteOutcome::ClipboardChanged
+                            }
+                            Ok(InjectionOutcome::PrivacyChanged) => {
+                                info!(
+                                    ?source,
+                                    session_id, operation_id, "隐私状态已变化，取消上屏注入"
+                                );
+                                return;
                             }
                             Err(error) => {
                                 warn!(?source, session_id, operation_id, error = %error, "上屏注入失败");
@@ -222,6 +250,13 @@ pub(crate) fn paste_item(
             None => PasteOutcome::Failed("未找到需要粘贴的窗口。"),
         };
 
+        if core.session_locked() || core.privacy_generation() != privacy_generation {
+            info!(
+                ?source,
+                session_id, operation_id, "隐私状态已变化，取消上屏后续操作"
+            );
+            return;
+        }
         if let Some(snapshot) = previous_clipboard {
             if let Err(error) = paste_support::schedule_clipboard_restore(
                 &core,
@@ -230,6 +265,7 @@ pub(crate) fn paste_item(
                 session_id,
                 operation_id,
                 written_sequence,
+                privacy_generation,
             ) {
                 warn!(?source, session_id, operation_id, error = %error, "上屏后安排剪贴板恢复失败");
             }

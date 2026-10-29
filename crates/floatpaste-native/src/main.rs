@@ -520,8 +520,26 @@ fn main() {
                     search::notify_clips_changed(&app);
                 });
             });
-        if let Err(error) = ClipboardMonitor::start(state.core.clone(), on_upsert) {
+        let app_for_session = app.clone();
+        let on_session_changed = Arc::new(move |locked| {
+            if locked {
+                let app = app_for_session.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    picker::hide(&app, false);
+                    app.state.set_picker_session(Default::default());
+                    search::hide(&app, false);
+                    tooltip::cancel(&app);
+                    tray_menu::close(&app);
+                });
+            }
+        });
+        if let Err(error) =
+            ClipboardMonitor::start(state.core.clone(), on_upsert, on_session_changed)
+        {
             tracing::error!("启动剪贴板监听失败: {error}");
+            tray::notify_failure(
+                "无法建立剪贴板及锁屏监听，已暂停采集和上屏。请重启 FloatPaste 后重试。",
+            );
         }
     }
 
@@ -806,6 +824,7 @@ fn l2_headless_ui_contracts() {
     picker::reveal_contract_tests::run();
     picker::action_sheet_tests::run();
     tooltip::headless_contract_tests::run();
+    settings::privacy_contract_tests::run();
 }
 
 #[cfg(test)]

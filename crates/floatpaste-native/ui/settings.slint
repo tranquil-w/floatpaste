@@ -938,6 +938,11 @@ export component SettingsWindow inherits Window {
     in-out property <string> winv-dialog-body;
     in-out property <bool> picker-digit-enabled: true;
     in-out property <string> history-limit-text;
+    in-out property <string> history-retention-text;
+    in-out property <string> deleted-retention-text;
+    in-out property <bool> clear-history-dialog-open: false;
+    in-out property <bool> clear-history-busy: false;
+    in-out property <string> privacy-notice;
     in-out property <string> picker-limit-text;
     in-out property <string> picker-card-height-text;
     in-out property <int> position-mode: 0;   // 0=mouse 1=lastPosition 2=caret
@@ -1012,6 +1017,12 @@ export component SettingsWindow inherits Window {
     /* ── 编辑回调（Rust 统一防抖保存） ── */
     callback history-limit-edited(string);
     callback history-limit-committed(string);
+    callback history-retention-edited(string);
+    callback history-retention-committed(string);
+    callback deleted-retention-edited(string);
+    callback deleted-retention-committed(string);
+    callback clear-history-requested();
+    callback clear-history-confirmed();
     callback picker-limit-edited(string);
     callback picker-limit-committed(string);
     callback picker-card-height-edited(string);
@@ -1100,6 +1111,18 @@ export component SettingsWindow inherits Window {
         // （录制框自己的 key-pressed 消费 Esc；会话键录制允许把 Esc
         // 录成键位，由 session-recorder-id 判断）
         capture-key-pressed(event) => {
+            if (root.clear-history-dialog-open) {
+                if (root.clear-history-busy) { return accept; }
+                if (event.text == Key.Escape) {
+                    root.clear-history-dialog-open = false;
+                    return accept;
+                }
+                if (event.text == Key.Return) {
+                    root.clear-history-confirmed();
+                    return accept;
+                }
+                return accept;
+            }
             // 重启引导弹窗打开时键盘先归弹窗（对齐编辑窗关闭确认）：
             // Esc 取消、Enter 确认重启
             if (root.winv-dialog-open) {
@@ -1323,7 +1346,7 @@ export component SettingsWindow inherits Window {
                     nav-col := VerticalLayout {
                         spacing: 2px;
                         for section[idx] in [
-                            "通用", "行为", "外观", "快捷键", "排除应用", "标签", "关于",
+                            "通用", "行为", "外观", "快捷键", "隐私", "标签", "关于",
                         ]: Rectangle {
                             height: 30px;
                             // 目录项（WinUI NavView 同构）：默认透明，hover 墨色
@@ -2186,8 +2209,63 @@ export component SettingsWindow inherits Window {
                             sec4-col := VerticalLayout {
                                 spacing: 8px;
                                 SectionHeader {
-                                    title: "排除应用";
-                                    description: "按进程名排除特定应用，来自这些应用的复制内容不会进入历史。";
+                                    title: "隐私";
+                                    description: "尊重来源的禁止记录标记；锁屏时暂停采集并取消旧上屏，解锁后不补采锁屏内容。可在托盘菜单快速暂停或恢复监听。";
+                                }
+                                RowGroup {
+                                    SettingRow {
+                                        title: "未收藏历史保留天数";
+                                        description: "按最近复制或粘贴时间清理；0 表示不按时间清理。收藏条目豁免。范围 0–3650 天。";
+                                        Rectangle {
+                                            width: 96px;
+                                            NumberInput {
+                                                y: (parent.height - self.height) / 2;
+                                                text <=> root.history-retention-text;
+                                                edited(text) => { root.history-retention-edited(text); }
+                                                committed(text) => { root.history-retention-committed(text); }
+                                            }
+                                        }
+                                    }
+                                    SettingRow {
+                                        title: "普通删除保留天数";
+                                        description: "删除后立即从列表隐藏，载荷默认保留 30 天。0 表示下次清理回收；启动后及每天清理，范围 0–365 天。";
+                                        Rectangle {
+                                            width: 96px;
+                                            NumberInput {
+                                                y: (parent.height - self.height) / 2;
+                                                text <=> root.deleted-retention-text;
+                                                edited(text) => { root.deleted-retention-edited(text); }
+                                                committed(text) => { root.deleted-retention-committed(text); }
+                                            }
+                                        }
+                                    }
+                                    SettingRow {
+                                        title: "清除全部历史";
+                                        description: "包括收藏、已删除条目和应用图片；保留设置、系统剪贴板和用户源文件。不承诺擦除备份或磁盘残留。";
+                                        Rectangle {
+                                            width: 104px;
+                                            height: 32px;
+                                            border-radius: Metrics.radius-md;
+                                            background: clear-history-ta.has-hover ? Theme.danger-subtle : Theme.canvas-subtle;
+                                            Text {
+                                                text: root.clear-history-busy ? "清除中…" : "清除历史…";
+                                                color: Theme.danger-fg;
+                                                font-size: Metrics.text-sm;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                            clear-history-ta := TouchArea {
+                                                enabled: !root.clear-history-busy;
+                                                clicked() => { root.clear-history-requested(); }
+                                            }
+                                        }
+                                    }
+                                }
+                                if (root.privacy-notice != ""): Text {
+                                    text: root.privacy-notice;
+                                    color: Theme.fg-muted;
+                                    font-size: Metrics.text-sm;
+                                    wrap: word-wrap;
                                 }
                                 RowGroup {
                                     ex-col := VerticalLayout {
@@ -2413,8 +2491,8 @@ export component SettingsWindow inherits Window {
         Rectangle {
             width: 100%;
             height: 100%;
-            visible: root.winv-dialog-open;
-            opacity: root.winv-dialog-open ? 1.0 : 0.0;
+            visible: root.winv-dialog-open || root.clear-history-dialog-open;
+            opacity: root.winv-dialog-open || root.clear-history-dialog-open ? 1.0 : 0.0;
             animate opacity { duration: Motion.dur-color; easing: Motion.ease; }
             background: rgba(0, 0, 0, 0.45);
             TouchArea {
@@ -2449,13 +2527,13 @@ export component SettingsWindow inherits Window {
                                 padding: 24px;
                                 spacing: 8px;
                                 Text {
-                                    text: root.winv-dialog-title;
+                                    text: root.clear-history-dialog-open ? "清除全部历史？" : root.winv-dialog-title;
                                     color: Theme.fg-default;
                                     font-size: 18px;
                                     font-weight: Metrics.weight-semibold;
                                 }
                                 Text {
-                                    text: root.winv-dialog-body;
+                                    text: root.clear-history-dialog-open ? "将移除全部历史，包括收藏、已删除条目、标签关联和应用保存的图片。此操作无法撤销。\n\n保留设置、系统剪贴板和用户源文件。备份及磁盘残留不在清除保证内。" : root.winv-dialog-body;
                                     color: Theme.fg-muted;
                                     font-size: Metrics.text-sm;
                                     wrap: word-wrap;
@@ -2475,8 +2553,12 @@ export component SettingsWindow inherits Window {
                                             ? Theme.canvas-subtle : transparent;
                                         animate background { duration: Motion.dur-color; easing: Motion.ease; }
                                         winv-dlg-cancel-ta := TouchArea {
+                                            enabled: !root.clear-history-busy;
                                             mouse-cursor: default;
-                                            clicked() => { root.winv-dialog-cancel(); }
+                                            clicked() => {
+                                                if (root.clear-history-dialog-open) { root.clear-history-dialog-open = false; }
+                                                else { root.winv-dialog-cancel(); }
+                                            }
                                         }
                                         Text {
                                             text: "取消";
@@ -2495,11 +2577,15 @@ export component SettingsWindow inherits Window {
                                             ? Theme.accent-hover : Theme.accent-emphasis;
                                         animate background { duration: Motion.dur-color; easing: Motion.ease; }
                                         winv-dlg-restart-ta := TouchArea {
+                                            enabled: !root.clear-history-busy;
                                             mouse-cursor: default;
-                                            clicked() => { root.winv-dialog-restart(); }
+                                            clicked() => {
+                                                if (root.clear-history-dialog-open) { root.clear-history-confirmed(); }
+                                                else { root.winv-dialog-restart(); }
+                                            }
                                         }
                                         winv-restart-text := Text {
-                                            text: root.winv-enabled ? "恢复并重启资源管理器" : "启用并重启资源管理器";
+                                            text: root.clear-history-dialog-open ? (root.clear-history-busy ? "正在清除…" : "确认清除") : (root.winv-enabled ? "恢复并重启资源管理器" : "启用并重启资源管理器");
                                             color: Theme.fg-on-emphasis;
                                             font-size: Metrics.text-sm;
                                             font-weight: Metrics.weight-semibold;

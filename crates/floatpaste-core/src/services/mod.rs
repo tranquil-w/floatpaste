@@ -4,6 +4,7 @@ pub mod dedup_service;
 pub mod history_service;
 pub mod image_decode;
 pub mod image_storage;
+pub mod input_limits;
 pub mod list_navigation;
 pub mod normalize_service;
 pub mod paste_support;
