@@ -171,6 +171,9 @@ pub fn publish_item_if_current(
     {
         return Err(AppError::OperationCancelled);
     }
+    if mode == PasteMode::TextFile {
+        return Err(AppError::Message("粘贴为文件需要提供文件名".into()));
+    }
     if mode == PasteMode::RevealInFolder {
         // 非剪贴板形态：发布链路拒绝，由上屏流程分流执行，防止漏分流
         // 时静默按本体上屏
@@ -201,6 +204,42 @@ pub fn publish_item_if_current(
         return write_text_formats_with_rollback(&detail.full_text, html, owner, previous);
     }
     write_item_to_clipboard(core, detail, mode, owner, previous)
+}
+
+/// 文本附件生成与发布同受隐私读守卫保护；发布失败撤销本次生成文件。
+pub fn publish_text_file_if_current(
+    core: &CoreState,
+    detail: &ClipItemDetail,
+    name: &str,
+    owner: Option<isize>,
+    previous: Option<&ClipboardSnapshot>,
+    generation: u64,
+) -> Result<u32, AppError> {
+    let privacy = core.privacy_read()?;
+    if privacy.session_locked || privacy.generation != generation || core.is_quitting() {
+        return Err(AppError::OperationCancelled);
+    }
+    if detail.r#type != "text" {
+        return Err(AppError::Message("只有文本条目可以生成文本文件".into()));
+    }
+    let path = core.text_file_storage.create(name, &detail.full_text)?;
+    let result = (|| {
+        if let Some(snapshot) = previous {
+            suppress_clipboard_snapshot(core, snapshot)?;
+        }
+        let mut file = detail.clone();
+        file.r#type = "file".into();
+        file.file_paths = vec![path.to_string_lossy().into_owned()];
+        file.directory_count = 0;
+        file.total_size = Some(detail.full_text.len() as i64);
+        write_item_to_clipboard(core, &file, PasteMode::Original, owner, previous)
+    })();
+    if result.is_err() {
+        if let Err(error) = core.text_file_storage.discard(&path) {
+            tracing::warn!(error = %error, "未发布的文本附件清理失败，保留至缓存清理");
+        }
+    }
+    result
 }
 
 /// 把剪辑项内容写入系统剪贴板，并登记自写抑制。

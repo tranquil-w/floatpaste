@@ -92,7 +92,34 @@ pub(crate) fn paste_item(
     option: PasteOption,
     source: PasteSource,
 ) -> Result<(), AppError> {
-    let privacy_generation = app.core().privacy_generation();
+    if option.mode == PasteMode::TextFile {
+        return crate::text_file::open(app, id, option, source);
+    }
+    paste_item_impl(app, id, option, source, None)
+}
+
+pub(crate) fn paste_named_text_file(
+    app: &App,
+    id: &str,
+    option: PasteOption,
+    source: PasteSource,
+    name: &str,
+    generation: u64,
+) -> Result<(), AppError> {
+    paste_item_impl(app, id, option, source, Some((name, generation)))
+}
+
+fn paste_item_impl(
+    app: &App,
+    id: &str,
+    option: PasteOption,
+    source: PasteSource,
+    file: Option<(&str, u64)>,
+) -> Result<(), AppError> {
+    let privacy_generation = file.map_or_else(
+        || app.core().privacy_generation(),
+        |(_, generation)| generation,
+    );
     if app.core().session_locked() {
         info!(?source, "锁屏期间取消上屏");
         return Ok(());
@@ -118,20 +145,33 @@ pub(crate) fn paste_item(
             )
         }
     };
+    // 命名窗口确认后会销毁；剪贴板及延迟恢复仍由常驻的来源窗口持有。
     let owner_hwnd = (owner_hwnd != 0).then_some(owner_hwnd);
     let admin_target =
         option.paste_to_target && paste_target_requires_elevation(session.target_window_hwnd);
     let operation_id = NEXT_PASTE_OPERATION_ID.fetch_add(1, Ordering::Relaxed);
     let operation_gate = paste_support::lock_paste_operation()?;
     let previous_clipboard = paste_support::capture_snapshot_if_needed(&option)?;
-    let written_sequence = match paste_support::publish_item_if_current(
-        app.core(),
-        &detail,
-        option.mode,
-        owner_hwnd,
-        previous_clipboard.as_ref(),
-        Some(privacy_generation),
-    ) {
+    let publication = if let Some((name, _)) = file {
+        paste_support::publish_text_file_if_current(
+            app.core(),
+            &detail,
+            name,
+            owner_hwnd,
+            previous_clipboard.as_ref(),
+            privacy_generation,
+        )
+    } else {
+        paste_support::publish_item_if_current(
+            app.core(),
+            &detail,
+            option.mode,
+            owner_hwnd,
+            previous_clipboard.as_ref(),
+            Some(privacy_generation),
+        )
+    };
+    let written_sequence = match publication {
         Err(AppError::OperationCancelled) => {
             info!(?source, operation_id, "隐私状态已变化，取消剪贴板发布");
             return Ok(());

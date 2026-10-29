@@ -44,6 +44,10 @@ pub struct ImageStorage {
 }
 
 impl ImageStorage {
+    pub(crate) fn base_dir(&self) -> &Path {
+        &self.base_dir
+    }
+
     pub fn new(base_dir: PathBuf) -> Result<Self, AppError> {
         fs::create_dir_all(base_dir.join(IMAGE_DIR_NAME))?;
         Ok(Self { base_dir })

@@ -33,7 +33,7 @@ fn rgba_color(rgb: [u8; 3], alpha: f32) -> Color {
 }
 
 /// 完整 token 集：速贴 / 搜索 / 编辑窗口共用同一键集
-fn write_full_tokens(theme: &Theme, tokens: &ThemeTokens) {
+pub(crate) fn write_full_tokens(theme: &Theme, tokens: &ThemeTokens) {
     theme.set_is_dark(tokens.is_dark);
     theme.set_canvas_default(hex_color(tokens.canvas_default));
     theme.set_canvas_subtle(hex_color(tokens.canvas_subtle));
@@ -134,6 +134,7 @@ pub fn apply_theme(
 /// 停屏窗口的旧主题残影由各 show 路径的
 /// [`crate::win32_ext::force_full_repaint`] 收口（此处泵帧不可靠）
 pub fn reapply_theme(app: &crate::app::App, tokens: &ThemeTokens) {
+    crate::text_file::apply_theme(tokens);
     apply_theme(
         app.picker.upgrade().as_ref(),
         app.tooltip.upgrade().as_ref(),

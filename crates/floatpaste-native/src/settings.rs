@@ -1256,6 +1256,7 @@ fn clear_history(app: &App) {
                 crate::picker::discard_history_view(&app);
                 crate::search::discard_history_view(&app);
                 crate::editor::discard_history_view(&app);
+                crate::text_file::close(false);
                 crate::thumbnails::clear();
                 crate::tooltip::discard_history_view(&app);
             }
@@ -1272,6 +1273,12 @@ fn clear_history(app: &App) {
                         message.push_str(&format!(
                             "仍有 {} 个应用图片待重试清理。",
                             result.pending_images
+                        ));
+                    }
+                    if result.pending_text_files > 0 {
+                        message.push_str(&format!(
+                            "仍有 {} 组文本附件待清理，可重试清除历史。",
+                            result.pending_text_files
                         ));
                     }
                     if !result.storage_compacted {

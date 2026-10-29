@@ -66,6 +66,7 @@ impl RetentionService {
 
         let removed_count = purged.len() + overflow.len() + expired;
         Self::retry_image_deletions(state)?;
+        state.text_file_storage.cleanup(false)?;
 
         if removed_count >= VACUUM_THRESHOLD {
             if let Err(error) = state.repository.vacuum() {

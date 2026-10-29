@@ -19,6 +19,7 @@ mod picker;
 mod search;
 mod settings;
 mod system;
+mod text_file;
 mod theme_bridge;
 mod thumbnails;
 mod tooltip;
@@ -525,6 +526,7 @@ fn main() {
             if locked {
                 let app = app_for_session.clone();
                 let _ = slint::invoke_from_event_loop(move || {
+                    text_file::close(false);
                     picker::hide(&app, false);
                     app.state.set_picker_session(Default::default());
                     search::hide(&app, false);

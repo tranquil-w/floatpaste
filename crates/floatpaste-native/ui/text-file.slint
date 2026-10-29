@@ -1,0 +1,109 @@
+import { Theme, Metrics, Motion } from "theme.slint";
+
+component FileButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> primary;
+    callback clicked();
+    height: 32px;
+    width: 88px;
+    border-radius: Metrics.radius-md;
+    border-width: 1px;
+    border-color: focus.has-focus ? Theme.border-accent : Theme.border-default;
+    background: primary ? (area.has-hover ? Theme.accent-hover : Theme.accent-emphasis)
+        : (area.has-hover ? Theme.hover-bg : Theme.surface);
+    animate background { duration: Motion.dur-color; easing: Motion.ease; }
+    forward-focus: focus;
+    accessible-role: button;
+    accessible-label: label;
+    focus := FocusScope {
+        key-pressed(event) => {
+            if (event.text == "\n" || event.text == " ") { root.clicked(); return accept; }
+            return reject;
+        }
+    }
+    Text {
+        text: root.label;
+        color: root.primary ? Theme.fg-on-emphasis : Theme.fg-default;
+        font-size: Metrics.text-body;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    area := TouchArea { clicked => { focus.focus(); root.clicked(); } }
+}
+
+export component TextFileWindow inherits Window {
+    title: "粘贴为文件";
+    icon: @image-url("app-icon.png");
+    preferred-width: 460px;
+    preferred-height: 250px;
+    min-width: 460px;
+    max-width: 460px;
+    min-height: 250px;
+    max-height: 250px;
+    background: Theme.canvas-default;
+    in-out property <string> file-name: "文本.txt";
+    in-out property <string> error-text;
+    callback confirmed();
+    callback cancelled();
+    callback focus-name();
+    focus-name => { input.focus(); input.select-all(); }
+    forward-focus: input;
+
+    FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Escape) { root.cancelled(); return accept; }
+            return reject;
+        }
+        VerticalLayout {
+            padding: 20px;
+            spacing: Metrics.space-3;
+            Text {
+                text: "文件名";
+                color: Theme.fg-default;
+                font-size: Metrics.text-sm;
+                font-weight: Metrics.weight-semibold;
+            }
+            Rectangle {
+                height: 36px;
+                border-radius: Metrics.radius-md;
+                border-width: 1px;
+                border-color: input.has-focus ? Theme.border-accent : Theme.border-default;
+                background: Theme.canvas-inset;
+                input := TextInput {
+                    x: Metrics.space-3;
+                    width: parent.width - 2 * Metrics.space-3;
+                    height: parent.height;
+                    text <=> root.file-name;
+                    single-line: true;
+                    vertical-alignment: center;
+                    font-size: Metrics.text-sm;
+                    color: Theme.fg-default;
+                    selection-background-color: Theme.selection-bg;
+                    selection-foreground-color: Theme.selection-fg;
+                    accepted => { root.confirmed(); }
+                    edited => { root.error-text = ""; }
+                }
+            }
+            Text {
+                text: "可填写 笔记.md、示例.py 等；未填写扩展名时使用 .txt。\n内容以 UTF-8 原文保存，保留换行和缩进。";
+                color: Theme.fg-muted;
+                font-size: Metrics.text-xs;
+                wrap: word-wrap;
+            }
+            Text {
+                height: 34px;
+                text: root.error-text;
+                color: Theme.danger-fg;
+                font-size: Metrics.text-xs;
+                wrap: word-wrap;
+                overflow: elide;
+            }
+            HorizontalLayout {
+                alignment: end;
+                spacing: Metrics.space-2;
+                FileButton { label: "取消"; clicked => { root.cancelled(); } }
+                FileButton { label: "粘贴"; primary: true; clicked => { root.confirmed(); } }
+            }
+        }
+    }
+}

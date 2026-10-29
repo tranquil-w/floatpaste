@@ -247,7 +247,8 @@ pub struct PasteOption {
 /// 位图、文件发布文件列表）；其余为变体：`PlainText` 只发布文字，
 /// `PathText` 发布路径文本（图片保存路径 / 文件逐行完整路径），
 /// `FileNameText` 发布逐行文件名，`ImageFile` 把图片以文件列表发布
-/// （CF_HDROP，目标应用按文件附件接收）。例外：`RevealInFolder` 不是
+/// （CF_HDROP，目标应用按文件附件接收）。`TextFile` 需填写文件名，
+/// 把文本生成 UTF-8 文件后以 CF_HDROP 发布。例外：`RevealInFolder` 不是
 /// 剪贴板形态——在资源管理器中定位文件，发布链路一律拒绝该模式，
 /// 由上屏流程前置分流执行。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
@@ -259,6 +260,7 @@ pub enum PasteMode {
     PathText,
     FileNameText,
     ImageFile,
+    TextFile,
     RevealInFolder,
 }
 
@@ -275,13 +277,14 @@ impl<'de> Deserialize<'de> for PasteMode {
             "path_text" => Self::PathText,
             "file_name_text" => Self::FileNameText,
             "image_file" => Self::ImageFile,
+            "text_file" => Self::TextFile,
             "reveal_in_folder" => Self::RevealInFolder,
             _ => Self::Original,
         })
     }
 }
 
-/// 富文本（带 HTML 的文本）的可用动作：原格式、纯文本。
+/// 富文本的默认次级动作目录；需要填写名称的 TextFile 仅出现在菜单。
 pub const RICH_TEXT_PASTE_MODES: &[PasteMode] = &[PasteMode::Original, PasteMode::PlainText];
 /// 图片的可用动作：图片、图片路径、图片文件。
 pub const IMAGE_PASTE_MODES: &[PasteMode] = &[
@@ -297,16 +300,21 @@ pub const FILE_PASTE_MODES: &[PasteMode] = &[
     PasteMode::FileNameText,
     PasteMode::RevealInFolder,
 ];
-/// 普通文本只有原文一种形态，不重复提供「纯文本」凑选项。
-pub const PLAIN_TEXT_PASTE_MODES: &[PasteMode] = &[PasteMode::Original];
+/// 普通文本不重复提供「纯文本」；文件动作需输入文件名。
+pub const PLAIN_TEXT_PASTE_MODES: &[PasteMode] = &[PasteMode::Original, PasteMode::TextFile];
 
 /// 条目的可用上屏动作，首项为主动作；菜单、按钮与次级解析共用此目录。
 pub fn available_paste_modes(item: &ClipItemSummary) -> &'static [PasteMode] {
     match item.r#type.as_str() {
         "image" => IMAGE_PASTE_MODES,
         "file" => FILE_PASTE_MODES,
-        "text" if item.has_html => RICH_TEXT_PASTE_MODES,
-        _ => PLAIN_TEXT_PASTE_MODES,
+        "text" if item.has_html => &[
+            PasteMode::Original,
+            PasteMode::PlainText,
+            PasteMode::TextFile,
+        ],
+        "text" => PLAIN_TEXT_PASTE_MODES,
+        _ => &[PasteMode::Original],
     }
 }
 
@@ -324,6 +332,7 @@ pub fn paste_mode_label(mode: PasteMode, clip_type: &str, has_html: bool) -> &'s
         PasteMode::PathText => "粘贴为完整路径",
         PasteMode::FileNameText => "粘贴为文件名",
         PasteMode::ImageFile => "粘贴为图片文件",
+        PasteMode::TextFile => "粘贴为文件…",
         PasteMode::RevealInFolder => "打开所在文件夹",
     }
 }
@@ -341,7 +350,7 @@ pub fn resolve_secondary_mode(
         "text" if item.has_html => (defaults.rich_text, PasteMode::PlainText),
         _ => return PasteMode::Original,
     };
-    if available_paste_modes(item).contains(&configured) {
+    if configured != PasteMode::TextFile && available_paste_modes(item).contains(&configured) {
         configured
     } else {
         fallback
@@ -410,11 +419,15 @@ mod tests {
     fn catalog_lists_primary_first_per_type() {
         assert_eq!(
             available_paste_modes(&item("text", false)),
-            &[PasteMode::Original]
+            &[PasteMode::Original, PasteMode::TextFile]
         );
         assert_eq!(
             available_paste_modes(&item("text", true)),
-            &[PasteMode::Original, PasteMode::PlainText]
+            &[
+                PasteMode::Original,
+                PasteMode::PlainText,
+                PasteMode::TextFile
+            ]
         );
         assert_eq!(
             available_paste_modes(&item("image", false)),
@@ -530,6 +543,7 @@ mod tests {
             PasteMode::PathText,
             PasteMode::FileNameText,
             PasteMode::ImageFile,
+            PasteMode::TextFile,
             PasteMode::RevealInFolder,
         ] {
             let json = serde_json::to_string(&mode).unwrap();

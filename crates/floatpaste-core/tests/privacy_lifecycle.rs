@@ -149,9 +149,15 @@ fn retention_preserves_favorites_and_clear_removes_all_history_but_not_source_fi
             .unwrap(),
         1
     );
+    let attachment = state
+        .text_file_storage
+        .create("附件.md", "需清理的文本附件")
+        .unwrap();
     let generation = state.privacy_generation();
     let cleared = ClipService::clear_history(&state).unwrap();
     assert_eq!(cleared.pending_images, 0);
+    assert_eq!(cleared.pending_text_files, 0);
+    assert!(!attachment.exists());
     assert!(cleared.storage_compacted);
     assert_ne!(state.privacy_generation(), generation);
     for table in [

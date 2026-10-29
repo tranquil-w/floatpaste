@@ -12,6 +12,7 @@ pub struct ClipService;
 
 pub struct ClearHistoryResult {
     pub pending_images: usize,
+    pub pending_text_files: usize,
     pub storage_compacted: bool,
 }
 
@@ -25,6 +26,7 @@ impl ClipService {
             Some(crate::platform::windows::clipboard_formats::clipboard_sequence());
         let pending_images =
             super::retention_service::RetentionService::retry_image_deletions(state)?;
+        let pending_text_files = state.text_file_storage.cleanup(true)?;
         let storage_compacted = match state.repository.vacuum() {
             Ok(()) => true,
             Err(error) => {
@@ -34,6 +36,7 @@ impl ClipService {
         };
         Ok(ClearHistoryResult {
             pending_images,
+            pending_text_files,
             storage_compacted,
         })
     }

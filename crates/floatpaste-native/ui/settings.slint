@@ -2533,7 +2533,7 @@ export component SettingsWindow inherits Window {
                                     font-weight: Metrics.weight-semibold;
                                 }
                                 Text {
-                                    text: root.clear-history-dialog-open ? "将移除全部历史，包括收藏、已删除条目、标签关联和应用保存的图片。此操作无法撤销。\n\n保留设置、系统剪贴板和用户源文件。备份及磁盘残留不在清除保证内。" : root.winv-dialog-body;
+                                    text: root.clear-history-dialog-open ? "将移除全部历史，包括收藏、已删除条目、标签关联、应用保存的图片和生成的文本附件。此操作无法撤销。\n\n保留设置、系统剪贴板和用户源文件。备份及磁盘残留不在清除保证内。" : root.winv-dialog-body;
                                     color: Theme.fg-muted;
                                     font-size: Metrics.text-sm;
                                     wrap: word-wrap;

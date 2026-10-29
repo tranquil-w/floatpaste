@@ -184,6 +184,7 @@ fn apply_preset_filter(app: &App, preset_tags: Vec<String>) {
 }
 
 fn open_inner(app: &App, preset_tags: Vec<String>) {
+    crate::text_file::close(false);
     if app.core().session_locked() {
         return;
     }
@@ -2563,12 +2564,15 @@ pub(crate) mod action_menu_tests {
         assert!(code_row.is_code);
         assert_eq!(code_row.purpose_label, "代码");
         assert!(code_row.preview.contains("    println!"));
-        assert_eq!(plain.actions.row_count(), 1);
-        assert_eq!(row_labels(&plain), vec!["粘贴为文本"]);
+        assert_eq!(plain.actions.row_count(), 2);
+        assert_eq!(row_labels(&plain), vec!["粘贴为文本", "粘贴为文件…"]);
         assert_eq!(plain.secondary_label, "", "普通文本无独立次级动作提示");
 
         let rich = make_row(&summary("text", true), &keys, &defaults);
-        assert_eq!(row_labels(&rich), vec!["粘贴为原格式", "粘贴为纯文本"]);
+        assert_eq!(
+            row_labels(&rich),
+            vec!["粘贴为原格式", "粘贴为纯文本", "粘贴为文件…"]
+        );
         assert_eq!(rich.secondary_label, "粘贴为纯文本");
         assert_eq!(rich.purpose_label, "富文本");
         for (purpose, label) in [(TextKind::Link, "链接"), (TextKind::Path, "路径")] {
@@ -2655,7 +2659,7 @@ pub(crate) mod action_menu_tests {
             },
         );
         assert_eq!(rich_original.secondary_label, "");
-        assert_eq!(rich_original.actions.row_count(), 2);
+        assert_eq!(rich_original.actions.row_count(), 3);
 
         // 菜单状态流转（不执行真实上屏）：直接注入 summary，
         // 等价一次查询落地后的行缓存
@@ -2663,9 +2667,10 @@ pub(crate) mod action_menu_tests {
         app.state
             .set_search_items(vec![summary("text", false), summary("file", false)]);
 
-        // 普通文本（仅一项动作）：不打开菜单
+        // 普通文本同样提供文件动作菜单
         open_actions_menu(&app, 0, 10.0, 100.0);
-        assert_eq!(win.get_actions_menu_row(), -1, "单项动作不开菜单");
+        assert_eq!(win.get_actions_menu_row(), 0, "普通文本提供文件动作");
+        close_actions_menu(&app);
 
         // 文件条目：打开后高亮回主动作，锚点入属性；键盘循环移动
         set_selected(&app, 0);
@@ -2732,6 +2737,7 @@ pub(crate) mod action_menu_tests {
         );
         reset_delete_arm(&app);
         pointer_split_button(&app, &win);
+        crate::text_file::contract_tests(&app);
     }
 
     fn pointer_split_button(app: &App, win: &SearchWindow) {

@@ -54,7 +54,7 @@ flowchart LR
 | 悬浮气泡 | 无焦点、点击穿透 | 条目预览与提示 |
 | 托盘 | — | 打开窗口、暂停/恢复监听与退出 |
 
-五窗口启动即建，共享事件循环。速贴、搜索窗口与悬浮气泡平时停在屏外；编辑与设置窗口通过 Win32 真隐藏进入停屏，Slint 侧保持窗口存活。显隐、前台归还、置顶和定位约束统一见 [无焦点速贴指南](no-focus-picker.md)。
+五窗口启动即建，共享事件循环。文本「粘贴为文件…」的命名窗口按需创建，确认或取消后释放；来源会话与上屏目标由共享上屏流程保留。速贴、搜索窗口与悬浮气泡平时停在屏外；编辑与设置窗口通过 Win32 真隐藏进入停屏，Slint 侧保持窗口存活。显隐、前台归还、置顶和定位约束统一见 [无焦点速贴指南](no-focus-picker.md)。
 
 ## 改动入口
 
@@ -67,7 +67,7 @@ Rust 文件路径相对于对应 crate 的 `src/`；Slint 界面位于 native �
 | HTML 采集、发布与恢复 | core 的 `platform/windows/clipboard_formats.rs`、`services/html_format.rs`、`services/paste_support.rs` | 白名单同会话采集，解析在锁外；HTML 只作载荷，不交界面执行，见 [运行行为与数据约定](runtime-behavior.md) |
 | 文本用途识别与内容身份 | core 的 `services/text_kind.rs`、`services/text_identity.rs` | 识别与搜索归一化分离；用途不参与 hash，见 [运行行为与数据约定](runtime-behavior.md) |
 | 启动、日志与共享状态 | native 的 `main.rs`、`system.rs`、`app.rs`、`app_state.rs` | [开发与诊断](../CONTRIBUTING.md) |
-| 窗口与上屏 | native 的 `picker.rs`、`search.rs`、`overlay.rs`、`paste_flow.rs` | [窗口时序与防坑](no-focus-picker.md) |
+| 窗口与上屏 | native 的 `picker.rs`、`search.rs`、`overlay.rs`、`paste_flow.rs`、`text_file.rs`；core 的 `services/text_file_storage.rs` | [窗口时序与防坑](no-focus-picker.md) |
 | 会话键与外部操作退出 | core 的 `platform/windows/session_keyboard.rs`（RegisterHotKey）、`mouse_monitor.rs`（LL 鼠标钩子）、`picker_dismiss.rs`（键盘旁路与前台通知） | [速贴会话退出](no-focus-picker.md#速贴会话退出) |
 | 插入符定位 | core 的 `platform/windows/picker_position.rs`、`uia_caret.rs`、`services/picker_position_service.rs` | [窗口时序与防坑](no-focus-picker.md) |
 | 编辑交互 | native 的 `editor.rs` 与 `ui/editor.slint` | [编辑窗口规格](editor-window.md) |

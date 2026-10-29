@@ -19,6 +19,7 @@ use crate::{
 pub struct CoreState {
     pub repository: SqliteRepository,
     pub image_storage: ImageStorage,
+    pub text_file_storage: crate::services::text_file_storage::TextFileStorage,
     settings: Arc<RwLock<UserSetting>>,
     self_write_guard: SelfWriteGuard,
     quitting: Arc<AtomicBool>,
@@ -40,6 +41,9 @@ impl CoreState {
         settings: UserSetting,
     ) -> Self {
         Self {
+            text_file_storage: crate::services::text_file_storage::TextFileStorage::new(
+                image_storage.base_dir(),
+            ),
             repository,
             image_storage,
             settings: Arc::new(RwLock::new(settings)),

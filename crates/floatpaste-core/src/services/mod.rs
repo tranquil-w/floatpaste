@@ -13,6 +13,7 @@ pub mod privacy_service;
 pub mod retention_service;
 
 pub mod tag_service;
+pub mod text_file_storage;
 pub mod text_identity;
 pub mod text_kind;
 pub mod time_format;

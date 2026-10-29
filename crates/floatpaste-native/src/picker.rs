@@ -130,6 +130,7 @@ fn stop_topmost_guard() {
 
 /// 打开速贴面板（对齐 WindowCoordinator::activate_picker）
 pub fn activate(app: &App) {
+    crate::text_file::close(false);
     if app.core().session_locked() {
         return;
     }
@@ -2565,24 +2566,24 @@ pub(crate) mod action_sheet_tests {
         assert_eq!(clicks.get(), 0, "更多按钮不能触发行点击或双击上屏");
         assert_eq!(win.get_actions_row(), 0);
         use slint::Model;
-        assert_eq!(win.get_menu_actions().row_count(), 4);
+        assert_eq!(win.get_menu_actions().row_count(), 5);
         assert_eq!(
             win.get_menu_actions().row_data(0).unwrap().shortcut,
             "Alt+Enter"
         );
         assert_eq!(
-            win.get_menu_actions().row_data(1).unwrap().shortcut,
+            win.get_menu_actions().row_data(2).unwrap().shortcut,
             "Ctrl+Shift+D"
         );
         assert_eq!(
-            win.get_menu_actions().row_data(2).unwrap().shortcut,
+            win.get_menu_actions().row_data(3).unwrap().shortcut,
             "Ctrl+Shift+E"
         );
         assert_eq!(
-            win.get_menu_actions().row_data(3).unwrap().shortcut,
+            win.get_menu_actions().row_data(4).unwrap().shortcut,
             "Ctrl+L"
         );
-        activate_menu_item(app, 0, 1);
+        activate_menu_item(app, 0, 2);
         assert!(
             app.state.item_at(0).unwrap().is_favorited,
             "菜单收藏更新条目"
@@ -2590,7 +2591,7 @@ pub(crate) mod action_sheet_tests {
         assert_eq!(win.get_actions_row(), -1);
         open_actions(app, 0);
         assert_eq!(
-            win.get_menu_actions().row_data(1).unwrap().label,
+            win.get_menu_actions().row_data(2).unwrap().label,
             "取消收藏"
         );
         slint::Timer::single_shot(Duration::from_millis(180), || {
@@ -2664,7 +2665,11 @@ pub(crate) mod action_sheet_tests {
             position,
             button: PointerEventButton::Left,
         });
-        assert_eq!(activated.get(), 3, "窄窗口可滚动并点击菜单末项");
+        assert_eq!(
+            activated.get(),
+            win.get_menu_actions().row_count() as i32 - 1,
+            "窄窗口可滚动并点击菜单末项"
+        );
         handle_session_action(app, SessionAction::Dismiss);
         assert_eq!(win.get_delete_armed_row(), -1);
         assert_eq!(win.get_actions_row(), 0, "Esc 先取消确认");

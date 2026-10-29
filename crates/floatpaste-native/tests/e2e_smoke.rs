@@ -1077,6 +1077,65 @@ fn app_e2e_smoke_flow() {
             .is_none(),
         "文件名发布须登记自写抑制身份"
     );
+    // 文本文件通过真实 CF_HDROP 发布，原文不因扩展名转换；沿用同一串行剪贴板隔离。
+    let mut attachment_detail = rich.clone();
+    attachment_detail.full_text = "中文 😀\r\n    缩进  \n```py\nprint(1)\n```".into();
+    for (name, expected) in [
+        ("附件", "附件.txt"),
+        ("笔记.md", "笔记.md"),
+        ("示例.py", "示例.py"),
+    ] {
+        retry_clipboard(|| {
+            floatpaste_core::services::paste_support::publish_text_file_if_current(
+                &driver,
+                &attachment_detail,
+                name,
+                None,
+                Some(&files_snapshot),
+                driver.privacy_generation(),
+            )
+        });
+        let snapshot = retry_clipboard(|| ClipboardSnapshot::capture(true));
+        let files = snapshot.files.clone().unwrap();
+        assert_eq!(files.len(), 1);
+        let path = std::path::Path::new(&files[0]);
+        assert_eq!(path.file_name().unwrap(), expected);
+        assert_eq!(
+            std::fs::read(path).unwrap(),
+            attachment_detail.full_text.as_bytes()
+        );
+        assert!(
+            snapshot.html().is_none(),
+            "富文本生成文件时只保存纯文本正文"
+        );
+        assert!(
+            HistoryService::ingest_files(
+                &driver,
+                files,
+                0,
+                Some(attachment_detail.full_text.len() as i64),
+                None
+            )
+            .unwrap()
+            .is_none(),
+            "生成附件发布须登记自写抑制"
+        );
+    }
+    let old_generation = driver.privacy_generation();
+    driver.set_session_locked(true).unwrap();
+    driver.set_session_locked(false).unwrap();
+    assert!(matches!(
+        floatpaste_core::services::paste_support::publish_text_file_if_current(
+            &driver,
+            &attachment_detail,
+            "过期.txt",
+            None,
+            None,
+            old_generation,
+        ),
+        Err(floatpaste_core::domain::error::AppError::OperationCancelled)
+    ));
+    retry_clipboard(|| files_snapshot.restore(None, None));
     drop(driver);
 
     // ── 场景 4：图片录入（CF 读取 → 解码 → 落盘 images/）──
