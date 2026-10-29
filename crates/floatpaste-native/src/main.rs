@@ -569,6 +569,7 @@ fn main() {
                 tracing::info!("提权重启已获确认，退出当前实例交由提权实例接管");
                 session_keyboard::end_session();
                 mouse_monitor::end_session();
+                floatpaste_core::platform::windows::picker_dismiss::end_session();
                 ClipboardMonitor::stop();
                 hotkey::stop_hotkeys();
                 app.state.core.begin_quit();
@@ -593,6 +594,7 @@ fn main() {
     // 退出收尾：先停输入拦截与监听，再置退出标志
     session_keyboard::end_session();
     mouse_monitor::end_session();
+    floatpaste_core::platform::windows::picker_dismiss::end_session();
     ClipboardMonitor::stop();
     hotkey::stop_hotkeys();
     state.core.begin_quit();

@@ -7,6 +7,7 @@ pub mod file_clipboard;
 pub mod hotkey;
 pub mod image_clipboard;
 pub mod mouse_monitor;
+pub mod picker_dismiss;
 pub mod picker_position;
 pub mod screen_capture;
 pub mod session_keyboard;

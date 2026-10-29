@@ -1,7 +1,7 @@
 //! 速贴面板会话期低级鼠标钩子：点击面板窗口外任意位置即关闭面板。
 //!
 //! 对齐原版 `picker_mouse_monitor.rs`：会话期间装载 WH_MOUSE_LL，
-//! 左/右/中键（含非客户区）按下时若命中点在面板窗口矩形之外，
+//! 左/右/中/侧键（含非客户区）按下或滚轮操作时若命中点在面板窗口矩形之外，
 //! 触发回调（由调用方关闭面板；是否还原前台由调用方决定，外击场景
 //! 用户点击处已取得焦点，不再还原），事件本身放行。
 //!
@@ -15,8 +15,8 @@ use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, GetWindowRect, SetWindowsHookExW, UnhookWindowsHookEx, HHOOK, MSLLHOOKSTRUCT,
-    WH_MOUSE_LL, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_NCLBUTTONDOWN, WM_NCMBUTTONDOWN,
-    WM_NCRBUTTONDOWN, WM_RBUTTONDOWN,
+    WH_MOUSE_LL, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_MOUSEHWHEEL, WM_MOUSEWHEEL, WM_NCLBUTTONDOWN,
+    WM_NCMBUTTONDOWN, WM_NCRBUTTONDOWN, WM_NCXBUTTONDOWN, WM_RBUTTONDOWN, WM_XBUTTONDOWN,
 };
 
 use tracing::error;
@@ -25,6 +25,7 @@ static MONITOR_WINDOW: AtomicIsize = AtomicIsize::new(0);
 static HOOK_ACTIVE: AtomicBool = AtomicBool::new(false);
 /// 命中矩形四周内缩量（物理像素）：可见卡片之外的透明柔影留边不算面板内
 static MONITOR_INSET: AtomicIsize = AtomicIsize::new(0);
+static MONITOR_SCROLL: AtomicBool = AtomicBool::new(false);
 
 pub type OutsideClickCallback = Box<dyn Fn() + Send + Sync>;
 static OUTSIDE_CLICK_CALLBACK: std::sync::Mutex<Option<OutsideClickCallback>> =
@@ -36,9 +37,15 @@ thread_local! {
 
 /// 开始监听：picker_hwnd 为面板窗口句柄，外击时调用 callback（钩子线程上触发）。
 /// `inset` 为命中矩形四周内缩（物理像素），用于排除窗口的透明柔影留边
-pub fn begin_session(picker_hwnd: isize, inset: i32, callback: OutsideClickCallback) {
+pub fn begin_session(
+    picker_hwnd: isize,
+    inset: i32,
+    outside_scroll: bool,
+    callback: OutsideClickCallback,
+) {
     MONITOR_WINDOW.store(picker_hwnd, Ordering::SeqCst);
     MONITOR_INSET.store(inset.max(0) as isize, Ordering::SeqCst);
+    MONITOR_SCROLL.store(outside_scroll, Ordering::SeqCst);
     if let Ok(mut slot) = OUTSIDE_CLICK_CALLBACK.lock() {
         *slot = Some(callback);
     }
@@ -64,6 +71,7 @@ pub fn end_session() {
     HOOK_ACTIVE.store(false, Ordering::SeqCst);
     MONITOR_WINDOW.store(0, Ordering::SeqCst);
     MONITOR_INSET.store(0, Ordering::SeqCst);
+    MONITOR_SCROLL.store(false, Ordering::SeqCst);
     HOOK_HANDLE.with(|handle| {
         if let Some(hook) = handle.borrow_mut().take() {
             unsafe {
@@ -85,6 +93,10 @@ extern "system" fn mouse_hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) ->
             || msg == WM_NCLBUTTONDOWN
             || msg == WM_NCRBUTTONDOWN
             || msg == WM_NCMBUTTONDOWN
+            || msg == WM_XBUTTONDOWN
+            || msg == WM_NCXBUTTONDOWN
+            || (MONITOR_SCROLL.load(Ordering::SeqCst)
+                && (msg == WM_MOUSEWHEEL || msg == WM_MOUSEHWHEEL))
         {
             if click_is_outside_picker(lparam) {
                 if let Ok(slot) = OUTSIDE_CLICK_CALLBACK.lock() {

@@ -31,7 +31,7 @@ use floatpaste_core::platform::windows::picker_position::ScreenPoint;
 use floatpaste_core::platform::windows::screen_capture;
 use floatpaste_core::platform::windows::start_menu;
 use floatpaste_core::platform::windows::window_control::{self, GestureMode, ResizeDirection};
-use floatpaste_core::platform::windows::{mouse_monitor, session_keyboard};
+use floatpaste_core::platform::windows::{mouse_monitor, picker_dismiss, session_keyboard};
 use floatpaste_core::services::clip_display::{
     clip_type_label, paste_action_summaries, PasteActionSummary,
 };
@@ -180,6 +180,7 @@ pub fn activate(app: &App) {
         app.state.end_picker_activation();
         session_keyboard::end_session();
         mouse_monitor::end_session();
+        picker_dismiss::end_session();
     }
 
     // 托盘菜单与速贴共用键鼠会话；完整打开前先让位。
@@ -397,6 +398,7 @@ pub fn hide(app: &App, restore_target: bool) {
 
     session_keyboard::end_session();
     mouse_monitor::end_session();
+    picker_dismiss::end_session();
 
     save_window_geometry(app, hwnd);
     cancel_reveal();
@@ -558,6 +560,7 @@ fn begin_input_session(app: &App, hwnd: isize, settings: &UserSetting) {
     mouse_monitor::begin_session(
         hwnd,
         inset,
+        true,
         Box::new(move || {
             let app = app_for_mouse.clone();
             let _ = slint::invoke_from_event_loop(move || {
@@ -580,6 +583,24 @@ fn begin_input_session(app: &App, hwnd: isize, settings: &UserSetting) {
             });
         }),
     );
+
+    let app_for_dismiss = app.clone();
+    if let Err(error) = picker_dismiss::begin_session(
+        hwnd,
+        settings,
+        Box::new(move || {
+            // 立即释放会话键，后续输入不再被速贴接管；隐藏仍交回事件循环并校验代际。
+            session_keyboard::end_session();
+            let app = app_for_dismiss.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if app.state.is_current_picker_activation(epoch) {
+                    hide(&app, false);
+                }
+            });
+        }),
+    ) {
+        warn!(%error, "速贴外部键盘与任务切换退出监控装配失败");
+    }
 }
 
 pub(crate) fn handle_session_action(app: &App, action: session_keyboard::SessionAction) {
@@ -1942,6 +1963,10 @@ pub(crate) mod reveal_contract_tests {
             let rect = win32_ext::physical_rect(hwnd).unwrap();
             assert_eq!((rect.left, rect.top), (-32000, -32000));
             assert!(!mouse_monitor::is_session_active(), "停屏期间不能接管输入");
+            assert!(
+                !picker_dismiss::is_session_active(),
+                "停屏期间不能监控外部输入"
+            );
         };
 
         // 系统调用卡住时不得为连续呼出叠加线程；完成后允许下一份任务。
@@ -2062,6 +2087,10 @@ pub(crate) mod reveal_contract_tests {
                 mouse_monitor::is_session_active(),
                 "真实显示后必须安装鼠标钩子"
             );
+            assert!(
+                picker_dismiss::is_session_active(),
+                "真实显示后必须监控外部输入"
+            );
             assert!(window_control::is_topmost(hwnd));
             assert!(TOPMOST_GUARD.with(|slot| slot.borrow().as_ref().unwrap().running()));
             win.set_selected(1);
@@ -2153,6 +2182,21 @@ pub(crate) mod reveal_contract_tests {
                 "关闭延迟恢复不能覆盖新前台"
             );
             eprintln!("速贴交互桌面前台恢复契约通过");
+
+            // 真正显屏后转移前台，须自动停屏并保留用户的新前台。
+            assert!(ActiveAppResolver::force_foreground_window(source_hwnd));
+            restore_after_editor(&app, target);
+            wait_for_reveal(hwnd, expected);
+            assert!(app.state.is_picker_active());
+            assert!(ActiveAppResolver::force_foreground_window(other_hwnd));
+            pump(100);
+            assert!(!app.state.is_picker_active(), "前台切换须结束速贴会话");
+            parked();
+            assert_eq!(
+                ActiveAppResolver::current_foreground_hwnd(),
+                Some(other_hwnd)
+            );
+            eprintln!("速贴交互桌面切换任务退出契约通过");
         } else {
             eprintln!("无可控交互前台，跳过速贴前台恢复契约");
         }

@@ -26,7 +26,8 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     MOD_SHIFT, MOD_WIN,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    DispatchMessageW, GetMessageW, PostThreadMessageW, TranslateMessage, MSG, WM_HOTKEY, WM_QUIT,
+    DispatchMessageW, GetMessageW, PeekMessageW, PostThreadMessageW, TranslateMessage, MSG,
+    PM_NOREMOVE, WM_HOTKEY, WM_QUIT,
 };
 
 use tracing::{info, warn};
@@ -189,6 +190,7 @@ const SESSION_HOTKEY_ID_BASE: i32 = 64;
 pub type SessionKeyCallback = Box<dyn Fn(SessionAction) + Send + Sync>;
 
 static SESSION_CALLBACK: Mutex<Option<SessionKeyCallback>> = Mutex::new(None);
+static SESSION_THREAD: Mutex<Option<thread::JoinHandle<()>>> = Mutex::new(None);
 
 /// 开始会话：把会话组合键注册为全局热键（专用线程装载并泵送 WM_HOTKEY）。
 /// 重复调用先结束上一会话（幂等）。全局热键命中与前台焦点无关
@@ -236,7 +238,10 @@ pub fn begin_session(config: SessionKeyConfig, callback: SessionKeyCallback) {
     }
 
     let session_generation = SESSION_GEN.fetch_add(1, Ordering::SeqCst) + 1;
-    thread::spawn(move || unsafe {
+    let handle = thread::spawn(move || unsafe {
+        // 发布线程 id 前建立消息队列，保证结束会话的 WM_QUIT 不会丢失。
+        let mut message = MSG::default();
+        let _ = PeekMessageW(&mut message, None, 0, 0, PM_NOREMOVE);
         let mut registered: Vec<(i32, SessionAction)> = Vec::new();
         for (id, modifiers, vk, action) in &hotkeys {
             match RegisterHotKey(None, *id, *modifiers, *vk) {
@@ -270,7 +275,6 @@ pub fn begin_session(config: SessionKeyConfig, callback: SessionKeyCallback) {
             return;
         }
 
-        let mut message = MSG::default();
         loop {
             let result = GetMessageW(&mut message, None, 0, 0);
             if result.0 <= 0 {
@@ -297,6 +301,9 @@ pub fn begin_session(config: SessionKeyConfig, callback: SessionKeyCallback) {
             let _ = UnregisterHotKey(Some(HWND::default()), *id);
         }
     });
+    if let Ok(mut slot) = SESSION_THREAD.lock() {
+        *slot = Some(handle);
+    }
 }
 
 /// 结束会话：注销全部会话热键并回收会话线程。幂等
@@ -314,6 +321,16 @@ pub fn end_session() {
             let _ = PostThreadMessageW(thread_id, WM_QUIT, WPARAM(0), LPARAM(0));
         }
     }
+    // 外部输入结束速贴后，后续数字/方向键必须已经交还目标，不能只投递退出消息。
+    let handle = SESSION_THREAD.lock().ok().and_then(|mut slot| slot.take());
+    if let Some(handle) = handle {
+        if handle.thread().id() == thread::current().id() {
+            warn!("会话键回调不得同步结束自身线程，请投递到事件循环");
+        } else if handle.join().is_err() {
+            warn!("会话快捷键线程异常退出");
+        }
+    }
+    SESSION_THREAD_ID.store(0, Ordering::SeqCst);
 }
 
 /// 组合键 → RegisterHotKey 修饰掩码（精确集合：未含的修饰键不置位）
@@ -338,6 +355,41 @@ fn modifiers_mask(combo: &SessionCombo) -> HOT_KEY_MODIFIERS {
 mod tests {
     use super::{parse_session_combo, SessionKeyConfig};
     use crate::domain::settings::UserSetting;
+
+    #[test]
+    fn ending_session_releases_hotkeys_even_during_registration() {
+        use super::*;
+        let combo = parse_session_combo("Ctrl+Shift+F24").unwrap();
+        for round in 0..12 {
+            begin_session(
+                SessionKeyConfig {
+                    digit_shortcuts_enabled: false,
+                    bindings: vec![(SessionAction::Dismiss, combo.clone())],
+                },
+                Box::new(|_| {}),
+            );
+            if round == 0 {
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+                while SESSION_THREAD_ID.load(Ordering::SeqCst) == 0 {
+                    assert!(std::time::Instant::now() < deadline, "等待会话热键注册超时");
+                    thread::sleep(std::time::Duration::from_millis(1));
+                }
+            }
+            end_session();
+            unsafe {
+                RegisterHotKey(
+                    None,
+                    7000,
+                    modifiers_mask(&combo),
+                    combo.virtual_key().unwrap(),
+                )
+                .expect("结束后应立即能够注册相同组合键");
+                UnregisterHotKey(None, 7000).unwrap();
+            }
+            assert_eq!(SESSION_THREAD_ID.load(Ordering::SeqCst), 0);
+        }
+        end_session();
+    }
 
     #[test]
     fn parses_session_combinations() {

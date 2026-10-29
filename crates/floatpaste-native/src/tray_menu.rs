@@ -236,6 +236,7 @@ fn begin_dismiss_sessions(app: &App, hwnd: isize) {
     mouse_monitor::begin_session(
         hwnd,
         inset,
+        false,
         Box::new(move || {
             let app = app_cb.clone();
             let _ = slint::invoke_from_event_loop(move || {
