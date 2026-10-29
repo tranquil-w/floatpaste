@@ -1142,7 +1142,7 @@ dependencies = [
 
 [[package]]
 name = "floatpaste-native"
-version = "0.10.4-beta.7"
+version = "0.10.5"
 dependencies = [
  "arboard",
  "embed-resource",
