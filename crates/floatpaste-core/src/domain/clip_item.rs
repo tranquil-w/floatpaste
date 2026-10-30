@@ -286,8 +286,12 @@ impl<'de> Deserialize<'de> for PasteMode {
     }
 }
 
-/// 富文本的默认次级动作目录；需要填写名称的 TextFile 仅出现在菜单。
-pub const RICH_TEXT_PASTE_MODES: &[PasteMode] = &[PasteMode::Original, PasteMode::PlainText];
+/// 富文本动作；TextFile 无论菜单还是次级入口均需先填写名称。
+pub const RICH_TEXT_PASTE_MODES: &[PasteMode] = &[
+    PasteMode::Original,
+    PasteMode::PlainText,
+    PasteMode::TextFile,
+];
 /// 图片的可用动作：图片、图片路径、图片文件。
 pub const IMAGE_PASTE_MODES: &[PasteMode] = &[
     PasteMode::Original,
@@ -332,11 +336,7 @@ pub fn available_paste_modes(item: &ClipItemSummary) -> &'static [PasteMode] {
             PasteMode::TextFile,
             PasteMode::OpenInBrowser,
         ],
-        "text" if item.has_html => &[
-            PasteMode::Original,
-            PasteMode::PlainText,
-            PasteMode::TextFile,
-        ],
+        "text" if item.has_html => RICH_TEXT_PASTE_MODES,
         "text" => PLAIN_TEXT_PASTE_MODES,
         _ => &[PasteMode::Original],
     }
@@ -362,28 +362,29 @@ pub fn paste_mode_label(mode: PasteMode, clip_type: &str, has_html: bool) -> &'s
     }
 }
 
-/// 解析条目的默认次级动作：取该类别配置值，不在可用目录（旧库或手改
-/// 配置残留）时回退该类别内置默认——富文本纯文本、图片与文件路径
-/// 文本，即次级动作可配置之前的既有行为。普通文本次级等同主动作。
+/// 链接/路径的显式动作优先，否则按是否带 HTML 沿用对应文本设置。
+/// 清理非法配置后再解析，避免手改值越过类别限制。
 pub fn resolve_secondary_mode(
     item: &ClipItemSummary,
     defaults: &super::settings::SecondaryPasteDefaults,
 ) -> PasteMode {
-    let (configured, fallback) = match item.r#type.as_str() {
-        "image" => (defaults.image, PasteMode::PathText),
-        "file" => (defaults.file, PasteMode::PathText),
-        "text" if item.has_html => (defaults.rich_text, PasteMode::PlainText),
-        _ => return PasteMode::Original,
-    };
-    let allowed = if item.r#type == "text" {
-        RICH_TEXT_PASTE_MODES
-    } else {
-        available_paste_modes(item)
-    };
-    if allowed.contains(&configured) {
-        configured
-    } else {
-        fallback
+    let defaults = defaults.sanitized();
+    match item.r#type.as_str() {
+        "image" => defaults.image,
+        "file" => defaults.file,
+        "text" => {
+            let override_mode = match item.text_kind {
+                TextKind::Link => defaults.link,
+                TextKind::Path => defaults.path,
+                _ => None,
+            };
+            override_mode.unwrap_or(if item.has_html {
+                defaults.rich_text
+            } else {
+                defaults.plain_text
+            })
+        }
+        _ => PasteMode::Original,
     }
 }
 
@@ -545,11 +546,55 @@ mod tests {
     }
 
     #[test]
+    fn text_secondary_inherits_base_and_applies_only_matching_override() {
+        for has_html in [false, true] {
+            let mut text = item("text", has_html);
+            let defaults = SecondaryPasteDefaults {
+                plain_text: PasteMode::TextFile,
+                rich_text: PasteMode::Original,
+                ..Default::default()
+            };
+            let inherited = if has_html {
+                PasteMode::Original
+            } else {
+                PasteMode::TextFile
+            };
+            for kind in [
+                super::TextKind::Plain,
+                super::TextKind::Link,
+                super::TextKind::Path,
+                super::TextKind::Code,
+            ] {
+                text.text_kind = kind;
+                assert_eq!(resolve_secondary_mode(&text, &defaults), inherited);
+            }
+            let overrides = SecondaryPasteDefaults {
+                link: Some(PasteMode::OpenInBrowser),
+                path: Some(PasteMode::RevealInFolder),
+                ..defaults
+            };
+            text.text_kind = super::TextKind::Link;
+            assert_eq!(
+                resolve_secondary_mode(&text, &overrides),
+                PasteMode::OpenInBrowser
+            );
+            text.text_kind = super::TextKind::Path;
+            assert_eq!(
+                resolve_secondary_mode(&text, &overrides),
+                PasteMode::RevealInFolder
+            );
+            text.text_kind = super::TextKind::Code;
+            assert_eq!(resolve_secondary_mode(&text, &overrides), inherited);
+        }
+    }
+
+    #[test]
     fn secondary_resolves_configured_value_per_category() {
         let defaults = SecondaryPasteDefaults {
             rich_text: PasteMode::Original,
             image: PasteMode::ImageFile,
             file: PasteMode::RevealInFolder,
+            ..Default::default()
         };
         assert_eq!(
             resolve_secondary_mode(&item("text", true), &defaults),

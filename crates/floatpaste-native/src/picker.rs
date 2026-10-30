@@ -1058,8 +1058,8 @@ fn ensure_thumbnails(app: &App, items: &[ClipItemSummary]) {
 
 /* ───────────────── 会话动作 ───────────────── */
 
-/// 确认上屏：主动作按本体；次级动作用该类别配置的默认变体（普通文本
-/// 等同主动作）。窗口不解析模式，目录与配置集中在 domain。
+/// 确认执行：主动作按本体；次级动作按类别配置。
+/// 窗口不解析模式，目录与配置集中在 domain。
 pub fn confirm(app: &App, index: usize, secondary: bool) {
     let Some(item) = app.state.item_at(index) else {
         return;

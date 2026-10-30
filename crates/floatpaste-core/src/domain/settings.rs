@@ -1,6 +1,8 @@
 use serde::{Deserialize, Deserializer, Serialize};
 
-use super::clip_item::{PasteMode, FILE_PASTE_MODES, IMAGE_PASTE_MODES, RICH_TEXT_PASTE_MODES};
+use super::clip_item::{
+    PasteMode, FILE_PASTE_MODES, IMAGE_PASTE_MODES, PLAIN_TEXT_PASTE_MODES, RICH_TEXT_PASTE_MODES,
+};
 
 pub const DEFAULT_MAIN_SHORTCUT: &str = "Alt+`";
 const DEFAULT_SEARCH_SHORTCUT: &str = "Alt+Q";
@@ -239,11 +241,17 @@ impl SessionKeys {
 }
 
 /// 各类别条目在次级入口（次级会话键 / 次级按钮）执行的默认动作。
-/// 值为发布模式，必须落在该类别的可用目录内（见 clip_item 的
-/// `*_PASTE_MODES`）；普通文本只有原文一种形态，不单独配置。
+/// 文本按是否带 HTML 选择基础动作；链接/路径可单独覆盖，None 表示沿用。
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SecondaryPasteDefaults {
+    #[serde(default)]
+    pub plain_text: PasteMode,
+    /// 链接与路径只允许对应外部动作，缺省沿用普通文本/富文本设置。
+    #[serde(default)]
+    pub link: Option<PasteMode>,
+    #[serde(default)]
+    pub path: Option<PasteMode>,
     /// 富文本（带 HTML 的文本）
     #[serde(default = "default_rich_text_secondary")]
     pub rich_text: PasteMode,
@@ -268,6 +276,9 @@ fn default_file_secondary() -> PasteMode {
 impl Default for SecondaryPasteDefaults {
     fn default() -> Self {
         Self {
+            plain_text: PasteMode::Original,
+            link: None,
+            path: None,
             rich_text: default_rich_text_secondary(),
             image: default_image_secondary(),
             file: default_file_secondary(),
@@ -287,6 +298,9 @@ impl SecondaryPasteDefaults {
             }
         }
         Self {
+            plain_text: in_catalog_or(self.plain_text, PLAIN_TEXT_PASTE_MODES, PasteMode::Original),
+            link: self.link.filter(|mode| *mode == PasteMode::OpenInBrowser),
+            path: self.path.filter(|mode| *mode == PasteMode::RevealInFolder),
             rich_text: in_catalog_or(
                 self.rich_text,
                 RICH_TEXT_PASTE_MODES,
@@ -1092,6 +1106,9 @@ mod tests {
                 rich_text: PasteMode::Original,
                 image: PasteMode::ImageFile,
                 file: PasteMode::FileNameText,
+                plain_text: PasteMode::TextFile,
+                link: Some(PasteMode::OpenInBrowser),
+                path: Some(PasteMode::RevealInFolder),
             },
             ..UserSetting::default()
         };
@@ -1109,6 +1126,9 @@ mod tests {
             serde_json::from_str(r#"{"secondaryPaste":{"image":"image_file"}}"#).unwrap();
         assert_eq!(partial.secondary_paste.image, PasteMode::ImageFile);
         assert_eq!(partial.secondary_paste.rich_text, PasteMode::PlainText);
+        assert_eq!(partial.secondary_paste.plain_text, PasteMode::Original);
+        assert_eq!(partial.secondary_paste.link, None);
+        assert_eq!(partial.secondary_paste.path, None);
     }
 
     #[test]
@@ -1118,11 +1138,17 @@ mod tests {
                 rich_text: PasteMode::PathText,
                 image: PasteMode::FileNameText,
                 file: PasteMode::PlainText,
+                plain_text: PasteMode::PlainText,
+                link: Some(PasteMode::RevealInFolder),
+                path: Some(PasteMode::OpenInBrowser),
             },
             ..UserSetting::default()
         }
         .sanitized();
 
+        assert_eq!(settings.secondary_paste.plain_text, PasteMode::Original);
+        assert_eq!(settings.secondary_paste.link, None);
+        assert_eq!(settings.secondary_paste.path, None);
         assert_eq!(settings.secondary_paste.rich_text, PasteMode::PlainText);
         assert_eq!(settings.secondary_paste.image, PasteMode::PathText);
         assert_eq!(settings.secondary_paste.file, PasteMode::PathText);

@@ -1298,7 +1298,7 @@ fn selected_index(app: &App) -> usize {
         .unwrap_or(0)
 }
 
-/// 选中条目上屏（键盘路径）；次级动作按类别配置解析（普通文本等同主上屏）
+/// 选中条目执行动作（键盘路径）；次级动作按类别配置解析
 pub fn paste_selected(app: &App, secondary: bool) {
     paste_index(app, selected_index(app), secondary);
 }
@@ -1704,7 +1704,7 @@ fn event_key_name(text: &str) -> Option<String> {
 
 /// 会话键解析（窗口 capture 阶段调用）：按当前设置的键位精确匹配
 /// （键名忽略大小写、修饰键集合一致），返回动作码：
-/// 0=无 1=向上 2=向下 3=上屏 4=次级上屏（纯文本或路径） 5=编辑 6=收藏 7=关闭 8=删除
+/// 0=无 1=向上 2=向下 3=上屏 4=默认次级动作 5=编辑 6=收藏 7=关闭 8=删除
 fn resolve_session_action(
     settings: &UserSetting,
     text: &str,
@@ -2565,7 +2565,7 @@ pub(crate) mod action_menu_tests {
         assert!(code_row.preview.contains("    println!"));
         assert_eq!(plain.actions.row_count(), 2);
         assert_eq!(row_labels(&plain), vec!["粘贴为文本", "粘贴为文件…"]);
-        assert_eq!(plain.secondary_label, "", "普通文本无独立次级动作提示");
+        assert_eq!(plain.secondary_label, "", "默认普通文本不重复提示主动作");
 
         let rich = make_row(&summary("text", true), &keys, &defaults);
         assert_eq!(
@@ -2589,6 +2589,32 @@ pub(crate) mod action_menu_tests {
                     "打开所在文件夹"
                 }
             );
+        }
+
+        let configured = SecondaryPasteDefaults {
+            plain_text: PasteMode::TextFile,
+            rich_text: PasteMode::TextFile,
+            link: Some(PasteMode::OpenInBrowser),
+            path: Some(PasteMode::RevealInFolder),
+            ..defaults
+        };
+        for has_html in [false, true] {
+            for (kind, label) in [
+                (TextKind::Plain, "粘贴为文件…"),
+                (TextKind::Link, "在浏览器中打开"),
+                (TextKind::Path, "打开所在文件夹"),
+            ] {
+                let mut item = summary("text", has_html);
+                item.text_kind = kind;
+                let row = make_row(&item, &keys, &configured);
+                assert_eq!(row.secondary_label, label);
+                let action = row
+                    .actions
+                    .iter()
+                    .find(|action| action.label == label)
+                    .unwrap();
+                assert_eq!(action.shortcut, keys.confirm_as_file);
+            }
         }
 
         let image = make_row(&summary("image", false), &keys, &defaults);

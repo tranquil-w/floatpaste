@@ -222,7 +222,7 @@ pub fn paste_action_summaries(
         .collect()
 }
 
-/// 默认次级动作的提示名；配置等同主动作（普通文本，或显式选了本体）时返回
+/// 默认次级动作的提示名；配置等同主动作（默认普通文本，或显式选了本体）时返回
 /// `None`，避免重复提示——主动作入口已覆盖该行为。
 pub fn secondary_action_label(
     item: &ClipItemSummary,

@@ -237,6 +237,30 @@ pub(crate) fn contract_tests(app: &App) {
         crate::paste_flow::paste_item(app, &item.id, option.clone(), source).unwrap();
         let window = DIALOG.with(|slot| slot.borrow().as_ref().unwrap().window.clone_strong());
         assert!(can_focus(&window));
+        close(false);
+        // 配置次级动作为文本文件后，两个真实窗口入口仍先进入命名流程。
+        let mut settings = app.state.current_settings();
+        let old_defaults = settings.secondary_paste;
+        settings.secondary_paste.plain_text = PasteMode::TextFile;
+        app.core().update_settings(settings).unwrap();
+        match source {
+            PasteSource::Search => {
+                app.state.set_search_items(vec![item.to_summary()]);
+                crate::search::paste_index(app, 0, true);
+            }
+            PasteSource::Picker => {
+                app.state.set_items(vec![item.to_summary()]);
+                crate::picker::confirm(app, 0, true);
+            }
+        }
+        assert!(
+            DIALOG.with(|slot| slot.borrow().is_some()),
+            "次级键必须打开命名窗口"
+        );
+        let mut settings = app.state.current_settings();
+        settings.secondary_paste = old_defaults;
+        app.core().update_settings(settings).unwrap();
+        let window = DIALOG.with(|slot| slot.borrow().as_ref().unwrap().window.clone_strong());
         crate::paste_flow::paste_item(app, &item.id, option.clone(), source).unwrap();
         assert!(!can_focus(&window), "旧聚焦回调不得接管替换后的窗口");
         let window = DIALOG.with(|slot| slot.borrow().as_ref().unwrap().window.clone_strong());

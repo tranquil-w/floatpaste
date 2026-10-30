@@ -17,7 +17,8 @@ use slint::{ComponentHandle, Model, VecModel};
 use tracing::{info, warn};
 
 use floatpaste_core::domain::clip_item::{
-    PasteMode, TagInfo, FILE_PASTE_MODES, IMAGE_PASTE_MODES, RICH_TEXT_PASTE_MODES,
+    PasteMode, TagInfo, FILE_PASTE_MODES, IMAGE_PASTE_MODES, PLAIN_TEXT_PASTE_MODES,
+    RICH_TEXT_PASTE_MODES,
 };
 use floatpaste_core::domain::error::AppError;
 use floatpaste_core::domain::settings::{
@@ -57,7 +58,7 @@ const SESSION_KEY_DEFS: [(&str, &str); 8] = [
     ("上屏", "把选中条目粘贴到目标应用。"),
     (
         "执行默认次级动作",
-        "按「行为 → 默认次级动作」中的设置粘贴选中条目。",
+        "按条目类别执行「行为 → 默认次级动作」中配置的动作。",
     ),
     ("编辑内容", "打开编辑窗口，修改文本或管理标签。"),
     ("收藏 / 取消收藏", "切换选中条目的收藏状态。"),
@@ -322,7 +323,34 @@ pub fn wire(app: &App) {
         });
     }
 
-    // ── 默认次级动作（分段控件序号即类别动作目录序号）──
+    // ── 默认次级动作（下拉选项序号与类别目录对应）──
+    {
+        let app_cb = app.clone();
+        win.on_secondary_plain_selected(move |index| {
+            if let Some(win) = app_cb.settings.upgrade() {
+                win.set_secondary_plain(index);
+                schedule_save(&app_cb);
+            }
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_secondary_link_selected(move |index| {
+            if let Some(win) = app_cb.settings.upgrade() {
+                win.set_secondary_link(index);
+                schedule_save(&app_cb);
+            }
+        });
+    }
+    {
+        let app_cb = app.clone();
+        win.on_secondary_path_selected(move |index| {
+            if let Some(win) = app_cb.settings.upgrade() {
+                win.set_secondary_path(index);
+                schedule_save(&app_cb);
+            }
+        });
+    }
     {
         let app_cb = app.clone();
         win.on_secondary_rich_selected(move |index| {
@@ -900,6 +928,17 @@ fn hydrate(app: &App, win: &SettingsWindow) {
         PasteTrigger::Click => 0,
         PasteTrigger::DoubleClick => 1,
     });
+    win.set_secondary_plain(paste_mode_index(
+        PLAIN_TEXT_PASTE_MODES,
+        settings.secondary_paste.plain_text,
+        0,
+    ));
+    win.set_secondary_link(i32::from(
+        settings.secondary_paste.link == Some(PasteMode::OpenInBrowser),
+    ));
+    win.set_secondary_path(i32::from(
+        settings.secondary_paste.path == Some(PasteMode::RevealInFolder),
+    ));
     win.set_secondary_rich(paste_mode_index(
         RICH_TEXT_PASTE_MODES,
         settings.secondary_paste.rich_text,
@@ -955,7 +994,7 @@ fn hydrate(app: &App, win: &SettingsWindow) {
 
 /* ───────────────── 草稿与保存 ───────────────── */
 
-/// 类别目录 → 分段控件序号；模式不在目录（异常残留）时回退默认序号
+/// 类别目录 → 下拉选项序号；模式不在目录（异常残留）时回退默认序号
 fn paste_mode_index(catalog: &[PasteMode], mode: PasteMode, default_index: i32) -> i32 {
     catalog
         .iter()
@@ -963,7 +1002,7 @@ fn paste_mode_index(catalog: &[PasteMode], mode: PasteMode, default_index: i32) 
         .map_or(default_index, |index| index as i32)
 }
 
-/// 分段控件序号 → 类别目录模式；越界（异常残留）时回退类别内置默认
+/// 下拉选项序号 → 类别目录模式；越界（异常残留）时回退类别内置默认
 fn paste_mode_at(catalog: &[PasteMode], index: i32, fallback: PasteMode) -> PasteMode {
     catalog
         .get(index.max(0) as usize)
@@ -1013,6 +1052,13 @@ fn current_draft(win: &SettingsWindow) -> UserSetting {
             _ => PasteTrigger::Click,
         },
         secondary_paste: SecondaryPasteDefaults {
+            plain_text: paste_mode_at(
+                PLAIN_TEXT_PASTE_MODES,
+                win.get_secondary_plain(),
+                PasteMode::Original,
+            ),
+            link: (win.get_secondary_link() == 1).then_some(PasteMode::OpenInBrowser),
+            path: (win.get_secondary_path() == 1).then_some(PasteMode::RevealInFolder),
             rich_text: paste_mode_at(
                 RICH_TEXT_PASTE_MODES,
                 win.get_secondary_rich(),
@@ -2039,6 +2085,58 @@ pub(crate) mod copy_contract_tests {
         );
         update_session_row(&win, 0, None, Some(""));
 
+        // 最窄窗口中通过指针打开实际选择框；方向键预选、Esc 取消、
+        // Enter 确认，不绕过弹层分发。坐标与下方六类设置快照一致。
+        win.set_nav_override(1);
+        let _ = win.window().take_snapshot().unwrap();
+        win.set_scroll_y(650.0 - win.get_sec_y2());
+        let _ = win.window().take_snapshot().unwrap();
+        let weak = win.as_weak();
+        win.on_secondary_plain_selected(move |index| {
+            weak.unwrap().set_secondary_plain(index);
+        });
+        let closed = std::rc::Rc::new(std::cell::Cell::new(false));
+        let closed_cb = closed.clone();
+        win.on_request_close(move || closed_cb.set(true));
+        let click = |x, y| {
+            use slint::platform::{PointerEventButton, WindowEvent};
+            let position = slint::LogicalPosition::new(x, y);
+            win.window().dispatch_event(WindowEvent::PointerPressed {
+                position,
+                button: PointerEventButton::Left,
+            });
+            win.window().dispatch_event(WindowEvent::PointerReleased {
+                position,
+                button: PointerEventButton::Left,
+            });
+        };
+        let send_key = |text: slint::SharedString| {
+            win.window()
+                .dispatch_event(slint::platform::WindowEvent::KeyPressed { text: text.clone() });
+            win.window()
+                .dispatch_event(slint::platform::WindowEvent::KeyReleased { text });
+        };
+        click(730.0, 350.0);
+        send_key(slint::platform::Key::DownArrow.into());
+        assert_eq!(win.get_secondary_plain(), 0, "预选不应保存");
+        send_key(slint::platform::Key::Escape.into());
+        assert_eq!(win.get_secondary_plain(), 0, "Esc 取消选择");
+        assert!(!closed.get(), "弹层 Esc 不得关闭设置窗口");
+        click(730.0, 350.0);
+        send_key(slint::platform::Key::DownArrow.into());
+        send_key(slint::platform::Key::Return.into());
+        assert_eq!(win.get_secondary_plain(), 1, "确认应选择文本文件");
+        win.set_secondary_plain(0);
+        click(730.0, 350.0);
+        click(730.0, 440.0);
+        assert_eq!(win.get_secondary_plain(), 1, "指针选择第二项应保存");
+        win.set_secondary_plain(0);
+        click(730.0, 350.0);
+        click(400.0, 350.0);
+        assert_eq!(win.get_secondary_plain(), 0, "点击外部取消，不应保存");
+        send_key(slint::platform::Key::Escape.into());
+        assert!(closed.get(), "弹层关闭后 Esc 应恢复窗口级处理");
+
         if std::env::var_os("FLOATPASTE_UI_SNAPSHOTS").is_some() {
             let dir =
                 std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.artifacts/snapshot");
@@ -2091,11 +2189,15 @@ pub(crate) mod copy_contract_tests {
                     slint::platform::update_timers_and_animations();
                     // 最小窗口宽度也要容纳较长的图片文件/文件名说明。
                     win.window().set_size(slint::LogicalSize::new(880.0, 760.0));
+                    win.set_secondary_plain(if state == "files" { 1 } else { 0 });
+                    win.set_secondary_rich(if state == "files" { 2 } else { 1 });
+                    win.set_secondary_link(if state == "files" { 1 } else { 0 });
+                    win.set_secondary_path(if state == "files" { 1 } else { 0 });
                     win.set_secondary_image(index);
                     win.set_secondary_file(index);
                     update_session_row(&win, 1, Some(key), None);
                     let _ = win.window().take_snapshot().unwrap();
-                    win.set_scroll_y(530.0 - win.get_sec_y2());
+                    win.set_scroll_y(650.0 - win.get_sec_y2());
                     let _ = win.window().take_snapshot().unwrap();
                     std::thread::sleep(Duration::from_millis(150));
                     slint::platform::update_timers_and_animations();
@@ -2111,6 +2213,22 @@ pub(crate) mod copy_contract_tests {
                         image::ColorType::Rgba8,
                     )
                     .unwrap();
+                    if state == "files" {
+                        click(730.0, 660.0);
+                        let pixels = win.window().take_snapshot().unwrap();
+                        image::save_buffer(
+                            dir.join(format!(
+                                "paste-settings-menu-{name}-{}.png",
+                                (win.window().scale_factor() * 100.0).round() as u32
+                            )),
+                            pixels.as_bytes(),
+                            pixels.width(),
+                            pixels.height(),
+                            image::ColorType::Rgba8,
+                        )
+                        .unwrap();
+                        send_key(slint::platform::Key::Escape.into());
+                    }
                 }
                 win.set_nav_override(4);
                 let _ = win.window().take_snapshot().unwrap();
@@ -2173,6 +2291,37 @@ pub(crate) mod privacy_contract_tests {
         };
         wire(&app);
         hydrate(&app, &win);
+        win.invoke_secondary_plain_selected(1);
+        win.invoke_secondary_rich_selected(2);
+        win.invoke_secondary_link_selected(1);
+        win.invoke_secondary_path_selected(1);
+        win.invoke_secondary_image_selected(2);
+        win.invoke_secondary_file_selected(3);
+        let expected = SecondaryPasteDefaults {
+            plain_text: PasteMode::TextFile,
+            rich_text: PasteMode::TextFile,
+            link: Some(PasteMode::OpenInBrowser),
+            path: Some(PasteMode::RevealInFolder),
+            image: PasteMode::ImageFile,
+            file: PasteMode::RevealInFolder,
+        };
+        assert_eq!(current_draft(&win).secondary_paste, expected);
+        stop_save_timer();
+        app.core().update_settings(current_draft(&win)).unwrap();
+        assert_eq!(
+            app.core()
+                .repository
+                .load_settings()
+                .unwrap()
+                .secondary_paste,
+            expected
+        );
+        win.set_secondary_plain(0);
+        win.set_secondary_rich(0);
+        win.set_secondary_link(0);
+        win.set_secondary_path(0);
+        hydrate(&app, &win);
+        assert_eq!(current_draft(&win).secondary_paste, expected);
         let item = floatpaste_core::services::history_service::HistoryService::ingest_text(
             app.core(),
             "隐私清除测试",
