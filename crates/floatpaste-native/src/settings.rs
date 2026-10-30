@@ -1,5 +1,5 @@
 //! 设置窗口：打开/水合/800ms 防抖自动保存/运行时联动（热键重注册、自启动
-//! 同步、主题应用）+ 标签管理 + 滚动跟随导航。
+//! 同步、主题应用）+ 标签管理。
 //!
 //! 数据流对齐旧壳 SettingsShell.tsx：任何字段编辑 → 800ms 防抖 →
 //! core.update_settings → 应用运行时副作用（SettingsService::
@@ -8,6 +8,8 @@
 //! 菜单文案为右键现建，无需推送刷新）。快捷键冲突时拦截保存并在头部
 //! 提示「修改暂未保存」；Esc 关窗前 flush 未落盘修改；X 关闭仅隐藏
 //! （防抖定时器仍在，随后台落盘，对齐旧壳 prevent_close+hide）。
+//! 侧边导航为 magpie 式分页：页面切换纯 UI 态（active-section），
+//! Slint 侧点击直接改页并复位滚动，Rust 不参与。
 
 use std::cell::RefCell;
 use std::sync::Mutex;
@@ -48,8 +50,6 @@ use std::sync::atomic::Ordering;
 
 const SAVE_DEBOUNCE: Duration = Duration::from_millis(800);
 const NOTICE_TIMEOUT: Duration = Duration::from_millis(1800);
-/// 分区滚动定位偏移（旧版 settingsScrollSpy SCROLL_OFFSET）
-const SCROLL_OFFSET: f32 = 80.0;
 /// 项目主页（设置窗「关于」区打开）
 const PROJECT_PAGE_URL: &str = "https://github.com/tranquil-w/floatpaste";
 
@@ -79,35 +79,12 @@ thread_local! {
     static SAVE_TIMER: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
     /// 录制非法提示的 1800ms 自动清除定时器
     static NOTICE_TIMER: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
-    /// 滚动动画驱动定时器（导航点击的程序性滚动）
-    static ANIM_TIMER: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
-    /// 滚动动画状态（Some=程序性滚动进行中，scroll-spy 锁定）
-    static SCROLL_ANIM: RefCell<Option<ScrollAnim>> = const { RefCell::new(None) };
     /// 最近一次服务端设置：与本地草稿比对判定脏（对齐 lastServerSettingsRef）
     static SAVED: RefCell<Option<UserSetting>> = const { RefCell::new(None) };
     /// explorer 重启后延迟补注册 Win+V 的单发定时器（广播早于系统
     /// 释放热键完成，等一站再注册）
     static EXPLORER_RESYNC_TIMER: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
 }
-
-struct ScrollAnim {
-    from: f32,
-    to: f32,
-    started_at: std::time::Instant,
-}
-
-impl Clone for ScrollAnim {
-    fn clone(&self) -> Self {
-        Self {
-            from: self.from,
-            to: self.to,
-            started_at: self.started_at,
-        }
-    }
-}
-
-const ANIM_DURATION: Duration = Duration::from_millis(240);
-const ANIM_STEP: Duration = Duration::from_millis(16);
 
 pub fn wire(app: &App) {
     let Some(win) = app.settings.upgrade() else {
@@ -702,26 +679,8 @@ pub fn wire(app: &App) {
     });
 
     // ── 导航与滚动 ──
-    {
-        let app_cb = app.clone();
-        win.on_nav_selected(move |index| {
-            let Some(win) = app_cb.settings.upgrade() else {
-                return;
-            };
-            scroll_to_section(&win, index.max(0) as usize);
-        });
-    }
-    // 用户主动滚动（滚轮/滚动条，Slint 侧已清 nav-override 解除高亮
-    // 锁定）：停掉进行中的程序性滚动动画，避免与用户输入打架
-    win.on_user_scroll(|| {
-        SCROLL_ANIM.with(|slot| *slot.borrow_mut() = None);
-        ANIM_TIMER.with(|slot| {
-            if let Some(timer) = slot.borrow().as_ref() {
-                timer.stop();
-            }
-            *slot.borrow_mut() = None;
-        });
-    });
+    // 分页切换是纯 UI 态：Slint 侧点击直接改 active-section 并复位
+    // 滚动，无需 Rust 接线
     // ── 标签管理 ──
     {
         let app_cb = app.clone();
@@ -983,9 +942,8 @@ fn hydrate(app: &App, win: &SettingsWindow) {
     win.set_status_kind(STATUS_IDLE);
     win.set_status_reasons("".into());
     win.set_save_banner_visible(false);
-    win.set_nav_override(-1);
+    win.set_active_section(0);
     win.set_scroll_y(0.0);
-    SCROLL_ANIM.with(|slot| *slot.borrow_mut() = None);
 
     let resolved = theme::resolve_theme(settings.theme_mode.clone(), theme::system_prefers_dark());
     rebuild_preview_models(win, &settings, resolved);
@@ -1590,69 +1548,6 @@ fn rebuild_preview_models(win: &SettingsWindow, settings: &UserSetting, resolved
     win.set_accent_swatches(slint::ModelRc::new(VecModel::from(swatches)));
 }
 
-/* ───────────────── 滚动跟随导航 ───────────────── */
-
-/// 导航点击：立即高亮 + ease-out 滚动到分区（对齐旧版 scrollToSection 的
-/// smooth 滚动；目标 = 分区顶 80px 下方），动画期间锁定 scroll-spy
-fn sec_y(win: &SettingsWindow, index: usize) -> Option<f32> {
-    match index {
-        0 => Some(win.get_sec_y0()),
-        1 => Some(win.get_sec_y1()),
-        2 => Some(win.get_sec_y2()),
-        3 => Some(win.get_sec_y3()),
-        4 => Some(win.get_sec_y4()),
-        5 => Some(win.get_sec_y5()),
-        6 => Some(win.get_sec_y6()),
-        _ => None,
-    }
-}
-
-fn scroll_to_section(win: &SettingsWindow, index: usize) {
-    let Some(y) = sec_y(win, index) else {
-        return;
-    };
-    let (view_h, content_h) = (win.get_view_height(), win.get_content_height());
-    let target = (SCROLL_OFFSET - y).clamp((view_h - content_h).min(0.0), 0.0);
-    // 程序性滚动期间锁定表达式 scroll-spy（对齐旧版 programmaticScrollTarget）
-    win.set_nav_override(index as i32);
-
-    let anim = ScrollAnim {
-        from: win.get_scroll_y() as f32,
-        to: target,
-        started_at: std::time::Instant::now(),
-    };
-    SCROLL_ANIM.with(|slot| *slot.borrow_mut() = Some(anim));
-    let win_cb = win.as_weak();
-    ANIM_TIMER.with(|slot| {
-        let timer = slint::Timer::default();
-        timer.start(slint::TimerMode::Repeated, ANIM_STEP, move || {
-            let Some(win) = win_cb.upgrade() else {
-                SCROLL_ANIM.with(|slot| *slot.borrow_mut() = None);
-                return;
-            };
-            let Some(current) = SCROLL_ANIM.with(|slot| slot.borrow().clone()) else {
-                return;
-            };
-            let elapsed = std::time::Instant::now()
-                .duration_since(current.started_at)
-                .min(ANIM_DURATION);
-            let progress = elapsed.as_secs_f32() / ANIM_DURATION.as_secs_f32();
-            // ease-out（二次缓出，近似浏览器 smooth 滚动手感）
-            let eased = 1.0 - (1.0 - progress) * (1.0 - progress);
-            win.set_scroll_y(current.from + (current.to - current.from) * eased);
-            if progress >= 1.0 {
-                win.set_scroll_y(current.to);
-                // 停止动画。高亮保持到用户主动滚动（滚轮/滚动条清
-                // nav-override 并回调 user-scroll 停掉本动画）：定位
-                // 目标=分区顶贴 80px 线，滚动完成时 spy 结论与点击项
-                // 一致，锁定仅为防动画期间 spy 中间值闪动
-                SCROLL_ANIM.with(|slot| *slot.borrow_mut() = None);
-            }
-        });
-        *slot.borrow_mut() = Some(timer);
-    });
-}
-
 /* ───────────────── 标签管理 ───────────────── */
 
 fn tag_names(win: &SettingsWindow) -> Vec<String> {
@@ -2060,9 +1955,12 @@ pub(crate) mod copy_contract_tests {
         win.set_main_hotkey_status("".into());
         win.set_search_hotkey_status("".into());
         win.set_winv_enabled(false);
+        // 快捷键页整体高度：分页后 content-height 即当前页内容高，
+        // 错误提示换行撑高行卡应体现在页高上
+        win.set_active_section(3);
         let section_height = || {
             let _ = win.window().take_snapshot().unwrap();
-            win.get_sec_y4() - win.get_sec_y3()
+            win.get_content_height()
         };
         let baseline = section_height();
         let occupied = "注册失败：组合键已被其他程序占用，请换一组组合。";
@@ -2087,9 +1985,9 @@ pub(crate) mod copy_contract_tests {
 
         // 最窄窗口中通过指针打开实际选择框；方向键预选、Esc 取消、
         // Enter 确认，不绕过弹层分发。坐标与下方六类设置快照一致。
-        win.set_nav_override(1);
+        win.set_active_section(1);
         let _ = win.window().take_snapshot().unwrap();
-        win.set_scroll_y(650.0 - win.get_sec_y2());
+        win.set_scroll_y(-360.0);
         let _ = win.window().take_snapshot().unwrap();
         let weak = win.as_weak();
         win.on_secondary_plain_selected(move |index| {
@@ -2116,22 +2014,22 @@ pub(crate) mod copy_contract_tests {
             win.window()
                 .dispatch_event(slint::platform::WindowEvent::KeyReleased { text });
         };
-        click(730.0, 350.0);
+        click(730.0, 394.0);
         send_key(slint::platform::Key::DownArrow.into());
         assert_eq!(win.get_secondary_plain(), 0, "预选不应保存");
         send_key(slint::platform::Key::Escape.into());
         assert_eq!(win.get_secondary_plain(), 0, "Esc 取消选择");
         assert!(!closed.get(), "弹层 Esc 不得关闭设置窗口");
-        click(730.0, 350.0);
+        click(730.0, 394.0);
         send_key(slint::platform::Key::DownArrow.into());
         send_key(slint::platform::Key::Return.into());
         assert_eq!(win.get_secondary_plain(), 1, "确认应选择文本文件");
         win.set_secondary_plain(0);
-        click(730.0, 350.0);
-        click(730.0, 440.0);
+        click(730.0, 394.0);
+        click(730.0, 466.0);
         assert_eq!(win.get_secondary_plain(), 1, "指针选择第二项应保存");
         win.set_secondary_plain(0);
-        click(730.0, 350.0);
+        click(730.0, 394.0);
         click(400.0, 350.0);
         assert_eq!(win.get_secondary_plain(), 0, "点击外部取消，不应保存");
         send_key(slint::platform::Key::Escape.into());
@@ -2142,6 +2040,27 @@ pub(crate) mod copy_contract_tests {
                 std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.artifacts/snapshot");
             std::fs::create_dir_all(&dir).unwrap();
             win.set_status_kind(STATUS_SAVED);
+            // 分页快照：逐页存图（页顶 + 超页内容补底），深浅主题各一轮
+            let save_snap = |file: String| {
+                std::thread::sleep(Duration::from_millis(150));
+                slint::platform::update_timers_and_animations();
+                let pixels = win.window().take_snapshot().unwrap();
+                image::save_buffer(
+                    dir.join(file),
+                    pixels.as_bytes(),
+                    pixels.width(),
+                    pixels.height(),
+                    image::ColorType::Rgba8,
+                )
+                .unwrap();
+            };
+            // 直设 scroll-y 不经滚轮钳制，触底量按当前页内容高计算
+            //（先 take_snapshot 迫使布局求解出最新页高）
+            let scroll_bottom = || {
+                let _ = win.window().take_snapshot().unwrap();
+                -((win.get_content_height() - win.get_view_height()).max(0.0))
+            };
+            let scale = (win.window().scale_factor() * 100.0).round() as u32;
             for (name, resolved) in [
                 ("light", ResolvedTheme::Light),
                 ("dark", ResolvedTheme::Dark),
@@ -2152,7 +2071,28 @@ pub(crate) mod copy_contract_tests {
                 win.set_session_key_rows(slint::ModelRc::new(VecModel::from(session_key_rows(
                     &UserSetting::default(),
                 ))));
-                win.set_nav_override(3);
+                // ── 通用页（数字框给真实值，验证行排布而非空框）──
+                win.set_history_limit_text("1000".into());
+                win.set_picker_limit_text("50".into());
+                win.set_picker_card_height_text("104".into());
+                win.set_app_version(env!("CARGO_PKG_VERSION").into());
+                win.set_active_section(0);
+                let _ = win.window().take_snapshot().unwrap();
+                save_snap(format!("settings-page-general-{name}-{scale}.png"));
+                // ── 行为页：页顶 + 默认次级动作卡 ──
+                win.set_active_section(1);
+                win.set_scroll_y(0.0);
+                let _ = win.window().take_snapshot().unwrap();
+                save_snap(format!("settings-page-behavior-{name}-{scale}.png"));
+                // ── 外观页（预设卡与强调色按当前明暗主题派生）──
+                rebuild_preview_models(&win, &UserSetting::default(), resolved);
+                win.set_active_section(2);
+                win.set_scroll_y(0.0);
+                let _ = win.window().take_snapshot().unwrap();
+                save_snap(format!("settings-page-appearance-{name}-{scale}.png"));
+                // ── 快捷键页：页顶错误提示 + 底部会话键与编辑键 ──
+                win.set_active_section(3);
+                win.set_scroll_y(0.0);
                 win.set_main_hotkey_status(occupied.into());
                 win.set_search_hotkey_status(occupied.into());
                 win.set_shortcut_parts(slint::ModelRc::new(VecModel::from(parts_vec(
@@ -2163,32 +2103,21 @@ pub(crate) mod copy_contract_tests {
                 ))));
                 update_session_row(&win, 0, None, Some(occupied));
                 let _ = win.window().take_snapshot().unwrap();
-                win.set_scroll_y(80.0 - win.get_sec_y3());
+                save_snap(format!("shortcut-errors-{name}-{scale}.png"));
+                win.set_scroll_y(scroll_bottom());
                 let _ = win.window().take_snapshot().unwrap();
-                std::thread::sleep(Duration::from_millis(150));
-                slint::platform::update_timers_and_animations();
-                let pixels = win.window().take_snapshot().unwrap();
-                image::save_buffer(
-                    dir.join(format!(
-                        "shortcut-errors-{name}-{}.png",
-                        (win.window().scale_factor() * 100.0).round() as u32
-                    )),
-                    pixels.as_bytes(),
-                    pixels.width(),
-                    pixels.height(),
-                    image::ColorType::Rgba8,
-                )
-                .unwrap();
+                save_snap(format!("shortcut-errors-session-{name}-{scale}.png"));
                 win.set_main_hotkey_status("".into());
                 win.set_search_hotkey_status("".into());
                 update_session_row(&win, 0, None, Some(""));
-                win.set_nav_override(1);
+                // ── 行为页默认次级动作：两组说明状态（最小窗口宽度）──
+                win.window().set_size(slint::LogicalSize::new(880.0, 760.0));
+                win.set_active_section(1);
+                win.set_scroll_y(0.0);
                 for (state, index, key) in
                     [("default", 1, "Shift+Enter"), ("files", 2, "Alt+Enter")]
                 {
                     slint::platform::update_timers_and_animations();
-                    // 最小窗口宽度也要容纳较长的图片文件/文件名说明。
-                    win.window().set_size(slint::LogicalSize::new(880.0, 760.0));
                     win.set_secondary_plain(if state == "files" { 1 } else { 0 });
                     win.set_secondary_rich(if state == "files" { 2 } else { 1 });
                     win.set_secondary_link(if state == "files" { 1 } else { 0 });
@@ -2196,62 +2125,32 @@ pub(crate) mod copy_contract_tests {
                     win.set_secondary_image(index);
                     win.set_secondary_file(index);
                     update_session_row(&win, 1, Some(key), None);
+                    // 让「默认次级动作」卡顶贴视口顶（页不足长时触底）
+                    win.set_scroll_y(scroll_bottom().max(-650.0));
                     let _ = win.window().take_snapshot().unwrap();
-                    win.set_scroll_y(650.0 - win.get_sec_y2());
-                    let _ = win.window().take_snapshot().unwrap();
-                    std::thread::sleep(Duration::from_millis(150));
-                    slint::platform::update_timers_and_animations();
-                    let pixels = win.window().take_snapshot().unwrap();
-                    image::save_buffer(
-                        dir.join(format!(
-                            "paste-settings-{state}-{name}-{}.png",
-                            (win.window().scale_factor() * 100.0).round() as u32
-                        )),
-                        pixels.as_bytes(),
-                        pixels.width(),
-                        pixels.height(),
-                        image::ColorType::Rgba8,
-                    )
-                    .unwrap();
+                    save_snap(format!("paste-settings-{state}-{name}-{scale}.png"));
                     if state == "files" {
                         click(730.0, 660.0);
-                        let pixels = win.window().take_snapshot().unwrap();
-                        image::save_buffer(
-                            dir.join(format!(
-                                "paste-settings-menu-{name}-{}.png",
-                                (win.window().scale_factor() * 100.0).round() as u32
-                            )),
-                            pixels.as_bytes(),
-                            pixels.width(),
-                            pixels.height(),
-                            image::ColorType::Rgba8,
-                        )
-                        .unwrap();
+                        save_snap(format!("paste-settings-menu-{name}-{scale}.png"));
                         send_key(slint::platform::Key::Escape.into());
                     }
                 }
-                win.set_nav_override(4);
-                let _ = win.window().take_snapshot().unwrap();
-                win.set_scroll_y(80.0 - win.get_sec_y4());
+                // ── 隐私页与清除确认框 ──
+                win.set_active_section(4);
+                win.set_scroll_y(0.0);
                 for dialog in [false, true] {
                     win.set_clear_history_dialog_open(dialog);
                     let _ = win.window().take_snapshot().unwrap();
-                    std::thread::sleep(Duration::from_millis(150));
-                    slint::platform::update_timers_and_animations();
-                    let pixels = win.window().take_snapshot().unwrap();
-                    image::save_buffer(
-                        dir.join(format!(
-                            "privacy-{name}-{dialog}-{}.png",
-                            (win.window().scale_factor() * 100.0).round() as u32
-                        )),
-                        pixels.as_bytes(),
-                        pixels.width(),
-                        pixels.height(),
-                        image::ColorType::Rgba8,
-                    )
-                    .unwrap();
+                    save_snap(format!("privacy-{name}-{dialog}-{scale}.png"));
                 }
                 win.set_clear_history_dialog_open(false);
+                // ── 标签页与关于页 ──
+                win.set_active_section(5);
+                let _ = win.window().take_snapshot().unwrap();
+                save_snap(format!("settings-page-tags-{name}-{scale}.png"));
+                win.set_active_section(6);
+                let _ = win.window().take_snapshot().unwrap();
+                save_snap(format!("settings-page-about-{name}-{scale}.png"));
             }
         }
     }

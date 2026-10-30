@@ -1,11 +1,11 @@
-// 设置窗口：对齐旧版 SettingsShell.tsx + SettingsNav.tsx + SettingsSection.tsx
-// + ShortcutInput.tsx + ThemePresetPicker.tsx + TagsSection.tsx。
-// no-frame 窗 + 自绘标题栏（旧版 label=manager，920×760 起、min 宽 880、
-// 任务栏可见，停屏常驻、关闭=停屏）。Tauri 运行时下 useSettingsNavigation
-// 恒为 sidebar 布局（176px 侧边导航 + 右侧滚动内容），故只复刻 sidebar 形态。
+// 设置窗口：magpie（yetone/magpie）设置页语言的复刻——平铺侧边导航
+// （贴窗左缘整列 + 1px 分界线，行 30px、图标 + 13px 文字，选中 = 浮起
+// 卡着色，无竖条）+ 点击即切换页面（每页独立滚动，无 scroll-spy）+
+// 卡片式分组排布（同组相关行合并进一张卡，行间 1px 分隔线）。
+// no-frame 窗 + 自绘标题栏（920×760 起、min 宽 880、任务栏可见，停屏
+// 常驻、关闭=停屏）。
 // 数据流：全部字段以 in-out property 供 Rust 水合/回写，编辑回调触发
-// Rust 的 800ms 防抖自动保存；滚动跟随（scroll-spy）由各分区上报 y，
-// Rust 计算高亮并驱动滚动。
+// Rust 的 800ms 防抖自动保存。
 import { Theme, Metrics, Motion, SoftShadow } from "theme.slint";
 import { WindowTitleBar, AppMark } from "common.slint";
 import { ListScrollBar } from "picker.slint";
@@ -693,18 +693,27 @@ component ToggleRow inherits Rectangle {
     }
 }
 
-// 设置卡（WinUI Layer 同构）：白墨半透明偏灰填充（Theme.layer-fill）
-// 叠在玻璃面上，靠亮度差分层，无描边、无投影，小圆角。相关行合并进
-// 同一卡（行间以 1px RowDivider 区隔、组内零间距），行悬停底圆角对齐
-// 卡圆角，无描边即无弧段被盖问题。半透明卡面不能垫 SoftShadow
-// ——同心实心层会透过卡面显成均匀墨膜（见 theme.slint SoftShadow 注释）
+// 设置卡（magpie .list 同构 + 玻璃语言）：白墨半透明偏灰填充
+// （Theme.layer-fill）叠在玻璃面上靠亮度差分层，外加 1px border-muted
+// 描边环、radius-lg 圆角，无投影。相关行合并进同一卡（行间以 1px
+// RowDivider 区隔、组内零间距）。描边环绘制在内容之上（子元素画在
+// 父边框上，行悬停底会盖住弧段，环置顶即无此问题）。半透明卡面不能
+// 垫 SoftShadow——同心实心层会透过卡面显成均匀墨膜（见 theme.slint
+// SoftShadow 注释）
 component RowGroup inherits Rectangle {
-    border-radius: Metrics.radius-sm;
+    border-radius: Metrics.radius-lg;
     background: Theme.layer-fill;
     clip: true;
     height: group-col.preferred-height;
     group-col := VerticalLayout {
         @children
+    }
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        border-radius: Metrics.radius-lg;
+        border-width: 1px;
+        border-color: Theme.border-muted;
     }
 }
 
@@ -1017,6 +1026,85 @@ component TagRow inherits Rectangle {
     }
 }
 
+// 侧边导航图标（magpie nav-ic 同构：16px 线性小图标，线宽 1.5，
+// 随选中态由 tint 着色）。kind = 设置页序号；圆用四段三次贝塞尔近似
+// （Slint Path 不支持 A 弧命令）。几何为组件内局部常量
+component NavIcon inherits Rectangle {
+    in property <int> kind;
+    in property <color> tint;
+    width: 16px;
+    height: 16px;
+    if (root.kind == 0): Path {
+        // 通用：滑杆（两条滑轨 + 滑块刻线）
+        width: 16px;
+        height: 16px;
+        viewbox-width: 20;
+        viewbox-height: 20;
+        stroke: root.tint;
+        stroke-width: 1.5px;
+        commands: "M 3 6.5 H 17 M 3 13.5 H 17 M 12 4 V 9 M 7 11 V 16";
+    }
+    if (root.kind == 1): Path {
+        // 行为：闪电（实心）
+        width: 16px;
+        height: 16px;
+        viewbox-width: 20;
+        viewbox-height: 20;
+        fill: root.tint;
+        commands: "M 11.5 2.5 L 5 11.5 H 9.5 L 8.5 17.5 L 15 8.5 H 10.5 Z";
+    }
+    if (root.kind == 2): Path {
+        // 外观：取景框 + 山形（观感/主题）
+        width: 16px;
+        height: 16px;
+        viewbox-width: 20;
+        viewbox-height: 20;
+        stroke: root.tint;
+        stroke-width: 1.5px;
+        commands: "M 3.5 4.5 H 16.5 V 15.5 H 3.5 Z M 3.5 12.5 L 8 8.5 L 11 11 L 13.5 9 L 16.5 11.5";
+    }
+    if (root.kind == 3): Path {
+        // 快捷键：键盘（外框 + 键点 + 空格条）
+        width: 16px;
+        height: 16px;
+        viewbox-width: 20;
+        viewbox-height: 20;
+        stroke: root.tint;
+        stroke-width: 1.5px;
+        commands: "M 2.5 5.5 H 17.5 V 14.5 H 2.5 Z M 5 8.5 H 6.2 M 8.2 8.5 H 9.4 M 11.4 8.5 H 12.6 M 14.6 8.5 H 15.8 M 7.5 11.8 H 12.5";
+    }
+    if (root.kind == 4): Path {
+        // 隐私：盾牌
+        width: 16px;
+        height: 16px;
+        viewbox-width: 20;
+        viewbox-height: 20;
+        stroke: root.tint;
+        stroke-width: 1.5px;
+        commands: "M 10 2.5 L 16 5 V 10.5 L 10 17 L 4 10.5 V 5 Z";
+    }
+    if (root.kind == 5): Path {
+        // 标签：吊牌 + 系孔
+        width: 16px;
+        height: 16px;
+        viewbox-width: 20;
+        viewbox-height: 20;
+        stroke: root.tint;
+        stroke-width: 1.5px;
+        commands: "M 3.5 4.5 H 9.5 L 16.5 11.5 L 11.5 16.5 L 3.5 8.5 Z M 5.5 8 C 5.5 7.17 6.17 6.5 7 6.5 C 7.83 6.5 8.5 7.17 8.5 8 C 8.5 8.83 7.83 9.5 7 9.5 C 6.17 9.5 5.5 8.83 5.5 8 Z";
+    }
+    if (root.kind == 6): Path {
+        // 关于：信息圆 + i
+        width: 16px;
+        height: 16px;
+        viewbox-width: 20;
+        viewbox-height: 20;
+        stroke: root.tint;
+        stroke-width: 1.5px;
+        commands: "M 3 10 C 3 6.13 6.13 3 10 3 C 13.87 3 17 6.13 17 10 C 17 13.87 13.87 17 10 17 C 6.13 17 3 13.87 3 10 Z M 10 9.2 V 14 M 10 5.8 V 6.6";
+    }
+}
+
 export component SettingsWindow inherits Window {
     no-frame: true;
     icon: @image-url("app-icon.png");
@@ -1113,32 +1201,10 @@ export component SettingsWindow inherits Window {
     in-out property <length> scroll-y <=> sv.content-y;
     in-out property <length> view-height: sv.height;
     in-out property <length> content-height: content-col.height;
-    in-out property <length> sec-y0: sec0.y;
-    in-out property <length> sec-y1: sec1.y;
-    in-out property <length> sec-y2: sec2.y;
-    in-out property <length> sec-y3: sec3.y;
-    in-out property <length> sec-y4: sec4.y;
-    in-out property <length> sec-y5: sec5.y;
-    in-out property <length> sec-y6: sec6.y;
-    // scroll-spy 锚定线（对应 Rust 侧 SCROLL_OFFSET）：分区顶滚过
-    // 此线即接管目录高亮
-    property <length> spy-line: 80px;
-    // scroll-spy：锚定线所在的最后一个分区；程序性滚动期间
-    // nav-override 锁定。不设触底特判：末区可达性由内容底部补
-    // padding 保证（见 content-col），触底强制末区会抢占高亮
-    in-out property <int> nav-override: -1;
-    in-out property <int> active-section:
-        root.nav-override >= 0 ? root.nav-override
-        : (sec6.y + scroll-y <= root.spy-line ? 6
-        : (sec5.y + scroll-y <= root.spy-line ? 5
-        : (sec4.y + scroll-y <= root.spy-line ? 4
-        : (sec3.y + scroll-y <= root.spy-line ? 3
-        : (sec2.y + scroll-y <= root.spy-line ? 2
-        : (sec1.y + scroll-y <= root.spy-line ? 1 : 0))))));
-    callback nav-selected(int);
-    // 用户主动滚动（滚轮/滚动条）：Slint 侧清 nav-override 解除高亮
-    // 锁定，Rust 侧停掉进行中的程序性滚动动画
-    callback user-scroll();
+    // 当前显示的设置页（0=通用 … 6=关于）：magpie 式平铺导航，点击
+    // 侧边项即切换页面并复位该页滚动（无 scroll-spy）；快照测试经
+    // 此属性直达对应页
+    in-out property <int> active-section: 0;
 
     /* ── 编辑回调（Rust 统一防抖保存） ── */
     callback history-limit-edited(string);
@@ -1394,13 +1460,14 @@ export component SettingsWindow inherits Window {
                 }
             }
 
-            // ── 保存失败横幅（旧版 saveError：danger 边框 + 重试/关闭）──
+            // ── 保存失败横幅（旧版 saveError：danger 边框 + 重试/关闭；
+            // 只覆盖内容列，与侧边导航右缘对齐）──
             if (root.save-banner-visible): Rectangle {
                 height: 46px;
                 Rectangle {
-                    x: 20px;
+                    x: 204px;
                     y: 0;
-                    width: parent.width - 40px;
+                    width: parent.width - 204px - 20px;
                     height: parent.height - 14px;
                     border-radius: 6px;
                     border-width: 1px;
@@ -1466,49 +1533,56 @@ export component SettingsWindow inherits Window {
             // 不进布局：滚动内容的 min/max 约束经 HorizontalLayout 传播，
             // 要么把行高压到内容最小高、要么把窗口撑到内容总高
             Rectangle {
-                // 侧边导航（旧版 SettingsNav sidebar：sticky top-16 self-start）
+                // ── 侧边导航（magpie 式平铺）：贴窗左缘整列，右缘 1px
+                // 分界线；行 30px / 圆角 6px / 图标 16px + 13px 文字，
+                // 默认透明、hover 墨色微叠、选中 = 与设置卡同款半透偏灰
+                // 层（layer-fill）+ 文字图标着色，无竖条无 accent（magpie
+                // 选中语言：浮起卡而非强调条）。点击即切页并复位该页滚动
                 Rectangle {
-                    x: 20px;
-                    y: root.save-banner-visible ? 0px : 14px;
-                    width: 176px;
-                    height: nav-col.preferred-height;
+                    x: 0;
+                    width: 184px;
+                    height: 100%;
+                    Rectangle {
+                        x: parent.width - 1px;
+                        width: 1px;
+                        height: 100%;
+                        background: Theme.border-subtle;
+                    }
                     nav-col := VerticalLayout {
+                        x: 8px;
+                        y: 10px;
+                        width: parent.width - 16px;
                         spacing: 2px;
                         for section[idx] in [
                             "通用", "行为", "外观", "快捷键", "隐私", "标签", "关于",
                         ]: Rectangle {
                             height: 30px;
-                            // 目录项（WinUI NavView 同构）：默认透明，hover 墨色
-                            // 微叠，选中 = 与设置卡同款半透偏灰层（layer-fill）
-                            // + 左缘 3px accent 竖条 + 文字着色（fg-default
-                            // + medium）
-                            border-radius: Metrics.radius-sm;
+                            border-radius: Metrics.radius-md;
                             background: root.active-section == idx
                                 ? Theme.layer-fill
-                                : (nav-ta.has-hover
-                                    ? Theme.hover-bg
-                                    : transparent);
+                                : (nav-ta.has-hover ? Theme.hover-bg : transparent);
                             animate background { duration: Motion.dur-color; easing: Motion.ease; }
                             nav-ta := TouchArea {
-                                clicked() => { root.nav-selected(idx); }
+                                clicked() => {
+                                    root.active-section = idx;
+                                    sv.content-y = 0px;
+                                }
                             }
-                            // 选中高亮竖条（左侧 3px accent）
-                            if (root.active-section == idx): Rectangle {
-                                x: 0;
-                                y: (parent.height - 16px) / 2;
-                                width: 3px;
-                                height: 16px;
-                                border-radius: Metrics.radius-pill;
-                                background: Theme.accent-fg;
+                            NavIcon {
+                                x: 8px;
+                                y: (parent.height - self.height) / 2;
+                                kind: idx;
+                                tint: root.active-section == idx || nav-ta.has-hover
+                                    ? Theme.fg-default : Theme.fg-muted;
                             }
                             Text {
-                                x: 12px;
-                                width: parent.width - 24px;
+                                x: 33px;
+                                width: parent.width - 41px;
                                 height: 100%;
                                 text: section;
-                                color: root.active-section == idx ? Theme.fg-default
-                                    : (nav-ta.has-hover ? Theme.fg-default : Theme.fg-muted);
-                                font-size: Metrics.text-sm;
+                                color: root.active-section == idx || nav-ta.has-hover
+                                    ? Theme.fg-default : Theme.fg-muted;
+                                font-size: Metrics.text-body;
                                 font-weight: root.active-section == idx
                                     ? Metrics.weight-medium : Metrics.weight-normal;
                                 vertical-alignment: center;
@@ -1523,10 +1597,10 @@ export component SettingsWindow inherits Window {
                 // SoftShadow——透明卡面下同心实心层在卡中心全叠成均匀
                 // 墨膜（染色而非投影）；实心层堆叠只能垫在不透明卡面之下
                 Rectangle {
-                    x: 216px;
-                    y: root.save-banner-visible ? 0px : 14px;
-                    width: parent.width - 216px - 20px;
-                    height: parent.height - (root.save-banner-visible ? 0px : 14px) - 14px;
+                    x: 204px;
+                    y: 14px;
+                    width: parent.width - 204px - 20px;
+                    height: parent.height - 28px;
                     background: transparent;
                     border-radius: Metrics.radius-lg;
                     clip: true;
@@ -1535,8 +1609,7 @@ export component SettingsWindow inherits Window {
                     // 改为滚轮事件直接驱动内容偏移。TouchArea 须为全部内容
                     // 的祖先——子元素未消费的滚轮沿父链冒泡，兄弟层收不到。
                     // content-y 保持 Flickable 数值语义（向下滚为负，范围
-                    // [-max, 0]）：scroll-spy、Rust 导航定位与 ListScrollBar
-                    // 均按此语义直连，零适配
+                    // [-max, 0]）：ListScrollBar 按此语义直连，零适配
                     sv := Rectangle {
                         x: 16px;
                         y: 14px;
@@ -1558,10 +1631,6 @@ export component SettingsWindow inherits Window {
                             width: 100%;
                             height: Math.max(content-col.preferred-height, sv.height);
                             scroll-event(event) => {
-                                // 用户滚轮：解除导航点击的高亮锁定（点击
-                                // 高亮保持到此刻），并停掉程序性滚动动画
-                                root.nav-override = -1;
-                                root.user-scroll();
                                 // Windows 滚轮向下 delta_y 为负 = content-y 负向
                                 // 增大（内容上移看下方），同 Flickable 符号约定
                                 sv.content-y = Math.clamp(
@@ -1571,15 +1640,12 @@ export component SettingsWindow inherits Window {
                             }
                         content-col := VerticalLayout {
                             spacing: 24px;
-                            // 锚点可达性：底部补足视口余量，让末区顶能
-                            // 滚到 spy 锚定线。缺这段余量时末两区总高不
-                            // 足一屏，滚到底也过不了线，目录高亮永远停
-                            // 在倒数第三区；前面各区 y 值更小，自动满足
-                            padding-bottom: Math.max(
-                                0px, sv.height - root.spy-line - sec6.height);
 
-                        /* ═══ 通用 ═══ */
-                        sec0 := Rectangle {
+                        /* ═══ 页面：每导航项一页（magpie set-page 同构），
+                           if 条件实例化——未选中页不参与布局；切页由侧边
+                           导航点击完成并复位滚动。卡内相关行合并为一张卡
+                           （magpie .list 排布），行间 RowDivider 分隔 ═══ */
+                        if (root.active-section == 0): Rectangle {
                             height: sec0-col.preferred-height;
                             sec0-col := VerticalLayout {
                                 spacing: 8px;
@@ -1601,8 +1667,7 @@ export component SettingsWindow inherits Window {
                                             }
                                         }
                                     }
-                                }
-                                RowGroup {
+                                    RowDivider { }
                                     SettingRow {
                                         title: "速贴条目数";
                                         description: "速贴中最多可浏览的条目数。启用数字快捷键时，1–9 对应前 9 条。";
@@ -1617,8 +1682,7 @@ export component SettingsWindow inherits Window {
                                             }
                                         }
                                     }
-                                }
-                                RowGroup {
+                                    RowDivider { }
                                     SettingRow {
                                         title: "速贴卡片高度";
                                         description: "速贴中每张卡片的高度（像素），更高的卡片显示更多预览内容。";
@@ -1638,7 +1702,7 @@ export component SettingsWindow inherits Window {
                         }
 
                         /* ═══ 行为 ═══ */
-                        sec1 := Rectangle {
+                        if (root.active-section == 1): Rectangle {
                             height: sec1-col.preferred-height;
                             sec1-col := VerticalLayout {
                                 spacing: 8px;
@@ -1739,16 +1803,14 @@ export component SettingsWindow inherits Window {
                                         checked: root.restore-clipboard;
                                         toggled(checked) => { root.restore-clipboard-toggled(checked); }
                                     }
-                                }
-                                RowGroup {
+                                    RowDivider { }
                                     ToggleRow {
                                         title: "暂停监听";
                                         description: "暂停后不再保存新的剪贴板条目。";
                                         checked: root.pause-monitoring;
                                         toggled(checked) => { root.pause-monitoring-toggled(checked); }
                                     }
-                                }
-                                RowGroup {
+                                    RowDivider { }
                                     // 鼠标上屏触发方式
                                     SettingRow {
                                         title: "粘贴触发方式";
@@ -1765,8 +1827,7 @@ export component SettingsWindow inherits Window {
                                             }
                                         }
                                     }
-                                }
-                                RowGroup {
+                                    RowDivider { }
                                     // 速贴窗口显示位置
                                     SettingRow {
                                         title: "速贴显示位置";
@@ -1921,7 +1982,7 @@ export component SettingsWindow inherits Window {
                         }
 
                         /* ═══ 外观 ═══ */
-                        sec2 := Rectangle {
+                        if (root.active-section == 2): Rectangle {
                             height: sec2-col.preferred-height;
                             sec2-col := VerticalLayout {
                                 spacing: 8px;
@@ -1946,8 +2007,7 @@ export component SettingsWindow inherits Window {
                                             }
                                         }
                                     }
-                                }
-                                RowGroup {
+                                    RowDivider { }
                                     // 背景材质（docs/adr-0005）：三档全窗口生效。
                                     // 速贴永不激活、DWM 不渲染其 Mica backdrop
                                     // （实测），Mica/Acrylic 两档在速贴上均为自绘
@@ -1965,6 +2025,53 @@ export component SettingsWindow inherits Window {
                                                 options: ["纯色", "Mica", "Acrylic"];
                                                 value <=> root.window-material;
                                                 selected(idx) => { root.window-material-selected(idx); }
+                                            }
+                                        }
+                                    }
+                                    RowDivider { }
+                                    // 强调色（旧版 h-7 色点 gap-1.5；内圆在 28px
+                                    // 圆内居中 = 4px 偏移，对齐旧版 items-center）
+                                    SettingRow {
+                                        title: "强调色";
+                                        description: "选中态、按钮与高亮使用的颜色。";
+                                        Rectangle {
+                                            width: dots-row.preferred-width;
+                                            dots-row := HorizontalLayout {
+                                                x: 0;
+                                                y: (parent.height - self.preferred-height) / 2;
+                                                height: self.preferred-height;
+                                                spacing: Metrics.space-1_5;
+                                                alignment: start;
+                                                for swatch in root.accent-swatches: Rectangle {
+                                                    // 旧版 hover:scale-105 的等效反馈用
+                                                    // 描边环表达：尺寸动画会改变行首选宽，
+                                                    // 悬停点间移动时所有圆点跟着重排闪动
+                                                    width: 28px;
+                                                    height: 28px;
+                                                    border-radius: Metrics.radius-pill;
+                                                    border-width: 2px;
+                                                    border-color: swatch.selected
+                                                        ? Theme.accent-fg
+                                                        : (sw-ta.has-hover
+                                                            ? Theme.border-default : transparent);
+                                                    animate border-color { duration: Motion.dur-color; easing: Motion.ease; }
+                                                    sw-ta := TouchArea {
+                                                        clicked() => { root.accent-selected(swatch.id); }
+                                                    }
+                                                    Rectangle {
+                                                        // 按下内圆回缩（按压反馈）；在固定
+                                                        // 外圈内变化，不影响布局尺寸
+                                                        x: (parent.width - self.width) / 2;
+                                                        y: (parent.height - self.height) / 2;
+                                                        width: sw-ta.pressed ? 17px : 20px;
+                                                        animate width { duration: Motion.dur-color; easing: Motion.ease; }
+                                                        height: self.width;
+                                                        border-radius: Metrics.radius-pill;
+                                                        border-width: 1px;
+                                                        border-color: rgba(0, 0, 0, 0.08);
+                                                        background: swatch.hex;
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -2083,60 +2190,11 @@ export component SettingsWindow inherits Window {
                                         }
                                     }
                                 }
-                                RowGroup {
-                                    // 强调色（旧版 h-7 色点 gap-1.5；内圆在 28px
-                                    // 圆内居中 = 4px 偏移，对齐旧版 items-center）
-                                    SettingRow {
-                                        title: "强调色";
-                                        description: "选中态、按钮与高亮使用的颜色。";
-                                        Rectangle {
-                                            width: dots-row.preferred-width;
-                                            dots-row := HorizontalLayout {
-                                                x: 0;
-                                                y: (parent.height - self.preferred-height) / 2;
-                                                height: self.preferred-height;
-                                                spacing: Metrics.space-1_5;
-                                                alignment: start;
-                                                for swatch in root.accent-swatches: Rectangle {
-                                                    // 旧版 hover:scale-105 的等效反馈用
-                                                    // 描边环表达：尺寸动画会改变行首选宽，
-                                                    // 悬停点间移动时所有圆点跟着重排闪动
-                                                    width: 28px;
-                                                    height: 28px;
-                                                    border-radius: Metrics.radius-pill;
-                                                    border-width: 2px;
-                                                    border-color: swatch.selected
-                                                        ? Theme.accent-fg
-                                                        : (sw-ta.has-hover
-                                                            ? Theme.border-default : transparent);
-                                                    animate border-color { duration: Motion.dur-color; easing: Motion.ease; }
-                                                    sw-ta := TouchArea {
-                                                        clicked() => { root.accent-selected(swatch.id); }
-                                                    }
-                                                    Rectangle {
-                                                        // 按下内圆回缩（按压反馈）；在固定
-                                                        // 外圈内变化，不影响布局尺寸
-                                                        x: (parent.width - self.width) / 2;
-                                                        y: (parent.height - self.height) / 2;
-                                                        width: sw-ta.pressed ? 17px : 20px;
-                                                        animate width { duration: Motion.dur-color; easing: Motion.ease; }
-                                                        height: self.width;
-                                                        border-radius: Metrics.radius-pill;
-                                                        border-width: 1px;
-                                                        border-color: rgba(0, 0, 0, 0.08);
-                                                        background: swatch.hex;
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                }
                             }
                         }
 
                         /* ═══ 快捷键 ═══ */
-                        sec3 := Rectangle {
+                        if (root.active-section == 3): Rectangle {
                             height: sec3-col.preferred-height;
                             sec3-col := VerticalLayout {
                                 spacing: 8px;
@@ -2284,38 +2342,48 @@ export component SettingsWindow inherits Window {
 
                                 // ── 会话动作键位（速贴面板与搜索窗口共用，
                                 //    数字 1-9 直达保留，见下方开关）──
-                                // for 每实例一张行卡（外层 spacing 承担卡距）
-                                for row[idx] in root.session-key-rows: RowGroup {
-                                    sk-row := SettingRow {
-                                        title: row.title;
-                                        description: row.description;
-                                        Rectangle {
-                                            width: 224px;
-                                            height: sk-ctrl.preferred-height;
-                                            sk-ctrl := VerticalLayout {
-                                                x: 0;
-                                                y: (parent.height - self.preferred-height) / 2;
+                                // 全部键位合入一张卡（magpie 列表排布），
+                                // 行顶分隔线由包装层按序号绘制
+                                RowGroup {
+                                    for row[idx] in root.session-key-rows: Rectangle {
+                                        height: sk-row.preferred-height;
+                                        if (idx > 0): Rectangle {
+                                            y: 0;
+                                            width: 100%;
+                                            height: 1px;
+                                            background: Theme.border-subtle;
+                                        }
+                                        sk-row := SettingRow {
+                                            title: row.title;
+                                            description: row.description;
+                                            Rectangle {
                                                 width: 224px;
-                                                height: self.preferred-height;
-                                                spacing: 6px;
-                                                SessionKeyInput {
-                                                    width: 100%;
-                                                    instance-id: idx;
-                                                    recorder-id <=> root.session-recorder-id;
-                                                    value-parts: row.parts;
-                                                    notice: row.notice;
-                                                    captured(value) => {
-                                                        root.session-key-captured(row.action, value);
+                                                height: sk-ctrl.preferred-height;
+                                                sk-ctrl := VerticalLayout {
+                                                    x: 0;
+                                                    y: (parent.height - self.preferred-height) / 2;
+                                                    width: 224px;
+                                                    height: self.preferred-height;
+                                                    spacing: 6px;
+                                                    SessionKeyInput {
+                                                        width: 100%;
+                                                        instance-id: idx;
+                                                        recorder-id <=> root.session-recorder-id;
+                                                        value-parts: row.parts;
+                                                        notice: row.notice;
+                                                        captured(value) => {
+                                                            root.session-key-captured(row.action, value);
+                                                        }
+                                                        cancelled() => {
+                                                            root.session-key-cancelled(row.action);
+                                                        }
                                                     }
-                                                    cancelled() => {
-                                                        root.session-key-cancelled(row.action);
+                                                    if (row.notice != ""): Text {
+                                                        text: row.notice;
+                                                        color: Theme.danger-fg;
+                                                        font-size: Metrics.text-xs;
+                                                        wrap: word-wrap;
                                                     }
-                                                }
-                                                if (row.notice != ""): Text {
-                                                    text: row.notice;
-                                                    color: Theme.danger-fg;
-                                                    font-size: Metrics.text-xs;
-                                                    wrap: word-wrap;
                                                 }
                                             }
                                         }
@@ -2330,8 +2398,7 @@ export component SettingsWindow inherits Window {
                                         checked: root.picker-digit-enabled;
                                         toggled(checked) => { root.picker-digit-toggled(checked); }
                                     }
-                                }
-                                RowGroup {
+                                    RowDivider { }
                                     // 编辑窗口固定键位（只读展示，重设计在
                                     // 编辑窗口迭代中一并处理）
                                     SettingRow {
@@ -2350,8 +2417,7 @@ export component SettingsWindow inherits Window {
                                             }
                                         }
                                     }
-                                }
-                                RowGroup {
+                                    RowDivider { }
                                     SettingRow {
                                         title: "编辑窗口关闭";
                                         description: "关闭编辑窗口，返回速贴或搜索窗口。";
@@ -2371,8 +2437,8 @@ export component SettingsWindow inherits Window {
                             }
                         }
 
-                        /* ═══ 排除应用 ═══ */
-                        sec4 := Rectangle {
+                        /* ═══ 隐私（排除应用）═══ */
+                        if (root.active-section == 4): Rectangle {
                             height: sec4-col.preferred-height;
                             sec4-col := VerticalLayout {
                                 spacing: 8px;
@@ -2496,7 +2562,7 @@ export component SettingsWindow inherits Window {
                         }
 
                         /* ═══ 标签 ═══ */
-                        sec5 := Rectangle {
+                        if (root.active-section == 5): Rectangle {
                             height: sec5-col.preferred-height;
                             sec5-col := VerticalLayout {
                                 spacing: 8px;
@@ -2544,7 +2610,7 @@ export component SettingsWindow inherits Window {
                         }
 
                         /* ═══ 关于 ═══ */
-                        sec6 := Rectangle {
+                        if (root.active-section == 6): Rectangle {
                             height: sec6-col.preferred-height;
                             sec6-col := VerticalLayout {
                                 spacing: 8px;
@@ -2593,8 +2659,7 @@ export component SettingsWindow inherits Window {
                                             }
                                         }
                                     }
-                                }
-                                RowGroup {
+                                    RowDivider { }
                                     SettingRow {
                                         title: "项目主页";
                                         description: "查看源码、提交问题或阅读发版说明。";
@@ -2643,10 +2708,6 @@ export component SettingsWindow inherits Window {
                         content-height: content-col.height;
                         visible-height: sv.height;
                         content-y <=> sv.content-y;
-                        user-scrolled() => {
-                            root.nav-override = -1;
-                            root.user-scroll();
-                        }
                     }
                 }
             }
