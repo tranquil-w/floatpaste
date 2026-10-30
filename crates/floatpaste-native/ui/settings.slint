@@ -1654,21 +1654,6 @@ export component SettingsWindow inherits Window {
                                 }
                                 RowGroup {
                                     SettingRow {
-                                        title: "历史保留数量";
-                                        description: "定期清理超出上限的未收藏条目，优先保留最近复制或粘贴的内容。收藏条目不计入上限。";
-                                        Rectangle {
-                                            width: 96px;
-                                            NumberInput {
-                                                x: 0;
-                                                y: (parent.height - self.height) / 2;
-                                                text <=> root.history-limit-text;
-                                                edited(text) => { root.history-limit-edited(text); }
-                                                committed(text) => { root.history-limit-committed(text); }
-                                            }
-                                        }
-                                    }
-                                    RowDivider { }
-                                    SettingRow {
                                         title: "速贴条目数";
                                         description: "速贴中最多可浏览的条目数。启用数字快捷键时，1–9 对应前 9 条。";
                                         Rectangle {
@@ -2444,9 +2429,23 @@ export component SettingsWindow inherits Window {
                                 spacing: 8px;
                                 SectionHeader {
                                     title: "隐私";
-                                    description: "尊重来源的禁止记录标记；锁屏时暂停采集并取消旧上屏，解锁后不补采锁屏内容。可在托盘菜单快速暂停或恢复监听。";
+                                    description: "配置历史数据的保留与清除：按数量或天数清理未收藏条目，删除条目到期回收，可一键清除全部历史，也可排除指定应用、不保存其复制内容。";
                                 }
                                 RowGroup {
+                                    SettingRow {
+                                        title: "历史保留数量";
+                                        description: "定期清理超出上限的未收藏条目，优先保留最近复制或粘贴的内容。收藏条目不计入上限。";
+                                        Rectangle {
+                                            width: 96px;
+                                            NumberInput {
+                                                y: (parent.height - self.height) / 2;
+                                                text <=> root.history-limit-text;
+                                                edited(text) => { root.history-limit-edited(text); }
+                                                committed(text) => { root.history-limit-committed(text); }
+                                            }
+                                        }
+                                    }
+                                    RowDivider { }
                                     SettingRow {
                                         title: "未收藏历史保留天数";
                                         description: "按最近复制或粘贴时间清理；0 表示不按时间清理。收藏条目豁免。范围 0–3650 天。";
@@ -2460,6 +2459,7 @@ export component SettingsWindow inherits Window {
                                             }
                                         }
                                     }
+                                    RowDivider { }
                                     SettingRow {
                                         title: "普通删除保留天数";
                                         description: "删除后立即从列表隐藏，载荷默认保留 30 天。0 表示下次清理回收；启动后及每天清理，范围 0–365 天。";
@@ -2473,6 +2473,7 @@ export component SettingsWindow inherits Window {
                                             }
                                         }
                                     }
+                                    RowDivider { }
                                     SettingRow {
                                         title: "清除全部历史";
                                         description: "包括收藏、已删除条目和应用图片；保留设置、系统剪贴板和用户源文件。不承诺擦除备份或磁盘残留。";
