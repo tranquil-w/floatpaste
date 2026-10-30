@@ -53,8 +53,9 @@ fn shell_execute_open(target: &str, parameters: Option<&str>) -> Result<(), AppE
 
 /// 用系统默认浏览器打开 URL。URL 不是文件系统路径，不做存在性检查。
 pub fn open_url(url: &str) -> Result<(), AppError> {
-    if url.is_empty() {
-        return Err(AppError::Message("URL 为空".into()));
+    let url = url.trim();
+    if crate::services::text_kind::http_url_parts(url).is_none() {
+        return Err(AppError::Message("仅支持有效的 HTTP(S) 链接".into()));
     }
     shell_execute_open(url, None)
 }
@@ -97,6 +98,8 @@ pub fn reveal_in_explorer(path: &str) -> Result<(), AppError> {
         return Ok(());
     }
     // explorer 自行解析命令行参数，路径带空格时内嵌引号是标准形式
+    // 非根目录去掉尾部分隔符，避免末尾反斜杠转义闭引号。
+    let path = path.trim_end_matches(['\\', '/']);
     shell_execute_open("explorer.exe", Some(&format!("/select,\"{path}\"")))
 }
 
@@ -219,7 +222,22 @@ unsafe fn is_explorer_frame(hwnd: HWND) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::reveal_in_explorer;
+    use super::{open_url, reveal_in_explorer};
+
+    #[test]
+    fn browser_rejects_non_http_and_malformed_targets_without_dispatch() {
+        for url in [
+            "",
+            "javascript:alert(1)",
+            "file:///C:/a.txt",
+            r"C:\a.exe",
+            "https://",
+            "https://example.com\0evil",
+            "https://example.com\nhttps://other.com",
+        ] {
+            assert!(open_url(url).is_err(), "{url:?}");
+        }
+    }
 
     // 只测拒绝分支：成功分支会真开资源管理器窗口，属桌面验收范围
     #[test]

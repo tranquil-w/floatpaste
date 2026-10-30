@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::Duration;
 
-use floatpaste_core::domain::clip_item::{ClipItemDetail, PasteMode, PasteOption};
+use floatpaste_core::domain::clip_item::{ClipItemDetail, PasteMode, PasteOption, TextKind};
 use floatpaste_core::domain::error::AppError;
 use floatpaste_core::platform::windows::active_app::ActiveAppResolver;
 use floatpaste_core::platform::windows::clipboard_formats::clipboard_sequence;
@@ -61,27 +61,47 @@ fn reveal_item_location(
     detail: &ClipItemDetail,
     source: PasteSource,
 ) -> Result<(), AppError> {
-    let existing = detail
-        .file_paths
-        .iter()
-        .find(|path| std::path::Path::new(path).exists())
-        .ok_or_else(|| AppError::Message("文件已被移动或删除".into()))?;
+    let existing = first_existing_path(detail)?;
     shell_open::reveal_in_explorer(existing)?;
+    hide_after_external_action(app, source);
+    Ok(())
+}
+
+fn first_existing_path(detail: &ClipItemDetail) -> Result<&str, AppError> {
+    let paths: Vec<&str> = match detail.r#type.as_str() {
+        "file" => detail.file_paths.iter().map(String::as_str).collect(),
+        "text"
+            if floatpaste_core::services::text_kind::detect_text_kind(&detail.full_text)
+                == TextKind::Path =>
+        {
+            detail.full_text.trim().lines().map(str::trim).collect()
+        }
+        _ => return Err(AppError::Message("条目不包含有效路径".into())),
+    };
+    for path in paths {
+        // 访问被拒等读取错误必须保留，不能当成文件已删除。
+        if std::path::Path::new(path).try_exists()? {
+            return Ok(path);
+        }
+    }
+    Err(AppError::Message("文件已被移动或删除".into()))
+}
+
+fn hide_after_external_action(app: &App, source: PasteSource) {
     match source {
         PasteSource::Picker if app.state.is_picker_active() => picker::hide(app, false),
         PasteSource::Search => search::hide(app, false),
         _ => {}
     }
-    Ok(())
 }
 
 /// 窗口层失败提示的统一文案：「打开所在文件夹」失败不是上屏失败，
 /// 前缀按动作名区分，两窗口共用
 pub(crate) fn failure_notice(mode: PasteMode, error: &AppError) -> String {
-    let action = if mode == PasteMode::RevealInFolder {
-        "打开所在文件夹失败"
-    } else {
-        "上屏失败"
+    let action = match mode {
+        PasteMode::RevealInFolder => "打开所在文件夹失败",
+        PasteMode::OpenInBrowser => "在浏览器中打开失败",
+        _ => "上屏失败",
     };
     format!("{action}：{error}")
 }
@@ -127,6 +147,14 @@ fn paste_item_impl(
     let detail = app.core().repository.get_item_for_paste(id)?;
     if option.mode == PasteMode::RevealInFolder {
         return reveal_item_location(app, &detail, source);
+    }
+    if option.mode == PasteMode::OpenInBrowser {
+        if detail.r#type != "text" {
+            return Err(AppError::Message("只有链接文本可以在浏览器中打开".into()));
+        }
+        shell_open::open_url(&detail.full_text)?;
+        hide_after_external_action(app, source);
+        return Ok(());
     }
     let (session, owner_hwnd) = match source {
         PasteSource::Picker => (
@@ -359,4 +387,60 @@ fn paste_item_impl(
     });
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use floatpaste_core::{
+        repository::sqlite_repository::SqliteRepository,
+        services::{history_service::HistoryService, image_storage::ImageStorage},
+        state::CoreState,
+    };
+
+    #[test]
+    fn path_actions_use_full_text_and_first_existing_path() {
+        let dir = std::env::temp_dir().join(format!(
+            "floatpaste-path-action-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&dir).unwrap();
+        let core = CoreState::new(
+            SqliteRepository::new(&dir.join("db.sqlite")).unwrap(),
+            ImageStorage::new(dir.clone()).unwrap(),
+            Default::default(),
+        );
+        let target = dir.join("中文 😀.txt");
+        std::fs::write(&target, "保留用户文件").unwrap();
+        let target = target.to_str().unwrap();
+        let text = format!(" {}\r\n  {target} \r\n", dir.join("missing.txt").display());
+        let item = HistoryService::ingest_text(&core, &text, None)
+            .unwrap()
+            .unwrap();
+        let mut detail = core.repository.get_item_for_paste(&item.id).unwrap();
+        detail.content_preview = "摘要不得用作路径".into();
+        assert_eq!(first_existing_path(&detail).unwrap(), target);
+        detail.full_text = format!("{target}\n这不是路径");
+        assert!(
+            first_existing_path(&detail).is_err(),
+            "混合正文不得部分打开"
+        );
+        detail.r#type = "file".into();
+        detail.file_paths = vec![
+            dir.join("missing.txt").to_string_lossy().into_owned(),
+            target.into(),
+        ];
+        assert_eq!(first_existing_path(&detail).unwrap(), target);
+        std::fs::remove_file(target).unwrap();
+        assert!(first_existing_path(&detail)
+            .unwrap_err()
+            .to_string()
+            .contains("移动或删除"));
+        drop(core);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

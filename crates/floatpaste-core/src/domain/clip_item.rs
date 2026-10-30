@@ -248,9 +248,9 @@ pub struct PasteOption {
 /// `PathText` 发布路径文本（图片保存路径 / 文件逐行完整路径），
 /// `FileNameText` 发布逐行文件名，`ImageFile` 把图片以文件列表发布
 /// （CF_HDROP，目标应用按文件附件接收）。`TextFile` 需填写文件名，
-/// 把文本生成 UTF-8 文件后以 CF_HDROP 发布。例外：`RevealInFolder` 不是
-/// 剪贴板形态——在资源管理器中定位文件，发布链路一律拒绝该模式，
-/// 由上屏流程前置分流执行。
+/// 把文本生成 UTF-8 文件后以 CF_HDROP 发布。`RevealInFolder` 定位文件或
+/// 路径文本，`OpenInBrowser` 用默认浏览器打开 HTTP(S) 链接；两者不是
+/// 剪贴板形态，发布链路拒绝，由上屏流程前置分流执行。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PasteMode {
@@ -262,6 +262,7 @@ pub enum PasteMode {
     ImageFile,
     TextFile,
     RevealInFolder,
+    OpenInBrowser,
 }
 
 /// 未知持久化值回退主动作：不让手改/旧库残留阻断设置读取（与
@@ -279,6 +280,7 @@ impl<'de> Deserialize<'de> for PasteMode {
             "image_file" => Self::ImageFile,
             "text_file" => Self::TextFile,
             "reveal_in_folder" => Self::RevealInFolder,
+            "open_in_browser" => Self::OpenInBrowser,
             _ => Self::Original,
         })
     }
@@ -308,6 +310,28 @@ pub fn available_paste_modes(item: &ClipItemSummary) -> &'static [PasteMode] {
     match item.r#type.as_str() {
         "image" => IMAGE_PASTE_MODES,
         "file" => FILE_PASTE_MODES,
+        "text" if item.text_kind == TextKind::Path && item.has_html => &[
+            PasteMode::Original,
+            PasteMode::PlainText,
+            PasteMode::TextFile,
+            PasteMode::RevealInFolder,
+        ],
+        "text" if item.text_kind == TextKind::Path => &[
+            PasteMode::Original,
+            PasteMode::TextFile,
+            PasteMode::RevealInFolder,
+        ],
+        "text" if item.text_kind == TextKind::Link && item.has_html => &[
+            PasteMode::Original,
+            PasteMode::PlainText,
+            PasteMode::TextFile,
+            PasteMode::OpenInBrowser,
+        ],
+        "text" if item.text_kind == TextKind::Link => &[
+            PasteMode::Original,
+            PasteMode::TextFile,
+            PasteMode::OpenInBrowser,
+        ],
         "text" if item.has_html => &[
             PasteMode::Original,
             PasteMode::PlainText,
@@ -334,6 +358,7 @@ pub fn paste_mode_label(mode: PasteMode, clip_type: &str, has_html: bool) -> &'s
         PasteMode::ImageFile => "粘贴为图片文件",
         PasteMode::TextFile => "粘贴为文件…",
         PasteMode::RevealInFolder => "打开所在文件夹",
+        PasteMode::OpenInBrowser => "在浏览器中打开",
     }
 }
 
@@ -350,7 +375,12 @@ pub fn resolve_secondary_mode(
         "text" if item.has_html => (defaults.rich_text, PasteMode::PlainText),
         _ => return PasteMode::Original,
     };
-    if configured != PasteMode::TextFile && available_paste_modes(item).contains(&configured) {
+    let allowed = if item.r#type == "text" {
+        RICH_TEXT_PASTE_MODES
+    } else {
+        available_paste_modes(item)
+    };
+    if allowed.contains(&configured) {
         configured
     } else {
         fallback
@@ -483,6 +513,38 @@ mod tests {
     }
 
     #[test]
+    fn text_external_actions_follow_purpose_without_changing_secondary_defaults() {
+        use super::TextKind;
+        for has_html in [false, true] {
+            for (kind, action) in [
+                (TextKind::Path, PasteMode::RevealInFolder),
+                (TextKind::Link, PasteMode::OpenInBrowser),
+            ] {
+                let mut text = item("text", has_html);
+                text.text_kind = kind;
+                let mut expected = vec![PasteMode::Original];
+                if has_html {
+                    expected.push(PasteMode::PlainText);
+                }
+                expected.extend([PasteMode::TextFile, action]);
+                assert_eq!(available_paste_modes(&text), expected);
+                let defaults = SecondaryPasteDefaults {
+                    rich_text: action,
+                    ..Default::default()
+                };
+                assert_eq!(
+                    resolve_secondary_mode(&text, &defaults),
+                    if has_html {
+                        PasteMode::PlainText
+                    } else {
+                        PasteMode::Original
+                    }
+                );
+            }
+        }
+    }
+
+    #[test]
     fn secondary_resolves_configured_value_per_category() {
         let defaults = SecondaryPasteDefaults {
             rich_text: PasteMode::Original,
@@ -545,6 +607,7 @@ mod tests {
             PasteMode::ImageFile,
             PasteMode::TextFile,
             PasteMode::RevealInFolder,
+            PasteMode::OpenInBrowser,
         ] {
             let json = serde_json::to_string(&mode).unwrap();
             assert_eq!(serde_json::from_str::<PasteMode>(&json).unwrap(), mode);

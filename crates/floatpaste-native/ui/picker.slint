@@ -98,7 +98,7 @@ export component PasteActionMenu inherits Rectangle {
     in property <[PasteActionItem]> actions;
     in-out property <int> highlighted: 0;
     in property <string> caption: "更多动作 · 仅本次";
-    // 搜索仅含动作目录（上屏方式与文件条目的「打开所在文件夹」）；
+    // 搜索仅含动作目录（上屏方式、定位路径与浏览器打开）；
     // 速贴从此索引开始显示管理操作。
     in property <int> management-start: -1;
     in property <bool> delete-armed: false;

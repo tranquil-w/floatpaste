@@ -1183,7 +1183,7 @@ fn handle_session_action_with_actions(
     }
 }
 
-/// 菜单上半部沿用上屏目录（文件条目含非上屏的「打开所在文件夹」，
+/// 菜单上半部沿用动作目录（含定位路径、浏览器打开等非上屏动作，
 /// 由 `paste_flow` 分流执行），分隔线下固定为收藏、编辑、删除。
 fn activate_menu_item(app: &App, index: usize, action_index: usize) {
     let Some(item) = app.state.item_at(index) else {

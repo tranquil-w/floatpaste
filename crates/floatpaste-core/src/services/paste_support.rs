@@ -174,10 +174,10 @@ pub fn publish_item_if_current(
     if mode == PasteMode::TextFile {
         return Err(AppError::Message("粘贴为文件需要提供文件名".into()));
     }
-    if mode == PasteMode::RevealInFolder {
+    if matches!(mode, PasteMode::RevealInFolder | PasteMode::OpenInBrowser) {
         // 非剪贴板形态：发布链路拒绝，由上屏流程分流执行，防止漏分流
         // 时静默按本体上屏
-        return Err(AppError::Message("打开所在文件夹不经剪贴板发布".into()));
+        return Err(AppError::Message("外部打开动作不经剪贴板发布".into()));
     }
     let needs_rollback =
         mode == PasteMode::Original && (detail.has_html || detail.r#type == "image");
@@ -488,7 +488,7 @@ mod tests {
     }
 
     #[test]
-    fn publish_rejects_reveal_in_folder_without_opening_clipboard() {
+    fn publish_rejects_external_actions_without_opening_clipboard() {
         use crate::domain::clip_item::{ClipItemDetail, PasteMode};
         use crate::repository::sqlite_repository::SqliteRepository;
         use crate::services::image_storage::ImageStorage;
@@ -528,9 +528,11 @@ mod tests {
             tags: Vec::new(),
             text_kind: Default::default(),
         };
-        let error = publish_item(&core, &detail, PasteMode::RevealInFolder, None, None)
-            .expect_err("发布链路必须拒绝非剪贴板形态");
-        assert!(error.to_string().contains("不经剪贴板发布"));
+        for mode in [PasteMode::RevealInFolder, PasteMode::OpenInBrowser] {
+            let error = publish_item(&core, &detail, mode, None, None)
+                .expect_err("发布链路必须拒绝非剪贴板形态");
+            assert!(error.to_string().contains("不经剪贴板发布"));
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 

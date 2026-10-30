@@ -1122,6 +1122,27 @@ fn app_e2e_smoke_flow() {
         );
     }
     let old_generation = driver.privacy_generation();
+    // 非法属主使发布失败：撤销新附件，并保留原剪贴板供重试。
+    let before_failure = retry_clipboard(|| ClipboardSnapshot::capture(true));
+    let cache = app_dir.join("text-files");
+    let cached_count = std::fs::read_dir(&cache).unwrap().count();
+    assert!(
+        floatpaste_core::services::paste_support::publish_text_file_if_current(
+            &driver,
+            &attachment_detail,
+            "失败重试.txt",
+            Some(-1),
+            Some(&before_failure),
+            old_generation,
+        )
+        .is_err()
+    );
+    assert_eq!(std::fs::read_dir(cache).unwrap().count(), cached_count);
+    assert_eq!(
+        retry_clipboard(|| ClipboardSnapshot::capture(true)).files,
+        before_failure.files,
+        "发布失败不得破坏原剪贴板"
+    );
     driver.set_session_locked(true).unwrap();
     driver.set_session_locked(false).unwrap();
     assert!(matches!(

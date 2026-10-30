@@ -91,12 +91,13 @@ pub(crate) fn open(
         let point = floatpaste_core::services::picker_position_service::center_in_work_area(
             area,
             (460.0 * scale) as i32,
-            (290.0 * scale) as i32,
+            (250.0 * scale) as i32,
         );
         window
             .window()
             .set_position(slint::PhysicalPosition::new(point.x, point.y));
     }
+    let previous_foreground = ActiveAppResolver::current_foreground_hwnd();
     // 先收口来源输入与鼠标监控，保留原目标；对话框接管焦点。
     match source {
         PasteSource::Picker => crate::picker::hide_for_editor(app),
@@ -106,25 +107,31 @@ pub(crate) fn open(
         restore(app, source, target);
         return Err(AppError::Message(format!("显示文件名窗口失败：{error}")));
     }
-    // 速贴/搜索均为不抢焦点窗口，前台仍在目标应用；不强制获取前台时
+    // 速贴不抢焦点，前台仍在目标应用；不强制获取前台时
     // 对话框会被压在目标窗口之下，键盘输入（Esc/Enter/文件名）全部
     // 落入目标应用。沿用编辑器窗口绕过前台锁的获取方式：show 刚返回
     // 时首帧与窗口句柄都未必就绪，立即抢前台会失败，延后到窗口就绪
-    // 再从当前对话框取句柄执行。
-    slint::Timer::single_shot(std::time::Duration::from_millis(120), || {
-        let hwnd = DIALOG.with(|slot| {
-            slot.borrow()
-                .as_ref()
-                .map(|dialog| crate::win32_ext::window_hwnd(&dialog.window))
-        });
-        let Some(hwnd) = hwnd else {
-            // 对话框已被取消或替换，无需获取前台
+    // 再从本次对话框取句柄执行；旧请求及用户已切往其他窗口时不再抢焦点。
+    let weak = window.as_weak();
+    slint::Timer::single_shot(std::time::Duration::from_millis(120), move || {
+        let Some(window) = weak.upgrade() else {
             return;
         };
-        let Some(hwnd) = hwnd else {
+        if !can_focus(&window) {
+            return;
+        }
+        let Some(hwnd) = crate::win32_ext::window_hwnd(&window) else {
             warn!("文件名窗口句柄缺失，无法获取前台");
             return;
         };
+        let foreground = ActiveAppResolver::current_foreground_hwnd();
+        if foreground.is_some()
+            && foreground != Some(hwnd)
+            && foreground != previous_foreground
+            && foreground != target.target_window_hwnd
+        {
+            return;
+        }
         if !ActiveAppResolver::force_foreground_window(hwnd) {
             warn!("文件名窗口获取前台失败");
         }
@@ -142,6 +149,14 @@ pub(crate) fn open(
         })
     });
     Ok(())
+}
+
+fn can_focus(window: &TextFileWindow) -> bool {
+    DIALOG.with(|slot| {
+        slot.borrow().as_ref().is_some_and(|dialog| {
+            std::ptr::eq(dialog.window.window(), window.window()) && is_current(dialog)
+        })
+    })
 }
 
 fn is_current(dialog: &Dialog) -> bool {
@@ -221,6 +236,10 @@ pub(crate) fn contract_tests(app: &App) {
     for source in [PasteSource::Search, PasteSource::Picker] {
         crate::paste_flow::paste_item(app, &item.id, option.clone(), source).unwrap();
         let window = DIALOG.with(|slot| slot.borrow().as_ref().unwrap().window.clone_strong());
+        assert!(can_focus(&window));
+        crate::paste_flow::paste_item(app, &item.id, option.clone(), source).unwrap();
+        assert!(!can_focus(&window), "旧聚焦回调不得接管替换后的窗口");
+        let window = DIALOG.with(|slot| slot.borrow().as_ref().unwrap().window.clone_strong());
         assert_eq!(window.get_file_name(), "文本.txt");
         window.set_file_name("CON.txt".into());
         window.invoke_confirmed();
@@ -270,6 +289,7 @@ pub(crate) fn contract_tests(app: &App) {
         let window = DIALOG.with(|slot| slot.borrow().as_ref().unwrap().window.clone_strong());
         app.core().set_session_locked(true).unwrap();
         app.core().set_session_locked(false).unwrap();
+        assert!(!can_focus(&window), "隐私代际失效后不得抢前台");
         window.invoke_confirmed();
         assert!(
             DIALOG.with(|slot| slot.borrow().is_none()),

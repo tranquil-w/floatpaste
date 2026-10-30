@@ -1286,10 +1286,9 @@ fn paste_menu_action(app: &App, index: usize, action_index: usize) {
     let Some(item) = app.state.search_item_at(index) else {
         return;
     };
-    let mode = available_paste_modes(&item)
-        .get(action_index)
-        .copied()
-        .unwrap_or(PasteMode::Original);
+    let Some(&mode) = available_paste_modes(&item).get(action_index) else {
+        return;
+    };
     paste_with_mode(app, &item, mode);
 }
 
@@ -2578,7 +2577,18 @@ pub(crate) mod action_menu_tests {
         for (purpose, label) in [(TextKind::Link, "链接"), (TextKind::Path, "路径")] {
             let mut item = summary("text", true);
             item.text_kind = purpose;
-            assert_eq!(make_row(&item, &keys, &defaults).purpose_label, label);
+            let row = make_row(&item, &keys, &defaults);
+            assert_eq!(row.purpose_label, label);
+            assert_eq!(row.secondary_label, "粘贴为纯文本");
+            assert_eq!(row.actions.row_count(), 4);
+            assert_eq!(
+                row_labels(&row)[3],
+                if purpose == TextKind::Link {
+                    "在浏览器中打开"
+                } else {
+                    "打开所在文件夹"
+                }
+            );
         }
 
         let image = make_row(&summary("image", false), &keys, &defaults);
