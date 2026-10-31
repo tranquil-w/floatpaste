@@ -819,6 +819,7 @@ fn l2_headless_ui_contracts() {
     settings_page_tests::run();
     settings::copy_contract_tests::run();
     search::scroll_reset_tests::run();
+    search::filter_scroll_tests::run();
     search::refresh_after_editor_tests::run();
     // 同进程重复场景，核对临时库和跨段异步状态不会复用上次结果。
     search::refresh_after_editor_tests::run();

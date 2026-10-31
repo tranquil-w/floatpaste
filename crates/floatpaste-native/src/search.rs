@@ -2480,6 +2480,153 @@ pub(crate) mod refresh_after_editor_tests {
 }
 
 #[cfg(test)]
+pub(crate) mod filter_scroll_tests {
+    //! 筛选行水平自管滚动契约（docs/testing.md L2 层）：标签 chips 总宽
+    //! 超出窗口（780px）时滚轮可浏览全部标签、两端 clamp；未超宽不吞
+    //! 滚轮；滚动后 chips 点击仍可达（不被滚动宿主 TouchArea 拦截）；
+    //! chips 减少后偏移收口防右侧露白。滚轮走真实 PointerScrolled 路径。
+    //! 由 l2_headless_ui_contracts 单线程串行调用（独立挂 #[test] 会与其
+    //! 他 UI 测试抢 Slint 平台线程绑定）。
+
+    use super::*;
+
+    fn dispatch_wheel(win: &SearchWindow, delta_x: f32, delta_y: f32) {
+        win.window()
+            .dispatch_event(slint::platform::WindowEvent::PointerScrolled {
+                position: slint::LogicalPosition::new(400.0, 74.0), // 筛选行带（56..92px）
+                delta_x,
+                delta_y,
+            });
+    }
+
+    fn pump_layout(win: &SearchWindow) {
+        // 布局派生读数（min-width → max-content-x）须一次渲染 pass；
+        // 未 show 的窗口不因泵循环而渲染，用 take_snapshot 强制布局
+        // （快照段同款）。changed 收口回调由循环调度，再泵一轮消费
+        let _ = win.window().take_snapshot().unwrap();
+        let closer = thread::spawn(|| {
+            thread::sleep(Duration::from_millis(200));
+            if let Err(error) = slint::quit_event_loop() {
+                eprintln!("quit_event_loop 失败: {error:?}");
+            }
+        });
+        let _ = slint::run_event_loop_until_quit();
+        closer.join().unwrap();
+    }
+
+    /// 单测试函数串行多段中的一段（见模块注释）
+    pub(crate) fn run() {
+        let win = SearchWindow::new().expect("实例化搜索窗失败");
+        win.window().set_size(slint::LogicalSize::new(780.0, 620.0));
+
+        // ── 未超宽时不吞滚轮：chips 为空，滚轮不应产生任何偏移 ──
+        pump_layout(&win);
+        dispatch_wheel(&win, 0.0, -120.0);
+        assert_eq!(
+            win.get_filter_scroll_x(),
+            0.0,
+            "未超宽时筛选行应拒绝滚轮（不吞事件、不产生偏移）"
+        );
+
+        // ── 注入 30 个长标签：总宽必超 780px 视口 ──
+        let chips: Vec<SearchTagChip> = (0..30)
+            .map(|index| SearchTagChip {
+                name: format!("标签名称测试{}", index).into(),
+                active: false,
+            })
+            .collect();
+        win.set_tag_chips(ModelRc::new(Rc::new(VecModel::from(chips))));
+        pump_layout(&win);
+        let max = win.get_filter_scroll_max();
+        assert!(max > 300.0, "长标签总宽应远超视口（实际 max={max}）");
+
+        // ── 鼠标垂直滚轮映射为水平浏览：一格即时滚动 120（无动画追赶）──
+        dispatch_wheel(&win, 0.0, -120.0);
+        assert_eq!(
+            win.get_filter_scroll_x(),
+            -120.0,
+            "向下滚一格应向右浏览（content-x=-120），无迟滞"
+        );
+
+        // ── 触底 clamp 与回顶 clamp ──
+        dispatch_wheel(&win, 0.0, -1_000_000.0);
+        assert_eq!(
+            win.get_filter_scroll_x(),
+            -max,
+            "超大滚动量应 clamp 到最右端"
+        );
+        dispatch_wheel(&win, 0.0, 1_000_000.0);
+        assert_eq!(win.get_filter_scroll_x(), 0.0, "回滚应 clamp 到最左端");
+
+        // ── 触摸板水平分量直连（delta_x 优先于 delta_y）──
+        dispatch_wheel(&win, -80.0, 0.0);
+        assert_eq!(
+            win.get_filter_scroll_x(),
+            -80.0,
+            "触摸板向左扫应向右浏览（delta_x 直连）"
+        );
+        dispatch_wheel(&win, 200.0, 0.0);
+        assert_eq!(
+            win.get_filter_scroll_x(),
+            0.0,
+            "触摸板向右扫应回看左侧并 clamp 到 0"
+        );
+
+        // ── 滚轮往返后 chips 点击仍可达：点「全部类型」（恒在最左可见），
+        // 回调不被滚动宿主 TouchArea 拦截 ──
+        let picked = Rc::new(std::sync::atomic::AtomicI32::new(-1));
+        {
+            let picked = picked.clone();
+            win.on_filter_selected(move |kind| {
+                picked.store(kind, std::sync::atomic::Ordering::SeqCst);
+            });
+        }
+        let position = slint::LogicalPosition::new(40.0, 74.0); // 「全部类型」chip 中心
+        win.window()
+            .dispatch_event(slint::platform::WindowEvent::PointerPressed {
+                position,
+                button: slint::platform::PointerEventButton::Left,
+            });
+        win.window()
+            .dispatch_event(slint::platform::WindowEvent::PointerReleased {
+                position,
+                button: slint::platform::PointerEventButton::Left,
+            });
+        assert_eq!(
+            picked.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "滚动后点击「全部类型」应触发 filter-selected(0)，不被滚动宿主拦截"
+        );
+
+        // ── chips 减少后偏移收口：滚到深处 → 换成少量短标签（总宽回落
+        // 到视口内）→ changed 收口应把偏移钳回 0，防右侧露白 ──
+        dispatch_wheel(&win, 0.0, -300.0);
+        assert!(win.get_filter_scroll_x() < 0.0, "前置：已滚到深处");
+        let few: Vec<SearchTagChip> = ["工作", "常用", "验收"]
+            .iter()
+            .map(|name| SearchTagChip {
+                name: (*name).into(),
+                active: false,
+            })
+            .collect();
+        win.set_tag_chips(ModelRc::new(Rc::new(VecModel::from(few))));
+        pump_layout(&win);
+        assert_eq!(
+            win.get_filter_scroll_max(),
+            0.0,
+            "少量短标签时总宽应回落到视口内（含固定 chips）"
+        );
+        assert_eq!(
+            win.get_filter_scroll_x(),
+            0.0,
+            "max-content-x 收缩后偏移应收口回 0（防右侧露白）"
+        );
+
+        drop(win);
+    }
+}
+
+#[cfg(test)]
 pub(crate) mod action_menu_tests {
     //! 「更多动作」菜单契约（docs/testing.md L2 层）：行级动作目录
     //! 投影、菜单开合、键盘高亮与跨行 Delete 路由，不执行真实上屏
