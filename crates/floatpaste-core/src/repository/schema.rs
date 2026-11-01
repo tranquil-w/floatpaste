@@ -1,10 +1,11 @@
 use rusqlite::{params, Connection};
 
+use crate::domain::clip_item::TextKind;
 use crate::services::text_identity::text_content_hash;
 use crate::services::text_kind::detect_text_kind;
 use crate::{domain::error::AppError, services::normalize_service::space_cjk_text};
 
-const CURRENT_SCHEMA_VERSION: i32 = 9;
+const CURRENT_SCHEMA_VERSION: i32 = 10;
 const CLIP_ITEMS_MEDIA_COLUMNS: [(&str, &str); 7] = [
     ("image_path", "TEXT NULL"),
     ("image_width", "INTEGER NULL"),
@@ -96,6 +97,11 @@ fn apply_schema_upgrades(connection: &Connection, current_version: i32) -> Resul
         transaction.execute_batch(
             "CREATE TABLE IF NOT EXISTS pending_image_deletions (image_path TEXT PRIMARY KEY);",
         )?;
+    }
+
+    // v7 已按运行时函数重算摘要，更旧版本升级到这里无需再刷一遍
+    if current_version >= 7 && current_version < 10 {
+        apply_preview_refresh_migration(&transaction)?;
     }
 
     set_schema_version(&transaction, CURRENT_SCHEMA_VERSION)?;
@@ -251,6 +257,43 @@ fn apply_text_kind_migration(connection: &Connection) -> Result<(), AppError> {
         connection.execute(
             "UPDATE clip_items SET text_kind = ?2, hash = ?3, preview_text = ?4 WHERE id = ?1",
             params![id, kind, hash, preview],
+        )?;
+    }
+    Ok(())
+}
+
+/// v10：列表摘要改为原文直显（链接去 userinfo、路径首条原样），按行内
+/// 记录的用途重算全部文本行的 `preview_text`，与徽章、筛选取自同一列。
+/// 识别规则与内容身份未变，不动 text_kind、hash 与 FTS；软删行一并刷新，
+/// 保留期内恢复显示口径一致。仅对 v7–v9 库执行：更旧版本由 v7 迁移用同
+/// 一个运行时函数写入摘要。
+/// - 简化: 全量载入待更新行；数据量大时再引入分批处理。
+fn apply_preview_refresh_migration(connection: &Connection) -> Result<(), AppError> {
+    let updates: Vec<(String, String)> = {
+        let mut statement = connection
+            .prepare("SELECT id, full_text, text_kind FROM clip_items WHERE type = 'text'")?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+        let mut updates = Vec::new();
+        for row in rows {
+            let (id, full_text, kind) = row?;
+            updates.push((
+                id,
+                crate::services::clip_display::text_preview(&full_text, TextKind::parse(&kind)),
+            ));
+        }
+        updates
+    };
+
+    for (id, preview) in updates {
+        connection.execute(
+            "UPDATE clip_items SET preview_text = ?2 WHERE id = ?1",
+            params![id, preview],
         )?;
     }
     Ok(())

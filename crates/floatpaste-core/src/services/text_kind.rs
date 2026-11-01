@@ -2,9 +2,11 @@
 //!
 //! 保守规则：识别不确定时回到普通文本；规则顺序为整段链接 → 路径 →
 //! 结构明确的代码。识别只产出 [`TextKind`]，不改写原文，不访问磁盘与
-//! 网络，不参与内容身份（hash）计算。
+//! 网络，不参与内容身份（hash）计算。同模块的 [`strip_url_userinfo`]
+//! 只服务列表摘要展示，同样不改写原文与身份。
 
 use crate::domain::clip_item::TextKind;
+use std::borrow::Cow;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 /// JSON 结构化尝试的长度上限：超限直接不按 JSON 识别（解析成本与
@@ -51,30 +53,36 @@ fn is_url_disallowed(c: char) -> bool {
         )
 }
 
-/// 本地校验整段 HTTP(S) URL，返回主机与路径/查询/片段供摘要复用。
+/// 本地校验整段 HTTP(S) URL；用途识别与外部动作执行前复检共用。
 /// 简化: 域名只接受字母、数字、连字符标签；升级：有特殊编码主机需求时采用 URL 解析器。
-pub(crate) fn http_url_parts(text: &str) -> Option<(&str, &str)> {
-    let (scheme, rest) = text.trim().split_once("://")?;
+pub(crate) fn is_http_url(text: &str) -> bool {
+    let Some((scheme, rest)) = text.trim().split_once("://") else {
+        return false;
+    };
     if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
-        return None;
+        return false;
     }
     if rest.is_empty() || rest.chars().any(is_url_disallowed) {
-        return None;
+        return false;
     }
 
-    let (authority, suffix) = rest.split_at(rest.find(['/', '?', '#']).unwrap_or(rest.len()));
+    let (authority, _) = rest.split_at(rest.find(['/', '?', '#']).unwrap_or(rest.len()));
     let host_port = if let Some((userinfo, host_port)) = authority.split_once('@') {
         if userinfo.is_empty() || userinfo.contains(['[', ']']) || host_port.contains('@') {
-            return None;
+            return false;
         }
         host_port
     } else {
         authority
     };
-    let (host, port_suffix) = if let Some(ipv6) = host_port.strip_prefix('[') {
-        let end = ipv6.find(']')?;
-        ipv6[..end].parse::<Ipv6Addr>().ok()?;
-        host_port.split_at(end + 2)
+    let port_suffix = if let Some(ipv6) = host_port.strip_prefix('[') {
+        let Some(end) = ipv6.find(']') else {
+            return false;
+        };
+        if ipv6[..end].parse::<Ipv6Addr>().is_err() {
+            return false;
+        }
+        &host_port[end + 2..]
     } else {
         let end = host_port.find(':').unwrap_or(host_port.len());
         let (host, port) = host_port.split_at(end);
@@ -88,21 +96,49 @@ pub(crate) fn http_url_parts(text: &str) -> Option<(&str, &str)> {
                     && label.chars().all(|c| c.is_alphanumeric() || c == '-')
             })
         {
-            return None;
+            return false;
         }
-        if domain.bytes().all(|b| b.is_ascii_digit() || b == b'.') {
-            domain.parse::<Ipv4Addr>().ok()?;
+        if domain.bytes().all(|b| b.is_ascii_digit() || b == b'.')
+            && domain.parse::<Ipv4Addr>().is_err()
+        {
+            return false;
         }
-        (host, port)
+        port
     };
-    if !port_suffix.is_empty() {
-        let port = port_suffix.strip_prefix(':')?;
-        if port.is_empty() || !port.bytes().all(|b| b.is_ascii_digit()) {
-            return None;
-        }
-        port.parse::<u16>().ok()?;
+    if port_suffix.is_empty() {
+        return true;
     }
-    Some((host, suffix))
+    let Some(port) = port_suffix.strip_prefix(':') else {
+        return false;
+    };
+    if port.is_empty() || !port.bytes().all(|b| b.is_ascii_digit()) {
+        return false;
+    }
+    port.parse::<u16>().is_ok()
+}
+
+/// 列表展示用的 URL 原文：去除 userinfo（`user:pass@`）后按原顺序返回，
+/// 其余部分保持不变；无 userinfo 或结构不认识时原样返回。仅做字符串
+/// 切除，不重新校验——调用方应先经 [`is_http_url`] 确认整段为链接。
+pub(crate) fn strip_url_userinfo(url: &str) -> Cow<'_, str> {
+    let Some((_, rest)) = url.split_once("://") else {
+        return Cow::Borrowed(url);
+    };
+    let auth_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let (authority, _) = rest.split_at(auth_end);
+    let Some((userinfo, host_port)) = authority.split_once('@') else {
+        return Cow::Borrowed(url);
+    };
+    // 与 is_http_url 同约束：userinfo 非空且主机部分不含第二个 @
+    if userinfo.is_empty() || host_port.contains('@') {
+        return Cow::Borrowed(url);
+    }
+    let scheme_end = url.len() - rest.len(); // 指向 "://" 之后
+    let cut_end = scheme_end + userinfo.len() + 1; // 连同 '@' 一起切除
+    let mut out = String::with_capacity(url.len() - (cut_end - scheme_end));
+    out.push_str(&url[..scheme_end]);
+    out.push_str(&url[cut_end..]);
+    Cow::Owned(out)
 }
 
 /// 整段文本（已去除首尾空白）是否为明确的 Windows 绝对路径、
@@ -274,7 +310,7 @@ pub fn detect_text_kind(full_text: &str) -> TextKind {
     if trimmed.is_empty() {
         return TextKind::Plain;
     }
-    if http_url_parts(trimmed).is_some() {
+    if is_http_url(trimmed) {
         return TextKind::Link;
     }
     if is_path_list(trimmed) {
@@ -445,6 +481,43 @@ mod tests {
         assert_eq!(
             kind_of("详见 https://example.com 中的说明"),
             TextKind::Plain
+        );
+    }
+
+    #[test]
+    fn strip_userinfo_only_removes_the_credential_segment() {
+        use super::strip_url_userinfo;
+        // 仅去除 userinfo 与分隔 @，scheme、端口与路径原样保留
+        assert_eq!(
+            strip_url_userinfo("https://user:pass@example.com/a?x=1#f"),
+            "https://example.com/a?x=1#f"
+        );
+        assert_eq!(
+            strip_url_userinfo("http://user@localhost:8080/api"),
+            "http://localhost:8080/api"
+        );
+        // 无 userinfo、IPv6 主机与未知结构原样返回
+        assert_eq!(
+            strip_url_userinfo("https://[::1]:8080/"),
+            "https://[::1]:8080/"
+        );
+        assert_eq!(
+            strip_url_userinfo("https://example.com"),
+            "https://example.com"
+        );
+        assert_eq!(strip_url_userinfo("not a url"), "not a url");
+        assert_eq!(
+            strip_url_userinfo("https://@example.com/"),
+            "https://@example.com/"
+        );
+        // '@' 只出现在路径或查询中、以及识别规则拒绝的双 @ 都不切除
+        assert_eq!(
+            strip_url_userinfo("https://example.com/a@b?mail=u@x"),
+            "https://example.com/a@b?mail=u@x"
+        );
+        assert_eq!(
+            strip_url_userinfo("https://u:p@ss@example.com/"),
+            "https://u:p@ss@example.com/"
         );
     }
 }

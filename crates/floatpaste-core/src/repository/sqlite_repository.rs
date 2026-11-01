@@ -1230,7 +1230,7 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
             .unwrap()
             .query_row("PRAGMA user_version", [], |row| row.get::<_, i32>(0))
             .unwrap();
-        assert_eq!(version, 9);
+        assert_eq!(version, 10);
 
         // v6 迁移按原文回填用途并重算 hash：ID、标签、收藏保持不变
         let legacy_detail = repository.get_item_detail("legacy-item").unwrap();
@@ -1304,7 +1304,7 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
                 .get_item_detail("m-link")
                 .unwrap()
                 .content_preview,
-            "example.com · /a?b=1"
+            "https://example.com/a?b=1"
         );
         assert_eq!(
             repository.get_item_detail("m-link").unwrap().text_kind,
@@ -1360,7 +1360,7 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
 
         let repository = SqliteRepository::new(&path).unwrap();
         let detail = repository.get_item_detail(&id).unwrap();
-        assert_eq!(detail.content_preview, "example.com · /a");
+        assert_eq!(detail.content_preview, "https://example.com/a");
         assert_eq!(detail.full_text, valid.normalized.full_text);
         assert_eq!(detail.hash, valid.normalized.hash);
         assert_eq!(detail.tags, vec!["工作"]);
@@ -1369,6 +1369,79 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
             repository.get_item_detail(&invalid_id).unwrap().text_kind,
             TextKind::Plain
         );
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    /// 回归：v10 升级把旧版本写入的重组摘要一次性刷新为原文直显，
+    /// 摘要按行内用途生成，用途与内容身份保持不变；软删行同口径刷新。
+    #[test]
+    fn v10_migration_refreshes_stale_text_previews() {
+        let path = temp_db_path();
+        {
+            let repository = SqliteRepository::new(&path).unwrap();
+            let connection = repository.connection.lock().unwrap();
+            for (id, text, preview, kind, deleted_at) in [
+                (
+                    "m-link",
+                    "https://example.com/a?b=1",
+                    "example.com · /a?b=1",
+                    TextKind::Link,
+                    None,
+                ),
+                (
+                    "m-path",
+                    "C:\\Temp\\a.txt\nD:\\b.txt",
+                    "a.txt · C:\\Temp （另 1 条路径）",
+                    TextKind::Path,
+                    None,
+                ),
+                ("m-plain", "普通一句话", "普通一句话", TextKind::Plain, None),
+                (
+                    "m-deleted",
+                    "https://example.com/deleted",
+                    "example.com · /deleted",
+                    TextKind::Link,
+                    Some(1),
+                ),
+            ] {
+                connection
+                    .execute(
+                        "INSERT INTO clip_items (id,type,full_text,preview_text,search_text,hash,text_kind,created_at,updated_at,deleted_at) VALUES(?1,'text',?2,?3,?2,?4,?5,1,1,?6)",
+                        params![id, text, preview, format!("hash-{id}"), kind.as_str(), deleted_at],
+                    )
+                    .unwrap();
+            }
+            connection.pragma_update(None, "user_version", 9).unwrap();
+        }
+
+        let repository = SqliteRepository::new(&path).unwrap();
+        let link = repository.get_item_detail("m-link").unwrap();
+        assert_eq!(link.content_preview, "https://example.com/a?b=1");
+        assert_eq!(link.text_kind, TextKind::Link);
+        assert_eq!(link.hash, "hash-m-link");
+        let path_item = repository.get_item_detail("m-path").unwrap();
+        assert_eq!(path_item.content_preview, "C:\\Temp\\a.txt （另 1 条路径）");
+        assert_eq!(path_item.text_kind, TextKind::Path);
+        // 普通文本摘要不变；v10 不重算用途与内容身份
+        let plain = repository.get_item_detail("m-plain").unwrap();
+        assert_eq!(plain.content_preview, "普通一句话");
+        assert_eq!(plain.hash, "hash-m-plain");
+        assert_eq!(plain.text_kind, TextKind::Plain);
+        // 软删行刷新后保留期内恢复显示口径一致，详情查询仍不返回它
+        assert!(repository.get_item_detail("m-deleted").is_err());
+        let deleted: (String, String) = {
+            let connection = repository.connection.lock().unwrap();
+            connection
+                .query_row(
+                    "SELECT preview_text, text_kind FROM clip_items WHERE id = 'm-deleted'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap()
+        };
+        assert_eq!(deleted.0, "https://example.com/deleted");
+        assert_eq!(deleted.1, TextKind::Link.as_str());
         drop(repository);
         fs::remove_file(path).unwrap();
     }

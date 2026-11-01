@@ -54,7 +54,7 @@ fn shell_execute_open(target: &str, parameters: Option<&str>) -> Result<(), AppE
 /// 用系统默认浏览器打开 URL。URL 不是文件系统路径，不做存在性检查。
 pub fn open_url(url: &str) -> Result<(), AppError> {
     let url = url.trim();
-    if crate::services::text_kind::http_url_parts(url).is_none() {
+    if !crate::services::text_kind::is_http_url(url) {
         return Err(AppError::Message("仅支持有效的 HTTP(S) 链接".into()));
     }
     shell_execute_open(url, None)

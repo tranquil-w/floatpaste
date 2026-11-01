@@ -8,7 +8,7 @@ use crate::domain::clip_item::{
     TextKind,
 };
 use crate::domain::settings::SecondaryPasteDefaults;
-use crate::services::text_kind::http_url_parts;
+use crate::services::text_kind::strip_url_userinfo;
 use crate::services::time_format::format_relative_time_or_unused;
 
 /// 文件预览突出名称、弱化父目录；根目录没有名称时保留整条路径。
@@ -25,34 +25,17 @@ pub fn file_preview_parts(path: &str) -> (&str, Option<&str>) {
 }
 
 /// 列表摘要最多 120 字符；原文与上屏内容由 full_text 独立保存。
+/// 链接与路径按原文直显——用途徽章负责标识形态，摘要不重排、不插入
+/// 分隔符，只按原文顺序截断；链接额外去除 userinfo（凭据不进列表），
+/// 路径多条时以「另 N 条路径」标识额外数量。
 pub fn text_preview(full_text: &str, kind: TextKind) -> String {
     let trimmed = full_text.trim();
     let preview = match kind {
-        TextKind::Link => http_url_parts(trimmed)
-            .map(|(host, suffix)| {
-                if suffix.is_empty() {
-                    host.to_string()
-                } else {
-                    format!("{host} · {suffix}")
-                }
-            })
-            .unwrap_or_else(|| full_text.to_string()),
+        TextKind::Link => strip_url_userinfo(trimmed).into_owned(),
         TextKind::Path => {
             let mut lines = trimmed.lines();
             let first = lines.next().unwrap_or_default().trim();
-            let path = first.trim_end_matches(['\\', '/']);
-            let mut summary = if first.len() == 3 && first.as_bytes().get(1) == Some(&b':') {
-                first.to_string()
-            } else if let Some((parent, name)) = path.rsplit_once(['\\', '/']) {
-                let parent = if parent.len() == 2 && parent.as_bytes()[1] == b':' {
-                    &path[..3]
-                } else {
-                    parent
-                };
-                format!("{name} · {parent}")
-            } else {
-                first.to_string()
-            };
+            let mut summary = first.to_string();
             let remaining = lines.count();
             if remaining > 0 {
                 summary.push_str(&format!(" （另 {remaining} 条路径）"));
@@ -261,24 +244,33 @@ mod tests {
     }
 
     #[test]
-    fn text_summaries_emphasize_host_and_filename_but_keep_code_layout() {
+    fn text_summaries_show_original_link_and_path_text() {
+        // userinfo 不进列表，其余部分按原顺序原样显示
         assert_eq!(
             super::text_preview("https://user:pass@example.com/a?x=1#f", TextKind::Link),
-            "example.com · /a?x=1#f"
+            "https://example.com/a?x=1#f"
         );
         assert_eq!(
-            super::text_preview("https://[::1]:8080/", TextKind::Link),
-            "[::1] · /"
+            super::text_preview("  https://[::1]:8080/ \n", TextKind::Link),
+            "https://[::1]:8080/"
         );
+        // 路径首条原样显示，额外数量用后缀标识
         assert_eq!(
             super::text_preview("C:\\Temp\\a.txt\nD:\\b.txt", TextKind::Path),
-            "a.txt · C:\\Temp （另 1 条路径）"
+            "C:\\Temp\\a.txt （另 1 条路径）"
         );
         assert_eq!(super::text_preview("C:\\", TextKind::Path), "C:\\");
         let code = "fn main() {\n    println!(\"hi\");\n}";
         assert_eq!(super::text_preview(code, TextKind::Code), code);
         assert_eq!(
             super::text_preview(&"中".repeat(121), TextKind::Plain)
+                .chars()
+                .count(),
+            120
+        );
+        let long_url = format!("https://example.com/{}", "a".repeat(200));
+        assert_eq!(
+            super::text_preview(&long_url, TextKind::Link)
                 .chars()
                 .count(),
             120
