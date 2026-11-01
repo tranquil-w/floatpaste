@@ -1,5 +1,6 @@
 use std::mem::size_of;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use windows::{
     core::PWSTR,
@@ -61,6 +62,39 @@ impl ActiveAppResolver {
         }
         let hwnd = HWND(hwnd as *mut _);
         unsafe { IsWindow(Some(hwnd)).as_bool() && SetForegroundWindow(hwnd).as_bool() }
+    }
+
+    /// 前台转移的落地确认上限：目标窗口线程处理 WM_ACTIVATE 是跨线程
+    /// 消息往返，Electron/终端类进程繁忙时可达百余毫秒
+    const RESTORE_SETTLE_MAX: Duration = Duration::from_millis(200);
+
+    /// 归还前台并等待激活真正落地（GetForegroundWindow == 目标）。
+    ///
+    /// SetForegroundWindow 返回 true 只代表调用被放行，激活经异步消息
+    /// 往返生效；归还方自己仍是前台进程时（如编辑/命名窗确认时）调用
+    /// 才有放行保证，且必须在收起或销毁自身前台窗口之前等激活落地——
+    /// 先关窗会把前台交给下一 z 序窗口，后续注入落进未激活窗口、再次
+    /// 还原则被前台锁拒绝（search::hide 的 e2e 场景 8 实证结论）。
+    /// 返回激活是否已在上限内落地；false 时调用方按原流程继续，不在此
+    /// 重试或降级。
+    pub fn restore_foreground_settled(hwnd: isize) -> bool {
+        // 桌面目标沿用 restore_foreground_window 的跳过语义（无激活浮层
+        // 未改变其前台，程序化激活桌面反而走 explorer 慢路径），不空转
+        // 等待落地
+        if is_desktop_window(hwnd) {
+            return true;
+        }
+        if !Self::restore_foreground_window(hwnd) {
+            return false;
+        }
+        let deadline = Instant::now() + Self::RESTORE_SETTLE_MAX;
+        while Instant::now() < deadline {
+            if Self::current_foreground_hwnd() == Some(hwnd) {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        false
     }
 
     /// 把窗口带到前台并激活（编辑器打开路径）。

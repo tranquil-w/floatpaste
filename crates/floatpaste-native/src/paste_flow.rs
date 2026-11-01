@@ -1,8 +1,11 @@
 //! 速贴与搜索共用的上屏执行流；窗口模块保留各自的会话与隐藏实现。
 //!
-//! 顺序：捕获快照 → 趁属主窗口存活发布 → 隐藏来源 → 后台等待 90ms
+//! 顺序：捕获快照 → 趁属主窗口存活发布 → 结束来源会话 → 后台等待 90ms
 //! → 恢复目标焦点 → 等待 60ms 并核验序列号后注入 → 调度恢复 → mark_used。
 //! 发布失败保留来源窗口；仅写剪贴板时不隐藏、不注入。等待不占串行门。
+//! 例外：命名窗口确认（TextFile）时本进程持有前台，恢复目标须在收起
+//! 命名窗前同步完成并等激活落地；普通速贴路径的目标始终持前台，
+//! 后台盲还即可生效。
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
@@ -15,7 +18,7 @@ use floatpaste_core::platform::windows::clipboard_formats::clipboard_sequence;
 use floatpaste_core::platform::windows::elevation;
 use floatpaste_core::platform::windows::shell_open;
 use floatpaste_core::services::paste_support::{self, InjectionOutcome};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::app::App;
 use crate::app_state::TargetSession;
@@ -217,7 +220,23 @@ fn paste_item_impl(
     }
 
     // 发布成功后才结束来源会话。搜索先恢复目标再停屏，速贴由后台恢复。
+    // 命名窗口确认时本进程持前台，归还规则与顺序依据见
+    // ActiveAppResolver::restore_foreground_settled——速贴来源此前只靠
+    // 后台线程延迟盲还，是「粘贴为文件」偶现焦点恢复失败的根因；
+    // 搜索来源已在 search::hide(true) 内完成同样动作。
     match source {
+        PasteSource::Picker if file.is_some() => {
+            if let Some(target_hwnd) = session.target_window_hwnd {
+                let settled = ActiveAppResolver::restore_foreground_settled(target_hwnd);
+                debug!(
+                    ?source,
+                    session_id = session.session_id,
+                    operation_id,
+                    settled,
+                    "命名上屏归还目标前台"
+                );
+            }
+        }
         PasteSource::Picker if app.state.is_picker_active() => picker::hide(app, false),
         PasteSource::Search => search::hide(app, true),
         _ => {}

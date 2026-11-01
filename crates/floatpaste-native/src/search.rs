@@ -17,7 +17,7 @@ use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::atomic::Ordering;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use slint::{ComponentHandle, Model, ModelRc, PhysicalPosition, PhysicalSize, VecModel};
 use tracing::{info, warn};
@@ -62,9 +62,6 @@ const INPUT_DEBOUNCE_MS: u64 = 200;
 const DELETE_ARM_TIMEOUT_MS: u64 = 3000;
 /// 焦点监视轮询间隔（对齐 SEARCH_FOCUS_WATCH_INTERVAL_MS）
 const FOCUS_WATCH_INTERVAL_MS: u64 = 120;
-/// 关闭路径还原前台后的激活落地等待上限：正常几十毫秒内完成，超时则
-/// 尽力停屏（还原未落地时前台会由系统回收，不阻塞用户）
-const RESTORE_SETTLE_MAX: Duration = Duration::from_millis(200);
 
 /* ───────────────── 会话生命周期 ───────────────── */
 
@@ -326,19 +323,11 @@ pub fn hide(app: &App, restore_target: bool) {
     // 还原退化为与系统转让赛跑（e2e 场景 8 间歇失败的实证根因）
     if restore_target {
         if let Some(target_hwnd) = session.target_window_hwnd {
-            if ActiveAppResolver::restore_foreground_window(target_hwnd) {
-                // 前台转移经跨线程消息往返异步落地（目标窗口线程处理
-                // WM_ACTIVATE），立即停屏（前台窗移出屏幕）会打断转移、
-                // 前台清空成 NULL——还原退化为碰运气。等激活落地再停屏，
-                // 上限一拍
-                let deadline = Instant::now() + RESTORE_SETTLE_MAX;
-                while Instant::now() < deadline {
-                    if ActiveAppResolver::current_foreground_hwnd() == Some(target_hwnd) {
-                        break;
-                    }
-                    thread::sleep(Duration::from_millis(10));
-                }
-            }
+            // 趁搜索窗还是前台进程归还并等激活落地；先停屏（窗口移出
+            // 屏幕）系统会立即把前台转让给下一 z 序窗口，随后的还原被
+            // 前台锁拒绝——还原退化为与系统转让赛跑（e2e 场景 8 间歇
+            // 失败的实证根因）。落地规则见 ActiveAppResolver
+            ActiveAppResolver::restore_foreground_settled(target_hwnd);
         }
     }
     if let Some(win) = app.search.upgrade() {
@@ -2630,7 +2619,9 @@ pub(crate) mod filter_scroll_tests {
 pub(crate) mod action_menu_tests {
     //! 「更多动作」菜单契约（docs/testing.md L2 层）：行级动作目录
     //! 投影、菜单开合、键盘高亮与跨行 Delete 路由，不执行真实上屏
-    //! （系统剪贴板属 L3 串行资源）。由 l2_headless_ui_contracts 单线程串行调用。
+    //! （系统剪贴板属 L3 串行资源）。例外是末尾的命名上屏前台落地段：
+    //! 真实发布 CF_HDROP 并注入以回归焦点时序，自持日常实例互斥量并
+    //! 以快照恢复剪贴板。由 l2_headless_ui_contracts 单线程串行调用。
 
     use super::*;
     use std::sync::Arc;
@@ -2921,6 +2912,7 @@ pub(crate) mod action_menu_tests {
         reset_delete_arm(&app);
         pointer_split_button(&app, &win);
         crate::text_file::contract_tests(&app);
+        crate::text_file::foreground_settlement_contract_tests(&app);
     }
 
     fn pointer_split_button(app: &App, win: &SearchWindow) {

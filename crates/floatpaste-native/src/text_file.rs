@@ -213,6 +213,184 @@ pub(crate) fn close(return_to_source: bool) {
     }
 }
 
+/// 交互桌面前台落地契约（docs/testing.md L2 前台段约束）：命名窗口确认
+/// 时持有前台，确认路径必须在收起命名窗之前把前台归还目标并等激活
+/// 落地，注入才能到达目标——回归「粘贴为文件」偶现焦点恢复失败且未
+/// 注入（速贴来源确认后曾只靠后台线程延迟盲还）。无可控前台（无人
+/// 值守会话）时整段跳过并报告覆盖缺失，不伪造通过。
+#[cfg(test)]
+pub(crate) fn foreground_settlement_contract_tests(app: &App) {
+    use std::sync::atomic::{AtomicU32, Ordering as AtomicOrdering};
+    use std::thread;
+    use std::time::Duration;
+
+    use floatpaste_core::{
+        domain::clip_item::PasteMode, platform::windows::clipboard_formats::ClipboardSnapshot,
+        platform::windows::single_instance, services::history_service::HistoryService,
+    };
+    use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+    use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
+    use windows::Win32::UI::WindowsAndMessaging::WM_KEYDOWN;
+
+    // 注入观测：记录目标窗口收到的 Ctrl/V keydown（wparam 为虚拟键码）
+    static INJECTED_KEYDOWN: AtomicU32 = AtomicU32::new(0);
+    const VK_CONTROL: usize = 0x11;
+    const VK_V: usize = 0x56;
+    const INJECTION_SUBCLASS_ID: usize = 0x4650_0201;
+
+    unsafe extern "system" fn injection_counter_proc(
+        hwnd: HWND,
+        msg: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+        _subclass_id: usize,
+        _ref_data: usize,
+    ) -> LRESULT {
+        if msg == WM_KEYDOWN {
+            INJECTED_KEYDOWN.fetch_or(
+                match wparam.0 {
+                    VK_CONTROL => 0b01,
+                    VK_V => 0b10,
+                    _ => 0b00,
+                },
+                AtomicOrdering::SeqCst,
+            );
+        }
+        DefSubclassProc(hwnd, msg, wparam, lparam)
+    }
+
+    fn pump(ms: u64) {
+        slint::Timer::single_shot(Duration::from_millis(ms), || {
+            slint::quit_event_loop().unwrap();
+        });
+        slint::run_event_loop_until_quit().unwrap();
+    }
+
+    // 本段以真实发布 CF_HDROP 与真实注入为前提，剪贴板属 L3 串行资源：
+    // 先占住日常实例互斥量（已有日常实例时跳过，防止测试内容被采进
+    // 个人库），再捕获快照供段尾恢复，避免覆盖用户剪贴板
+    let guard = match single_instance::reserve_clipboard_test_session() {
+        Ok(Some(guard)) => Some(guard),
+        Ok(None) => {
+            eprintln!("日常实例运行中，跳过命名上屏前台落地契约");
+            return;
+        }
+        Err(error) => panic!("获取剪贴板测试会话失败：{error}"),
+    };
+    let mut snapshot = None;
+    for _ in 0..3 {
+        match ClipboardSnapshot::capture(true) {
+            Ok(captured) => {
+                snapshot = Some(captured);
+                break;
+            }
+            Err(_) => thread::sleep(Duration::from_millis(100)),
+        }
+    }
+    let Some(snapshot) = snapshot else {
+        eprintln!("剪贴板快照不可得（被占用或不可恢复），跳过命名上屏前台落地契约");
+        return;
+    };
+    INJECTED_KEYDOWN.store(0, AtomicOrdering::SeqCst);
+
+    let Some(_) = ActiveAppResolver::current_foreground_hwnd() else {
+        eprintln!("无可控交互前台，跳过命名上屏前台落地契约");
+        return;
+    };
+    // 目标窗口只提供真实 HWND 与前台；首次 show 前停屏（前台段辅助窗约束）
+    let target = crate::EditorWindow::new().unwrap();
+    target
+        .window()
+        .set_position(slint::PhysicalPosition::new(-32000, -32000));
+    target.show().unwrap();
+    pump(100);
+    let target_hwnd = crate::win32_ext::window_hwnd(&target).unwrap();
+    if !ActiveAppResolver::force_foreground_window(target_hwnd) {
+        eprintln!("辅助目标窗取得前台失败，跳过命名上屏前台落地契约");
+        return;
+    }
+    assert_eq!(
+        crate::win32_ext::physical_rect(target_hwnd).map(|r| (r.left, r.top)),
+        Some((-32000, -32000)),
+        "辅助目标窗取得前台后位置不得漂移"
+    );
+    assert!(unsafe {
+        SetWindowSubclass(
+            HWND(target_hwnd as *mut _),
+            Some(injection_counter_proc),
+            INJECTION_SUBCLASS_ID,
+            0,
+        )
+        .as_bool()
+    });
+
+    let item = HistoryService::ingest_text(app.core(), "命名上屏前台落地回归 😀", None)
+        .unwrap()
+        .unwrap();
+    let session_id = 41_001;
+    app.state.set_picker_session(TargetSession {
+        session_id,
+        target_window_hwnd: Some(target_hwnd),
+        target_focus_hwnd: None,
+    });
+    let option = PasteOption {
+        mode: PasteMode::TextFile,
+        paste_to_target: true,
+        restore_clipboard_after_paste: false,
+    };
+    crate::paste_flow::paste_item(app, &item.id, option, PasteSource::Picker).unwrap();
+    let window = DIALOG.with(|slot| slot.borrow().as_ref().unwrap().window.clone_strong());
+    // 命名窗口延迟聚焦应已从目标窗口抢走前台（与真实使用一致的抢占）
+    pump(300);
+    let naming_hwnd = crate::win32_ext::window_hwnd(&window).unwrap();
+    assert_eq!(
+        ActiveAppResolver::current_foreground_hwnd(),
+        Some(naming_hwnd),
+        "命名窗口应持有前台"
+    );
+
+    window.set_file_name("前台落地.txt".into());
+    window.invoke_confirmed();
+    // 确认返回即已归还：同步归还 + 激活落地先于命名窗收起，是本回归的核心
+    assert!(
+        DIALOG.with(|slot| slot.borrow().is_none()),
+        "确认后释放请求"
+    );
+    assert_eq!(
+        ActiveAppResolver::current_foreground_hwnd(),
+        Some(target_hwnd),
+        "确认必须先归还目标前台再收起命名窗"
+    );
+
+    // 后台链在此后注入：目标窗口应收到完整 Ctrl+V（前台未落地时注入
+    // 会落进别的窗口，计数保持 0）
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while std::time::Instant::now() < deadline
+        && INJECTED_KEYDOWN.load(AtomicOrdering::SeqCst) != 0b11
+    {
+        pump(50);
+    }
+    assert_eq!(
+        INJECTED_KEYDOWN.load(AtomicOrdering::SeqCst),
+        0b11,
+        "目标窗口应收到 Ctrl 与 V 的 keydown"
+    );
+    app.state.set_picker_session(Default::default());
+
+    // 剪贴板恢复是本段的收尾义务（对齐 L3 卫生纪律）：短重试后仍失败
+    // 不得算作验证通过
+    let mut restored = false;
+    for _ in 0..3 {
+        if snapshot.restore(None, None).is_ok() {
+            restored = true;
+            break;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    assert!(restored, "测试剪贴板快照恢复失败，剪贴板被本段覆盖");
+    drop(guard);
+}
+
 fn restore(app: &App, source: PasteSource, target: TargetSession) {
     match source {
         PasteSource::Picker => crate::picker::restore_after_editor(app, target),
