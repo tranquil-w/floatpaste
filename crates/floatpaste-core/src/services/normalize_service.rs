@@ -71,11 +71,11 @@ impl NormalizeService {
         )
         .trim()
         .to_lowercase();
-        let hash_input = format!(
-            "{:?}{:?}{:?}{:?}{:?}",
-            content_hash, width, height, format, file_size
-        );
-        let hash = digest_to_hex(Sha256::digest(hash_input.as_bytes()).iter().copied());
+        // 身份只由像素内容决定：content_hash 已把宽高编入摘要。编码字节数
+        // （file_size）、格式与尺寸元数据仅用于展示，不参与身份——目标应用
+        // 粘贴后常以自己的 PNG/DIB 编码回写剪贴板，同一图片的字节长度随编码
+        // 变化，混入身份会把相同图片误判为新内容（重复入库）。
+        let hash = content_hash;
 
         Some(NewClipImageItem {
             normalized: NormalizedClipImage {
@@ -391,6 +391,7 @@ mod tests {
         assert_eq!(item.normalized.preview_text, "图片 (1920 x 1080, 2.0 KB)");
         assert!(item.normalized.search_text.contains("1920 x 1080"));
         assert!(item.normalized.search_text.contains("png"));
-        assert!(item.normalized.hash.len() > 10);
+        // 身份即像素内容 hash：编码元数据（尺寸/格式/字节长度）不参与身份
+        assert_eq!(item.normalized.hash, "deadbeef");
     }
 }

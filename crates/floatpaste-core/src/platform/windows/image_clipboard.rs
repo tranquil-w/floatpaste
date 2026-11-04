@@ -151,7 +151,9 @@ mod tests {
         ExtendedColorType, ImageEncoder,
     };
 
-    use super::{build_clipboard_image_payload, decode_dib_bytes, decode_png_bytes};
+    use super::{
+        build_clipboard_image_payload, decode_dib_bytes, decode_png_bytes, encode_dib_bytes,
+    };
     use crate::services::image_decode::MAX_IMAGE_EDGE;
 
     #[test]
@@ -239,5 +241,178 @@ mod tests {
             build_clipboard_image_payload(&rgba, 2, 1, Some(encoded_png.clone())).unwrap();
 
         assert_eq!(payload.png_bytes, Some(encoded_png));
+    }
+
+    /// 回归：粘贴图片后监听重采集发布的载荷，重算 hash 必须与库中条目一致，
+    /// 且 3 秒抑制窗内命中自写抑制——否则会新增一条相同图片的重复记录。
+    /// 链路：监听采集入库 → 粘贴发布载荷 → 按监听链路重采集。
+    #[test]
+    fn republished_image_payload_reingests_under_the_same_identity() {
+        use std::time::Duration;
+
+        use crate::{
+            repository::sqlite_repository::SqliteRepository,
+            services::{
+                dedup_service::{DedupDecision, DedupService},
+                history_service::HistoryService,
+                image_storage::ImageStorage,
+                normalize_service::NormalizeService,
+                privacy_service::PrivacyService,
+            },
+            state::CoreState,
+        };
+
+        let dir = std::env::temp_dir().join(format!(
+            "floatpaste-image-resuppress-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let core = CoreState::new(
+            SqliteRepository::new(&dir.join("db.sqlite")).unwrap(),
+            ImageStorage::new(dir.clone()).unwrap(),
+            Default::default(),
+        );
+
+        // 1) 模拟监听采集入库：剪贴板 PNG 直传 → 解码 → 准备 → 公共入口入库。
+        //    像素用伪随机纹理，模拟真实截图：不同压缩级别的编码字节长度才有区分
+        let side = 64usize;
+        let mut rgba = Vec::with_capacity(side * side * 4);
+        let mut seed = 0x9E3779B9u64;
+        for _ in 0..side * side {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            rgba.extend_from_slice(&[
+                (seed >> 33) as u8,
+                (seed >> 41) as u8,
+                (seed >> 49) as u8,
+                255,
+            ]);
+        }
+        let mut clipboard_png = Vec::new();
+        PngEncoder::new(&mut clipboard_png)
+            .write_image(&rgba, side as u32, side as u32, ExtendedColorType::Rgba8)
+            .unwrap();
+        let captured = decode_png_bytes(clipboard_png).unwrap();
+        let prepared = core
+            .image_storage
+            .prepare_image(
+                &captured.rgba,
+                captured.width,
+                captured.height,
+                captured.png_bytes.as_deref(),
+            )
+            .unwrap();
+        let detail = HistoryService::ingest_image(&core, prepared, None)
+            .unwrap()
+            .expect("首次入库应新增记录");
+        let image_path = detail.image_path.clone().expect("图片条目应带存储路径");
+        let stored_file_size = detail.file_size.expect("图片条目应记录 PNG 字节长度");
+
+        // 2) 模拟粘贴发布：与 write_item_to_clipboard 图片本体分支一致——
+        //    先登记 detail.hash 抑制，再从 load_image 构建发布载荷
+        core.self_write_guard()
+            .suppress_hash(detail.hash.clone(), Duration::from_secs(3))
+            .unwrap();
+        let loaded = core.image_storage.load_image(&image_path).unwrap();
+        let payload = build_clipboard_image_payload(
+            &loaded.rgba,
+            loaded.width,
+            loaded.height,
+            Some(loaded.png_bytes),
+        )
+        .unwrap();
+        let published_png = payload.png_bytes.expect("PNG 直传必须保留原始字节");
+
+        // 3) 模拟粘贴后监听重采集：发布的 PNG 直传字节按监听链路重算身份
+        let republished = decode_png_bytes(published_png).unwrap();
+        let prepared_again = core
+            .image_storage
+            .prepare_image(
+                &republished.rgba,
+                republished.width,
+                republished.height,
+                republished.png_bytes.as_deref(),
+            )
+            .unwrap();
+        let normalized = NormalizeService::normalize_image(
+            None,
+            Some(prepared_again.width),
+            Some(prepared_again.height),
+            Some(prepared_again.image_format),
+            Some(prepared_again.file_size),
+            Some(prepared_again.content_hash),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            normalized.normalized.hash, detail.hash,
+            "发布的图片载荷重算身份必须与库中条目一致，否则去重也拦不住重复记录"
+        );
+        let settings = core.current_settings().unwrap();
+        let should_capture = PrivacyService::should_capture_image(
+            &settings,
+            &normalized.normalized,
+            None,
+            &core.self_write_guard(),
+        )
+        .unwrap();
+        assert!(
+            !should_capture,
+            "粘贴发布后抑制窗内重采集必须被自写抑制跳过"
+        );
+
+        // 4) 目标应用回写场景：接收方粘贴后常以自己的 PNG 编码器回写剪贴板，
+        //    同一像素、不同压缩字节。按监听链路重采集必须仍是同一身份，
+        //    且抑制窗外去重也只置顶既有条目——修复前 file_size 混入身份，
+        //    编码字节长度不同会新增重复记录
+        let mut rewritten_png = Vec::new();
+        PngEncoder::new_with_quality(
+            &mut rewritten_png,
+            image::codecs::png::CompressionType::Best,
+            image::codecs::png::FilterType::default(),
+        )
+        .write_image(&rgba, side as u32, side as u32, ExtendedColorType::Rgba8)
+        .unwrap();
+        let rewritten = decode_png_bytes(rewritten_png).unwrap();
+        let prepared_rewritten = core
+            .image_storage
+            .prepare_image(
+                &rewritten.rgba,
+                rewritten.width,
+                rewritten.height,
+                rewritten.png_bytes.as_deref(),
+            )
+            .unwrap();
+        assert_ne!(
+            prepared_rewritten.file_size, stored_file_size,
+            "场景前提：回写重编码的 PNG 字节长度应与原始条目不同"
+        );
+        let normalized_rewritten = NormalizeService::normalize_image(
+            None,
+            Some(prepared_rewritten.width),
+            Some(prepared_rewritten.height),
+            Some(prepared_rewritten.image_format),
+            Some(prepared_rewritten.file_size),
+            Some(prepared_rewritten.content_hash),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            normalized_rewritten.normalized.hash, detail.hash,
+            "同像素不同编码的回写必须保持同一身份"
+        );
+        match DedupService::default()
+            .decide(&core.repository, &normalized_rewritten.normalized.hash)
+            .unwrap()
+        {
+            DedupDecision::BumpExisting(id) => assert_eq!(id, detail.id),
+            other => panic!("相同像素回写必须置顶既有条目，实际: {other:?}"),
+        }
+
+        drop(core);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

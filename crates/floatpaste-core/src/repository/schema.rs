@@ -1,11 +1,14 @@
+use std::path::{Path, PathBuf};
+
 use rusqlite::{params, Connection};
 
 use crate::domain::clip_item::TextKind;
+use crate::services::image_storage::ImageStorage;
 use crate::services::text_identity::text_content_hash;
 use crate::services::text_kind::detect_text_kind;
 use crate::{domain::error::AppError, services::normalize_service::space_cjk_text};
 
-const CURRENT_SCHEMA_VERSION: i32 = 10;
+const CURRENT_SCHEMA_VERSION: i32 = 11;
 const CLIP_ITEMS_MEDIA_COLUMNS: [(&str, &str); 7] = [
     ("image_path", "TEXT NULL"),
     ("image_width", "INTEGER NULL"),
@@ -21,15 +24,18 @@ const CLIP_ITEMS_DIRECTORY_COUNT_COLUMN: (&str, &str) =
 
 /// 初始化数据库：加载初始 schema 并按版本号执行增量迁移。
 ///
+/// `db_path` 用于推导图片目录（与运行时 ImageStorage 同为数据库所在目录），
+/// 供迁移重算存量图片条目的内容身份。
+///
 /// 兼容历史上未记录 `user_version` 的已有数据库：当检测到 media 列缺失但
 /// `user_version` 已是最新时，仍会补齐 media 列迁移。
-pub(super) fn initialize_database(connection: &Connection) -> Result<(), AppError> {
+pub(super) fn initialize_database(connection: &Connection, db_path: &Path) -> Result<(), AppError> {
     // 0001 含 PRAGMA journal_mode 赋值，不能包进事务；幂等靠 IF NOT EXISTS
     connection.execute_batch(include_str!("../../migrations/0001_init.sql"))?;
 
     let schema_version = current_schema_version(connection)?;
     if schema_version < CURRENT_SCHEMA_VERSION {
-        apply_schema_upgrades(connection, schema_version)?;
+        apply_schema_upgrades(connection, schema_version, db_path)?;
     } else if !clip_items_has_media_columns(connection)? {
         // 补列迁移同样整体原子：中途崩溃不会留下"列已加但版本未写"的半迁移状态
         let transaction = connection.unchecked_transaction()?;
@@ -41,7 +47,11 @@ pub(super) fn initialize_database(connection: &Connection) -> Result<(), AppErro
     Ok(())
 }
 
-fn apply_schema_upgrades(connection: &Connection, current_version: i32) -> Result<(), AppError> {
+fn apply_schema_upgrades(
+    connection: &Connection,
+    current_version: i32,
+    db_path: &Path,
+) -> Result<(), AppError> {
     // 全部增量迁移在一个事务内原子完成：表结构与 user_version 要么都生效要么都不生效，
     // 避免重建 FTS 等多步骤迁移中途崩溃后留下半迁移库
     let transaction = connection.unchecked_transaction()?;
@@ -104,8 +114,51 @@ fn apply_schema_upgrades(connection: &Connection, current_version: i32) -> Resul
         apply_preview_refresh_migration(&transaction)?;
     }
 
+    if current_version < 11 {
+        apply_image_hash_migration(&transaction, db_path)?;
+    }
+
     set_schema_version(&transaction, CURRENT_SCHEMA_VERSION)?;
     transaction.commit()?;
+    Ok(())
+}
+
+/// v11：图片条目身份改为像素内容（v10 及之前把 file_size 等编码元数据混入
+/// hash，目标应用粘贴后以自己的 PNG/DIB 编码回写剪贴板时，同一图片会因
+/// 编码字节不同被判为新内容、重复入库）。逐行读取保存的 PNG 重算 hash；
+/// 单行失败保留原 hash 并继续——文件已缺失或损坏的条目无法还原原始像素，
+/// 不能因此让整个迁移失败阻塞启动。不合并历史条目，软删行一并刷新。
+/// 当前全量载入待更新行；数据量大时再引入分批处理。
+fn apply_image_hash_migration(connection: &Connection, db_path: &Path) -> Result<(), AppError> {
+    let image_rows: Vec<(String, String)> = {
+        let mut statement = connection.prepare(
+            "SELECT id, image_path FROM clip_items WHERE type = 'image' AND image_path IS NOT NULL",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+    // 无图片行时直接跳过：ImageStorage 构造会创建 images 目录，
+    // 内存库或相对路径库（如测试）不能因此在工作目录落下空目录
+    if image_rows.is_empty() {
+        return Ok(());
+    }
+    let data_dir = db_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let image_storage = ImageStorage::new(data_dir)?;
+    for (id, image_path) in image_rows {
+        let Some(hash) = image_storage.content_hash_of_stored_image(&image_path) else {
+            tracing::warn!(%id, %image_path, "迁移 v11：读取图片失败，保留原 hash");
+            continue;
+        };
+        connection.execute(
+            "UPDATE clip_items SET hash = ?2 WHERE id = ?1",
+            params![id, hash],
+        )?;
+    }
     Ok(())
 }
 
@@ -370,4 +423,78 @@ fn column_exists(
     }
 
     Ok(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CURRENT_SCHEMA_VERSION;
+    use crate::{
+        repository::sqlite_repository::SqliteRepository, services::image_storage::ImageStorage,
+    };
+
+    /// v11：存量图片行按保存的 PNG 像素重算 hash（此前 file_size 等编码元
+    /// 数据混入身份，目标应用以不同编码回写同一图片会重复入库）；
+    /// 文件缺失或损坏的行保留原 hash，软删行一并刷新。
+    #[test]
+    fn v11_migration_recomputes_image_hash_from_stored_png() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "floatpaste-v11-migration-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        let image_storage = ImageStorage::new(data_dir.clone()).unwrap();
+        let mut rgba = Vec::with_capacity(8 * 8 * 4);
+        for _ in 0..(8 * 8) {
+            rgba.extend_from_slice(&[200, 30, 40, 255]);
+        }
+        let prepared = image_storage.prepare_image(&rgba, 8, 8, None).unwrap();
+        let stored = image_storage.store_prepared_image(&prepared).unwrap();
+
+        let db_path = data_dir.join("floatpaste.db");
+        {
+            let connection = rusqlite::Connection::open(&db_path).unwrap();
+            connection
+                .execute_batch(include_str!("../../migrations/0001_init.sql"))
+                .unwrap();
+            connection.pragma_update(None, "user_version", 10).unwrap();
+            connection
+                .execute_batch(&format!(
+                    "INSERT INTO clip_items(id, type, full_text, preview_text, search_text, hash, created_at, updated_at, image_path, image_width, image_height, image_format, file_size)
+                     VALUES
+                       ('img-live',  'image', '', '', '', 'legacy-live',  1, 1, '{stored}', 8, 8, 'png', 1234),
+                       ('img-del',   'image', '', '', '', 'legacy-del',   2, 2, '{stored}', 8, 8, 'png', 1234),
+                       ('img-rown',  'image', '', '', '', 'legacy-rown',  3, 3, 'images/missing.png', 8, 8, 'png', 1234);
+                    UPDATE clip_items SET deleted_at = 99 WHERE id = 'img-del';",
+                    stored = stored.image_path
+                ))
+                .unwrap();
+        }
+
+        let repository = SqliteRepository::new(&db_path).unwrap();
+        let read_hash = |repository: &SqliteRepository, id: &str| {
+            repository
+                .connection
+                .lock()
+                .unwrap()
+                .query_row("SELECT hash FROM clip_items WHERE id = ?1", [id], |row| {
+                    row.get::<_, String>(0)
+                })
+                .unwrap()
+        };
+
+        assert_eq!(read_hash(&repository, "img-live"), prepared.content_hash);
+        assert_eq!(read_hash(&repository, "img-del"), prepared.content_hash);
+        // 文件缺失的行无法还原像素，保留原 hash，不阻断迁移
+        assert_eq!(read_hash(&repository, "img-rown"), "legacy-rown");
+
+        let version: i32 = repository
+            .connection
+            .lock()
+            .unwrap()
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, CURRENT_SCHEMA_VERSION);
+
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
 }

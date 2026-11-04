@@ -59,7 +59,7 @@ impl SqliteRepository {
         connection.busy_timeout(Duration::from_secs(5))?;
         // 单用户低频读写，默认 2MB 页缓存收紧到 1MB
         connection.pragma_update(None, "cache_size", -1000)?;
-        super::schema::initialize_database(&connection)?;
+        super::schema::initialize_database(&connection, path)?;
         Ok(Self {
             connection: Arc::new(Mutex::new(connection)),
             path: path.to_path_buf(),
@@ -1230,7 +1230,7 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
             .unwrap()
             .query_row("PRAGMA user_version", [], |row| row.get::<_, i32>(0))
             .unwrap();
-        assert_eq!(version, 10);
+        assert_eq!(version, 11);
 
         // v6 迁移按原文回填用途并重算 hash：ID、标签、收藏保持不变
         let legacy_detail = repository.get_item_detail("legacy-item").unwrap();

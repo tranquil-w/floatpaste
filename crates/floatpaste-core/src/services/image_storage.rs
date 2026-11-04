@@ -82,14 +82,9 @@ impl ImageStorage {
         let height = i32::try_from(height)
             .map_err(|_| AppError::Message("图片高度超出支持范围".to_string()))?;
 
-        let mut hasher = Sha256::new();
-        hasher.update(width.to_le_bytes());
-        hasher.update(height.to_le_bytes());
-        hasher.update(rgba);
-
         Ok(PreparedImage {
             png_bytes,
-            content_hash: digest_to_hex(hasher.finalize().iter().copied()),
+            content_hash: image_content_hash(rgba, width, height)?,
             width,
             height,
             image_format: PNG_FORMAT.to_string(),
@@ -119,17 +114,22 @@ impl ImageStorage {
         decode_png_bytes(&png_bytes)
     }
 
+    /// 按保存的 PNG 读取像素并重算内容身份，供数据库迁移刷新存量条目 hash。
+    /// 只接受应用生成的 `images/<UUID>.png` 命名（与清理同规则）；
+    /// 文件缺失、损坏或超限时返回 `None`，调用方保留原 hash。
+    pub fn content_hash_of_stored_image(&self, image_path: &str) -> Option<String> {
+        if !is_app_managed_image_path(Path::new(image_path)) {
+            return None;
+        }
+        let decoded = self.load_image(image_path).ok()?;
+        let width = i32::try_from(decoded.width).ok()?;
+        let height = i32::try_from(decoded.height).ok()?;
+        image_content_hash(&decoded.rgba, width, height).ok()
+    }
+
     pub fn delete_image(&self, image_path: &str) -> Result<(), AppError> {
         // 只删除应用生成的图片名；损坏的数据库引用不能变成任意文件删除。
-        let path = Path::new(image_path);
-        if path.parent() != Some(Path::new(IMAGE_DIR_NAME))
-            || path.extension().and_then(|value| value.to_str()) != Some(PNG_EXTENSION)
-            || path
-                .file_stem()
-                .and_then(|value| value.to_str())
-                .and_then(|value| Uuid::parse_str(value).ok())
-                .is_none()
-        {
+        if !is_app_managed_image_path(Path::new(image_path)) {
             return Err(AppError::Message("拒绝清理非应用图片路径".into()));
         }
         use std::os::windows::fs::MetadataExt;
@@ -169,6 +169,32 @@ impl ImageStorage {
 
         Ok(self.base_dir.join(relative_path))
     }
+}
+
+/// 只接受应用生成的 `images/<UUID>.png` 命名；删除与迁移重算共用同一规则，
+/// 损坏的数据库引用不能变成任意文件访问或删除。
+fn is_app_managed_image_path(path: &Path) -> bool {
+    path.parent() == Some(Path::new(IMAGE_DIR_NAME))
+        && path.extension().and_then(|value| value.to_str()) == Some(PNG_EXTENSION)
+        && path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .and_then(|value| Uuid::parse_str(value).ok())
+            .is_some()
+}
+
+/// 图片内容身份：SHA256(宽高小端字节 + RGBA 像素)。
+/// 录入与迁移共用同一实现，保证存量重算与运行时采集产生相同 hash。
+pub fn image_content_hash(rgba: &[u8], width: i32, height: i32) -> Result<String, AppError> {
+    let expected = super::image_decode::validate_pixels(width as usize, height as usize)?;
+    if rgba.len() != expected {
+        return Err(AppError::Message("图片像素数据长度与尺寸不匹配".into()));
+    }
+    let mut hasher = Sha256::new();
+    hasher.update(width.to_le_bytes());
+    hasher.update(height.to_le_bytes());
+    hasher.update(rgba);
+    Ok(digest_to_hex(hasher.finalize().iter().copied()))
 }
 
 fn decode_png_bytes(png_bytes: &[u8]) -> Result<DecodedImage, AppError> {
