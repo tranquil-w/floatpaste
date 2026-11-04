@@ -313,10 +313,14 @@ component ResizeHandle inherits Rectangle {
     callback finished();
 
     handle-ta := TouchArea {
-        mouse-cursor: direction == 0 || direction == 4 || direction == 5 ? n-resize
-            : direction == 1 || direction == 6 || direction == 7 ? s-resize
+        mouse-cursor: direction == 0 ? n-resize
+            : direction == 1 ? s-resize
             : direction == 2 ? w-resize
-            : e-resize;
+            : direction == 3 ? e-resize
+            : direction == 4 ? nw-resize
+            : direction == 5 ? ne-resize
+            : direction == 6 ? sw-resize
+            : se-resize;
         pointer-event(e) => {
             if (e.kind == PointerEventKind.down) {
                 root.started();
@@ -858,10 +862,25 @@ export component QuickPasteWindow inherits Window {
                     width: 46px;
                     height: parent.height;
                     opacity: btn-close-ta.pressed ? 0.85 : 1.0;
-                    background: btn-close-ta.has-hover ? Theme.danger-subtle : transparent;
                     btn-close-ta := TouchArea {
                         mouse-cursor: default;
                         clicked => { root.close-clicked(); }
+                    }
+                    // hover 底自绘「仅右上角圆角」形状：软渲 clip 不按圆角
+                    // 裁剪（slint#4176，card 的 clip 圈不住角部溢出），
+                    // danger-subtle 半透明，同色矩形叠加合成又会在重叠处
+                    // 双重混色，只能单一路径填充；圆弧半径 8 对齐 card 的
+                    // Metrics.radius-lg。viewbox 与按钮 46×30 一致、1:1
+                    // 呈现；顶栏高度固定 30px，若调整须同步 viewbox，
+                    // 否则圆弧被非等比拉伸变形
+                    if btn-close-ta.has-hover : Path {
+                        width: 100%;
+                        height: 100%;
+                        viewbox-width: 46;
+                        viewbox-height: 30;
+                        fill: Theme.danger-subtle;
+                        // k=4.42≈0.5523·r（r=8）为四分之一圆弧的三次贝塞尔近似
+                        commands: "M 0 0 L 38 0 C 42.42 0 46 3.58 46 8 L 46 30 L 0 30 Z";
                     }
                     Path {
                         x: (parent.width - 12px) / 2;
