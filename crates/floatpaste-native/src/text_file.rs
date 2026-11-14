@@ -80,22 +80,31 @@ pub(crate) fn open(
             )
         }
     };
-    if let Some(rect) = crate::win32_ext::physical_rect(source_hwnd) {
-        let area = floatpaste_core::platform::windows::picker_position::work_area_from_point(
-            floatpaste_core::platform::windows::picker_position::ScreenPoint {
-                x: rect.left,
-                y: rect.top,
-            },
-        )?;
-        let scale = window.window().scale_factor();
-        let point = floatpaste_core::services::picker_position_service::center_in_work_area(
-            area,
-            (460.0 * scale) as i32,
-            (250.0 * scale) as i32,
-        );
-        window
-            .window()
-            .set_position(slint::PhysicalPosition::new(point.x, point.y));
+    let target_position = match crate::win32_ext::physical_rect(source_hwnd) {
+        Some(rect) => {
+            let area = floatpaste_core::platform::windows::picker_position::work_area_from_point(
+                floatpaste_core::platform::windows::picker_position::ScreenPoint {
+                    x: rect.left,
+                    y: rect.top,
+                },
+            )?;
+            let scale = window.window().scale_factor();
+            let point = floatpaste_core::services::picker_position_service::center_in_work_area(
+                area,
+                (460.0 * scale) as i32,
+                (250.0 * scale) as i32,
+            );
+            Some((point.x, point.y))
+        }
+        None => None,
+    };
+    // 有落位点时先停屏首秀（同 picker/tooltip 的停屏语义）：图标须等窗口实体
+    // 就绪才能写入，先上屏会露出一帧系统缩放的糊图标。
+    if target_position.is_some() {
+        window.window().set_position(slint::PhysicalPosition::new(
+            OFFSCREEN_POSITION,
+            OFFSCREEN_POSITION,
+        ));
     }
     let previous_foreground = ActiveAppResolver::current_foreground_hwnd();
     // 先收口来源输入与鼠标监控，保留原目标；对话框接管焦点。
@@ -107,6 +116,7 @@ pub(crate) fn open(
         restore(app, source, target);
         return Err(AppError::Message(format!("显示文件名窗口失败：{error}")));
     }
+    reveal_with_icon(window.as_weak(), target_position);
     // 速贴不抢焦点，前台仍在目标应用；不强制获取前台时
     // 对话框会被压在目标窗口之下，键盘输入（Esc/Enter/文件名）全部
     // 落入目标应用。沿用编辑器窗口绕过前台锁的获取方式：show 刚返回
@@ -211,6 +221,47 @@ pub(crate) fn close(return_to_source: bool) {
     if return_to_source && current {
         restore(&dialog.app, dialog.source, dialog.target);
     }
+}
+
+/// 停屏位置，与 picker/tooltip 的停屏口径一致（Windows 窗口坐标下限）。
+const OFFSCREEN_POSITION: i32 = -32000;
+/// 等窗口实体就绪的轮询间隔与次数上限。句柄迟迟不来时也必须落位，
+/// 不能让对话框永久留在屏外。
+const REVEAL_RETRY_MS: u64 = 8;
+const REVEAL_RETRY_LIMIT: u32 = 16;
+
+/// 写入窗口图标后落位。图标按 DPI 从内嵌 ICO 精确取档：Slint `Window.icon`
+/// 交给 winit 的是单一位图（实测 `WM_GETICON` 拿到 512×512），系统再缩到
+/// 标题栏/任务栏档位会把细线条糊掉——编辑/设置窗走 `app_icon` 的同一套取档。
+/// 窗口实体由 winit 在下一轮事件循环创建（`show` 返回时句柄仍不可得），
+/// 因此停屏首秀、就绪即写图标并落位：用户看到的首帧已带清晰图标。
+fn reveal_with_icon(window: slint::Weak<TextFileWindow>, target: Option<(i32, i32)>) {
+    attempt_reveal(window, target, REVEAL_RETRY_LIMIT);
+}
+
+fn attempt_reveal(window: slint::Weak<TextFileWindow>, target: Option<(i32, i32)>, retries: u32) {
+    let Some(window) = window.upgrade() else {
+        return;
+    };
+    let hwnd = crate::win32_ext::window_hwnd(&window);
+    if let Some(hwnd) = hwnd {
+        crate::app_icon::apply_window_icon(hwnd);
+    }
+    if hwnd.is_some() || retries == 0 {
+        if let Some((x, y)) = target {
+            window
+                .window()
+                .set_position(slint::PhysicalPosition::new(x, y));
+        }
+        return;
+    }
+    let weak = window.as_weak();
+    slint::Timer::single_shot(
+        std::time::Duration::from_millis(REVEAL_RETRY_MS),
+        move || {
+            attempt_reveal(weak, target, retries - 1);
+        },
+    );
 }
 
 /// 交互桌面前台落地契约（docs/testing.md L2 前台段约束）：命名窗口确认
@@ -398,11 +449,48 @@ fn restore(app: &App, source: PasteSource, target: TargetSession) {
     }
 }
 
+/// 窗口图标的位图尺寸（WM_GETICON 的 HICON 经 GetIconInfo 取 color 位图），
+/// `kind` 为 `ICON_SMALL`（标题栏）或 `ICON_BIG`（任务栏）。仅测试用：核对落窗
+/// 图标是 ICO 里与 DPI 匹配的档位，而非被系统缩放的位图——后者是 Slint
+/// `Window.icon` 的原图（实测 512×512），缩到 16/24 必糊。
+#[cfg(test)]
+fn icon_bitmap_size(hwnd: isize, kind: u32) -> Option<(i32, i32)> {
+    use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+    use windows::Win32::Graphics::Gdi::{DeleteObject, GetObjectW, BITMAP, HGDIOBJ};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetIconInfo, SendMessageW, HICON, ICONINFO, WM_GETICON,
+    };
+
+    unsafe {
+        let icon = SendMessageW(
+            HWND(hwnd as *mut _),
+            WM_GETICON,
+            Some(WPARAM(kind as usize)),
+            Some(LPARAM(0)),
+        );
+        if icon.0 == 0 {
+            return None;
+        }
+        let mut info = ICONINFO::default();
+        GetIconInfo(HICON(icon.0 as *mut _), &mut info).ok()?;
+        let mut bitmap = BITMAP::default();
+        let copied = GetObjectW(
+            HGDIOBJ(info.hbmColor.0),
+            std::mem::size_of::<BITMAP>() as i32,
+            Some(&mut bitmap as *mut _ as *mut _),
+        );
+        let _ = DeleteObject(HGDIOBJ(info.hbmColor.0));
+        let _ = DeleteObject(HGDIOBJ(info.hbmMask.0));
+        (copied != 0).then_some((bitmap.bmWidth, bitmap.bmHeight))
+    }
+}
+
 #[cfg(test)]
 pub(crate) fn contract_tests(app: &App) {
     use floatpaste_core::{
         domain::clip_item::PasteMode, services::history_service::HistoryService,
     };
+    use windows::Win32::UI::WindowsAndMessaging::{ICON_BIG, ICON_SMALL};
     let item = HistoryService::ingest_text(app.core(), "文件名窗口验收 😀\n    原文", None)
         .unwrap()
         .unwrap();
@@ -415,6 +503,41 @@ pub(crate) fn contract_tests(app: &App) {
         crate::paste_flow::paste_item(app, &item.id, option.clone(), source).unwrap();
         let window = DIALOG.with(|slot| slot.borrow().as_ref().unwrap().window.clone_strong());
         assert!(can_focus(&window));
+        // 图标由窗口实体就绪后的定时器写入，先让事件循环转一圈（winit 在这一轮
+        // 建窗，之后才谈得上 WM_SETICON 与落位）。
+        slint::Timer::single_shot(std::time::Duration::from_millis(80), || {
+            slint::quit_event_loop().unwrap()
+        });
+        slint::run_event_loop_until_quit().unwrap();
+        // 标题栏取小图标、任务栏取大图标绘制，两者的位图都必须是 ICO 里与当前
+        // DPI 匹配的档位：Slint 位图只有一个尺寸，系统缩到 16/24 会把细线条糊掉
+        // （回归「粘贴为文件」窗口图标模糊）。
+        let hwnd = crate::win32_ext::window_hwnd(&window).expect("命名窗口句柄缺失");
+        let (small, big) = unsafe {
+            use windows::Win32::UI::WindowsAndMessaging::{
+                GetSystemMetrics, SM_CXICON, SM_CXSMICON,
+            };
+            (
+                GetSystemMetrics(SM_CXSMICON),
+                GetSystemMetrics(SM_CXICON) * 3 / 4,
+            )
+        };
+        assert_eq!(
+            icon_bitmap_size(hwnd, ICON_SMALL),
+            Some((small, small)),
+            "命名窗口标题栏图标应按 DPI 从内嵌 ICO 精确取档"
+        );
+        assert_eq!(
+            icon_bitmap_size(hwnd, ICON_BIG),
+            Some((big, big)),
+            "命名窗口任务栏图标应按 DPI 从内嵌 ICO 精确取档"
+        );
+        // 停屏首秀是为了不在首帧露出糊图标，落位不能因此丢失
+        assert_ne!(
+            crate::win32_ext::physical_rect(hwnd).map(|rect| rect.left),
+            Some(OFFSCREEN_POSITION),
+            "命名窗口必须落位，不能留在停屏位置"
+        );
         close(false);
         // 配置次级动作为文本文件后，两个真实窗口入口仍先进入命名流程。
         let mut settings = app.state.current_settings();
