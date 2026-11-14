@@ -58,7 +58,7 @@ const SESSION_KEY_DEFS: [(&str, &str); 8] = [
     ("上屏", "把选中条目粘贴到目标应用。"),
     (
         "执行默认次级动作",
-        "按条目类别执行「行为 → 默认次级动作」中配置的动作。",
+        "按条目类别执行「速贴与上屏 → 默认次级动作」中配置的动作。",
     ),
     ("编辑内容", "打开编辑窗口，修改文本或管理标签。"),
     ("收藏 / 取消收藏", "切换选中条目的收藏状态。"),
@@ -73,6 +73,29 @@ const STATUS_SAVING: i32 = 1;
 const STATUS_SAVED: i32 = 2;
 const STATUS_ERROR: i32 = 3;
 const STATUS_BLOCKED: i32 = 4;
+
+/// 设置页序号：与 `ui/settings.slint` 的导航数组顺序、页面 `if` 条件与
+/// `NavIcon.kind` 一一对应。界面与测试只引用这里的名字，重排页面时改一处。
+/// 生产路径目前只落到首屏（QUICK_PASTE），其余页由测试与快照按名引用，
+/// 故非测试构建允许未使用——不要据此删除常量，它们是页序的唯一来源
+pub(crate) mod section {
+    #![allow(dead_code)]
+
+    /// 速贴与上屏（速贴显示/容量 + 上屏触发与默认次级动作）
+    pub(crate) const QUICK_PASTE: i32 = 0;
+    /// 快捷键（全局热键 + 会话键 + 数字直达）
+    pub(crate) const SHORTCUTS: i32 = 1;
+    /// 外观（明暗、主题预设、强调色、材质）
+    pub(crate) const APPEARANCE: i32 = 2;
+    /// 系统（启动与管理员权限）
+    pub(crate) const SYSTEM: i32 = 3;
+    /// 隐私与数据（采集控制、保留与回收、危险操作）
+    pub(crate) const PRIVACY: i32 = 4;
+    /// 标签（内容管理，非偏好项）
+    pub(crate) const TAGS: i32 = 5;
+    /// 关于（非偏好项）
+    pub(crate) const ABOUT: i32 = 6;
+}
 
 thread_local! {
     /// 800ms 防抖保存定时器（单实例，重编辑重置）
@@ -942,7 +965,7 @@ fn hydrate(app: &App, win: &SettingsWindow) {
     win.set_status_kind(STATUS_IDLE);
     win.set_status_reasons("".into());
     win.set_save_banner_visible(false);
-    win.set_active_section(0);
+    win.set_active_section(section::QUICK_PASTE);
     win.set_scroll_y(0.0);
 
     let resolved = theme::resolve_theme(settings.theme_mode.clone(), theme::system_prefers_dark());
@@ -1110,7 +1133,7 @@ fn session_conflict_reason(win: &SettingsWindow) -> Option<String> {
 }
 
 /// 会话键行模型（按当前设置构建，打开设置窗口时整体水合）
-fn session_key_rows(settings: &UserSetting) -> Vec<SessionKeyRow> {
+pub(crate) fn session_key_rows(settings: &UserSetting) -> Vec<SessionKeyRow> {
     SESSION_KEY_DEFS
         .iter()
         .enumerate()
@@ -1957,7 +1980,7 @@ pub(crate) mod copy_contract_tests {
         win.set_winv_enabled(false);
         // 快捷键页整体高度：分页后 content-height 即当前页内容高，
         // 错误提示换行撑高行卡应体现在页高上
-        win.set_active_section(3);
+        win.set_active_section(section::SHORTCUTS);
         let section_height = || {
             let _ = win.window().take_snapshot().unwrap();
             win.get_content_height()
@@ -1984,10 +2007,12 @@ pub(crate) mod copy_contract_tests {
         update_session_row(&win, 0, None, Some(""));
 
         // 最窄窗口中通过指针打开实际选择框；方向键预选、Esc 取消、
-        // Enter 确认，不绕过弹层分发。坐标与下方六类设置快照一致。
-        win.set_active_section(1);
+        // Enter 确认，不绕过弹层分发。坐标对应「速贴与上屏」页默认
+        // 次级动作卡的普通文本行（页首 → 该卡需滚动到视口内）。
+        win.set_active_section(section::QUICK_PASTE);
         let _ = win.window().take_snapshot().unwrap();
         win.set_scroll_y(-360.0);
+        // 滚动后重解一次布局：指针命中的行位置以新偏移为准
         let _ = win.window().take_snapshot().unwrap();
         let weak = win.as_weak();
         win.on_secondary_plain_selected(move |index| {
@@ -2014,22 +2039,24 @@ pub(crate) mod copy_contract_tests {
             win.window()
                 .dispatch_event(slint::platform::WindowEvent::KeyReleased { text });
         };
-        click(730.0, 394.0);
+        // 坐标来源：880×760 窗口、本页滚到 -360 时，「普通文本」下拉框
+        // 中心 (730, 208)；弹层第二项中心 (730, 284)（按快照量测）
+        click(730.0, 208.0);
         send_key(slint::platform::Key::DownArrow.into());
         assert_eq!(win.get_secondary_plain(), 0, "预选不应保存");
         send_key(slint::platform::Key::Escape.into());
         assert_eq!(win.get_secondary_plain(), 0, "Esc 取消选择");
         assert!(!closed.get(), "弹层 Esc 不得关闭设置窗口");
-        click(730.0, 394.0);
+        click(730.0, 208.0);
         send_key(slint::platform::Key::DownArrow.into());
         send_key(slint::platform::Key::Return.into());
         assert_eq!(win.get_secondary_plain(), 1, "确认应选择文本文件");
         win.set_secondary_plain(0);
-        click(730.0, 394.0);
-        click(730.0, 466.0);
+        click(730.0, 208.0);
+        click(730.0, 284.0);
         assert_eq!(win.get_secondary_plain(), 1, "指针选择第二项应保存");
         win.set_secondary_plain(0);
-        click(730.0, 394.0);
+        click(730.0, 208.0);
         click(400.0, 350.0);
         assert_eq!(win.get_secondary_plain(), 0, "点击外部取消，不应保存");
         send_key(slint::platform::Key::Escape.into());
@@ -2071,27 +2098,17 @@ pub(crate) mod copy_contract_tests {
                 win.set_session_key_rows(slint::ModelRc::new(VecModel::from(session_key_rows(
                     &UserSetting::default(),
                 ))));
-                // ── 通用页（数字框给真实值，验证行排布而非空框）──
+                // ── 速贴与上屏页（数字框给真实值，验证行排布而非空框）──
                 win.set_history_limit_text("1000".into());
                 win.set_picker_limit_text("50".into());
                 win.set_picker_card_height_text("104".into());
                 win.set_app_version(env!("CARGO_PKG_VERSION").into());
-                win.set_active_section(0);
-                let _ = win.window().take_snapshot().unwrap();
-                save_snap(format!("settings-page-general-{name}-{scale}.png"));
-                // ── 行为页：页顶 + 默认次级动作卡 ──
-                win.set_active_section(1);
+                win.set_active_section(section::QUICK_PASTE);
                 win.set_scroll_y(0.0);
                 let _ = win.window().take_snapshot().unwrap();
-                save_snap(format!("settings-page-behavior-{name}-{scale}.png"));
-                // ── 外观页（预设卡与强调色按当前明暗主题派生）──
-                rebuild_preview_models(&win, &UserSetting::default(), resolved);
-                win.set_active_section(2);
-                win.set_scroll_y(0.0);
-                let _ = win.window().take_snapshot().unwrap();
-                save_snap(format!("settings-page-appearance-{name}-{scale}.png"));
-                // ── 快捷键页：页顶错误提示 + 底部会话键与编辑键 ──
-                win.set_active_section(3);
+                save_snap(format!("settings-page-quick-paste-{name}-{scale}.png"));
+                // ── 快捷键页：页顶错误提示 + 底部会话键 ──
+                win.set_active_section(section::SHORTCUTS);
                 win.set_scroll_y(0.0);
                 win.set_main_hotkey_status(occupied.into());
                 win.set_search_hotkey_status(occupied.into());
@@ -2110,9 +2127,20 @@ pub(crate) mod copy_contract_tests {
                 win.set_main_hotkey_status("".into());
                 win.set_search_hotkey_status("".into());
                 update_session_row(&win, 0, None, Some(""));
-                // ── 行为页默认次级动作：两组说明状态（最小窗口宽度）──
+                // ── 外观页（预设卡与强调色按当前明暗主题派生）──
+                rebuild_preview_models(&win, &UserSetting::default(), resolved);
+                win.set_active_section(section::APPEARANCE);
+                win.set_scroll_y(0.0);
+                let _ = win.window().take_snapshot().unwrap();
+                save_snap(format!("settings-page-appearance-{name}-{scale}.png"));
+                // ── 系统页（启动与管理员权限）──
+                win.set_active_section(section::SYSTEM);
+                win.set_scroll_y(0.0);
+                let _ = win.window().take_snapshot().unwrap();
+                save_snap(format!("settings-page-system-{name}-{scale}.png"));
+                // ── 速贴与上屏页默认次级动作：两组说明状态（最小窗口宽度）──
                 win.window().set_size(slint::LogicalSize::new(880.0, 760.0));
-                win.set_active_section(1);
+                win.set_active_section(section::QUICK_PASTE);
                 win.set_scroll_y(0.0);
                 for (state, index, key) in
                     [("default", 1, "Shift+Enter"), ("files", 2, "Alt+Enter")]
@@ -2130,25 +2158,27 @@ pub(crate) mod copy_contract_tests {
                     let _ = win.window().take_snapshot().unwrap();
                     save_snap(format!("paste-settings-{state}-{name}-{scale}.png"));
                     if state == "files" {
-                        click(730.0, 660.0);
+                        // 图片行（滚到页底后位于视口内）的菜单可整块落在窗内，
+                        // 供快照核对靠近底部的弹层不被视口裁切
+                        click(730.0, 604.0);
                         save_snap(format!("paste-settings-menu-{name}-{scale}.png"));
                         send_key(slint::platform::Key::Escape.into());
                     }
                 }
-                // ── 隐私页与清除确认框 ──
-                win.set_active_section(4);
+                // ── 隐私与数据页与清除确认框 ──
+                win.set_active_section(section::PRIVACY);
                 win.set_scroll_y(0.0);
                 for dialog in [false, true] {
                     win.set_clear_history_dialog_open(dialog);
                     let _ = win.window().take_snapshot().unwrap();
-                    save_snap(format!("privacy-{name}-{dialog}-{scale}.png"));
+                    save_snap(format!("privacy-data-{name}-{dialog}-{scale}.png"));
                 }
                 win.set_clear_history_dialog_open(false);
                 // ── 标签页与关于页 ──
-                win.set_active_section(5);
+                win.set_active_section(section::TAGS);
                 let _ = win.window().take_snapshot().unwrap();
                 save_snap(format!("settings-page-tags-{name}-{scale}.png"));
-                win.set_active_section(6);
+                win.set_active_section(section::ABOUT);
                 let _ = win.window().take_snapshot().unwrap();
                 save_snap(format!("settings-page-about-{name}-{scale}.png"));
             }

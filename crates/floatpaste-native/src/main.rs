@@ -840,6 +840,7 @@ mod settings_page_tests {
     //! 单测试函数串行：winit 事件循环全局单例，多测试并行实例化会
     //! 抢建失败（"EventLoop can't be recreated"）
 
+    use floatpaste_core::domain::settings::UserSetting;
     use slint::ComponentHandle;
 
     /// 由 l2_headless_ui_contracts 单线程串行调用（不再挂 #[test]，
@@ -850,9 +851,13 @@ mod settings_page_tests {
         // 未布局时元素几何为 0，滚轮命中落空
         win.window().set_size(slint::LogicalSize::new(920.0, 760.0));
 
-        // ── 滚轮即时性与 clamp（行为页：内容最高的页面）──
-        // 向下滚一格（Flickable 数值语义：delta_y 为负累加，scroll-y 负向增大）
-        win.set_active_section(1);
+        // ── 滚轮即时性与 clamp（快捷键页：内容最高的页面）──
+        // 会话键行是页面主体（8 行），未注入模型时该卡为空、整页不足一屏，
+        // 滚轮无从产生偏移——先按真实开窗路径水合行模型
+        win.set_session_key_rows(slint::ModelRc::new(slint::VecModel::from(
+            crate::settings::session_key_rows(&UserSetting::default()),
+        )));
+        win.set_active_section(crate::settings::section::SHORTCUTS);
         let window = win.window();
         let pos = slint::LogicalPosition::new(500.0, 400.0);
         let scroll = |dy: f32| {
@@ -873,7 +878,7 @@ mod settings_page_tests {
         scroll(-1_000_000.0);
         let max = (win.get_content_height() - win.get_view_height()).max(0.0);
         assert_eq!(win.get_scroll_y(), -max, "触底应 clamp 到 -最大滚动量");
-        assert!(max > 180.0, "行为页内容应高于一屏（否则滚动测试无意义）");
+        assert!(max > 180.0, "快捷键页内容应高于一屏（否则滚动测试无意义）");
 
         // 回滚到顶：向上滚超大值应 clamp 回 0
         scroll(1_000_000.0);
@@ -881,7 +886,7 @@ mod settings_page_tests {
 
         // ── 侧边导航点击切页并复位滚动 ──
         // 导航项几何：标题栏 32 + 头部 41 + 侧栏内边距 10 起、行高 30
-        // 间距 2；第 5 项（隐私，idx=4）中心 x=90, y=73+10+4*32+15=226
+        // 间距 2；第 5 项（隐私与数据，idx=4）中心 x=90, y=73+10+4*32+15=226
         win.set_scroll_y(-max);
         let click = |x, y| {
             use slint::platform::{PointerEventButton, WindowEvent};
@@ -896,11 +901,27 @@ mod settings_page_tests {
             });
         };
         click(90.0, 226.0);
-        assert_eq!(win.get_active_section(), 4, "点击侧边第 5 项应切到隐私页");
+        assert_eq!(
+            win.get_active_section(),
+            crate::settings::section::PRIVACY,
+            "点击侧边第 5 项应切到隐私与数据页"
+        );
         assert_eq!(win.get_scroll_y(), 0.0, "切页应复位该页滚动");
         assert!(
             win.get_content_height() <= win.get_view_height(),
-            "隐私页内容应在一屏内（整页呈现，无需滚动）"
+            "隐私与数据页内容应在一屏内（整页呈现，无需滚动）"
+        );
+        // 外观页四行一卡，同样整页呈现；切到它核对更短页面的
+        // 「内容不超视口即无滚动条」性质
+        click(90.0, 73.0 + 10.0 + 2.0 * 32.0 + 15.0);
+        assert_eq!(
+            win.get_active_section(),
+            crate::settings::section::APPEARANCE,
+            "点击侧边第 3 项应切到外观页"
+        );
+        assert!(
+            win.get_content_height() <= win.get_view_height(),
+            "外观页内容应在一屏内（整页呈现，无需滚动）"
         );
     }
 }
