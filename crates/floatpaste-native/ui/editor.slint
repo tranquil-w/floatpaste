@@ -1,4 +1,4 @@
-// 编辑窗口：对齐旧版 EditorShell.tsx + tagEditor.tsx + keyboard.ts。
+// 编辑窗口：条目信息、标签、正文工具栏与状态栏分区。
 // no-frame 窗 + 自绘标题栏（任务栏可见、可缩放、800×600 起 min 400×300，
 // 停屏常驻不销毁重建）。会话与数据由 Rust 接管：
 // - 文本条目：多行编辑 + Ctrl+S 保存 + 未保存关闭确认 + 两段式删除
@@ -17,6 +17,68 @@ export struct EditorTagSuggestion {
     count-text: string,
 }
 
+// 底部状态栏保存按钮（文本条目专用）：
+// 干净状态：轻量状态徽章（微边框 + 对勾 + 浅灰文字）；
+// 脏状态：高亮主按钮（Theme.accent-emphasis + 纯白加粗文字）。
+component SaveButton inherits Rectangle {
+    in property <bool> is-dirty: false;
+    callback clicked();
+    callback hint(length, length);
+    callback hint-left();
+
+    height: 24px;
+    width: save-row.preferred-width + 16px;
+    border-radius: Metrics.radius-md;
+    border-width: 1px;
+    border-color: root.is-dirty ? transparent : (save-ta.has-hover ? Theme.border-default : Theme.border-subtle);
+    background: root.is-dirty
+        ? (save-ta.has-hover ? Theme.accent-hover : Theme.accent-emphasis)
+        : (save-ta.has-hover ? Theme.hover-bg : transparent);
+    opacity: save-ta.pressed ? 0.85 : 1.0;
+    animate background { duration: Motion.dur-color; easing: Motion.ease; }
+    animate border-color { duration: Motion.dur-color; easing: Motion.ease; }
+
+    save-ta := TouchArea {
+        mouse-cursor: root.is-dirty ? pointer : default;
+        clicked => {
+            if (root.is-dirty) {
+                root.clicked();
+            }
+        }
+        changed has-hover => {
+            if (self.has-hover) {
+                root.hint(root.absolute-position.x, root.absolute-position.y + root.height + 4px);
+            } else {
+                root.hint-left();
+            }
+        }
+    }
+
+    save-row := HorizontalLayout {
+        padding-left: 6px;
+        padding-right: 6px;
+        spacing: 4px;
+        alignment: center;
+        if (!root.is-dirty): Path {
+            width: 10px;
+            height: 10px;
+            y: (parent.height - self.height) / 2;
+            viewbox-width: 24;
+            viewbox-height: 24;
+            stroke: Theme.fg-subtle;
+            stroke-width: 2.2px;
+            commands: "M 4 12.5 L 9.5 18 L 20 6.5";
+        }
+        Text {
+            text: root.is-dirty ? "保存" : "已保存";
+            color: root.is-dirty ? Theme.fg-on-emphasis : Theme.fg-subtle;
+            font-size: Metrics.text-xs;
+            font-weight: root.is-dirty ? Metrics.weight-medium : Metrics.weight-normal;
+            vertical-alignment: center;
+        }
+    }
+}
+
 // 两段式删除按钮（旧版 actionButtonDanger 的编辑器变体）
 component DeleteButton inherits Rectangle {
     in property <bool> armed;
@@ -24,13 +86,14 @@ component DeleteButton inherits Rectangle {
     callback hint(length, length);
     callback hint-left();
 
-    height: 28px;
-    width: armed ? 68px : 28px;
+    height: 24px;
+    width: armed ? 68px : 24px;
     border-radius: Metrics.radius-md;
     opacity: del-ta.pressed ? 0.85 : 1.0;
     background: armed ? Theme.danger-subtle
         : (del-ta.has-hover ? Theme.danger-subtle : transparent);
     animate background { duration: Motion.dur-color; easing: Motion.ease; }
+    animate width { duration: Motion.dur-enter; easing: Motion.ease; }
 
     del-ta := TouchArea {
         mouse-cursor: default;
@@ -65,6 +128,74 @@ component DeleteButton inherits Rectangle {
         // Slint 描边不随视框缩放：1.8 @24 → 16px 显示折算 1.2px
         stroke-width: 1.2px;
         commands: "M 4 7 L 20 7 M 9.5 4.75 L 14.5 4.75 L 14.5 7 L 9.5 7 Z M 6.5 7 L 7.3 19.25 L 16.7 19.25 L 17.5 7 M 10 10.5 L 10 16.5 M 14 10.5 L 14 16.5";
+    }
+}
+
+// 仅用于本窗口的轻量工具键；焦点框和 Enter/空格支持与指针同一路径。
+component EditorTool inherits Rectangle {
+    in property <string> label;
+    in property <string> icon;
+    in property <string> tip: root.label;
+    in property <bool> active: false;
+    in property <bool> primary: false;
+    in property <bool> available: true;
+    callback clicked();
+    callback hint(string, length, length);
+    callback hint-left();
+    height: 28px;
+    width: root.primary ? 64px : root.icon != "" ? 28px : tool-label.preferred-width + 16px;
+    horizontal-stretch: 0;
+    border-radius: Metrics.radius-md;
+    opacity: tool-ta.pressed && root.available ? 0.85 : 1.0;
+    background: root.primary ? (root.available ? Theme.accent-emphasis : Theme.hover-bg)
+        : tool-ta.has-hover || tool-focus.has-focus || root.active ? Theme.hover-bg : transparent;
+    border-width: 1px;
+    border-color: tool-focus.has-focus ? Theme.border-accent : transparent;
+    animate background { duration: Motion.dur-color; easing: Motion.ease; }
+    accessible-role: button;
+    accessible-label: root.tip;
+    accessible-enabled: root.available;
+    accessible-action-default => { if (root.available) { root.clicked(); } }
+    tool-label := Text {
+        visible: root.icon == "";
+        text: root.label;
+        color: root.primary && root.available ? Theme.fg-on-emphasis : root.active ? Theme.fg-default : Theme.fg-muted;
+        font-size: Metrics.text-xs;
+        font-weight: root.primary ? Metrics.weight-medium : Metrics.weight-normal;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    if (root.icon != ""): Path {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: 16px;
+        height: 16px;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        commands: root.icon;
+        stroke: root.active ? Theme.fg-default : Theme.fg-muted;
+        stroke-width: 1.3px;
+    }
+    tool-focus := FocusScope {
+        enabled: root.available;
+        width: 100%;
+        height: 100%;
+        key-pressed(e) => {
+            if (root.available && (e.text == Key.Return || e.text == " ")) {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+        tool-ta := TouchArea {
+            mouse-cursor: root.available ? pointer : default;
+            clicked => { if (root.available) { root.clicked(); } }
+            changed has-hover => {
+                if (self.has-hover) {
+                    root.hint(root.tip, root.absolute-position.x + root.width / 2, root.absolute-position.y + root.height + 4px);
+                } else { root.hint-left(); }
+            }
+        }
     }
 }
 
@@ -140,6 +271,21 @@ export component EditorWindow inherits Window {
     // 高亮收拢到合法范围（对齐 activeIndex = min(highlight, len-1)）
     in-out property <int> tag-active:
         Math.min(root.tag-highlight, root.tag-suggestions.length - 1);
+
+    // 显示偏好只存在当前窗口内，不写配置、不改变正文。
+    in-out property <int> focus-body-seq: 0;
+    changed tag-open => {
+        if (!root.tag-open) {
+            root.focus-root-scope();
+            root.focus-body-seq += 1;
+        }
+    }
+    in-out property <bool> wrap-text: true;
+    in-out property <bool> monospace: false;
+    in-out property <int> undo-seq: 0;
+    in-out property <int> redo-seq: 0;
+    in-out property <int> select-all-seq: 0;
+    in-out property <int> wrap-toggle-seq: 0;
 
     // ── 回调（Rust 接管）──
     callback text-edited(string);
@@ -231,9 +377,8 @@ export component EditorWindow inherits Window {
             // ── 自绘标题栏（共享组件：拖拽 + 窗控按钮）──
             WindowTitleBar {
                 maximized: root.is-maximized;
-                title-text: root.has-session && root.is-dirty
-                    ? "● FloatPaste · 编辑"
-                    : "FloatPaste · 编辑";
+                is-dirty: root.has-session && root.is-dirty;
+                title-text: "FloatPaste · 编辑";
                 drag-started => root.drag-started();
                 drag-moved => root.drag-moved();
                 drag-finished => root.drag-finished();
@@ -288,8 +433,7 @@ export component EditorWindow inherits Window {
             // ── 主区（旧版 main flex-1：吃掉底栏以外的全部剩余高度）──
             Rectangle {
                 vertical-stretch: 1;
-                // 透出窗底（Window.background 恒有底：材质底或回退实色）
-                background: transparent;
+                background: Theme.canvas-subtle;
                 clip: true;
 
                 // 无会话：引导态
@@ -376,226 +520,303 @@ export component EditorWindow inherits Window {
                     }
                 }
 
-                // 会话内容（visible 而非 if：tag-input/edit-input 需要被
-                // 窗口级键盘与焦点函数引用，条件实例化的元素不可寻址。
-                // visible:false 不参与布局计算但此处无碍——父容器是
-                // Rectangle，子元素 width/height 显式 100%，不占布局位）
-                // Rectangle 的子元素同样不自动铺满，显式全屏 + 旧版 mt-2.5 行距
-                VerticalLayout {
+                // 正文面板只留小幅外边距；标签属于当前条目，直接融入面板上沿。
+                note-surface := Rectangle {
                     visible: root.has-session && !root.item-missing && !root.load-failed;
+                    x: root.width < 500px ? 8px : 12px;
+                    y: 4px;
+                    width: parent.width - (root.width < 500px ? 16px : 24px);
+                    height: parent.height - 8px;
+                    border-radius: Metrics.radius-lg;
+                    border-width: 1px;
+                    border-color: Theme.border-subtle;
+                    background: Theme.canvas-default;
+                    clip: true;
+                VerticalLayout {
                     width: parent.width;
                     height: parent.height;
-                    spacing: 8px;
-                    padding-left: 20px;
-                    padding-right: 20px;
-                    padding-top: 14px;
-                    padding-bottom: 10px;
+                    spacing: 0px;
+                    header-bar := Rectangle {
+                        height: 34px;
 
-                    // ── 头部：元信息 + 两段删除（无 alignment：文本
-                    // stretch 占满、删除按钮靠右，对齐旧版 justify-between）──
-                    HorizontalLayout {
-                        spacing: Metrics.space-3;
-                        Text {
-                            horizontal-stretch: 1;
-                            wrap: word-wrap;
-                            overflow: elide;
-                            vertical-alignment: center;
-                            // 元信息：来源 · 时间 (+ 字数 / 尺寸 / 文件与大小)
-                            text: root.is-text
-                                ? "\{root.meta-source} · \{root.meta-time} · \{root.char-count} 字"
-                                : (root.meta-extra == ""
-                                    ? "\{root.meta-source} · \{root.meta-time}"
-                                    : "\{root.meta-source} · \{root.meta-time} · \{root.meta-extra}");
-                            color: Theme.fg-subtle;
-                            font-size: Metrics.text-xs;
-                        }
-                        DeleteButton {
-                            armed: root.delete-armed;
-                            clicked => { root.delete-requested(); }
-                            hint(x, y) => {
-                                root.button-hint(
-                                    root.delete-armed ? "再次点击确认删除" : "删除条目",
-                                    x, y);
-                            }
-                            hint-left => { root.button-hint-left(); }
-                        }
-                    }
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            spacing: 6px;
 
-                    // ── 标签行：已选 chips（行内 × 删除）+「添加标签」入口。
-                    // 添加/搜索/创建收敛到下拉面板（Notion/GitHub 多选模
-                    // 式，见 root-scope 直挂的面板实例）。行本身不再画条
-                    // 形容器：chips 直接落在窗口底上（轻量标注，非表单框）
-                    tag-field := Rectangle {
-                        height: 30px;
-                        clip: false;
+                            // ── 左侧：标签区域（弹性宽度）──
+                            tag-area := Rectangle {
+                                horizontal-stretch: 1;
+                                height: 100%;
 
-                        tag-flick := Flickable {
-                            x: 0;
-                            y: 0;
-                            width: parent.width;
-                            height: parent.height;
-                            // interactive=false：非滚轮事件完全透传（源码
-                            // ForwardAndIgnore），可滚状态下拖拽拦截会吞掉
-                            // chips 的 × 点击；滚轮走独立分支仍可滚
-                            interactive: false;
-                            VerticalLayout {
-                                alignment: center;
-                                HorizontalLayout {
-                                    padding-left: 6px;
-                                    padding-right: 6px;
-                                    spacing: 6px;
-                                    // 全员 stretch=0 + start：chips 紧凑靠左
-                                    alignment: start;
+                                Path {
+                                    x: 2px;
+                                    y: (parent.height - 14px) / 2;
+                                    width: 14px;
+                                    height: 14px;
+                                    viewbox-width: 24;
+                                    viewbox-height: 24;
+                                    stroke: Theme.fg-subtle;
+                                    stroke-width: 1.1px;
+                                    commands: "M 3 4 L 12 4 L 21 13 L 13 21 L 3 11 Z M 7 8 L 7.1 8";
+                                }
 
-                                    for tag-name[i] in root.tags: Rectangle {
-                                        height: 24px;
-                                        horizontal-stretch: 0;
-                                        border-radius: Metrics.radius-pill;
-                                        background: Theme.canvas-default;
+                                tag-flick := Flickable {
+                                    x: 22px;
+                                    width: parent.width - 24px;
+                                    height: parent.height;
+                                    interactive: false;
+                                    VerticalLayout {
+                                        alignment: center;
                                         HorizontalLayout {
-                                            padding-left: 10px;
-                                            padding-right: 4px;
-                                            spacing: 4px;
                                             alignment: start;
-                                            Text {
-                                                text: tag-name;
-                                                color: Theme.fg-default;
-                                                font-size: Metrics.text-xs;
-                                                vertical-alignment: center;
+                                            spacing: 6px;
+                                            for tag-name[i] in root.tags: Rectangle {
+                                                height: 22px;
+                                                width: Math.min(tag-label.preferred-width + 30px, 150px);
+                                                horizontal-stretch: 0;
+                                                border-radius: Metrics.radius-md;
+                                                background: Theme.accent-subtle;
+                                                tag-label := Text {
+                                                    x: 8px;
+                                                    width: parent.width - 28px;
+                                                    height: 100%;
+                                                    text: tag-name;
+                                                    color: Theme.accent-fg;
+                                                    font-size: Metrics.text-xs;
+                                                    font-weight: Metrics.weight-medium;
+                                                    vertical-alignment: center;
+                                                    overflow: elide;
+                                                }
+                                                Rectangle {
+                                                    x: parent.width - 20px;
+                                                    y: 2px;
+                                                    width: 18px;
+                                                    height: 18px;
+                                                    border-radius: Metrics.radius-sm;
+                                                    background: remove-tag.has-hover ? Theme.hover-bg : transparent;
+                                                    Text {
+                                                        text: "×";
+                                                        color: Theme.accent-fg;
+                                                        font-size: Metrics.text-xs;
+                                                        horizontal-alignment: center;
+                                                        vertical-alignment: center;
+                                                    }
+                                                    remove-tag := TouchArea {
+                                                        width: 100%;
+                                                        height: 100%;
+                                                        mouse-cursor: pointer;
+                                                        clicked => { root.tag-remove(i); }
+                                                    }
+                                                }
                                             }
-                                            Rectangle {
-                                                width: 14px;
-                                                height: 24px;
-                                                background: transparent;
-                                                tag-x-ta := TouchArea {
-                                                    mouse-cursor: default;
-                                                    clicked => { root.tag-remove(i); }
+                                            if (root.tags.length == 0): Rectangle {
+                                                height: 22px;
+                                                width: add-empty-row.preferred-width + 16px;
+                                                horizontal-stretch: 0;
+                                                border-radius: Metrics.radius-md;
+                                                border-width: 1px;
+                                                border-color: empty-ta.has-hover ? Theme.border-default : Theme.border-subtle;
+                                                background: empty-ta.has-hover ? Theme.hover-bg : transparent;
+                                                animate background { duration: Motion.dur-color; easing: Motion.ease; }
+                                                animate border-color { duration: Motion.dur-color; easing: Motion.ease; }
+                                                add-empty-row := HorizontalLayout {
+                                                    padding-left: 6px;
+                                                    padding-right: 6px;
+                                                    spacing: 4px;
+                                                    alignment: center;
+                                                    Text {
+                                                        text: "+";
+                                                        color: empty-ta.has-hover ? Theme.fg-default : Theme.fg-subtle;
+                                                        font-size: Metrics.text-xs;
+                                                        font-weight: Metrics.weight-medium;
+                                                        vertical-alignment: center;
+                                                    }
+                                                    Text {
+                                                        text: "添加标签";
+                                                        color: empty-ta.has-hover ? Theme.fg-default : Theme.fg-subtle;
+                                                        font-size: Metrics.text-xs;
+                                                        vertical-alignment: center;
+                                                    }
                                                 }
-                                                if (tag-x-ta.has-hover): Rectangle {
-                                                    x: 0;
-                                                    y: 5px;
-                                                    width: 14px;
-                                                    height: 14px;
-                                                    border-radius: 7px;
-                                                    background: Theme.danger-subtle;
+                                                empty-ta := TouchArea {
+                                                    width: 100%;
+                                                    height: 100%;
+                                                    mouse-cursor: pointer;
+                                                    clicked => { root.open-tag-panel(); }
                                                 }
+                                            }
+                                            if (root.tags.length > 0): Rectangle {
+                                                height: 22px;
+                                                width: 22px;
+                                                horizontal-stretch: 0;
+                                                border-radius: Metrics.radius-md;
+                                                border-width: 1px;
+                                                border-color: add-ta.has-hover ? Theme.border-default : Theme.border-subtle;
+                                                background: add-ta.has-hover ? Theme.hover-bg : transparent;
+                                                animate background { duration: Motion.dur-color; easing: Motion.ease; }
+                                                animate border-color { duration: Motion.dur-color; easing: Motion.ease; }
                                                 Text {
-                                                    y: 4px;
-                                                    text: "×";
-                                                    color: tag-x-ta.has-hover ? Theme.danger-fg : Theme.fg-subtle;
-                                                    font-size: Metrics.text-body;
+                                                    text: "+";
+                                                    color: add-ta.has-hover ? Theme.fg-default : Theme.fg-subtle;
+                                                    font-size: Metrics.text-sm;
+                                                    font-weight: Metrics.weight-medium;
+                                                    horizontal-alignment: center;
+                                                    vertical-alignment: center;
                                                 }
-                                            }
-                                        }
-                                    }
-
-                                    // 添加入口 chip：打开面板（搜索既有/创建新标签）
-                                    Rectangle {
-                                        height: 24px;
-                                        horizontal-stretch: 0;
-                                        border-radius: Metrics.radius-pill;
-                                        border-width: 1px;
-                                        border-color: add-ta.has-hover ? Theme.border-default : Theme.border-subtle;
-                                        background: add-ta.has-hover ? Theme.hover-bg : transparent;
-                                        animate background { duration: Motion.dur-color; easing: Motion.ease; }
-                                        animate border-color { duration: Motion.dur-color; easing: Motion.ease; }
-                                        add-ta := TouchArea {
-                                            mouse-cursor: pointer;
-                                            clicked => { root.open-tag-panel(); }
-                                        }
-                                        HorizontalLayout {
-                                            padding-left: 10px;
-                                            padding-right: 10px;
-                                            spacing: 4px;
-                                            alignment: start;
-                                            Text {
-                                                text: "+";
-                                                color: Theme.fg-muted;
-                                                font-size: Metrics.text-body;
-                                                vertical-alignment: center;
-                                            }
-                                            Text {
-                                                text: root.tags.length > 0 ? "添加" : "添加标签";
-                                                color: add-ta.has-hover ? Theme.fg-default : Theme.fg-muted;
-                                                font-size: Metrics.text-xs;
-                                                vertical-alignment: center;
+                                                add-ta := TouchArea {
+                                                    width: 100%;
+                                                    height: 100%;
+                                                    mouse-cursor: pointer;
+                                                    clicked => { root.open-tag-panel(); }
+                                                    changed has-hover => {
+                                                        if (self.has-hover) {
+                                                            root.button-hint("添加标签 · 更改后自动保存", root.absolute-position.x + self.mouse-x, root.absolute-position.y + 26px);
+                                                        } else {
+                                                            root.button-hint-left();
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
                                     }
                                 }
                             }
+
+                            // ── 右侧：正文编辑工具组（文本模式）──
+                            if (root.is-text): Rectangle {
+                                width: 1px;
+                                height: 16px;
+                                y: (parent.height - self.height) / 2;
+                                background: Theme.border-subtle;
+                            }
+                            if (root.is-text): HorizontalLayout {
+                                horizontal-stretch: 0;
+                                spacing: 2px;
+                                alignment: end;
+                                EditorTool {
+                                    label: "撤销";
+                                    icon: "M 9 5 L 4 10 L 9 15 M 4 10 L 14 10 C 21 10 21 20 14 20";
+                                    tip: "撤销（Ctrl+Z）";
+                                    clicked => { root.undo-seq += 1; }
+                                    hint(text, x, y) => { root.button-hint(text, x, y); }
+                                    hint-left => { root.button-hint-left(); }
+                                }
+                                EditorTool {
+                                    label: "重做";
+                                    icon: "M 15 5 L 20 10 L 15 15 M 20 10 L 10 10 C 3 10 3 20 10 20";
+                                    tip: "重做（Ctrl+Y）";
+                                    clicked => { root.redo-seq += 1; }
+                                    hint(text, x, y) => { root.button-hint(text, x, y); }
+                                    hint-left => { root.button-hint-left(); }
+                                }
+                                EditorTool {
+                                    label: "全选";
+                                    icon: "M 8 4 L 4 4 L 4 8 M 16 4 L 20 4 L 20 8 M 4 16 L 4 20 L 8 20 M 20 16 L 20 20 L 16 20 M 8 9 L 16 9 M 8 12 L 16 12 M 8 15 L 16 15";
+                                    tip: "全选（Ctrl+A）";
+                                    clicked => { root.select-all-seq += 1; }
+                                    hint(text, x, y) => { root.button-hint(text, x, y); }
+                                    hint-left => { root.button-hint-left(); }
+                                }
+                                Rectangle { width: 1px; height: 16px; y: (parent.height - self.height) / 2; background: Theme.border-subtle; }
+                                EditorTool {
+                                    label: "换行";
+                                    tip: root.wrap-text ? "自动换行：开启" : "自动换行：关闭";
+                                    active: root.wrap-text;
+                                    clicked => { root.wrap-text = !root.wrap-text; root.wrap-toggle-seq += 1; }
+                                    hint(text, x, y) => { root.button-hint(text, x, y); }
+                                    hint-left => { root.button-hint-left(); }
+                                }
+                                EditorTool {
+                                    label: "等宽";
+                                    tip: root.monospace ? "等宽字体：开启" : "等宽字体：关闭";
+                                    active: root.monospace;
+                                    clicked => { root.monospace = !root.monospace; root.focus-body-seq += 1; }
+                                    hint(text, x, y) => { root.button-hint(text, x, y); }
+                                    hint-left => { root.button-hint-left(); }
+                                }
+                            }
+                        }
+
+                        // 顶部工作条统一底部分隔线
+                        Rectangle {
+                            y: parent.height - 1px;
+                            width: 100%;
+                            height: 1px;
+                            background: Theme.border-subtle;
                         }
                     }
-
-                    Text {
-                        text: "标签更改会自动保存";
-                        color: Theme.fg-subtle;
-                        font-size: Metrics.text-xs;
-                    }
-
-                    // ── 内容弹性区（旧版 flex-1：吃掉头部与标签区以外的
-                    // 全部剩余高度）──
-                    // 文本编辑与只读预览两态必须用 if 条件实例化：visible:false
-                    // 的元素只是不绘制，布局仍照常给它分配空间，两个 stretch
-                    // 兄弟会把剩余高度对半分掉。edit-input 的初始聚焦改由
-                    // init 承担（if 内元素无法从组件外部寻址）
+                    // ── 正文占据顶部工作栏以外的全部高度 ──
                     Rectangle {
                         vertical-stretch: 1;
 
                         if (root.is-text): Rectangle {
                             width: 100%;
                             height: 100%;
-                            // changed 只监听本元素属性：用本地别名桥接根上的
-                            // 会话序号，每次载入条目重新聚焦
                             property <int> focus-trigger: root.session-seq;
-                            // 无独立底色：正文直接坐在 Window.background 材质
-                            // 底上，与头部/底栏/标题栏完全同一透明语义——
-                            // 任何半透明叠加都会比周围更实（区域差 = α叠加·
-                            // (1-α材质)，与材质联动永远存在），统一透明是
-                            // 唯一无区域差的形态。透出强度只由材质 alpha
-                            // 统一控制（theme.rs material_layer_alpha）
+                            property <int> body-focus-trigger: root.focus-body-seq;
+                            property <int> undo-trigger: root.undo-seq;
+                            property <int> redo-trigger: root.redo-seq;
+                            property <int> select-all-trigger: root.select-all-seq;
+                            property <int> wrap-trigger: root.wrap-toggle-seq;
+                            changed body-focus-trigger => { edit-input.focus(); }
+                            changed undo-trigger => { edit-input.undo(); edit-input.focus(); }
+                            changed redo-trigger => { edit-input.redo(); edit-input.focus(); }
+                            changed select-all-trigger => { edit-input.focus(); edit-input.select-all(); }
+                            changed wrap-trigger => { edit-scroll.scroll-x = 0px; edit-input.focus(); }
                             background: transparent;
                             clip: true;
+
                             init => {
-                                // 首次实例化即聚焦并置尾（对齐旧版
-                                // setSelectionRange(len, len)）：init 在本次
-                                // 会话属性写入落地后执行，draft-byte-len 已是
-                                // 本条目值。同窗口再次打开不重新实例化，由
-                                // session-seq changed 承接
                                 edit-input.focus();
                                 edit-input.set-selection-offsets(
                                     root.draft-byte-len, root.draft-byte-len);
                             }
                             changed focus-trigger => {
-                                // 再次载入条目：滚动复位后聚焦并把光标定位
-                                // 到文本末尾（跟随逻辑会把视口推到光标处）。
-                                // session-seq 由 Rust 在数据全部就绪后自增，
-                                // 这里读到的 draft-byte-len 是本条目值
                                 edit-scroll.scroll-y = 0px;
                                 edit-input.focus();
                                 edit-input.set-selection-offsets(
                                     root.draft-byte-len, root.draft-byte-len);
                             }
 
-                        // 自管滚动（弃用 Flickable：可滚状态在 pressed
-                        // 阶段吞子元素点击、滚轮链路不可控，见
-                        // docs/editor-window.md）。滚动 = 内容层 y 偏移 + 滚轮事件
-                        // 驱动，全部显式
+                        // 自管滚动
                         edit-scroll := Rectangle {
-                            x: 0;
-                            y: 0;
-                            width: parent.width;
-                            height: parent.height;
+                            x: 1px;
+                            y: 1px;
+                            width: parent.width - 2px;
+                            height: parent.height - 2px - (self.max-scroll-x > 0px ? 10px : 0px);
                             clip: true;
                             property <length> scroll-y: 0px;
+                            property <length> scroll-x: 0px;
+                            property <length> caret-x: 0px;
+                            property <length> caret-y: 0px;
+                            function reveal-cursor() {
+                                let view-x = self.caret-x + 20px - self.scroll-x;
+                                if (view-x < 8px || view-x > self.width - 16px) {
+                                    self.scroll-x = Math.clamp(self.caret-x + 20px
+                                        - (view-x < 8px ? 8px : self.width - 16px), 0px, self.max-scroll-x);
+                                }
+                                let view-y = self.caret-y + 16px - self.scroll-y;
+                                if (view-y < 8px || view-y + 23px > self.height - 8px) {
+                                    self.scroll-y = Math.clamp(self.caret-y + 16px
+                                        - (view-y < 8px ? 8px : self.height - 31px), 0px, self.max-scroll-y);
+                                }
+                            }
+                            changed height => { self.reveal-cursor(); }
+                            changed width => { self.reveal-cursor(); }
+                            property <length> content-width: root.wrap-text ? self.width
+                                : Math.max(self.width, edit-input.preferred-width + 40px);
+                            property <length> max-scroll-x: Math.max(0px, self.content-width - self.width);
+                            changed max-scroll-y => { self.scroll-y = Math.min(self.scroll-y, self.max-scroll-y); }
+                            changed max-scroll-x => { self.scroll-x = Math.min(self.scroll-x, self.max-scroll-x); }
                             // 内容高 = 全文排版高 + 上下 padding 32
                             property <length> max-scroll-y:
                                 Math.max(0px, edit-input.preferred-height + 32px - self.height);
 
                             inner := Rectangle {
-                                x: 0;
+                                x: -edit-scroll.scroll-x;
                                 y: -edit-scroll.scroll-y;
-                                width: edit-scroll.width;
+                                width: edit-scroll.content-width;
                                 height: Math.max(edit-input.preferred-height + 32px,
                                     edit-scroll.height);
 
@@ -606,7 +827,7 @@ export component EditorWindow inherits Window {
                                 edit-ta := TouchArea {
                                     width: 100%;
                                     height: 100%;
-                                    mouse-cursor: default;
+                                    mouse-cursor: text;
                                     scroll-event(event) => {
                                         // Windows 滚轮向下 delta_y 为负：向下滚
                                         // = 看下方内容 = scroll-y 增大，故取负
@@ -614,6 +835,8 @@ export component EditorWindow inherits Window {
                                             edit-scroll.scroll-y - event.delta_y,
                                             0px,
                                             edit-scroll.max-scroll-y);
+                                        edit-scroll.scroll-x = Math.clamp(
+                                            edit-scroll.scroll-x - event.delta-x, 0px, edit-scroll.max-scroll-x);
                                         return accept;
                                     }
                                     clicked => {
@@ -654,8 +877,11 @@ export component EditorWindow inherits Window {
                                             width: 100%;
                                             height: 100%;
                                             single-line: false;
-                                            wrap: word-wrap;
-                                            font-size: Metrics.text-sm;
+                                            wrap: root.wrap-text ? word-wrap : no-wrap;
+                                            font-family: root.monospace ? Metrics.font-code : root.default-font-family;
+                                            font-size: Metrics.text-preview;
+                                            line-height-factor: 1.4;
+                                            page-height: edit-scroll.height;
                                             color: Theme.fg-default;
                                             selection-foreground-color: Theme.selection-fg;
                                             selection-background-color: Theme.selection-bg;
@@ -666,20 +892,9 @@ export component EditorWindow inherits Window {
                                                 // 属性读出，Rust 按 draft 文本换算）
                                                 root.editor-cursor-moved(
                                                     edit-input.cursor-position_byte-offset);
-                                                // 光标跟随滚动：cursor.y 是 TextInput 内
-                                                // 坐标，视口内位置 = cursor.y + 16 - scroll
-                                                let view-y = cursor.y + 16px - edit-scroll.scroll-y;
-                                                if (view-y < 8px) {
-                                                    edit-scroll.scroll-y = Math.clamp(
-                                                        cursor.y + 16px - 8px,
-                                                        0px, edit-scroll.max-scroll-y);
-                                                } else if (view-y + 23px
-                                                    > edit-scroll.height - 8px)
-                                                {
-                                                    edit-scroll.scroll-y = Math.clamp(
-                                                        cursor.y + 16px + 23px - edit-scroll.height + 8px,
-                                                        0px, edit-scroll.max-scroll-y);
-                                                }
+                                                edit-scroll.caret-x = cursor.x;
+                                                edit-scroll.caret-y = cursor.y;
+                                                edit-scroll.reveal-cursor();
                                             }
                                         }
                                     }
@@ -708,16 +923,23 @@ export component EditorWindow inherits Window {
                                         height: 100%;
                                         pointer-event(e) => {
                                             if (e.kind == PointerEventKind.down) {
-                                                self.grab-offset =
-                                                    self.pressed-y - scrollbar.thumb-y;
+                                                self.grab-offset = self.pressed-y >= scrollbar.thumb-y && self.pressed-y <= scrollbar.thumb-y + scrollbar.thumb-h
+                                                    ? self.pressed-y - scrollbar.thumb-y : scrollbar.thumb-h / 2;
+                                                edit-scroll.scroll-y = Math.clamp(
+                                                    (self.mouse-y - self.grab-offset)
+                                                        / Math.max(scrollbar.height - scrollbar.thumb-h, 1px)
+                                                        * edit-scroll.max-scroll-y,
+                                                    0px, edit-scroll.max-scroll-y);
                                             }
                                         }
                                         moved => {
-                                            edit-scroll.scroll-y = Math.clamp(
-                                                (self.mouse-y - self.grab-offset)
-                                                    / Math.max(scrollbar.height - scrollbar.thumb-h, 1px)
-                                                    * edit-scroll.max-scroll-y,
-                                                0px, edit-scroll.max-scroll-y);
+                                            if (self.pressed) {
+                                                edit-scroll.scroll-y = Math.clamp(
+                                                    (self.mouse-y - self.grab-offset)
+                                                        / Math.max(scrollbar.height - scrollbar.thumb-h, 1px)
+                                                        * edit-scroll.max-scroll-y,
+                                                    0px, edit-scroll.max-scroll-y);
+                                            }
                                         }
                                     }
 
@@ -733,13 +955,47 @@ export component EditorWindow inherits Window {
                                     }
                                 }
                             }
+                            if (edit-scroll.max-scroll-x > 0px): Rectangle {
+                                x: 8px;
+                                y: parent.height - 10px;
+                                width: parent.width - 16px;
+                                height: 8px;
+                                property <length> thumb-width: Math.max(24px, self.width * edit-scroll.width / edit-scroll.content-width);
+                                property <length> thumb-x: edit-scroll.scroll-x / Math.max(1px, edit-scroll.max-scroll-x) * (self.width - self.thumb-width);
+                                horizontal-track := TouchArea {
+                                    property <length> grab-offset;
+                                    pointer-event(e) => {
+                                        if (e.kind == PointerEventKind.down) {
+                                            self.grab-offset = self.pressed-x >= parent.thumb-x && self.pressed-x <= parent.thumb-x + parent.thumb-width
+                                                ? self.pressed-x - parent.thumb-x : parent.thumb-width / 2;
+                                            edit-scroll.scroll-x = Math.clamp((self.mouse-x - self.grab-offset)
+                                                / Math.max(1px, parent.width - parent.thumb-width) * edit-scroll.max-scroll-x,
+                                                0px, edit-scroll.max-scroll-x);
+                                        }
+                                    }
+                                    moved => {
+                                        if (self.pressed) {
+                                            edit-scroll.scroll-x = Math.clamp((self.mouse-x - self.grab-offset)
+                                                / Math.max(1px, parent.width - parent.thumb-width) * edit-scroll.max-scroll-x,
+                                                0px, edit-scroll.max-scroll-x);
+                                        }
+                                    }
+                                }
+                                Rectangle {
+                                    x: parent.thumb-x;
+                                    y: 2px;
+                                    width: parent.thumb-width;
+                                    height: 4px;
+                                    border-radius: 2px;
+                                    background: horizontal-track.has-hover || horizontal-track.pressed ? Theme.border-default : Theme.border-subtle;
+                                }
+                            }
                     }
 
                         if (!root.is-text): Rectangle {
                             width: 100%;
                             height: 100%;
-                            border-radius: Metrics.radius-lg;
-                            background: Theme.canvas-subtle;
+                            background: transparent;
                             clip: true;
 
                         if (root.has-image): Rectangle {
@@ -751,6 +1007,7 @@ export component EditorWindow inherits Window {
                             border-radius: Metrics.radius-md;
                             border-width: 1px;
                             border-color: Theme.border-subtle;
+                            background: Theme.is-dark ? #18191c : #f5f6f8;
                             clip: true;
                             Image {
                                 x: 1px;
@@ -827,7 +1084,7 @@ export component EditorWindow inherits Window {
                                 spacing: 4px;
                                 alignment: start;
                                 for path[i] in root.file-paths: Rectangle {
-                                    height: 30px;
+                                    height: 32px;
                                     border-radius: Metrics.radius-md;
                                     border-width: 1px;
                                     // hover 描边 + 文字提亮提示可点（行底色与
@@ -842,6 +1099,17 @@ export component EditorWindow inherits Window {
                                     HorizontalLayout {
                                         padding-left: 12px;
                                         padding-right: 12px;
+                                        spacing: 8px;
+                                        Path {
+                                            width: 14px;
+                                            height: 14px;
+                                            y: (parent.height - self.height) / 2;
+                                            viewbox-width: 24;
+                                            viewbox-height: 24;
+                                            stroke: path-ta.has-hover ? Theme.accent-fg : Theme.fg-subtle;
+                                            stroke-width: 1.2px;
+                                            commands: "M 14 2 L 6 2 C 4.9 2 4 2.9 4 4 L 4 20 C 4 21.1 4.9 22 6 22 L 18 22 C 19.1 22 20 21.1 20 20 L 20 8 Z M 14 2 L 14 8 L 20 8";
+                                        }
                                         Text {
                                             text: path;
                                             color: path-ta.has-hover ? Theme.fg-default : Theme.fg-muted;
@@ -863,147 +1131,49 @@ export component EditorWindow inherits Window {
                         }
                         }
                     }
+
+                }
                 }
             }
 
-            if (root.has-html): Rectangle {
-                height: 30px;
-                background: Theme.warning-subtle;
-                Text {
-                    x: 20px;
-                    width: parent.width - 40px;
-                    height: parent.height;
-                    text: "修改文本并保存后将不保留原格式";
-                    color: Theme.warning-fg;
-                    font-size: Metrics.text-xs;
-                    vertical-alignment: center;
-                    overflow: elide;
-                }
-            }
-
-            // ── 底栏（原 52px 精简：键位提示已移至按钮 tooltip）──
-            footer := Rectangle {
-                height: 44px;
-                // 恒定半透明：材质时透 backdrop，无材质时叠窗底实色
-                background: Theme.canvas-subtle.with-alpha(0.6);
+            // 状态栏承载来源、编辑状态和低频删除入口。
+            Rectangle {
+                height: 28px;
                 HorizontalLayout {
-                    padding-left: 20px;
-                    padding-right: 20px;
+                    padding-left: 16px;
+                    padding-right: 16px;
                     spacing: 12px;
-                    // 不设 alignment:start——它会禁用 stretch，弹性占位
-                    // 失效后右侧按钮组不再贴右（旧版 justify-between）
-
-                    // 左：行列 + 未保存标记（start 排列收缩到左端）
-                    HorizontalLayout {
-                        alignment: start;
-                        spacing: 12px;
-                        if (root.is-text && root.has-session): Text {
-                            text: "第 \{root.cursor-line} 行 · 第 \{root.cursor-col} 列";
-                            color: Theme.fg-subtle;
-                            font-size: Metrics.text-hint;
-                            vertical-alignment: center;
-                        }
-                        if (root.is-dirty && root.has-session): HorizontalLayout {
-                            spacing: 6px;
-                            alignment: start;
-                            VerticalLayout {
-                                alignment: center;
-                                Rectangle {
-                                    width: 6px;
-                                    height: 6px;
-                                    border-radius: 3px;
-                                    background: Theme.warning-emphasis;
-                                }
-                            }
-                            Text {
-                                text: "文本未保存";
-                                color: Theme.warning-fg;
-                                font-size: Metrics.text-xs;
-                                font-weight: Metrics.weight-medium;
-                                vertical-alignment: center;
-                            }
-                        }
+                    Text {
+                        text: root.has-session ? "\{root.meta-source} · \{root.meta-time}" : "";
+                        color: Theme.fg-subtle;
+                        font-size: Metrics.text-xs;
+                        vertical-alignment: center;
+                        overflow: elide;
+                        horizontal-stretch: 1;
                     }
-
-                    Rectangle { horizontal-stretch: 1; }
-
-                    // 右：关闭 / 保存（tooltip 承载键位提示；固定高按钮在
-                    // 布局交叉轴顶对齐，包一层居中容器才能垂直居中）
-                    HorizontalLayout {
-                        spacing: 8px;
-                        alignment: end;
-                        VerticalLayout {
-                            alignment: center;
-                            HorizontalLayout {
-                                alignment: end;
-                                spacing: 8px;
-                        close-btn := Rectangle {
-                            width: 68px;
-                            height: 32px;
-                            border-radius: Metrics.radius-md;
-                            border-width: 1px;
-                            border-color: Theme.border-default;
-                            opacity: close-ta.pressed ? 0.85 : 1.0;
-                            background: close-ta.has-hover ? Theme.hover-bg : transparent;
-                            animate background { duration: Motion.dur-color; easing: Motion.ease; }
-                            close-ta := TouchArea {
-                                mouse-cursor: default;
-                                clicked => { root.request-close(); }
-                                changed has-hover => {
-                                    if (self.has-hover) {
-                                        root.button-hint("关闭（Esc）",
-                                            close-btn.absolute-position.x,
-                                            close-btn.absolute-position.y + close-btn.height + 4px);
-                                    } else {
-                                        root.button-hint-left();
-                                    }
-                                }
-                            }
-                            Text {
-                                text: "关闭";
-                                color: Theme.fg-default;
-                                font-size: Metrics.text-sm;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                            }
-                        }
-                        save-btn := Rectangle {
-                            width: 88px;
-                            height: 32px;
-                            border-radius: Metrics.radius-md;
-                            // 旧版 disabled:opacity-50：整键（底+字）半透明；
-                            // 可点时按压再压一档（叠加 0.85）
-                            opacity: root.is-text && root.is-dirty
-                                ? (save-ta.pressed ? 0.85 : 1.0) : 0.5;
-                            // 强调按钮悬停升 accent-hover（Primer emphasis 语义）
-                            background: save-ta.has-hover
-                                ? Theme.accent-hover : Theme.accent-emphasis;
-                            animate background { duration: Motion.dur-color; easing: Motion.ease; }
-                            save-ta := TouchArea {
-                                enabled: root.is-text && root.is-dirty;
-                                mouse-cursor: root.is-text && root.is-dirty ? default : not-allowed;
-                                clicked => { root.save-requested(); }
-                                changed has-hover => {
-                                    if (self.has-hover) {
-                                        root.button-hint("保存文本（Ctrl+S）",
-                                            save-btn.absolute-position.x,
-                                            save-btn.absolute-position.y + save-btn.height + 4px);
-                                    } else {
-                                        root.button-hint-left();
-                                    }
-                                }
-                            }
-                            Text {
-                                text: "保存文本";
-                                color: Theme.fg-on-emphasis;
-                                font-size: Metrics.text-sm;
-                                font-weight: Metrics.weight-semibold;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                            }
-                        }
-                            }
-                        }
+                    if (root.is-text && root.has-session): Text {
+                        text: "行 \{root.cursor-line}，列 \{root.cursor-col} · \{root.char-count} 字";
+                        color: Theme.fg-subtle;
+                        font-size: Metrics.text-xs;
+                        vertical-alignment: center;
+                    }
+                    if (!root.is-text && root.has-session): Text {
+                        text: root.meta-extra;
+                        color: Theme.fg-subtle;
+                        font-size: Metrics.text-xs;
+                        vertical-alignment: center;
+                    }
+                    if (root.is-text && root.has-session && !root.item-missing && !root.load-failed): SaveButton {
+                        is-dirty: root.is-dirty;
+                        clicked => { root.save-requested(); }
+                        hint(x, y) => { root.button-hint(root.is-dirty ? "保存（Ctrl+S）" : "内容已保存", x, y); }
+                        hint-left => { root.button-hint-left(); }
+                    }
+                    if (root.has-session && !root.item-missing && !root.load-failed): DeleteButton {
+                        armed: root.delete-armed;
+                        clicked => { root.delete-requested(); }
+                        hint(x, y) => { root.button-hint(root.delete-armed ? "再次点击确认删除" : "删除条目", x, y); }
+                        hint-left => { root.button-hint-left(); }
                     }
                 }
             }
@@ -1020,13 +1190,24 @@ export component EditorWindow inherits Window {
             // 容器比面板卡大四周 10px（弹层柔影的落影面——drop-shadow
             // 在软件渲染下是空实现，见 theme.slint SoftShadow 注释）；
             // 定位锚点反补同值，面板卡视觉位置不变
-            x: tag-field.absolute-position.x - 10px;
-            y: tag-field.absolute-position.y + tag-field.height + 4px - 10px;
+            x: header-bar.absolute-position.x - 10px;
+            y: header-bar.absolute-position.y + header-bar.height + 4px - 10px;
             width: 340px;
-            // 高度随内容：搜索框 44 + 分隔线 1 + 行列表 32px/行 + 列表
-            // 内边距 8，封顶 288；上下各 +10px 留边
-            height: Math.min(288px,
-                45px + (root.tags.length + root.tag-suggestions.length) * 32px + 8px) + 20px;
+            // 内部真实内容所需高度：
+            // 搜索框 44px + 分隔线 1px = 45px
+            // 已选区：表头 20px + 条目 tags.length * 32px
+            // 分隔线：9px（当两者共存）
+            // 建议区：表头 20px + 条目 suggestions.length * 32px
+            // 列表上下内边距：8px
+            property <length> panel-content-h:
+                45px
+                + (root.tags.length > 0 ? (20px + root.tags.length * 32px) : 0px)
+                + (root.tags.length > 0 && root.tag-suggestions.length > 0 ? 9px : 0px)
+                + (root.tag-suggestions.length > 0 ? (20px + root.tag-suggestions.length * 32px) : 0px)
+                + 8px;
+            property <length> max-panel-h: Math.min(420px, Math.max(54px, root.height - 40px - header-bar.absolute-position.y - header-bar.height - 4px));
+
+            height: Math.min(max-panel-h, panel-content-h) + 20px;
             opacity: root.tag-open ? 1.0 : 0.0;
             animate opacity { duration: Motion.dur-enter; easing: Motion.ease; }
             clip: true;
@@ -1041,7 +1222,7 @@ export component EditorWindow inherits Window {
                 step: 1px;
                 offset-y: 0px;
                 radius: Metrics.radius-md;
-                alpha: 0.15;
+                alpha: 0.08;
             }
             panel-body := Rectangle {
                 x: 10px;
@@ -1051,8 +1232,9 @@ export component EditorWindow inherits Window {
                 height: parent.height - 20px;
                 border-radius: Metrics.radius-md;
                 border-width: 1px;
-                border-color: Theme.border-subtle;
+                border-color: Theme.is-dark ? #FFFFFF.with-alpha(0.08) : Theme.border-subtle;
                 background: Theme.canvas-default;
+                clip: true;
 
                 VerticalLayout {
                     // 搜索框（内部绝对定位：Rectangle 子元素不自动铺满，
@@ -1068,10 +1250,24 @@ export component EditorWindow inherits Window {
                             border-width: 1px;
                             border-color: panel-input.has-focus ? Theme.border-accent : Theme.border-subtle;
                             background: Theme.canvas-subtle;
-                            HorizontalLayout {
-                                padding-left: 8px;
-                                padding-right: 8px;
-                                if (panel-input.text == "" && !panel-input.has-focus): Text {
+                            Path {
+                                x: 8px;
+                                y: 8px;
+                                width: 12px;
+                                height: 12px;
+                                viewbox-width: 24;
+                                viewbox-height: 24;
+                                stroke: Theme.fg-subtle;
+                                stroke-width: 1.8px;
+                                commands: "M 11 19 A 8 8 0 1 0 11 3 A 8 8 0 0 0 11 19 Z M 21 21 L 16.65 16.65";
+                            }
+                            Rectangle {
+                                x: 25px;
+                                width: parent.width - 33px;
+                                height: parent.height;
+                                if (panel-input.text == ""): Text {
+                                    width: parent.width;
+                                    height: parent.height;
                                     text: "搜索或创建标签";
                                     color: Theme.fg-subtle;
                                     font-size: Metrics.text-body;
@@ -1110,9 +1306,9 @@ export component EditorWindow inherits Window {
                                                     root.tag-suggestions.length,
                                                 );
                                                 // 高亮行保持可见：建议行视口系顶 =
-                                                // 已选区高 + 行索引 × 行高
-                                                let row-top = root.tags.length * 32px
-                                                    + root.tag-active * 32px;
+                                                // 已选区高（含表头与分隔线）+ 建议表头 + 建议行索引 × 行高 + padding
+                                                let row-top = (root.tags.length > 0 ? (20px + root.tags.length * 32px + 9px) : 0px)
+                                                    + 20px + root.tag-active * 32px + 4px;
                                                 if (row-top < -panel-flick.content-y) {
                                                     panel-flick.content-y = -row-top;
                                                 } else if (row-top + 32px
@@ -1148,8 +1344,8 @@ export component EditorWindow inherits Window {
                     Rectangle { height: 1px; background: Theme.border-subtle; }
                     // 行列表（已选区 + 建议区）
                     panel-flick := Flickable {
-                        width: parent.width;
-                        height: parent.height;
+                        width: 100%;
+                        vertical-stretch: 1;
                         // false=行点击透传（列表超出面板封顶高时不吞点击），
                         // 滚轮仍可滚；键盘导航的滚动跟随是显式写 content-y
                         interactive: false;
@@ -1158,6 +1354,20 @@ export component EditorWindow inherits Window {
                             spacing: 0px;
 
                             // 已选区：点击行 = 移除该标签（勾号标记归属）
+                            if (root.tags.length > 0): Rectangle {
+                                height: 20px;
+                                HorizontalLayout {
+                                    padding-left: 8px;
+                                    padding-right: 8px;
+                                    Text {
+                                        text: "已选标签";
+                                        color: Theme.fg-subtle;
+                                        font-size: 11px;
+                                        font-weight: Metrics.weight-medium;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
                             for tag-name[i] in root.tags: Rectangle {
                                 height: 32px;
                                 border-radius: Metrics.radius-md;
@@ -1200,16 +1410,50 @@ export component EditorWindow inherits Window {
                                         horizontal-stretch: 1;
                                         overflow: elide;
                                     }
-                                    Text {
-                                        text: sel-ta.has-hover ? "移除" : "";
-                                        color: Theme.danger-fg;
-                                        font-size: Metrics.text-hint;
-                                        vertical-alignment: center;
+                                    if (sel-ta.has-hover): Rectangle {
+                                        height: 20px;
+                                        border-radius: Metrics.radius-sm;
+                                        background: Theme.danger-subtle;
+                                        HorizontalLayout {
+                                            padding-left: 6px;
+                                            padding-right: 6px;
+                                            Text {
+                                                text: "移除";
+                                                color: Theme.danger-fg;
+                                                font-size: Metrics.text-xs;
+                                                vertical-alignment: center;
+                                            }
+                                        }
                                     }
                                 }
                             }
 
+                            // 已选与建议之间的微型分隔线
+                            if (root.tags.length > 0 && root.tag-suggestions.length > 0): Rectangle {
+                                height: 9px;
+                                Rectangle {
+                                    y: 4px;
+                                    width: 100%;
+                                    height: 1px;
+                                    background: Theme.border-subtle;
+                                }
+                            }
+
                             // 建议区：kind 0=match 1=create 2=exists
+                            if (root.tag-suggestions.length > 0): Rectangle {
+                                height: 20px;
+                                HorizontalLayout {
+                                    padding-left: 8px;
+                                    padding-right: 8px;
+                                    Text {
+                                        text: root.tag-input-text != "" ? "搜索结果" : "推荐标签";
+                                        color: Theme.fg-subtle;
+                                        font-size: 11px;
+                                        font-weight: Metrics.weight-medium;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
                             for sug[i] in root.tag-suggestions: Rectangle {
                                 height: 32px;
                                 border-radius: Metrics.radius-md;
@@ -1264,6 +1508,23 @@ export component EditorWindow inherits Window {
                                 }
                             }
                         }
+                    }
+                }
+
+                // 超出最大高度时的微型滚动条指示器
+                if (panel-content-h - 45px > panel-flick.height): Rectangle {
+                    x: parent.width - 6px;
+                    y: 49px;
+                    width: 3px;
+                    height: panel-flick.height - 8px;
+                    Rectangle {
+                        width: 100%;
+                        height: Math.max(16px, parent.height * parent.height / Math.max(1px, (panel-content-h - 45px)));
+                        y: (-panel-flick.content-y / Math.max(1px, (panel-content-h - 45px) - panel-flick.height))
+                            * Math.max(0px, parent.height - self.height);
+                        border-radius: 1.5px;
+                        background: Theme.fg-subtle;
+                        opacity: 0.4;
                     }
                 }
             }

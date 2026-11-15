@@ -535,7 +535,7 @@ pub fn save(app: &App) {
             // UI 侧 saved-text 必须同步回写，否则 is-dirty（draft!=saved）
             // 恒为真，保存后 Esc 仍会弹"未保存"确认框
             win.set_saved_text(draft.into());
-            show_notice(app, "文本已保存");
+            win.set_notice_text("".into());
             win.set_error_text("".into());
             refresh_lists(app);
         }
@@ -727,6 +727,7 @@ fn refresh_lists(app: &App) {
     search::refresh_after_editor(app);
 }
 
+#[allow(dead_code)]
 fn show_notice(app: &App, text: &str) {
     let Some(win) = app.editor.upgrade() else {
         return;
@@ -832,7 +833,7 @@ pub fn tag_remove_last(app: &App) {
 }
 
 pub fn tag_escape(app: &App) {
-    // Esc 分层退出（面板模式）：清空输入、收起面板、焦点回窗口级。
+    // Esc 分层退出：清空输入、收起面板；Slint 在关闭后将文本焦点归还正文。
     // 输入非空时 Slint 侧 capture 已先按「仅清空」处理，不会到这里；
     // 此处兜底清空并关闭
     if let Some(win) = app.editor.upgrade() {
@@ -1173,6 +1174,7 @@ pub(crate) mod load_error_tests {
         load_session(app, win, &rich.id);
         assert!(win.get_has_html());
         assert!(!win.get_is_dirty());
+        editor_workspace_contract(app, win, &rich.id);
         assert!(
             crate::search::make_row(
                 &rich.to_summary(),
@@ -1271,6 +1273,271 @@ pub(crate) mod load_error_tests {
         assert!(!win.get_draft_text().is_empty());
         reveal_tests::run(app, win, item_id);
         app.state.set_editor_session(None);
+    }
+
+    fn editor_workspace_contract(app: &App, win: &EditorWindow, item_id: &str) {
+        use slint::platform::{PointerEventButton, WindowEvent};
+        fn pump() {
+            slint::Timer::single_shot(Duration::from_millis(200), || {
+                slint::quit_event_loop().unwrap();
+            });
+            slint::run_event_loop_until_quit().unwrap();
+        }
+        // winit 的逻辑尺寸换算使用系统 DPI；测试缩放由 SLINT_SCALE_FACTOR
+        // 覆盖，故显式换算物理尺寸，保证三档都验证相同的逻辑工作区。
+        let resize = |width: f32, height: f32| {
+            let scale = win.window().scale_factor();
+            let expected = slint::PhysicalSize::new(
+                (width * scale).round() as u32,
+                (height * scale).round() as u32,
+            );
+            win.window().set_size(expected);
+            pump();
+            assert_eq!(
+                win.window().size(),
+                expected,
+                "工作区物理尺寸必须匹配请求缩放"
+            );
+        };
+        let key = |text: slint::SharedString| {
+            win.window()
+                .dispatch_event(WindowEvent::KeyPressed { text: text.clone() });
+            win.window()
+                .dispatch_event(WindowEvent::KeyReleased { text });
+        };
+        let click = |x, y| {
+            let position = slint::LogicalPosition::new(x, y);
+            win.window().dispatch_event(WindowEvent::PointerPressed {
+                position,
+                button: PointerEventButton::Left,
+            });
+            win.window().dispatch_event(WindowEvent::PointerReleased {
+                position,
+                button: PointerEventButton::Left,
+            });
+        };
+        let original_tags = app.core().repository.get_item_detail(item_id).unwrap().tags;
+        commit_tags(
+            app,
+            vec![
+                "产品设计".into(),
+                "待整理".into(),
+                "一个较长的标签名称".into(),
+            ],
+        );
+        let sample = "设计草稿\n\n让每次编辑都更从容。\n正文与标签各有归属，修改后按 Ctrl+S 保存。\n\nconst message = \"Hello, FloatPaste 👋\";";
+        win.set_notice_text("".into());
+        win.set_draft_text(sample.into());
+        win.set_saved_text(sample.into());
+        text_edited(app, sample);
+        win.set_session_seq(win.get_session_seq() + 1);
+        win.show().unwrap();
+        let tokens = floatpaste_core::theme::derive_tokens(
+            "default",
+            "",
+            floatpaste_core::theme::ResolvedTheme::Light,
+        );
+        crate::theme_bridge::reapply_theme(app, &tokens);
+        resize(800.0, 600.0);
+        if std::env::var_os("FLOATPASTE_UI_SNAPSHOTS").is_some()
+            || std::env::var_os("FLOATPASTE_SAVE_EDITOR_SNAPSHOTS").is_some()
+        {
+            win.set_saved_text("设计草稿".into());
+            let dir =
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.artifacts/snapshot");
+            std::fs::create_dir_all(&dir).unwrap();
+            for (name, theme) in [
+                ("light", floatpaste_core::theme::ResolvedTheme::Light),
+                ("dark", floatpaste_core::theme::ResolvedTheme::Dark),
+            ] {
+                crate::theme_bridge::reapply_theme(
+                    app,
+                    &floatpaste_core::theme::derive_tokens("default", "", theme),
+                );
+                for (label, w, h) in [("normal", 800.0, 600.0), ("compact", 400.0, 300.0)] {
+                    resize(w, h);
+                    win.set_saved_text(win.get_draft_text());
+                    pump();
+                    let pixels = win.window().take_snapshot().unwrap();
+                    image::save_buffer(
+                        dir.join(format!(
+                            "editor-note-{name}-{label}-{}.png",
+                            (win.window().scale_factor() * 100.0).round() as u32
+                        )),
+                        pixels.as_bytes(),
+                        pixels.width(),
+                        pixels.height(),
+                        image::ColorType::Rgba8,
+                    )
+                    .unwrap();
+
+                    // 截取未保存（dirty）状态下的完整界面（标题栏未保存圆点 + 底栏高亮保存按钮）
+                    win.set_saved_text("原始文本".into());
+                    pump();
+                    let dirty_pixels = win.window().take_snapshot().unwrap();
+                    image::save_buffer(
+                        dir.join(format!(
+                            "editor-note-{name}-dirty-{label}-{}.png",
+                            (win.window().scale_factor() * 100.0).round() as u32
+                        )),
+                        dirty_pixels.as_bytes(),
+                        dirty_pixels.width(),
+                        dirty_pixels.height(),
+                        image::ColorType::Rgba8,
+                    )
+                    .unwrap();
+                    win.set_saved_text(win.get_draft_text());
+                    pump();
+
+                    if label == "normal" {
+                        let orig_tags = win.get_tags();
+                        let orig_sug = win.get_tag_suggestions();
+                        win.set_tags(slint::ModelRc::default());
+                        win.set_tag_suggestions(slint::ModelRc::new(std::rc::Rc::new(
+                            slint::VecModel::from(vec![
+                                EditorTagSuggestion {
+                                    kind: 0,
+                                    name: "deepseek".into(),
+                                    count_text: "1 条".into(),
+                                },
+                                EditorTagSuggestion {
+                                    kind: 0,
+                                    name: "Gitea".into(),
+                                    count_text: "1 条".into(),
+                                },
+                                EditorTagSuggestion {
+                                    kind: 0,
+                                    name: "Gitea token".into(),
+                                    count_text: "1 条".into(),
+                                },
+                                EditorTagSuggestion {
+                                    kind: 0,
+                                    name: "定向补证".into(),
+                                    count_text: "1 条".into(),
+                                },
+                                EditorTagSuggestion {
+                                    kind: 0,
+                                    name: "独立复核".into(),
+                                    count_text: "1 条".into(),
+                                },
+                            ]),
+                        )));
+                        win.invoke_open_tag_panel();
+                        pump();
+                        let pixels = win.window().take_snapshot().unwrap();
+                        image::save_buffer(
+                            dir.join(format!(
+                                "editor-note-{name}-tags-normal-{}.png",
+                                (win.window().scale_factor() * 100.0).round() as u32
+                            )),
+                            pixels.as_bytes(),
+                            pixels.width(),
+                            pixels.height(),
+                            image::ColorType::Rgba8,
+                        )
+                        .unwrap();
+                        tag_escape(app);
+                        pump();
+                        win.set_tags(orig_tags);
+                        win.set_tag_suggestions(orig_sug);
+                    }
+
+                    if label == "compact" {
+                        win.invoke_open_tag_panel();
+                        pump();
+                        let pixels = win.window().take_snapshot().unwrap();
+                        image::save_buffer(
+                            dir.join(format!(
+                                "editor-note-{name}-tags-{}.png",
+                                (win.window().scale_factor() * 100.0).round() as u32
+                            )),
+                            pixels.as_bytes(),
+                            pixels.width(),
+                            pixels.height(),
+                            image::ColorType::Rgba8,
+                        )
+                        .unwrap();
+                        tag_escape(app);
+                        pump();
+                    }
+                }
+            }
+        }
+        win.set_saved_text(sample.into());
+        win.set_draft_text(sample.into());
+        resize(800.0, 600.0);
+        click(355.0, 53.0);
+        assert!(win.get_tag_open(), "常驻标签行可打开标签面板");
+        pump();
+        key("工作区回归".into());
+        key(slint::platform::Key::Return.into());
+        assert!(
+            app.core()
+                .repository
+                .get_item_detail(item_id)
+                .unwrap()
+                .tags
+                .iter()
+                .any(|t| t == "工作区回归"),
+            "标签须立即入库"
+        );
+        assert!(!win.get_is_dirty(), "只改标签不得产生正文草稿");
+        let added_index = app
+            .core()
+            .repository
+            .get_item_detail(item_id)
+            .unwrap()
+            .tags
+            .iter()
+            .position(|tag| tag == "工作区回归")
+            .unwrap();
+        tag_remove(app, added_index);
+        key(slint::platform::Key::Escape.into());
+        assert!(!win.get_tag_open());
+        win.set_notice_text("".into());
+        pump();
+        key("!".into());
+        assert_eq!(
+            win.get_draft_text(),
+            format!("{sample}!"),
+            "关闭标签面板后焦点返回正文并保留光标"
+        );
+        assert!(win.get_is_dirty());
+        // 坐标由单行整合工作栏量测；走实际指针命中，不能只调用编辑回调。
+        click(618.0, 53.0);
+        assert_eq!(win.get_draft_text(), sample, "撤销恢复输入前的正文");
+        assert!(!win.get_is_dirty());
+        click(648.0, 53.0);
+        assert_eq!(win.get_draft_text(), format!("{sample}!"), "重做恢复编辑");
+        click(678.0, 53.0);
+        key("替换😀".into());
+        assert_eq!(win.get_draft_text(), "替换😀", "全选后输入替换全文");
+        assert_eq!(win.get_char_count(), 3);
+        assert_eq!(win.get_cursor_col(), 4);
+        click(712.0, 53.0);
+        assert!(!win.get_wrap_text(), "工具栏切换换行");
+        click(754.0, 53.0);
+        assert!(win.get_monospace(), "工具栏切换等宽字体");
+        assert_eq!(win.get_draft_text(), "替换😀", "显示切换不得改正文");
+        let long_line = format!("START 中文😀 {} END", "abcdefghij".repeat(60));
+        win.set_draft_text(long_line.clone().into());
+        text_edited(app, &long_line);
+        win.set_session_seq(win.get_session_seq() + 1);
+        pump();
+        click(60.0, 101.0);
+        assert!(
+            win.get_cursor_col() > 500,
+            "关闭换行后视口须跟随行尾，点击仍命中行尾附近"
+        );
+        key(slint::platform::Key::Home.into());
+        pump();
+        click(60.0, 101.0);
+        assert!(win.get_cursor_col() < 80, "Home 后视口须回到行首");
+        win.set_wrap_text(true);
+        win.set_monospace(false);
+        commit_tags(app, original_tags);
+        load_session(app, win, item_id);
+        pump();
     }
 }
 

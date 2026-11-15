@@ -1566,6 +1566,19 @@ fn app_e2e_smoke_flow() {
                 "Esc 关闭后前台应还原给会话目标窗口"
             );
             eprintln!("[e2e] 焦点还原段通过（命名事件驱动，未覆盖真实按键分发）");
+        } else {
+            assert!(
+                floatpaste_core::platform::windows::single_instance::signal_test_search_escape(
+                    &search_stamp,
+                ),
+                "发送搜索 Esc 信号失败（被测实例未装载钩子）"
+            );
+            assert!(
+                wait_until(Duration::from_secs(5), Duration::from_millis(100), || {
+                    onscreen_search_window(search_pid).is_none()
+                }),
+                "Esc 后搜索窗应停屏（平移回屏外）"
+            );
         }
 
         // ── 场景 9：搜索窗两段式删除（选中行 = 列表首行 = 最新条目）──

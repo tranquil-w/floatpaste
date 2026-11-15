@@ -65,6 +65,7 @@ export component Kbd inherits Rectangle {
 // 切换后回写（还原态图标随之切换）
 export component WindowTitleBar inherits Rectangle {
     in property <string> title-text;
+    in property <bool> is-dirty: false;
     in property <bool> maximized: false;
     callback drag-started();
     callback drag-moved();
@@ -81,15 +82,26 @@ export component WindowTitleBar inherits Rectangle {
         width: 16px;
         height: 16px;
     }
-    Text {
+    HorizontalLayout {
         x: 34px;
         width: parent.width - 180px;
         height: parent.height;
-        text: root.title-text;
-        color: Theme.fg-default;
-        font-size: Metrics.text-hint;
-        vertical-alignment: center;
-        overflow: elide;
+        spacing: 6px;
+        alignment: start;
+        if (root.is-dirty): Rectangle {
+            width: 6px;
+            height: 6px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 3px;
+            background: Theme.accent-fg;
+        }
+        Text {
+            text: root.title-text;
+            color: Theme.fg-default;
+            font-size: Metrics.text-hint;
+            vertical-alignment: center;
+            overflow: elide;
+        }
     }
     // 拖拽命中区（声明在按钮之前 = 按钮点击优先）
     title-ta := TouchArea {
