@@ -4,7 +4,7 @@ use std::sync::atomic::Ordering;
 
 use floatpaste_core::{
     domain::{clip_item::PasteOption, error::AppError},
-    platform::windows::active_app::ActiveAppResolver,
+    platform::windows::{active_app::ActiveAppResolver, window_control},
     services::text_file_storage::normalize_file_name,
     theme::{self, ThemeTokens},
 };
@@ -23,6 +23,17 @@ struct Dialog {
     generation: u64,
 }
 
+impl Dialog {
+    fn hide(&self) {
+        if self.window.get_title_dragging() {
+            if let Some(hwnd) = crate::win32_ext::window_hwnd(&self.window) {
+                window_control::end_window_gesture(hwnd);
+            }
+        }
+        let _ = self.window.hide();
+    }
+}
+
 thread_local! {
     static DIALOG: RefCell<Option<Dialog>> = const { RefCell::new(None) };
 }
@@ -33,6 +44,25 @@ pub(crate) fn apply_theme(tokens: &ThemeTokens) {
             crate::theme_bridge::write_full_tokens(&dialog.window.global::<Theme>(), tokens);
         }
     });
+}
+
+const WINDOW_WIDTH: f32 = 448.0;
+const WINDOW_HEIGHT: f32 = 280.0;
+
+/// 从快捷选项替换或追加文件名扩展名。
+fn replace_file_extension(filename: &str, new_ext: &str) -> String {
+    let trimmed = filename.trim();
+    let ext = new_ext.strip_prefix('.').unwrap_or(new_ext);
+    if trimmed.is_empty() {
+        return format!("文本.{ext}");
+    }
+    if let Some(dot_idx) = trimmed.rfind('.') {
+        if dot_idx > 0 {
+            let stem = &trimmed[..dot_idx];
+            return format!("{stem}.{ext}");
+        }
+    }
+    format!("{trimmed}.{ext}")
 }
 
 pub(crate) fn open(
@@ -57,12 +87,66 @@ pub(crate) fn open(
     let resolved = theme::resolve_theme(settings.theme_mode, theme::system_prefers_dark());
     let tokens = theme::derive_tokens(&settings.theme_preset, &settings.theme_accent, resolved);
     crate::theme_bridge::write_full_tokens(&window.global::<Theme>(), &tokens);
+
+    let chars = detail.full_text.chars().count();
+    let lines = detail.full_text.lines().count().max(1);
+    window.set_meta_summary(format!("{chars} 字符 · {lines} 行").into());
+
     window.on_cancelled(|| close(true));
     window.on_confirmed(confirm);
     window.window().on_close_requested(|| {
         close(true);
         slint::CloseRequestResponse::KeepWindowShown
     });
+
+    {
+        let weak = window.as_weak();
+        window.on_replace_extension(move |ext| {
+            if let Some(win) = weak.upgrade() {
+                let current = win.get_file_name().to_string();
+                let replaced = replace_file_extension(&current, ext.as_str());
+                win.set_file_name(replaced.into());
+                win.set_error_text("".into());
+            }
+        });
+    }
+
+    {
+        let weak = window.as_weak();
+        window.on_drag_started(move || {
+            if let Some(win) = weak.upgrade() {
+                if let Some(hwnd) = crate::win32_ext::window_hwnd(&win) {
+                    window_control::begin_window_gesture(
+                        hwnd,
+                        window_control::GestureMode::Move,
+                        0,
+                        0,
+                    );
+                }
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        window.on_drag_moved(move || {
+            if let Some(win) = weak.upgrade() {
+                if let Some(hwnd) = crate::win32_ext::window_hwnd(&win) {
+                    window_control::update_window_gesture(hwnd);
+                }
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        window.on_drag_finished(move || {
+            if let Some(win) = weak.upgrade() {
+                if let Some(hwnd) = crate::win32_ext::window_hwnd(&win) {
+                    window_control::end_window_gesture(hwnd);
+                }
+            }
+        });
+    }
+
     let (target, source_hwnd) = match source {
         PasteSource::Picker => (
             app.state.picker_session(),
@@ -91,8 +175,8 @@ pub(crate) fn open(
             let scale = window.window().scale_factor();
             let point = floatpaste_core::services::picker_position_service::center_in_work_area(
                 area,
-                (460.0 * scale) as i32,
-                (250.0 * scale) as i32,
+                (WINDOW_WIDTH * scale) as i32,
+                (WINDOW_HEIGHT * scale) as i32,
             );
             Some((point.x, point.y))
         }
@@ -188,7 +272,7 @@ fn confirm() {
         return;
     };
     if !is_current(&dialog) {
-        let _ = dialog.window.hide();
+        dialog.hide();
         return;
     }
     let result = normalize_file_name(&dialog.window.get_file_name()).and_then(|name| {
@@ -203,7 +287,7 @@ fn confirm() {
     });
     match result {
         Ok(()) | Err(AppError::OperationCancelled) => {
-            let _ = dialog.window.hide();
+            dialog.hide();
         }
         Err(error) => {
             dialog.window.set_error_text(error.to_string().into());
@@ -217,7 +301,7 @@ pub(crate) fn close(return_to_source: bool) {
         return;
     };
     let current = is_current(&dialog);
-    let _ = dialog.window.hide();
+    dialog.hide();
     if return_to_source && current {
         restore(&dialog.app, dialog.source, dialog.target);
     }
@@ -246,6 +330,8 @@ fn attempt_reveal(window: slint::Weak<TextFileWindow>, target: Option<(i32, i32)
     let hwnd = crate::win32_ext::window_hwnd(&window);
     if let Some(hwnd) = hwnd {
         crate::app_icon::apply_window_icon(hwnd);
+        crate::win32_ext::apply_dwm_shadow(hwnd);
+        crate::win32_ext::apply_dwm_rounded_corners(hwnd);
     }
     if hwnd.is_some() || retries == 0 {
         if let Some((x, y)) = target {
@@ -486,6 +572,39 @@ fn icon_bitmap_size(hwnd: isize, kind: u32) -> Option<(i32, i32)> {
 }
 
 #[cfg(test)]
+fn capture_snapshots(window: &TextFileWindow, state: &str) {
+    if std::env::var_os("FLOATPASTE_UI_SNAPSHOTS").is_none()
+        && std::env::var_os("FLOATPASTE_TEXT_FILE_SNAPSHOTS").is_none()
+    {
+        return;
+    }
+    for (name, resolved) in [
+        ("light", theme::ResolvedTheme::Light),
+        ("dark", theme::ResolvedTheme::Dark),
+    ] {
+        apply_theme(&theme::derive_tokens("default", "", resolved));
+        let _ = window.window().take_snapshot().unwrap();
+        slint::Timer::single_shot(std::time::Duration::from_millis(180), || {
+            slint::quit_event_loop().unwrap()
+        });
+        slint::run_event_loop_until_quit().unwrap();
+        let pixels = window.window().take_snapshot().unwrap();
+        let dir =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.artifacts/snapshot");
+        std::fs::create_dir_all(&dir).unwrap();
+        let scale = (window.window().scale_factor() * 100.0).round() as u32;
+        image::save_buffer(
+            dir.join(format!("text-file-{name}-{state}-{scale}.png")),
+            pixels.as_bytes(),
+            pixels.width(),
+            pixels.height(),
+            image::ColorType::Rgba8,
+        )
+        .unwrap();
+    }
+}
+
+#[cfg(test)]
 pub(crate) fn contract_tests(app: &App) {
     use floatpaste_core::{
         domain::clip_item::PasteMode, services::history_service::HistoryService,
@@ -566,41 +685,26 @@ pub(crate) fn contract_tests(app: &App) {
         assert!(!can_focus(&window), "旧聚焦回调不得接管替换后的窗口");
         let window = DIALOG.with(|slot| slot.borrow().as_ref().unwrap().window.clone_strong());
         assert_eq!(window.get_file_name(), "文本.txt");
+        use slint::platform::{Key, WindowEvent};
+        window.invoke_focus_name();
+        capture_snapshots(&window, "normal");
+        // 从文件名按两次 Tab 进入第二个扩展名选项。
+        for key in [Key::Tab.into(), Key::Tab.into(), " ".into()] {
+            window
+                .window()
+                .dispatch_event(WindowEvent::KeyPressed { text: key });
+        }
+        assert_eq!(window.get_file_name(), "文本.md");
         window.set_file_name("CON.txt".into());
-        window.invoke_confirmed();
+        window.window().dispatch_event(WindowEvent::KeyPressed {
+            text: Key::Return.into(),
+        });
         assert!(
             !window.get_error_text().is_empty(),
             "无效文件名应保留窗口并显示错误"
         );
         assert!(DIALOG.with(|slot| slot.borrow().is_some()));
-        if std::env::var_os("FLOATPASTE_UI_SNAPSHOTS").is_some() {
-            for (name, resolved) in [
-                ("light", theme::ResolvedTheme::Light),
-                ("dark", theme::ResolvedTheme::Dark),
-            ] {
-                apply_theme(&theme::derive_tokens("default", "", resolved));
-                let _ = window.window().take_snapshot().unwrap();
-                slint::Timer::single_shot(std::time::Duration::from_millis(180), || {
-                    slint::quit_event_loop().unwrap()
-                });
-                slint::run_event_loop_until_quit().unwrap();
-                let pixels = window.window().take_snapshot().unwrap();
-                let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("../../.artifacts/snapshot");
-                std::fs::create_dir_all(&dir).unwrap();
-                image::save_buffer(
-                    dir.join(format!(
-                        "text-file-{name}-{}.png",
-                        (window.window().scale_factor() * 100.0).round() as u32
-                    )),
-                    pixels.as_bytes(),
-                    pixels.width(),
-                    pixels.height(),
-                    image::ColorType::Rgba8,
-                )
-                .unwrap();
-            }
-        }
+        capture_snapshots(&window, "error");
         window
             .window()
             .dispatch_event(slint::platform::WindowEvent::KeyPressed {
@@ -621,4 +725,22 @@ pub(crate) fn contract_tests(app: &App) {
             "旧代际不得发布或恢复来源"
         );
     }
+}
+
+#[cfg(test)]
+#[test]
+fn test_replace_file_extension() {
+    assert_eq!(replace_file_extension("文本.txt", ".md"), "文本.md");
+    assert_eq!(replace_file_extension("文本.txt", "md"), "文本.md");
+    assert_eq!(replace_file_extension("笔记", ".py"), "笔记.py");
+    assert_eq!(
+        replace_file_extension("data.v1.json", ".csv"),
+        "data.v1.csv"
+    );
+    assert_eq!(replace_file_extension("", ".sql"), "文本.sql");
+    assert_eq!(replace_file_extension("  ", ".sql"), "文本.sql");
+    assert_eq!(
+        replace_file_extension(".gitignore", ".txt"),
+        ".gitignore.txt"
+    );
 }
