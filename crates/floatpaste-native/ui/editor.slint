@@ -549,6 +549,16 @@ export component EditorWindow inherits Window {
                                 horizontal-stretch: 1;
                                 height: 100%;
 
+                                // 整行可点：行内 chips 之间的空白与行尾也打开面板，
+                                // 不依赖 chips 的实际宽度（字体度量不同地区/环境会变），
+                                // chip 内的 × 与「+」仍由各自 TouchArea 先接收。
+                                TouchArea {
+                                    width: 100%;
+                                    height: 100%;
+                                    mouse-cursor: pointer;
+                                    clicked => { root.open-tag-panel(); }
+                                }
+
                                 Path {
                                     x: 2px;
                                     y: (parent.height - 14px) / 2;

@@ -1466,6 +1466,12 @@ pub(crate) mod load_error_tests {
         win.set_saved_text(sample.into());
         win.set_draft_text(sample.into());
         resize(800.0, 600.0);
+        // 标签行空白处同样可打开面板：chips 的实际宽度随字体度量变化，
+        // 固定坐标只有在整行可点时才在任何环境都落在标签行上。
+        click(520.0, 53.0);
+        assert!(win.get_tag_open(), "标签行空白处可打开标签面板");
+        tag_escape(app);
+        pump();
         click(355.0, 53.0);
         assert!(win.get_tag_open(), "常驻标签行可打开标签面板");
         pump();
