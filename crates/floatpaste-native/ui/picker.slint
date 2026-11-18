@@ -2,7 +2,7 @@
 // - 无边框透明窗 + 圆角卡片 + 1px 窗口边框，四周 4px 留边内绘制短影
 // - 顶栏：软件图标 + 居中拖拽横条 + 关闭按钮，
 //   整条背景可拖拽移动窗口；操作失败提示走托盘系统通知，不占面板 UI
-// - 列表：等高卡片、三行预览、60px 缩略图；底部常显数字徽章、类型、来源、
+// - 列表：等高卡片、按可用高度裁排的预览、等比缩略图；底部常显数字徽章、类型、来源、
 //   标签摘要、相对时间与收藏星标，内容及交互状态均不改变行高
 // - 交互：单击选中 / 双击上屏 / 悬停 400ms 预览（Rust 调度）
 // - 键盘全程不经窗口焦点（RegisterHotKey 会话），窗口本身不抢焦点
@@ -280,18 +280,19 @@ export global PanelGeometry {
     out property <length> list-pad-left: 14px;             // 原版 grid pl-[14px]
     out property <length> list-pad-right: Metrics.space-1; // 原版 grid pr-1
     out property <length> row-inset: 2px;                 // 行卡片内容边距（单侧）；选中描边向内画在卡片边缘内侧
-    out property <length> row-frame: 2 * row-inset;       // 行卡片内容边距双层（Rust 裁排经 preview-pad-h 扣除）
+    out property <length> row-frame: 2 * row-inset;       // 行卡片内容边距双层
     out property <length> row-pad-left: 12px;              // 行内左 padding
     out property <length> row-pad-right: Metrics.space-1_5; // 行内右 padding（单侧）
     out property <length> row-action-width: 36px;         // 常驻预留更多按钮空间
-    // 行卡片总高由「速贴卡片高度」设置项控制：Rust 经
-    // picker::apply_card_height 注入，默认值与 UserSetting 的
+    // 行卡片总高由 Rust 注入「速贴卡片高度」设置，默认值与 UserSetting 的
     // picker_card_height 一致（未注入路径按默认几何渲染）
     in-out property <length> card-height: 104px;
-    // 预览行数预算由 Rust 按注入后的预览高度与实测字体行高派生
-    in-out property <int> preview-max-lines: 3;
+    out property <length> row-pad-vertical: Metrics.space-1_5;
+    out property <length> metadata-gap: Metrics.space-2;
+    out property <length> metadata-height: 20px;
+    out property <float> preview-line-height-factor: 1.15;
     out property <length> preview-height: card-height - row-frame
-        - 2 * Metrics.space-2 - Metrics.space-1_5 - 18px;
+        - 2 * row-pad-vertical - metadata-gap - metadata-height;
     out property <length> row-height: card-height;
     out property <length> thumb-size: preview-height;
     out property <length> thumb-gap: 10px;
@@ -340,6 +341,7 @@ component ClipRowCard inherits Rectangle {
     in property <bool> actions-open;
     property <length> action-reserve: PanelGeometry.row-action-width;
     in property <length> text-width;
+    min-width: 0px;
     height: PanelGeometry.row-height;
     // Acrylic 档烘焙底上行卡半透（玻璃卡透底）；Mica 档（0.92 近实
     // 底）与「无」档实底保持不透明——底下是平色，透它没有意义
@@ -433,9 +435,9 @@ component ClipRowCard inherits Rectangle {
             VerticalLayout {
                 padding-left: PanelGeometry.row-pad-left;
                 padding-right: PanelGeometry.row-pad-right;
-                padding-top: Metrics.space-2;
-                padding-bottom: Metrics.space-2;
-                spacing: Metrics.space-1_5;
+                padding-top: PanelGeometry.row-pad-vertical;
+                padding-bottom: PanelGeometry.row-pad-vertical;
+                spacing: PanelGeometry.metadata-gap;
 
                 HorizontalLayout {
                     height: PanelGeometry.preview-height;
@@ -465,11 +467,13 @@ component ClipRowCard inherits Rectangle {
                         // 大面积 secondary 灰在浅色下偏淡失神；收藏区分
                         // 由 ★ 星标承载，不再吃文字色档位
                         color: Theme.fg-default;
-                        font-size: Metrics.text-body;
+                        font-size: Metrics.text-sm;
                         font-family: data.is-code ? Metrics.font-code : "";
-                        // 预览串由 Rust 按当前宽度与三行预算裁排并加省略号
-                        font-weight: selected ? Metrics.weight-semibold : Metrics.weight-medium;
+                        line-height-factor: PanelGeometry.preview-line-height-factor;
+                        // 预览串由 Rust 按当前宽高裁排并加省略号
+                        font-weight: selected ? Metrics.weight-semibold : Metrics.weight-normal;
                         wrap: word-wrap;
+                        overflow: elide;
                         // 宽度显式固定（实例化处按 preview-width-* 传入），
                         // 不给布局按首选宽分配的机会
                         width: Math.max(40px, root.text-width - root.action-reserve);
@@ -480,17 +484,17 @@ component ClipRowCard inherits Rectangle {
 
                 // ── 元信息行 ──
                 HorizontalLayout {
-                    height: 18px;
-                    spacing: 6px;
+                    height: PanelGeometry.metadata-height;
+                    spacing: Metrics.space-1;
                     alignment: start;
 
                     HorizontalLayout {
-                        spacing: 6px;
+                        spacing: Metrics.space-1;
                         alignment: start;
                         horizontal-stretch: 1;
 
                         if (data.digit != ""): Rectangle {
-                            height: 18px;
+                            height: PanelGeometry.metadata-height;
                             min-width: 18px;
                             border-radius: Metrics.radius-sm;
                             // 数字只是按键提示，不承载选择感（选择感由
@@ -507,7 +511,7 @@ component ClipRowCard inherits Rectangle {
                                     // 恒 fg-muted：徽章底是 canvas 系深底，
                                     // fg-subtle 落上去跌破 4.5 对比度门禁
                                     color: Theme.fg-muted;
-                                    font-size: Metrics.text-hint;
+                                    font-size: Metrics.text-xs;
                                     font-weight: Metrics.weight-bold;
                                     font-family: "Consolas";
                                     vertical-alignment: center;
@@ -517,7 +521,7 @@ component ClipRowCard inherits Rectangle {
                         }
 
                         Rectangle {
-                            height: 18px;
+                            height: PanelGeometry.metadata-height;
                             border-radius: Metrics.radius-sm;
                             background: selected ? Theme.canvas-default : Theme.canvas-inset;
                             HorizontalLayout {
@@ -527,7 +531,7 @@ component ClipRowCard inherits Rectangle {
                                     text: data.type-label;
                                     // 同数字徽章：canvas-inset 底上用 fg-muted 保对比度
                                     color: Theme.fg-muted;
-                                    font-size: Metrics.text-hint;
+                                    font-size: Metrics.text-xs;
                                     font-weight: Metrics.weight-medium;
                                     vertical-alignment: center;
                                 }
@@ -537,10 +541,11 @@ component ClipRowCard inherits Rectangle {
                         Text {
                             text: data.source-app;
                             color: Theme.fg-metadata;
-                            font-size: Metrics.text-hint;
+                            font-size: Metrics.text-xs;
                             font-weight: Metrics.weight-medium;
                             vertical-alignment: center;
                             overflow: elide;
+                            min-width: 0px;
                             horizontal-stretch: 1;
                         }
                     }
@@ -550,21 +555,21 @@ component ClipRowCard inherits Rectangle {
                         spacing: Metrics.space-1;
                         alignment: start;
                         for tag-name in data.tags: Rectangle {
-                            height: 18px;
-                            min-width: 24px;
+                            height: PanelGeometry.metadata-height;
+                            min-width: 16px;
                             max-width: 56px;
-                            preferred-width: min(56px, tag-text.preferred-width + 12px);
+                            preferred-width: min(56px, tag-text.preferred-width + 2 * Metrics.space-1);
                             horizontal-stretch: 0;
                             border-radius: Metrics.radius-pill;
                             background: Theme.canvas-inset;
                             clip: true;
                             tag-text := Text {
-                                x: 6px;
-                                width: parent.width - 12px;
+                                x: Metrics.space-1;
+                                width: parent.width - 2 * Metrics.space-1;
                                 height: parent.height;
                                 text: tag-name;
                                 color: Theme.fg-muted;
-                                font-size: Metrics.text-hint;
+                                font-size: Metrics.text-xs;
                                 vertical-alignment: center;
                                 overflow: elide;
                             }
@@ -572,7 +577,7 @@ component ClipRowCard inherits Rectangle {
                         if (data.tag-more > 0): Text {
                             text: "+" + data.tag-more;
                             color: Theme.fg-metadata;
-                            font-size: Metrics.text-hint;
+                            font-size: Metrics.text-xs;
                             vertical-alignment: center;
                         }
                     }
@@ -580,7 +585,7 @@ component ClipRowCard inherits Rectangle {
                     Text {
                         text: data.time-text;
                         color: Theme.fg-metadata;
-                        font-size: Metrics.text-hint;
+                        font-size: Metrics.text-xs;
                         font-weight: Metrics.weight-medium;
                         vertical-alignment: center;
                     }
@@ -739,12 +744,13 @@ export component QuickPasteWindow inherits Window {
     // 为 0，Rust 首帧自行兜底——常量取自 PanelGeometry，上报后重裁修正）。
     // 裁排与渲染共用同一值，不再两边手抄几何公式
     out property <length> preview-width-no-thumb;
-    out property <length> preview-width-thumb;
+    out property <length> preview-width-thumb:
+        preview-width-no-thumb - PanelGeometry.thumb-size - PanelGeometry.thumb-gap;
     callback preview-widths-changed();
     // 排版度量标尺：返回 text 在给定宽度下的排版高度（逻辑像素）。
     // 用 Slint 自己的排版引擎度量，与实际渲染天然一致。字重固定
     // Metrics.weight-semibold（标尺属性同值）：选中态行内 Text 在
-    // 500↔600 间切换，按重字重裁排才能保证两态都不溢出预算
+    // 400↔600 间切换，按重字重裁排，切换选中项时沿用同一预览串
     callback measure-preview(string, length, bool) -> length;
     measure-preview(text, width, code) => {
         measure-ruler.font-family = code ? Metrics.font-code : "";
@@ -979,6 +985,7 @@ export component QuickPasteWindow inherits Window {
                         y: 0;
                         width: parent.width - PanelGeometry.scroll-slot;
                         height: parent.height;
+                        content-width: self.width;
                         interactive: true;
                         changed content-y => { root.row-hover-left(); }
                         // 实测上报预览可用宽：flick 宽扣 PanelGeometry.
@@ -987,8 +994,6 @@ export component QuickPasteWindow inherits Window {
                         // 缩放联动 changed width，重裁由回调驱动
                         function report-preview-widths() {
                             root.preview-width-no-thumb = self.width - PanelGeometry.preview-pad-h;
-                            root.preview-width-thumb = root.preview-width-no-thumb
-                                - PanelGeometry.thumb-size - PanelGeometry.thumb-gap;
                             root.preview-widths-changed();
                         }
                         init => { self.report-preview-widths(); }
@@ -1171,7 +1176,8 @@ export component QuickPasteWindow inherits Window {
             y: 0;
             width: 0px;
             text: "";
-            font-size: Metrics.text-body;
+            font-size: Metrics.text-sm;
+            line-height-factor: PanelGeometry.preview-line-height-factor;
             font-weight: Metrics.weight-semibold;
             wrap: word-wrap;
         }

@@ -371,7 +371,7 @@ pub struct UserSetting {
     pub picker_record_limit: u32,
     /// 速贴行卡片总高（逻辑像素），允许 80–160；预览区高度、缩略图尺寸
     /// 与预览行数预算由其派生（native 的 PanelGeometry 与
-    /// picker::apply_card_height），默认 104 对应 60px 预览与三行裁排
+    /// picker 和 PanelGeometry），默认 104 对应 60px 预览
     pub picker_card_height: u32,
     pub picker_position_mode: PickerPositionMode,
     /// 速贴/搜索条目的鼠标上屏触发方式，见 [PasteTrigger]

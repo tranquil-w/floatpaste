@@ -708,7 +708,8 @@ pub(crate) fn refresh_copy(app: &App) {
     app.with_picker(|win| {
         win.set_monitoring_paused(settings.pause_monitoring);
         win.set_digit_shortcuts_enabled(settings.picker_digit_shortcuts_enabled);
-        apply_card_height(win, settings.picker_card_height);
+        win.global::<PanelGeometry>()
+            .set_card_height(settings.picker_card_height as f32);
         build_rows(app, win, &app.state.items());
     });
 }
@@ -800,28 +801,7 @@ thread_local! {
 // picker_record_limit（9..=1000）内够用，若要放开上限需先做裁排结果
 // 缓存与模型 diff 更新，否则软件渲染与逐行度量会成为刷新瓶颈
 
-/// 预览单行排版高度（逻辑像素）：同一文本一行与两行的度量之差，
-/// 不依赖具体字体行框数值。度量走 measure-preview 标尺，与裁排同字重
-fn preview_line_height(win: &QuickPasteWindow, is_code: bool) -> f32 {
-    let one = win.invoke_measure_preview("文本Ag".into(), 1000.0, is_code);
-    let two = win.invoke_measure_preview("文本Ag\n文本Ag".into(), 1000.0, is_code);
-    (two - one).max(1.0)
-}
-
-/// 应用「速贴卡片高度」设置：写入 PanelGeometry 后读回派生的预览高度，
-/// 按实测正文行高派生预览行数预算——布局与裁排共用 PanelGeometry，
-/// 卡片铬件公式只在 slint 一侧维护。行数取 round：默认档（预览 60px）
-/// 在正文行高 19.4–20.7px 区间恒得三行，与既有固定三行行为一致；
-/// floor 会在行高略超 20px 时无谓退到两行
-fn apply_card_height(win: &QuickPasteWindow, card_height: u32) {
-    let geo = win.global::<PanelGeometry>();
-    geo.set_card_height(card_height as f32);
-    let preview_height = geo.get_preview_height().max(0.0);
-    let line_height = preview_line_height(win, false);
-    geo.set_preview_max_lines((preview_height / line_height).round().max(1.0) as i32);
-}
-
-/// 用 Slint 排版引擎把预览裁到 max_lines 行的纯裁排核心。
+/// 用 Slint 排版引擎把预览裁到可用高度的纯裁排核心。
 /// measure 返回候选串在给定宽度下的排版高度（逻辑像素），与窗口解耦
 /// 以便单元测试固定裁切语义：
 /// - 文本放得下且非截断源 → 原样返回（对齐 line-clamp 不溢出不加省略号）
@@ -832,14 +812,11 @@ pub fn clamp_preview_with(
     text: &str,
     avail_logical: f32,
     source_truncated: bool,
-    line_height: f32,
-    max_lines: usize,
+    available_height: f32,
 ) -> String {
     if text.is_empty() || avail_logical <= 0.0 {
         return text.to_string();
     }
-    let budget = max_lines as f32 * line_height;
-
     fn fits_with_ellipsis(
         measure: &mut dyn FnMut(&str, f32) -> f32,
         text: &str,
@@ -855,22 +832,28 @@ pub fn clamp_preview_with(
     }
 
     let full_height = measure(text, avail_logical);
-    if full_height <= budget + 0.5 && !source_truncated {
+    if full_height <= available_height + 0.5 && !source_truncated {
         return text.to_string();
     }
-    if fits_with_ellipsis(measure, text, text.chars().count(), avail_logical, budget) {
+    if fits_with_ellipsis(
+        measure,
+        text,
+        text.chars().count(),
+        avail_logical,
+        available_height,
+    ) {
         let mut trimmed = text.trim_end().to_string();
         trimmed.push('…');
         return trimmed;
     }
-    if !fits_with_ellipsis(measure, text, 0, avail_logical, budget) {
+    if !fits_with_ellipsis(measure, text, 0, avail_logical, available_height) {
         return "…".into();
     }
     let mut lo = 0usize;
     let mut hi = text.chars().count();
     while hi - lo > 1 {
         let mid = (lo + hi) / 2;
-        if fits_with_ellipsis(measure, text, mid, avail_logical, budget) {
+        if fits_with_ellipsis(measure, text, mid, avail_logical, available_height) {
             lo = mid;
         } else {
             hi = mid;
@@ -884,13 +867,13 @@ pub fn clamp_preview_with(
 }
 
 /// 行内裁排：度量走 measure-preview 标尺（Slint 排版引擎，字重固定重字重
-/// ——见 picker.slint，选中两态共用同一串与同一行高）
+/// ——见 picker.slint，选中两态共用同一串）。
 fn clamp_preview(
     win: &QuickPasteWindow,
     text: &str,
     avail_logical: f32,
     source_truncated: bool,
-    line_height: f32,
+    available_height: f32,
     is_code: bool,
 ) -> String {
     clamp_preview_with(
@@ -898,8 +881,7 @@ fn clamp_preview(
         text,
         avail_logical,
         source_truncated,
-        line_height,
-        win.global::<PanelGeometry>().get_preview_max_lines() as usize,
+        available_height,
     )
 }
 
@@ -932,8 +914,9 @@ fn build_rows(app: &App, win: &QuickPasteWindow, items: &[ClipItemSummary]) {
     win.set_delete_shortcut(keys.delete_entry.clone().into());
     win.set_dismiss_shortcut(keys.dismiss.clone().into());
     let (avail_no_thumb, avail_with_thumb) = preview_avail_widths(win);
-    let line_height = preview_line_height(win, false);
-    let code_line_height = preview_line_height(win, true);
+    let geo = win.global::<PanelGeometry>();
+    let available_height = geo.get_preview_height();
+    let action_reserve = geo.get_row_action_width();
     let geometry_ms = geometry_started.elapsed().as_millis();
     let rows_started = Instant::now();
     let mut preview_time = Duration::ZERO;
@@ -946,7 +929,6 @@ fn build_rows(app: &App, win: &QuickPasteWindow, items: &[ClipItemSummary]) {
             let has_thumb = thumb.is_some();
             // 预览达到入库截断上限即认为原文更长，行末始终要有省略号
             let source_truncated = item.content_preview.chars().count() >= PREVIEW_SOURCE_LIMIT;
-            let action_reserve = win.global::<PanelGeometry>().get_row_action_width();
             let preview_started = Instant::now();
             let is_code = item.r#type == "text" && item.text_kind == TextKind::Code;
             let preview = clamp_preview(
@@ -959,11 +941,7 @@ fn build_rows(app: &App, win: &QuickPasteWindow, items: &[ClipItemSummary]) {
                 } - action_reserve)
                     .max(40.0),
                 source_truncated,
-                if is_code {
-                    code_line_height
-                } else {
-                    line_height
-                },
+                available_height,
                 is_code,
             );
             preview_time += preview_started.elapsed();
@@ -1667,7 +1645,8 @@ pub fn wire(app: &App) {
     };
 
     // 启动先按持久化设置定形几何；后续变更经 refresh_copy 重入
-    apply_card_height(&win, app.state.current_settings().picker_card_height);
+    win.global::<PanelGeometry>()
+        .set_card_height(app.state.current_settings().picker_card_height as f32);
 
     // 单击：单击触发模式下立即上屏，否则仅选中。菜单展开时先收
     // 浮层并吞掉本次点击——去点菜单外的第一击不应立即上屏
@@ -2248,8 +2227,7 @@ mod tests {
             text,
             1000.0,
             source_truncated,
-            LINE_HEIGHT,
-            max_lines,
+            max_lines as f32 * LINE_HEIGHT,
         )
     }
 
@@ -2270,6 +2248,15 @@ mod tests {
         longer.push('a');
         longer.push('…');
         assert!(fake_measure(&longer, 1000.0) > 4.0 * LINE_HEIGHT + 0.5);
+    }
+
+    #[test]
+    fn preview_does_not_round_up_to_a_partially_visible_line() {
+        let text = "中文和英文混排 FloatPaste 速贴预览";
+        let height = 2.8 * LINE_HEIGHT;
+        let result = clamp_preview_with(&mut fake_measure, text, 1000.0, false, height);
+        assert!(result.ends_with('…'));
+        assert_eq!(fake_measure(&result, 1000.0), 2.0 * LINE_HEIGHT);
     }
 
     #[test]
@@ -2731,7 +2718,7 @@ pub(crate) mod action_sheet_tests {
         let hovered_cb = hovered.clone();
         win.on_row_hover(move |row, _, _| hovered_cb.set(row));
 
-        for width in [360.0, 280.0] {
+        for width in [360.0, 280.0, PICKER_MIN_WIDTH as f32] {
             win.window().set_size(slint::LogicalSize::new(width, 600.0));
             build_rows(app, win, &items);
             let rows = win.get_rows();
@@ -2814,16 +2801,18 @@ pub(crate) mod action_sheet_tests {
         }
         win.set_delete_armed_row(-1);
 
-        // 「速贴卡片高度」设置项：注入非默认总高后，行高与裁排行数预算
-        // 跟随变化且各行保持等高；结束后恢复默认几何不影响后续用例
+        // 注入更高卡片后，同样的条目应容纳更多正文；各行仍然等高。
         win.window().set_size(slint::LogicalSize::new(360.0, 760.0));
-        apply_card_height(win, 140);
         build_rows(app, win, &items);
+        let default_preview = win.get_rows().row_data(1).unwrap().preview;
         let geo = win.global::<PanelGeometry>();
+        geo.set_card_height(140.0);
+        build_rows(app, win, &items);
         assert_eq!(geo.get_row_height(), 140.0);
+        let tall_preview = win.get_rows().row_data(1).unwrap().preview;
         assert!(
-            geo.get_preview_max_lines() > 3,
-            "更高卡片的预览行数预算应增加"
+            tall_preview.lines().count() > default_preview.lines().count(),
+            "更高卡片应显示更多正文"
         );
         win.set_selected(0);
         let _ = win.window().take_snapshot().unwrap();
@@ -2845,6 +2834,6 @@ pub(crate) mod action_sheet_tests {
                 "行 {row} 在卡片高度 140 时应保持等高：{top}..={bottom}"
             );
         }
-        apply_card_height(win, app.state.current_settings().picker_card_height);
+        geo.set_card_height(app.state.current_settings().picker_card_height as f32);
     }
 }
