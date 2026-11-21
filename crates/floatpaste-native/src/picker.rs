@@ -708,6 +708,7 @@ pub(crate) fn refresh_copy(app: &App) {
     app.with_picker(|win| {
         win.set_monitoring_paused(settings.pause_monitoring);
         win.set_digit_shortcuts_enabled(settings.picker_digit_shortcuts_enabled);
+        win.set_header_hint_visible(settings.picker_header_hint_visible);
         win.global::<PanelGeometry>()
             .set_card_height(settings.picker_card_height as f32);
         build_rows(app, win, &app.state.items());
@@ -1645,8 +1646,10 @@ pub fn wire(app: &App) {
     };
 
     // 启动先按持久化设置定形几何；后续变更经 refresh_copy 重入
+    let startup_settings = app.state.current_settings();
     win.global::<PanelGeometry>()
-        .set_card_height(app.state.current_settings().picker_card_height as f32);
+        .set_card_height(startup_settings.picker_card_height as f32);
+    win.set_header_hint_visible(startup_settings.picker_header_hint_visible);
 
     // 单击：单击触发模式下立即上屏，否则仅选中。菜单展开时先收
     // 浮层并吞掉本次点击——去点菜单外的第一击不应立即上屏
@@ -2390,6 +2393,7 @@ pub(crate) mod action_sheet_tests {
 
         pointer_actions_button(&app, &win);
         equal_height_cards(&app, &win);
+        header_hint_visibility(&app, &win);
         deletion_interactions(&app, &win);
 
         let _ =
@@ -2452,6 +2456,27 @@ pub(crate) mod action_sheet_tests {
             assert_eq!(win.get_selected(), row as i32);
             close_actions(app);
         }
+    }
+
+    /// 顶栏提示显示跟随设置：保存路径（refresh_copy）即时生效，隐藏只
+    /// 影响顶栏文本，提示内容仍按会话状态生成（删除确认等由菜单呈现）
+    fn header_hint_visibility(app: &App, win: &QuickPasteWindow) {
+        assert!(win.get_header_hint_visible(), "顶栏提示默认显示");
+        let hint = win.get_header_hint();
+        assert!(!hint.is_empty(), "默认生成当前上屏键提示");
+
+        let mut settings = app.state.current_settings();
+        settings.picker_header_hint_visible = false;
+        app.core().update_settings(settings).unwrap();
+        refresh_copy(app);
+        assert!(!win.get_header_hint_visible(), "关闭设置后隐藏顶栏提示");
+        assert_eq!(win.get_header_hint(), hint, "隐藏不改变提示内容");
+
+        let mut settings = app.state.current_settings();
+        settings.picker_header_hint_visible = true;
+        app.core().update_settings(settings).unwrap();
+        refresh_copy(app);
+        assert!(win.get_header_hint_visible(), "重新开启后恢复显示");
     }
 
     fn deletion_interactions(app: &App, win: &QuickPasteWindow) {

@@ -373,6 +373,10 @@ pub struct UserSetting {
     /// 与预览行数预算由其派生（native 的 PanelGeometry 与
     /// picker 和 PanelGeometry），默认 104 对应 60px 预览
     pub picker_card_height: u32,
+    /// 速贴顶栏的会话键提示（如「Enter 粘贴为原格式」）是否显示。
+    /// 关闭后顶栏只保留图标与关闭按钮，拖拽与关闭不受影响
+    #[serde(default = "default_true")]
+    pub picker_header_hint_visible: bool,
     pub picker_position_mode: PickerPositionMode,
     /// 速贴/搜索条目的鼠标上屏触发方式，见 [PasteTrigger]
     pub paste_trigger: PasteTrigger,
@@ -430,6 +434,7 @@ impl Default for UserSetting {
             deleted_retention_days: 30,
             picker_record_limit: 50,
             picker_card_height: 104,
+            picker_header_hint_visible: true,
             picker_position_mode: PickerPositionMode::Mouse,
             paste_trigger: PasteTrigger::Click,
             excluded_apps: vec![
@@ -736,6 +741,25 @@ mod tests {
         assert_eq!(settings.picker_card_height, 104);
         assert_eq!(settings.picker_position_mode, PickerPositionMode::Mouse);
         assert_eq!(settings.theme_mode, ThemeMode::System);
+    }
+
+    #[test]
+    fn picker_header_hint_visible_defaults_on_and_round_trips() {
+        // 旧配置缺该字段：顶栏提示保持显示，升级不改动既有观感
+        let legacy: UserSetting =
+            serde_json::from_str(r#"{"pickerCardHeight":120,"pickerRecordLimit":20}"#).unwrap();
+        assert!(legacy.picker_header_hint_visible);
+        assert!(legacy.sanitized().picker_header_hint_visible);
+
+        let serialized = serde_json::to_string(&UserSetting {
+            picker_header_hint_visible: false,
+            ..UserSetting::default()
+        })
+        .unwrap();
+        assert!(serialized.contains("pickerHeaderHintVisible"));
+        let parsed: UserSetting = serde_json::from_str(&serialized).unwrap();
+        assert!(!parsed.picker_header_hint_visible);
+        assert!(!parsed.sanitized().picker_header_hint_visible);
     }
 
     #[test]

@@ -1194,6 +1194,7 @@ export component SettingsWindow inherits Window {
     in-out property <string> privacy-notice;
     in-out property <string> picker-limit-text;
     in-out property <string> picker-card-height-text;
+    in-out property <bool> picker-header-hint-visible: true;
     in-out property <int> position-mode: 0;   // 0=mouse 1=lastPosition 2=caret
     in-out property <int> paste-trigger: 0;   // 0=click 1=doubleClick
     // 默认次级动作：选项索引对应 Rust 目录；链接/路径 0=沿用 1=外部打开。
@@ -1259,6 +1260,7 @@ export component SettingsWindow inherits Window {
     callback picker-limit-committed(string);
     callback picker-card-height-edited(string);
     callback picker-card-height-committed(string);
+    callback picker-header-hint-toggled(bool);
     callback shortcut-edited(string);
     callback shortcut-cancelled();
     callback search-shortcut-edited(string);
@@ -1726,6 +1728,13 @@ export component SettingsWindow inherits Window {
                                                 committed(text) => { root.picker-card-height-committed(text); }
                                             }
                                         }
+                                    }
+                                    RowDivider { }
+                                    ToggleRow {
+                                        title: "显示速贴顶栏提示";
+                                        description: "在顶栏显示当前会话键与上屏动作；关闭后顶栏只保留图标和关闭按钮。";
+                                        checked: root.picker-header-hint-visible;
+                                        toggled(checked) => { root.picker-header-hint-toggled(checked); }
                                     }
                                     RowDivider { }
                                     SettingRow {

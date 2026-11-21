@@ -702,6 +702,9 @@ export component QuickPasteWindow inherits Window {
     in-out property <int> selected: 0;
     in property <bool> monitoring-paused: false;
     in-out property <bool> digit-shortcuts-enabled: true;
+    // 顶栏提示（会话键 + 上屏动作）：设置可关闭，关闭后顶栏只留图标与
+    // 关闭按钮，整条仍可拖拽（高度不变，列表区不位移）
+    in property <bool> header-hint-visible: true;
     in-out property <bool> loading: false;
     in-out property <bool> load-failed: false;
     // 自绘模糊底图：DWM SystemBackdrop 的 Acrylic 模糊是激活态特权
@@ -850,7 +853,9 @@ export component QuickPasteWindow inherits Window {
                 }
 
                 // 直接说明当前主键的作用；沿用整条顶栏的拖拽命中，不新增焦点。
+                // 绝对定位不进布局：隐藏后不改变顶栏高度与列表可用高
                 Text {
+                    visible: root.header-hint-visible;
                     x: 38px;
                     width: parent.width - 84px;
                     height: parent.height;

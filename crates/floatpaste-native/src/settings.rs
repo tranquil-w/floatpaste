@@ -434,6 +434,15 @@ pub fn wire(app: &App) {
     }
     {
         let app_cb = app.clone();
+        win.on_picker_header_hint_toggled(move |checked| {
+            if let Some(win) = app_cb.settings.upgrade() {
+                win.set_picker_header_hint_visible(checked);
+                schedule_save(&app_cb);
+            }
+        });
+    }
+    {
+        let app_cb = app.clone();
         win.on_history_limit_committed(move |text| {
             if let Some(win) = app_cb.settings.upgrade() {
                 commit_number_text(
@@ -901,6 +910,7 @@ fn hydrate(app: &App, win: &SettingsWindow) {
     }
     win.set_picker_limit_text(settings.picker_record_limit.to_string().into());
     win.set_picker_card_height_text(settings.picker_card_height.to_string().into());
+    win.set_picker_header_hint_visible(settings.picker_header_hint_visible);
     win.set_position_mode(match settings.picker_position_mode {
         PickerPositionMode::Mouse => 0,
         PickerPositionMode::LastPosition => 1,
@@ -1023,6 +1033,7 @@ fn current_draft(win: &SettingsWindow) -> UserSetting {
             .unwrap_or(30),
         picker_record_limit: picker_limit,
         picker_card_height,
+        picker_header_hint_visible: win.get_picker_header_hint_visible(),
         picker_position_mode: match win.get_position_mode() {
             1 => PickerPositionMode::LastPosition,
             2 => PickerPositionMode::Caret,
@@ -2040,23 +2051,24 @@ pub(crate) mod copy_contract_tests {
                 .dispatch_event(slint::platform::WindowEvent::KeyReleased { text });
         };
         // 坐标来源：880×760 窗口、本页滚到 -360 时，「普通文本」下拉框
-        // 中心 (730, 208)；弹层第二项中心 (730, 284)（按快照量测）
-        click(730.0, 208.0);
+        // 中心 (730, 263)；弹层第二项中心 (730, 339)（按快照量测）。上方
+        // 「显示速贴顶栏提示」开关行（54px + 1px 分割线）已计入行位
+        click(730.0, 263.0);
         send_key(slint::platform::Key::DownArrow.into());
         assert_eq!(win.get_secondary_plain(), 0, "预选不应保存");
         send_key(slint::platform::Key::Escape.into());
         assert_eq!(win.get_secondary_plain(), 0, "Esc 取消选择");
         assert!(!closed.get(), "弹层 Esc 不得关闭设置窗口");
-        click(730.0, 208.0);
+        click(730.0, 263.0);
         send_key(slint::platform::Key::DownArrow.into());
         send_key(slint::platform::Key::Return.into());
         assert_eq!(win.get_secondary_plain(), 1, "确认应选择文本文件");
         win.set_secondary_plain(0);
-        click(730.0, 208.0);
-        click(730.0, 284.0);
+        click(730.0, 263.0);
+        click(730.0, 339.0);
         assert_eq!(win.get_secondary_plain(), 1, "指针选择第二项应保存");
         win.set_secondary_plain(0);
-        click(730.0, 208.0);
+        click(730.0, 263.0);
         click(400.0, 350.0);
         assert_eq!(win.get_secondary_plain(), 0, "点击外部取消，不应保存");
         send_key(slint::platform::Key::Escape.into());

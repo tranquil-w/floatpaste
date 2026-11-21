@@ -10,6 +10,7 @@
 //!   alpha 缺省取代码内 MICA_TINT_ALPHA
 //! - backdrop=#RRGGBB：用指定纯色替代合成彩底，校准不同背景下的材质
 //! - preset=<id>：使用指定风格预设（默认 default）
+//! - header=off：隐藏顶栏会话键提示（设置「显示速贴顶栏提示」关闭态）
 //! - actions=<行号>：展开该行的更多操作菜单（从 0 起）；frame=<毫秒> 取进场帧
 //! - hover-x=<坐标>：与 hover-y 配合，检查行内更多按钮的悬停
 //!
@@ -310,6 +311,9 @@ fn main() {
         picker.set_blur_active(true);
         picker.set_material_active(use_mica);
     }
+
+    // 顶栏提示显示跟随设置；诊断隐藏态用 header=off
+    picker.set_header_hint_visible(!std::env::args().any(|a| a == "header=off"));
 
     picker
         .window()
