@@ -24,6 +24,7 @@
 | 核对必需检查、自审与交付证据 | [验证与交付](../CONTRIBUTING.md#验证与交付) / [交付前自审](../CONTRIBUTING.md#交付前自审) |
 | 一条命令执行检查、生成证据报告 | [统一检查入口](../CONTRIBUTING.md#统一检查入口) |
 | 查看日志与诊断开关 | [调试与诊断](../CONTRIBUTING.md#调试与诊断) |
+| 冷启动桌面实机验证、截图留证与日常实例隔离保护 | [桌面实机验证技能](../.agents/skills/verify-floatpaste/SKILL.md) |
 | 排查慢呼出与显屏 | [呼出缓慢与显屏延迟](no-focus-picker.md#呼出缓慢与显屏延迟) |
 | 理解领域命名 | [术语表](../CONTEXT.md) |
 | 定位模块与依赖关系 | [架构概览](architecture.md) |
