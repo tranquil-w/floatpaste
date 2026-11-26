@@ -65,14 +65,14 @@ fn main() {
     // 下次显示自动重建。编辑/设置窗口关闭即回收内存；overlay 装配窗口
     // （速贴/搜索/tooltip）显隐走停屏与 Win32 路径，不触发此行为
     std::env::set_var("SLINT_DESTROY_WINDOW_ON_HIDE", "1");
-    let _log_guard = system::init_logging();
+    let logging = system::init_logging();
     install_panic_hook();
 
     // 提权辅助路径（UAC 重入自身）：完成管理员自启任务的注册/卸载后以
     // 退出码报告结果。必须先于单实例检查——旧实例正持锁等待本进程结果
     let args: Vec<String> = std::env::args().collect();
     if let Some(exit_code) = run_elevated_sidecar(&args) {
-        drop(_log_guard);
+        drop(logging);
         std::process::exit(exit_code);
     }
 
@@ -106,6 +106,12 @@ fn main() {
             return;
         }
     };
+    if let Some(logging) = &logging {
+        match core.current_settings() {
+            Ok(settings) => logging.finish_startup(settings.log_level),
+            Err(error) => tracing::warn!("读取日志级别失败: {error}"),
+        }
+    }
 
     if let Err(error) =
         floatpaste_core::services::history_service::HistoryService::ensure_welcome_item(

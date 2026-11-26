@@ -480,7 +480,7 @@ component Segmented inherits Rectangle {
     }
 }
 
-// 次级动作的固定宽选择框；长选项不挤压左侧说明，弹层交给 Slint
+// 设置行的固定宽选择框；长选项不挤压左侧说明，弹层交给 Slint
 // 管理点击外部关闭与焦点归还。方向键只预选，确认后才保存。
 component ActionSelect inherits Rectangle {
     in property <[string]> options;
@@ -1212,6 +1212,7 @@ export component SettingsWindow inherits Window {
     in property <string> theme-accent-id: "default";
     in-out property <bool> launch-on-startup;
     in-out property <bool> silent-on-startup;
+    in-out property <int> log-level: 3; // Debug
     // 以管理员身份运行：process-elevated = 当前进程实际提权状态（运行时
     // 注入，不入设置）；always-run-elevated 决定自启任务是否带提权
     in-out property <bool> process-elevated: false;
@@ -1301,6 +1302,7 @@ export component SettingsWindow inherits Window {
     callback accent-selected(string);
     callback launch-on-startup-toggled(bool);
     callback silent-on-startup-toggled(bool);
+    callback log-level-selected(int);
     callback always-run-elevated-toggled(bool);
     // 以管理员身份重启（UAC 确认后立即重启，成功即退出当前进程）
     callback restart-as-admin();
@@ -2364,7 +2366,19 @@ export component SettingsWindow inherits Window {
                                 spacing: 8px;
                                 SectionHeader {
                                     title: "系统";
-                                    description: "决定 FloatPaste 如何启动，以及是否以管理员权限运行。";
+                                    description: "管理启动、管理员权限和日志。";
+                                }
+                                RowGroup {
+                                    SettingRow {
+                                        title: "日志级别";
+                                        description: "保存后退出并重新启动生效。有效的 RUST_LOG 环境变量优先。";
+                                        ActionSelect {
+                                            title: "日志级别";
+                                            options: ["错误 (Error)", "警告 (Warn)", "信息 (Info)", "调试 (Debug)", "跟踪 (Trace)"];
+                                            value: root.log-level;
+                                            selected(idx) => { root.log-level-selected(idx); }
+                                        }
+                                    }
                                 }
                                 RowGroup {
                                     ToggleRow {

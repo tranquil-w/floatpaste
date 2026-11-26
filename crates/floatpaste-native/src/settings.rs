@@ -24,8 +24,8 @@ use floatpaste_core::domain::clip_item::{
 };
 use floatpaste_core::domain::error::AppError;
 use floatpaste_core::domain::settings::{
-    normalize_shortcut_for_compare, PasteTrigger, PickerPositionMode, SecondaryPasteDefaults,
-    SessionKeys, ThemeMode, UserSetting, WindowMaterial,
+    normalize_shortcut_for_compare, LogLevel, PasteTrigger, PickerPositionMode,
+    SecondaryPasteDefaults, SessionKeys, ThemeMode, UserSetting, WindowMaterial,
 };
 use floatpaste_core::launch_mode;
 use floatpaste_core::platform::windows::active_app::ActiveAppResolver;
@@ -50,6 +50,13 @@ use std::sync::atomic::Ordering;
 
 const SAVE_DEBOUNCE: Duration = Duration::from_millis(800);
 const NOTICE_TIMEOUT: Duration = Duration::from_millis(1800);
+const LOG_LEVELS: [LogLevel; 5] = [
+    LogLevel::Error,
+    LogLevel::Warn,
+    LogLevel::Info,
+    LogLevel::Debug,
+    LogLevel::Trace,
+];
 /// 项目主页（设置窗「关于」区打开）
 const PROJECT_PAGE_URL: &str = "https://github.com/tranquil-w/floatpaste";
 
@@ -486,6 +493,16 @@ pub fn wire(app: &App) {
                     104,
                     SettingsWindow::set_picker_card_height_text,
                 );
+            }
+        });
+    }
+
+    {
+        let app_cb = app.clone();
+        win.on_log_level_selected(move |level| {
+            if let Some(win) = app_cb.settings.upgrade() {
+                win.set_log_level(level);
+                schedule_save(&app_cb);
             }
         });
     }
@@ -965,6 +982,12 @@ fn hydrate(app: &App, win: &SettingsWindow) {
     win.set_theme_accent_id(settings.theme_accent.clone().into());
     win.set_launch_on_startup(settings.launch_on_startup);
     win.set_silent_on_startup(settings.silent_on_startup);
+    win.set_log_level(
+        LOG_LEVELS
+            .iter()
+            .position(|level| *level == settings.log_level)
+            .expect("日志级别须有对应的设置选项") as i32,
+    );
     win.set_always_run_elevated(settings.always_run_elevated);
     win.set_process_elevated(elevation::is_current_process_elevated());
     win.set_elevated_status_text("".into());
@@ -1017,6 +1040,10 @@ fn current_draft(win: &SettingsWindow) -> UserSetting {
     UserSetting {
         shortcut: win.get_shortcut().to_string(),
         launch_on_startup,
+        log_level: LOG_LEVELS
+            .get(win.get_log_level() as usize)
+            .copied()
+            .unwrap_or_default(),
         // 关闭自启动时静默启动强制为 false（对齐 toSettingsPayload）
         silent_on_startup: if launch_on_startup {
             win.get_silent_on_startup()
@@ -2074,6 +2101,18 @@ pub(crate) mod copy_contract_tests {
         send_key(slint::platform::Key::Escape.into());
         assert!(closed.get(), "弹层关闭后 Esc 应恢复窗口级处理");
 
+        win.set_active_section(section::SYSTEM);
+        win.set_scroll_y(0.0);
+        let _ = win.window().take_snapshot().unwrap();
+        let weak = win.as_weak();
+        win.on_log_level_selected(move |index| weak.unwrap().set_log_level(index));
+        // 880×760 窗口中日志级别选择框的中心，方向键从 Debug 移到 Info。
+        click(730.0, 175.0);
+        send_key(slint::platform::Key::UpArrow.into());
+        send_key(slint::platform::Key::Return.into());
+        assert_eq!(current_draft(&win).log_level, LogLevel::Info);
+        win.set_log_level(3);
+
         if std::env::var_os("FLOATPASTE_UI_SNAPSHOTS").is_some() {
             let dir =
                 std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.artifacts/snapshot");
@@ -2232,6 +2271,8 @@ pub(crate) mod privacy_contract_tests {
         };
         wire(&app);
         hydrate(&app, &win);
+        assert_eq!(current_draft(&win).log_level, LogLevel::Debug);
+        win.invoke_log_level_selected(1);
         win.invoke_secondary_plain_selected(1);
         win.invoke_secondary_rich_selected(2);
         win.invoke_secondary_link_selected(1);
@@ -2250,6 +2291,10 @@ pub(crate) mod privacy_contract_tests {
         stop_save_timer();
         app.core().update_settings(current_draft(&win)).unwrap();
         assert_eq!(
+            app.core().repository.load_settings().unwrap().log_level,
+            LogLevel::Warn
+        );
+        assert_eq!(
             app.core()
                 .repository
                 .load_settings()
@@ -2261,7 +2306,9 @@ pub(crate) mod privacy_contract_tests {
         win.set_secondary_rich(0);
         win.set_secondary_link(0);
         win.set_secondary_path(0);
+        win.set_log_level(3);
         hydrate(&app, &win);
+        assert_eq!(current_draft(&win).log_level, LogLevel::Warn);
         assert_eq!(current_draft(&win).secondary_paste, expected);
         let item = floatpaste_core::services::history_service::HistoryService::ingest_text(
             app.core(),
