@@ -6,22 +6,32 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use floatpaste_core::{
-    domain::error::AppError, repository::sqlite_repository::SqliteRepository,
-    services::image_storage::ImageStorage, state::CoreState,
+    domain::{error::AppError, settings::LogLevel},
+    repository::sqlite_repository::SqliteRepository,
+    services::image_storage::ImageStorage,
+    state::CoreState,
 };
 use tracing_appender::non_blocking::{ErrorCounter, WorkerGuard};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use tracing_subscriber::{
+    fmt, layer::SubscriberExt, reload, util::SubscriberInitExt, EnvFilter, Registry,
+};
 
 const MAX_LOG_FILES: usize = 15;
 
-pub struct LoggingGuard {
+pub struct Logging {
+    settings_filter: Option<reload::Handle<EnvFilter, Registry>>,
+    file: Option<LogFileGuard>,
+}
+
+struct LogFileGuard {
+    directory: PathBuf,
     reporter_stop: Sender<()>,
     reporter_thread: Option<JoinHandle<()>>,
     _worker_guard: WorkerGuard,
 }
 
-impl Drop for LoggingGuard {
+impl Drop for LogFileGuard {
     fn drop(&mut self) {
         let _ = self.reporter_stop.send(());
         if let Some(reporter_thread) = self.reporter_thread.take() {
@@ -30,74 +40,31 @@ impl Drop for LoggingGuard {
     }
 }
 
-/// 初始化日志：stdout + 按天滚动文件。返回的 guard 需在进程生命周期内保活。
-///
-/// 默认级别放到了 debug：插入符定位链路的诊断日志（锚点来源、失败现场）
-/// 全在 debug 级，定位问题要开箱可查，不能要求先设 RUST_LOG 再复现
-pub fn init_logging() -> Option<LoggingGuard> {
-    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| default_filter());
+/// 先保留启动与数据库迁移诊断，读取设置后再应用持久化级别。
+/// 返回值需在进程生命周期内保活，以便刷新文件日志。
+pub fn init_logging() -> Option<Logging> {
+    let env_filter = EnvFilter::try_from_default_env().ok();
+    let allow_settings = env_filter.is_none();
+    let (filter, handle) =
+        reload::Layer::new(env_filter.unwrap_or_else(|| settings_filter(LogLevel::default())));
 
-    let (mut log_dir, mut fallback_reason) = match resolve_log_dir() {
-        Ok(log_dir) => (log_dir, None),
-        Err(primary_error) => {
-            let fallback = std::env::temp_dir().join("FloatPaste").join("logs");
-            match std::fs::create_dir_all(&fallback) {
-                Ok(()) => (fallback, Some(primary_error)),
-                Err(fallback_error) => {
-                    eprintln!(
-                        "无法初始化日志目录: {primary_error}; 临时目录也不可用: {fallback_error}"
-                    );
-                    let _ = fmt()
-                        .with_env_filter(env_filter)
-                        .with_target(false)
-                        .try_init();
-                    return None;
-                }
-            }
+    let (file, fallback_reason) = open_log_file();
+    let (file_layer, file_parts) = match file {
+        Some((appender, directory)) => {
+            let (writer, guard) = tracing_appender::non_blocking(appender);
+            let counter = writer.error_counter();
+            (
+                Some(fmt::layer().with_writer(writer).with_ansi(false)),
+                Some((directory, counter, guard)),
+            )
         }
+        None => (None, None),
     };
-
-    let file_appender = match build_file_appender(&log_dir) {
-        Ok(appender) => appender,
-        Err(primary_error) if fallback_reason.is_none() => {
-            let fallback = std::env::temp_dir().join("FloatPaste").join("logs");
-            let fallback_appender = std::fs::create_dir_all(&fallback)
-                .map_err(|error| error.to_string())
-                .and_then(|()| build_file_appender(&fallback).map_err(|error| error.to_string()));
-            match fallback_appender {
-                Ok(appender) => {
-                    fallback_reason = Some(primary_error.to_string());
-                    log_dir = fallback;
-                    appender
-                }
-                Err(fallback_error) => {
-                    eprintln!(
-                        "无法初始化日志文件: {primary_error}; 临时目录也不可用: {fallback_error}"
-                    );
-                    let _ = fmt()
-                        .with_env_filter(env_filter)
-                        .with_target(false)
-                        .try_init();
-                    return None;
-                }
-            }
-        }
-        Err(error) => {
-            eprintln!("无法初始化日志文件: {error}");
-            let _ = fmt()
-                .with_env_filter(env_filter)
-                .with_target(false)
-                .try_init();
-            return None;
-        }
-    };
-    let (non_blocking_file, guard) = tracing_appender::non_blocking(file_appender);
-    let dropped_lines = non_blocking_file.error_counter();
 
     let result = tracing_subscriber::registry()
-        .with(env_filter)
+        .with(filter)
         .with(fmt::layer().with_target(false))
-        .with(fmt::layer().with_writer(non_blocking_file).with_ansi(false))
+        .with(file_layer)
         .try_init();
 
     if let Err(error) = result {
@@ -108,20 +75,38 @@ pub fn init_logging() -> Option<LoggingGuard> {
     if let Some(error) = fallback_reason {
         tracing::warn!("应用日志目录不可用，已改写入临时目录: {error}");
     }
-    tracing::info!("日志将写入 {}", log_dir.display());
-    tracing::info!(
-        version = env!("CARGO_PKG_VERSION"),
-        pid = std::process::id(),
-        executable = ?std::env::current_exe().ok(),
-        diagnostic_text = std::env::var_os("FLOATPASTE_DIAGNOSTIC_LOG").is_some_and(|value| value == "1"),
-        "应用启动诊断"
-    );
-    let (reporter_stop, reporter_thread) = start_drop_reporter(dropped_lines);
-    Some(LoggingGuard {
-        reporter_stop,
-        reporter_thread,
-        _worker_guard: guard,
+    Some(Logging {
+        settings_filter: allow_settings.then_some(handle),
+        file: file_parts.map(|(directory, counter, guard)| {
+            let (reporter_stop, reporter_thread) = start_drop_reporter(counter);
+            LogFileGuard {
+                directory,
+                reporter_stop,
+                reporter_thread,
+                _worker_guard: guard,
+            }
+        }),
     })
+}
+
+impl Logging {
+    pub fn finish_startup(&self, level: LogLevel) {
+        if let Some(handle) = &self.settings_filter {
+            if let Err(error) = handle.reload(settings_filter(level)) {
+                tracing::warn!("应用日志级别失败: {error}");
+            }
+        }
+        if let Some(file) = &self.file {
+            tracing::info!("日志将写入 {}", file.directory.display());
+        }
+        tracing::info!(
+            version = env!("CARGO_PKG_VERSION"),
+            pid = std::process::id(),
+            executable = ?std::env::current_exe().ok(),
+            diagnostic_text = std::env::var_os("FLOATPASTE_DIAGNOSTIC_LOG").is_some_and(|value| value == "1"),
+            "应用启动诊断"
+        );
+    }
 }
 
 fn start_drop_reporter(counter: ErrorCounter) -> (Sender<()>, Option<JoinHandle<()>>) {
@@ -170,17 +155,41 @@ fn build_file_appender(
         .build(log_dir)
 }
 
-/// 两个 crate 的 target 前缀不同（floatpaste / floatpaste_core），都显式列出
-fn default_filter() -> EnvFilter {
-    EnvFilter::new("floatpaste=debug,floatpaste_core=debug")
+fn settings_filter(level: LogLevel) -> EnvFilter {
+    let level = match level {
+        LogLevel::Error => "error",
+        LogLevel::Warn => "warn",
+        LogLevel::Info => "info",
+        LogLevel::Debug => "debug",
+        LogLevel::Trace => "trace",
+    };
+    EnvFilter::new(format!("floatpaste={level},floatpaste_core={level}"))
 }
 
-fn resolve_log_dir() -> Result<PathBuf, String> {
-    let dir = resolve_data_dir()
-        .map_err(|error| error.to_string())?
-        .join("logs");
-    std::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
-    Ok(dir)
+fn open_log_file() -> (Option<(RollingFileAppender, PathBuf)>, Option<String>) {
+    let primary = resolve_data_dir()
+        .map_err(|error| error.to_string())
+        .and_then(|dir| {
+            let dir = dir.join("logs");
+            build_file_appender(&dir)
+                .map(|appender| (appender, dir))
+                .map_err(|error| error.to_string())
+        });
+    match primary {
+        Ok(file) => (Some(file), None),
+        Err(primary_error) => {
+            let fallback = std::env::temp_dir().join("FloatPaste").join("logs");
+            match build_file_appender(&fallback) {
+                Ok(appender) => (Some((appender, fallback)), Some(primary_error)),
+                Err(fallback_error) => {
+                    eprintln!(
+                        "无法初始化日志文件: {primary_error}; 临时目录也不可用: {fallback_error}"
+                    );
+                    (None, None)
+                }
+            }
+        }
+    }
 }
 
 /// 初始化核心状态：日志与数据库共用数据目录解析及旧目录迁移。
@@ -223,8 +232,25 @@ fn resolve_appdata_dir(appdata: &Path) -> Result<PathBuf, AppError> {
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_appdata_dir;
+    use super::*;
     use std::{fs, os::windows::fs::OpenOptionsExt, time::SystemTime};
+
+    #[test]
+    fn saved_level_filters_both_application_targets_after_startup() {
+        let (filter, handle) = reload::Layer::new(settings_filter(LogLevel::default()));
+        let subscriber = tracing_subscriber::registry().with(filter);
+        tracing::subscriber::with_default(subscriber, || {
+            assert!(tracing::enabled!(target: "floatpaste::picker", tracing::Level::DEBUG));
+            assert!(tracing::enabled!(target: "floatpaste_core::services", tracing::Level::DEBUG));
+            assert!(!tracing::enabled!(target: "floatpaste::picker", tracing::Level::TRACE));
+
+            handle.reload(settings_filter(LogLevel::Warn)).unwrap();
+            assert!(tracing::enabled!(target: "floatpaste::picker", tracing::Level::WARN));
+            assert!(tracing::enabled!(target: "floatpaste_core::services", tracing::Level::WARN));
+            assert!(!tracing::enabled!(target: "floatpaste::picker", tracing::Level::INFO));
+            assert!(!tracing::enabled!(target: "floatpaste_core::services", tracing::Level::INFO));
+        });
+    }
 
     #[test]
     fn data_directory_migration_preserves_files_and_existing_destination() {
