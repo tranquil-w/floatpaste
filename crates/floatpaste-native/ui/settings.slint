@@ -2369,18 +2369,6 @@ export component SettingsWindow inherits Window {
                                     description: "管理启动、管理员权限和日志。";
                                 }
                                 RowGroup {
-                                    SettingRow {
-                                        title: "日志级别";
-                                        description: "保存后退出并重新启动生效。有效的 RUST_LOG 环境变量优先。";
-                                        ActionSelect {
-                                            title: "日志级别";
-                                            options: ["错误 (Error)", "警告 (Warn)", "信息 (Info)", "调试 (Debug)", "跟踪 (Trace)"];
-                                            value: root.log-level;
-                                            selected(idx) => { root.log-level-selected(idx); }
-                                        }
-                                    }
-                                }
-                                RowGroup {
                                     ToggleRow {
                                         title: "开机自启";
                                         description: "登录系统后自动启动 FloatPaste。";
@@ -2462,6 +2450,18 @@ export component SettingsWindow inherits Window {
                                             color: Theme.danger-fg;
                                             font-size: Metrics.text-xs;
                                             wrap: word-wrap;
+                                        }
+                                    }
+                                }
+                                RowGroup {
+                                    SettingRow {
+                                        title: "日志级别";
+                                        description: "日志可帮助排查问题。需要更多细节时可选「跟踪」。退出并重新打开 FloatPaste 后生效。";
+                                        ActionSelect {
+                                            title: "日志级别";
+                                            options: ["错误 (Error)", "警告 (Warn)", "信息 (Info)", "调试 (Debug)", "跟踪 (Trace)"];
+                                            value: root.log-level;
+                                            selected(idx) => { root.log-level-selected(idx); }
                                         }
                                     }
                                 }

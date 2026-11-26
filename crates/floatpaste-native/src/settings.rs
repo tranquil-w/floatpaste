@@ -2106,8 +2106,8 @@ pub(crate) mod copy_contract_tests {
         let _ = win.window().take_snapshot().unwrap();
         let weak = win.as_weak();
         win.on_log_level_selected(move |index| weak.unwrap().set_log_level(index));
-        // 880×760 窗口中日志级别选择框的中心，方向键从 Debug 移到 Info。
-        click(730.0, 175.0);
+        // 880×760 窗口中系统页底部的日志级别选择框，方向键从 Debug 移到 Info。
+        click(730.0, 445.0);
         send_key(slint::platform::Key::UpArrow.into());
         send_key(slint::platform::Key::Return.into());
         assert_eq!(current_draft(&win).log_level, LogLevel::Info);
