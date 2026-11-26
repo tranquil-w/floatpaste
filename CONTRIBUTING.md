@@ -66,6 +66,7 @@ Rust 测试和构建使用 `--locked`；测试启用严格 E2E 和隔离目录�
 
 ## 调试与诊断
 
+- 应用日志的过滤与重启生效规则见 [日志级别](docs/runtime-behavior.md#日志级别)。
 - 日志写入 `%APPDATA%\floatpaste\logs`，文件以 `floatpaste-native.log` 为前缀按天滚动，最多保留 15 个文件；主目录不可用时写入 `%TEMP%\FloatPaste\logs`。
 - 默认不记录窗口标题或 UIA 元素名称；设置 `FLOATPASTE_DIAGNOSTIC_LOG=1` 后启用这些字段，耗时日志只记录阶段与数量。共享诊断日志前检查其中的敏感信息。
 - 窗口生命周期用 `session_id` 关联，上屏异步操作同时记录 `operation_id`；日志队列丢弃计数每 30 秒检查并在新增丢弃时报告，日志基建见 [system.rs](crates/floatpaste-native/src/system.rs)。panic 日志包含线程名与堆栈，钩子在 [main.rs](crates/floatpaste-native/src/main.rs)。

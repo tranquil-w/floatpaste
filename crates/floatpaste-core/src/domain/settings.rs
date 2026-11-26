@@ -343,6 +343,19 @@ pub struct CustomThemeColors {
     pub dark: Option<ThemeColorPalette>,
 }
 
+/// 应用日志级别，下次启动读取。
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LogLevel {
+    Error,
+    Warn,
+    Info,
+    Trace,
+    #[default]
+    #[serde(other)]
+    Debug,
+}
+
 /// 用户设置结构
 ///
 /// # 快捷键
@@ -356,6 +369,7 @@ pub struct UserSetting {
     pub shortcut: String,
     pub launch_on_startup: bool,
     pub silent_on_startup: bool,
+    pub log_level: LogLevel,
     /// 以管理员权限启动：登录自启经任务计划程序「最高权限」任务接管
     /// （Run 键无法提权；asInvoker manifest 不触发 UAC）；其余启动路径
     /// （手动双击图标等）由壳层启动期自检经 UAC 重入自身提权，UAC 取消
@@ -428,6 +442,7 @@ impl Default for UserSetting {
             shortcut: DEFAULT_MAIN_SHORTCUT.to_string(),
             launch_on_startup: false,
             silent_on_startup: false,
+            log_level: LogLevel::default(),
             always_run_elevated: false,
             history_limit: 1_000,
             history_retention_days: 0,
@@ -737,6 +752,7 @@ mod tests {
 
         assert!(settings.launch_on_startup);
         assert!(!settings.silent_on_startup);
+        assert_eq!(settings.log_level, super::LogLevel::Debug);
         assert_eq!(settings.picker_record_limit, 50);
         assert_eq!(settings.picker_card_height, 104);
         assert_eq!(settings.picker_position_mode, PickerPositionMode::Mouse);
