@@ -2106,8 +2106,10 @@ pub(crate) mod copy_contract_tests {
         let _ = win.window().take_snapshot().unwrap();
         let weak = win.as_weak();
         win.on_log_level_selected(move |index| weak.unwrap().set_log_level(index));
-        // 880×760 窗口中系统页底部的日志级别选择框，方向键从 Debug 移到 Info。
-        click(730.0, 445.0);
+        // 从窗口的初始焦点通过 Tab 进入系统页的下拉框，避免依赖字体换行后的行坐标。
+        win.invoke_focus_root_scope();
+        send_key(slint::platform::Key::Tab.into());
+        send_key(slint::platform::Key::Return.into());
         send_key(slint::platform::Key::UpArrow.into());
         send_key(slint::platform::Key::Return.into());
         assert_eq!(current_draft(&win).log_level, LogLevel::Info);
