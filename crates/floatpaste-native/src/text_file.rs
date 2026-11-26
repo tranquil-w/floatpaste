@@ -1,5 +1,6 @@
 //! 文本文件命名窗口；暂存来源会话，取消原样返回，确认沿共享上屏链执行。
 use std::cell::RefCell;
+use std::path::Path;
 use std::sync::atomic::Ordering;
 
 use floatpaste_core::{
@@ -49,6 +50,23 @@ pub(crate) fn apply_theme(tokens: &ThemeTokens) {
 const WINDOW_WIDTH: f32 = 448.0;
 const WINDOW_HEIGHT: f32 = 280.0;
 
+fn default_file_name(extension: &str) -> String {
+    // 极限长度的扩展名只给文件主名留下一个 UTF-16 码元。
+    let stem = if extension.encode_utf16().count() == 253 {
+        "文"
+    } else {
+        "文本"
+    };
+    let name = format!("{stem}.{extension}");
+    if Path::new(&name).extension().and_then(|ext| ext.to_str()) == Some(extension)
+        && normalize_file_name(&name).is_ok()
+    {
+        name
+    } else {
+        "文本.txt".into()
+    }
+}
+
 /// 从快捷选项替换或追加文件名扩展名。
 fn replace_file_extension(filename: &str, new_ext: &str) -> String {
     let trimmed = filename.trim();
@@ -83,6 +101,16 @@ pub(crate) fn open(
     close(false);
     let window =
         TextFileWindow::new().map_err(|e| AppError::Message(format!("创建文件名窗口失败：{e}")))?;
+    let extension = match app.core().repository.load_last_text_file_extension() {
+        Ok(extension) => extension,
+        Err(error) => {
+            warn!(%error, "读取文本附件扩展名失败");
+            None
+        }
+    };
+    let file_name = default_file_name(extension.as_deref().unwrap_or("txt"));
+    let stem_len = file_name.rfind('.').unwrap_or(file_name.len());
+    window.set_file_name(file_name.into());
     let settings = app.state.current_settings();
     let resolved = theme::resolve_theme(settings.theme_mode, theme::system_prefers_dark());
     let tokens = theme::derive_tokens(&settings.theme_preset, &settings.theme_accent, resolved);
@@ -230,7 +258,7 @@ pub(crate) fn open(
             warn!("文件名窗口获取前台失败");
         }
     });
-    window.invoke_focus_name();
+    window.invoke_focus_name(stem_len as i32);
     DIALOG.with(|slot| {
         *slot.borrow_mut() = Some(Dialog {
             window,
@@ -284,11 +312,24 @@ fn confirm() {
             &name,
             dialog.generation,
         )
+        .map(|()| name)
     });
     match result {
-        Ok(()) | Err(AppError::OperationCancelled) => {
+        Ok(name) => {
             dialog.hide();
+            // 偏好写入安排在归还前台、调度注入和关窗之后。
+            if let Some(extension) = Path::new(&name).extension().and_then(|ext| ext.to_str()) {
+                if let Err(error) = dialog
+                    .app
+                    .core()
+                    .repository
+                    .save_last_text_file_extension(extension)
+                {
+                    warn!(%error, "记录文本附件扩展名失败");
+                }
+            }
         }
+        Err(AppError::OperationCancelled) => dialog.hide(),
         Err(error) => {
             dialog.window.set_error_text(error.to_string().into());
             DIALOG.with(|slot| *slot.borrow_mut() = Some(dialog));
@@ -486,7 +527,7 @@ pub(crate) fn foreground_settlement_contract_tests(app: &App) {
         "命名窗口应持有前台"
     );
 
-    window.set_file_name("前台落地.txt".into());
+    window.set_file_name("前台落地.MD".into());
     window.invoke_confirmed();
     // 确认返回即已归还：同步归还 + 激活落地先于命名窗收起，是本回归的核心
     assert!(
@@ -526,6 +567,21 @@ pub(crate) fn foreground_settlement_contract_tests(app: &App) {
     }
     assert!(restored, "测试剪贴板快照恢复失败，剪贴板被本段覆盖");
     drop(guard);
+
+    // 速贴成功发布的扩展名应成为搜索打开同一对话框时的默认值。
+    let option = PasteOption {
+        mode: PasteMode::TextFile,
+        paste_to_target: false,
+        restore_clipboard_after_paste: false,
+    };
+    crate::paste_flow::paste_item(app, &item.id, option, PasteSource::Search).unwrap();
+    let window = DIALOG.with(|slot| slot.borrow().as_ref().unwrap().window.clone_strong());
+    assert_eq!(window.get_file_name(), "文本.MD");
+    window
+        .window()
+        .dispatch_event(slint::platform::WindowEvent::KeyPressed { text: "x".into() });
+    assert_eq!(window.get_file_name(), "x.MD", "直接改名应保留记住的扩展名");
+    close(false);
 }
 
 fn restore(app: &App, source: PasteSource, target: TargetSession) {
@@ -686,7 +742,6 @@ pub(crate) fn contract_tests(app: &App) {
         let window = DIALOG.with(|slot| slot.borrow().as_ref().unwrap().window.clone_strong());
         assert_eq!(window.get_file_name(), "文本.txt");
         use slint::platform::{Key, WindowEvent};
-        window.invoke_focus_name();
         capture_snapshots(&window, "normal");
         // 从文件名按两次 Tab 进入第二个扩展名选项。
         for key in [Key::Tab.into(), Key::Tab.into(), " ".into()] {
@@ -716,6 +771,11 @@ pub(crate) fn contract_tests(app: &App) {
         );
         crate::paste_flow::paste_item(app, &item.id, option.clone(), source).unwrap();
         let window = DIALOG.with(|slot| slot.borrow().as_ref().unwrap().window.clone_strong());
+        assert_eq!(
+            window.get_file_name(),
+            "文本.txt",
+            "取消或校验失败不得记住扩展名"
+        );
         app.core().set_session_locked(true).unwrap();
         app.core().set_session_locked(false).unwrap();
         assert!(!can_focus(&window), "隐私代际失效后不得抢前台");
@@ -742,5 +802,20 @@ fn test_replace_file_extension() {
     assert_eq!(
         replace_file_extension(".gitignore", ".txt"),
         ".gitignore.txt"
+    );
+}
+
+#[cfg(test)]
+#[test]
+fn test_default_file_name() {
+    assert_eq!(default_file_name("MD"), "文本.MD");
+    assert_eq!(default_file_name("rs"), "文本.rs");
+    assert_eq!(default_file_name(""), "文本.txt");
+    assert_eq!(default_file_name("a.b"), "文本.txt");
+    assert_eq!(default_file_name("a/b"), "文本.txt");
+    let long_extension = "x".repeat(253);
+    assert_eq!(
+        default_file_name(&long_extension),
+        format!("文.{long_extension}")
     );
 }

@@ -4,14 +4,15 @@ component FileButton inherits Rectangle {
     in property <string> label;
     in property <bool> primary;
     in property <bool> extension;
+    in property <bool> selected;
     callback clicked();
 
     border-radius: Metrics.radius-md;
     border-width: 1px;
     border-color: focus.has-focus ? (root.primary ? Theme.fg-on-emphasis : Theme.border-accent)
-        : (root.primary ? transparent : Theme.border-muted);
+        : (root.primary ? transparent : (root.selected ? Theme.border-accent : Theme.border-muted));
     background: root.primary ? (area.has-hover || area.pressed ? Theme.accent-hover : Theme.accent-emphasis)
-        : (area.pressed ? Theme.selected-bg : (area.has-hover ? Theme.hover-bg : transparent));
+        : (area.pressed || root.selected ? Theme.selected-bg : (area.has-hover ? Theme.hover-bg : transparent));
     animate background { duration: Motion.dur-color; easing: Motion.ease; }
 
     accessible-role: button;
@@ -31,7 +32,7 @@ component FileButton inherits Rectangle {
     Text {
         text: root.label;
         color: root.primary ? Theme.fg-on-emphasis
-            : (root.extension ? Theme.fg-muted : Theme.fg-default);
+            : (root.selected ? Theme.accent-fg : (root.extension ? Theme.fg-muted : Theme.fg-default));
         font-size: root.extension ? Metrics.text-xs : Metrics.text-sm;
         font-weight: root.primary ? Metrics.weight-semibold : Metrics.weight-normal;
         horizontal-alignment: center;
@@ -58,20 +59,20 @@ export component TextFileWindow inherits Window {
     min-height: 280px;
     max-height: 280px;
 
-    in-out property <string> file-name: "文本.txt";
+    in-out property <string> file-name;
     in-out property <string> error-text;
     in property <string> meta-summary;
     out property <bool> title-dragging: title-area.pressed;
 
     callback confirmed();
     callback cancelled();
-    callback focus-name();
+    callback focus-name(int);
     callback replace-extension(string);
     callback drag-started();
     callback drag-moved();
     callback drag-finished();
 
-    focus-name => { input.focus(); input.select-all(); }
+    focus-name(stem-len) => { input.focus(); input.set-selection-offsets(0, stem-len); }
     forward-focus: input;
 
     Rectangle {
@@ -232,6 +233,7 @@ export component TextFileWindow inherits Window {
                             width: 48px;
                             label: ext;
                             extension: true;
+                            selected: root.file-name.to-lowercase() != ext && root.file-name.to-lowercase().ends-with(ext);
                             clicked => {
                                 root.replace-extension(ext);
                                 input.focus();

@@ -1958,6 +1958,30 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
     }
 
     #[test]
+    fn last_text_file_extension_survives_reopening() {
+        let path = temp_db_path();
+        {
+            let repository = SqliteRepository::new(&path).unwrap();
+            assert_eq!(repository.load_last_text_file_extension().unwrap(), None);
+            repository.save_last_text_file_extension("md").unwrap();
+            repository.save_last_text_file_extension("rs").unwrap();
+            repository
+                .save_settings(&crate::domain::settings::UserSetting::default())
+                .unwrap();
+        }
+        let repository = SqliteRepository::new(&path).unwrap();
+        assert_eq!(
+            repository
+                .load_last_text_file_extension()
+                .unwrap()
+                .as_deref(),
+            Some("rs")
+        );
+        drop(repository);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn rename_tag_syncs_fts_and_merges_case_variants() {
         let path = temp_db_path();
         let repository = SqliteRepository::new(&path).unwrap();

@@ -10,8 +10,30 @@ use super::sqlite_repository::SqliteRepository;
 const USER_SETTINGS_KEY: &str = "user_settings";
 // 继续复用旧 key，兼容已落盘的“仅位置”状态。
 pub(super) const PICKER_WINDOW_STATE_KEY: &str = "picker_last_position";
+const LAST_TEXT_FILE_EXTENSION_KEY: &str = "last_text_file_extension";
 
 impl SqliteRepository {
+    pub fn load_last_text_file_extension(&self) -> Result<Option<String>, AppError> {
+        let connection = self.connection.lock()?;
+        Ok(connection
+            .query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                [LAST_TEXT_FILE_EXTENSION_KEY],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    pub fn save_last_text_file_extension(&self, extension: &str) -> Result<(), AppError> {
+        let connection = self.connection.lock()?;
+        connection.execute(
+            "INSERT INTO settings(key, value) VALUES(?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![LAST_TEXT_FILE_EXTENSION_KEY, extension],
+        )?;
+        Ok(())
+    }
+
     pub fn load_settings(&self) -> Result<UserSetting, AppError> {
         let connection = self.connection.lock()?;
         let settings_json = connection

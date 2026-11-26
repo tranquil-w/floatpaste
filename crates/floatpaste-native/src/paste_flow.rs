@@ -118,7 +118,10 @@ pub(crate) fn paste_item(
     if option.mode == PasteMode::TextFile {
         return crate::text_file::open(app, id, option, source);
     }
-    paste_item_impl(app, id, option, source, None)
+    match paste_item_impl(app, id, option, source, None) {
+        Err(AppError::OperationCancelled) => Ok(()),
+        result => result,
+    }
 }
 
 pub(crate) fn paste_named_text_file(
@@ -145,7 +148,7 @@ fn paste_item_impl(
     );
     if app.core().session_locked() {
         info!(?source, "锁屏期间取消上屏");
-        return Ok(());
+        return Err(AppError::OperationCancelled);
     }
     let detail = app.core().repository.get_item_for_paste(id)?;
     if option.mode == PasteMode::RevealInFolder {
@@ -205,7 +208,7 @@ fn paste_item_impl(
     let written_sequence = match publication {
         Err(AppError::OperationCancelled) => {
             info!(?source, operation_id, "隐私状态已变化，取消剪贴板发布");
-            return Ok(());
+            return Err(AppError::OperationCancelled);
         }
         result => result?,
     };
