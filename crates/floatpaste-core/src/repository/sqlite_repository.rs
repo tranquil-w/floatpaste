@@ -21,7 +21,7 @@ use crate::{
         },
         error::AppError,
     },
-    services::normalize_service::space_cjk_text,
+    services::normalize_service::{build_file_preview, space_cjk_text},
 };
 
 /// 列表/详情查询统一的标签聚合子查询：按 NOCASE 排序保证输出顺序确定，
@@ -1083,7 +1083,8 @@ fn resolve_file_clip_fields(
     };
 
     ResolvedFileClipFields {
-        content_preview: None,
+        content_preview: (!file_paths.is_empty())
+            .then(|| build_file_preview(file_paths, file_count, directory_count, total_size)),
         file_count,
         directory_count,
         total_size,
@@ -1186,6 +1187,48 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
             uuid::Uuid::new_v4()
         ))
     }
+    #[test]
+    fn existing_file_rows_show_names_in_recent_and_search_results() {
+        let path = temp_db_path();
+        let repository = SqliteRepository::new(&path).unwrap();
+        let paths = vec![r"C:\资料\report.txt".into(), r"\\server\share\文档\".into()];
+        let item = repository
+            .save_file_item(&crate::domain::clip_item::NewClipFileItem {
+                normalized: crate::domain::clip_item::NormalizedClipFile {
+                    preview_text: "1 个文件，1 个文件夹".into(),
+                    search_text: "report.txt 文档".into(),
+                    hash: "legacy-file-summary".into(),
+                    file_count: 2,
+                    directory_count: 1,
+                    total_size: None,
+                    file_paths: paths.clone(),
+                },
+                source_app: None,
+            })
+            .unwrap();
+        drop(repository);
+
+        let repository = SqliteRepository::new(&path).unwrap();
+        let recent = repository.list_recent(10).unwrap();
+        let results = repository
+            .search(SearchQuery {
+                keyword: "report".into(),
+                filters: SearchFilters::default(),
+                offset: 0,
+                limit: 10,
+                sort: SearchSort::RecentDesc,
+            })
+            .unwrap();
+        for summary in [&recent[0], &results.items[0]] {
+            assert_eq!(summary.id, item.id);
+            assert_eq!(summary.content_preview, "1 个文件，1 个文件夹 · report.txt");
+        }
+        let detail = repository.get_item_detail(&item.id).unwrap();
+        assert_eq!(detail.file_paths, paths);
+        drop(repository);
+        std::fs::remove_file(path).unwrap();
+    }
+
     #[test]
     fn new_upgrades_legacy_database_with_media_columns() {
         let path = temp_db_path();

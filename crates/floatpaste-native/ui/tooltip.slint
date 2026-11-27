@@ -13,7 +13,6 @@ export struct TooltipMetaBadge {
 export struct TooltipLine {
     text: string,
     height: length,
-    secondary: bool,
 }
 
 export component TooltipWindow inherits Window {
@@ -34,9 +33,12 @@ export component TooltipWindow inherits Window {
     // 正文按源行拆行渲染（Slint Text 无 line-height，行距由
     // content-line-spacing 提供）；静态提示模式仍走 content-text 单行
     in-out property <[TooltipLine]> content-lines;
+    in property <bool> wrap-paths: false;
     in-out property <bool> preview-truncated: false;
     out property <length> notice-height: 18px;
-    out property <string> truncation-notice: "内容未完整展示，可进入编辑查看";
+    out property <string> truncation-notice: root.wrap-paths
+        ? "路径未完整展示，可进入编辑查看"
+        : "内容未完整展示，可进入编辑查看";
     // 行间距：Rust 测高时读取，保持与渲染同源
     out property <length> content-line-spacing: 4px;
     // 正文与分隔线之间的间距：Rust 测高时读取（计入窗口高）
@@ -166,9 +168,9 @@ export component TooltipWindow inherits Window {
                 for line in root.content-lines: Text {
                     text: line.text;
                     font-family: root.content-font-family;
-                    color: line.secondary ? Theme.fg-muted : Theme.fg-default;
+                    color: Theme.fg-default;
                     font-size: Metrics.text-body;
-                    wrap: line.secondary ? no-wrap : word-wrap;
+                    wrap: root.wrap-paths ? char-wrap : word-wrap;
                     overflow: elide;
                     min-width: 0px;
                     height: line.height;
@@ -269,7 +271,7 @@ export component TooltipWindow inherits Window {
             width: 0px;
             text: "";
             font-size: Metrics.text-body;
-            wrap: word-wrap;
+            wrap: root.wrap-paths ? char-wrap : word-wrap;
         }
 
         // 自然宽度标尺：不换行排版，preferred-width 即最宽段落所需宽度

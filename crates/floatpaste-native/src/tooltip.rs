@@ -18,9 +18,7 @@ use floatpaste_core::platform::windows::picker_position::{
     primary_monitor_work_area, work_area_from_point, ScreenPoint, ScreenRect,
 };
 use floatpaste_core::platform::windows::window_control;
-use floatpaste_core::services::clip_display::{
-    clip_type_label, file_preview_parts, format_file_size,
-};
+use floatpaste_core::services::clip_display::{clip_type_label, format_file_size};
 use floatpaste_core::services::time_format::format_relative_time_or_unused;
 
 use crate::app::App;
@@ -382,13 +380,10 @@ fn render(
         }
         Payload::Files(paths) => {
             win.set_has_image(false);
-            let lines = paths.iter().flat_map(|path| {
-                let (name, parent) = file_preview_parts(path);
-                std::iter::once((name, false)).chain(parent.map(|parent| (parent, true)))
-            });
             layout_lines(
                 &win,
-                lines,
+                paths.iter().map(String::as_str),
+                true,
                 min_content_width,
                 max_width - inset_h,
                 content_budget,
@@ -440,7 +435,8 @@ fn layout_text(
 ) -> (f32, f32) {
     layout_lines(
         win,
-        text.split('\n').map(|line| (line, false)),
+        text.split('\n'),
+        false,
         min_width,
         max_width,
         max_height,
@@ -449,24 +445,30 @@ fn layout_text(
 
 fn layout_lines<'a>(
     win: &TooltipWindow,
-    mut source: impl Iterator<Item = (&'a str, bool)>,
+    mut source: impl Iterator<Item = &'a str>,
+    wrap_paths: bool,
     min_width: f32,
     max_width: f32,
     max_height: f32,
 ) -> (f32, f32) {
     const MAX_CHARS: usize = 4096;
     const MAX_SOURCE_LINES: usize = 32;
+    win.set_wrap_paths(wrap_paths);
     let mut remaining = MAX_CHARS;
     let mut raw_lines = Vec::new();
     let mut source_truncated = false;
-    for (line, secondary) in source.by_ref().take(MAX_SOURCE_LINES) {
+    for line in source.by_ref().take(MAX_SOURCE_LINES) {
         let end = line
             .char_indices()
             .nth(remaining)
             .map_or(line.len(), |(i, _)| i);
         let prefix = &line[..end];
         remaining = remaining.saturating_sub(prefix.chars().count() + 1);
-        let text = prefix.trim_end();
+        let text = if wrap_paths {
+            prefix
+        } else {
+            prefix.trim_end()
+        };
         raw_lines.push(TooltipLine {
             text: if text.is_empty() {
                 " ".into()
@@ -474,7 +476,6 @@ fn layout_lines<'a>(
                 text.into()
             },
             height: 0.0,
-            secondary,
         });
         if end < line.len() {
             source_truncated = true;
@@ -487,24 +488,12 @@ fn layout_lines<'a>(
         .map(|line| win.invoke_measure_natural_width(line.text.clone()))
         .fold(min_width, f32::max);
     let mut width = natural.clamp(min_width, max_width);
-    source_truncated |= raw_lines
-        .iter()
-        .any(|line| line.secondary && win.invoke_measure_natural_width(line.text.clone()) > width);
     let spacing = win.get_content_line_spacing();
     let measure = |width| {
         raw_lines
             .iter()
             .map(|line| TooltipLine {
-                height: win
-                    .invoke_measure_text(
-                        if line.secondary {
-                            " ".into()
-                        } else {
-                            line.text.clone()
-                        },
-                        width,
-                    )
-                    .ceil(),
+                height: win.invoke_measure_text(line.text.clone(), width).ceil(),
                 ..line.clone()
             })
             .collect::<Vec<_>>()
@@ -563,7 +552,6 @@ fn layout_lines<'a>(
                 lines.push(TooltipLine {
                     text,
                     height: clipped_height,
-                    secondary: line.secondary,
                 });
             }
             break;
@@ -1038,7 +1026,7 @@ pub(crate) mod headless_contract_tests {
 
         let paths: Vec<String> = [
             r"D:\项目资料\发布准备\产品使用说明🦀.pdf",
-            r"D:\项目资料\发布准备\产品界面截图.png",
+            r"C:\备份\产品使用说明🦀.pdf",
             r"\\server\share\设计资源\",
         ]
         .into_iter()
@@ -1062,29 +1050,47 @@ pub(crate) mod headless_contract_tests {
             .unwrap()
             .to_summary();
         schedule_with(&app, host, file_item.clone(), 100.0, 100.0);
-        wait_until(|| win.get_appear() && win.get_content_lines().row_count() == 6);
-        let file_lines: Vec<_> = win.get_content_lines().iter().collect();
-        assert_eq!(file_lines[0].text, "产品使用说明🦀.pdf");
-        assert!(!file_lines[0].secondary);
-        assert_eq!(file_lines[1].text, r"D:\项目资料\发布准备");
-        assert!(file_lines[1].secondary);
+        wait_until(|| win.get_appear() && win.get_content_lines().row_count() == paths.len());
+        for (line, path) in win.get_content_lines().iter().zip(&paths) {
+            assert_eq!(line.text.as_str(), path);
+        }
         assert_eq!(
             win.get_badges().row_data(1).unwrap().text,
             "2 个文件 · 1 个文件夹"
         );
         cancel(&app);
 
-        let long_parent = r"D:\很长的目录\".repeat(1000);
+        let long_path = format!(r"D:\{}说明.txt", "longdirectory\\".repeat(10));
         let (_, height) = layout_lines(
             &win,
-            [("说明🦀.txt", false), (long_parent.as_str(), true)].into_iter(),
+            [long_path.as_str()].into_iter(),
+            true,
+            120.0,
+            220.0,
+            180.0,
+        );
+        assert!(height > win.invoke_measure_text("说明.txt".into(), 220.0));
+        assert!(!win.get_preview_truncated());
+        assert_eq!(
+            win.get_content_lines().row_data(0).unwrap().text.as_str(),
+            long_path
+        );
+
+        let over_budget = long_path.repeat(1000);
+        let (_, height) = layout_lines(
+            &win,
+            [over_budget.as_str()].into_iter(),
+            true,
             120.0,
             360.0,
             180.0,
         );
-        assert!(height < 100.0, "长父目录只占一行，不能挤占文件名预览");
+        assert!(height <= 180.0);
         assert!(win.get_preview_truncated());
-        assert_eq!(win.get_content_lines().row_count(), 2);
+        assert_eq!(
+            win.get_truncation_notice(),
+            "路径未完整展示，可进入编辑查看"
+        );
 
         for text in [
             "短文本 🦀".to_string(),

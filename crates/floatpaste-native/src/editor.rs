@@ -1542,6 +1542,41 @@ pub(crate) mod load_error_tests {
         win.set_wrap_text(true);
         win.set_monospace(false);
         commit_tags(app, original_tags);
+        if std::env::var_os("FLOATPASTE_UI_SNAPSHOTS").is_some() {
+            let paths = vec![
+                format!(r"D:\{}报告🦀.pdf", "long-directory\\".repeat(8)),
+                r"C:\备份\报告🦀.pdf".into(),
+            ];
+            let file =
+                floatpaste_core::services::normalize_service::NormalizeService::normalize_files(
+                    paths.clone(),
+                    0,
+                    None,
+                    None,
+                )
+                .unwrap();
+            let detail = app.core().repository.save_file_item(&file).unwrap();
+            load_session(app, win, &detail.id);
+            assert!(win
+                .get_file_paths()
+                .iter()
+                .eq(paths.iter().map(|p| slint::SharedString::from(p.as_str()))));
+            resize(400.0, 300.0);
+            let pixels = win.window().take_snapshot().unwrap();
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+                "../../.artifacts/snapshot/editor-file-paths-{}.png",
+                (win.window().scale_factor() * 100.0).round() as u32,
+            ));
+            image::save_buffer(
+                path,
+                pixels.as_bytes(),
+                pixels.width(),
+                pixels.height(),
+                image::ColorType::Rgba8,
+            )
+            .unwrap();
+            resize(800.0, 600.0);
+        }
         load_session(app, win, item_id);
         pump();
     }
