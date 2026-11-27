@@ -476,12 +476,11 @@ fn cleanup_draft(app: &App, action: EditorCleanup, selection: Selection) {
 
 /// 光标移动（含载入置尾触发）：按 UTF-8 byte offset 计算行列写回底栏。
 /// offset 由 Slint 侧从 TextInput 内部属性读出，异常值按边界钳制
-pub fn cursor_moved(app: &App, byte_offset: i32) {
+fn cursor_moved(app: &App, text: &str, byte_offset: i32) {
     let Some(win) = app.editor.upgrade() else {
         return;
     };
-    let text = win.get_draft_text().to_string();
-    let (line, col) = cursor_line_col(&text, byte_offset.max(0) as usize);
+    let (line, col) = cursor_line_col(text, byte_offset.max(0) as usize);
     win.set_cursor_line(line as i32);
     win.set_cursor_col(col as i32);
 }
@@ -1102,8 +1101,22 @@ pub fn wire(app: &App) {
         }
     });
     let app_cb = app.clone();
-    win.on_editor_cursor_moved(move |offset| {
-        cursor_moved(&app_cb, offset);
+    win.on_editor_cursor_moved(move |text, anchor, cursor| {
+        // Slint 在 edited 之前上报新光标。只接收旧正文匹配时的位置，
+        // 避免把编辑后的光标当作撤销前的位置。
+        DRAFT_HISTORY.with(|history| {
+            history
+                .borrow_mut()
+                .observe_selection(text.as_str(), Selection { anchor, cursor });
+        });
+        cursor_moved(&app_cb, text.as_str(), cursor);
+    });
+    win.on_editor_input_started(|text, anchor, cursor| {
+        DRAFT_HISTORY.with(|history| {
+            history
+                .borrow_mut()
+                .observe_selection(text.as_str(), Selection { anchor, cursor });
+        });
     });
     let app_cb = app.clone();
     win.on_open_externally(move |path| {
@@ -1722,6 +1735,31 @@ pub(crate) mod load_error_tests {
         assert_eq!(win.get_draft_text(), joined, "放弃后仍读取已保存的正文");
         control_key("z", false);
         assert_eq!(win.get_draft_text(), joined, "重开后撤销栈随会话重置");
+
+        use slint::platform::Key;
+        let home: slint::SharedString = Key::Home.into();
+        control_key(home.as_str(), false);
+        key(Key::RightArrow.into());
+        assert_eq!((win.get_cursor_line(), win.get_cursor_col()), (1, 2));
+        key(Key::Delete.into());
+        assert_eq!(win.get_draft_text(), "前😀\n中文  甲 乙\n后缀");
+        control_key("z", false);
+        pump();
+        assert_eq!(win.get_draft_text(), joined);
+        assert_eq!((win.get_cursor_line(), win.get_cursor_col()), (1, 2));
+        modifier(Key::Shift.into(), true);
+        key(Key::RightArrow.into());
+        modifier(Key::Shift.into(), false);
+        key("X".into());
+        assert_eq!(win.get_draft_text(), "前X😀\n中文  甲 乙\n后缀");
+        control_key("z", false);
+        pump();
+        key("Y".into());
+        assert_eq!(
+            win.get_draft_text(),
+            "前Y😀\n中文  甲 乙\n后缀",
+            "撤销替换后，下一次输入应覆盖恢复的选区"
+        );
         app.state.set_editor_session(Some(EditorSession {
             item_id: item_id.into(),
             ..Default::default()

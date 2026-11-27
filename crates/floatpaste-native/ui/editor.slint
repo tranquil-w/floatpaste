@@ -304,7 +304,8 @@ export component EditorWindow inherits Window {
     callback text-edited(string, int, int);
     callback draft-history-step(bool);
     callback cleanup-requested(EditorCleanup, int, int);
-    callback editor-cursor-moved(int); // 光标移动（UTF-8 byte offset），Rust 算行列
+    callback editor-cursor-moved(string, int, int); // UTF-8 byte offset
+    callback editor-input-started(string, int, int);
     callback open-externally(string);  // 系统默认程序打开路径
     callback open-file-path-at(int);   // 按索引打开文件条目路径
     callback button-hint(string, length, length); // 按钮 tooltip（悬浮气泡 simple 模式）
@@ -959,6 +960,9 @@ export component EditorWindow inherits Window {
                                                         return accept;
                                                     }
                                                 }
+                                                // 失焦可能只折叠锚点，未触发光标回调。
+                                                root.editor-input-started(self.text,
+                                                    self.anchor-position-byte-offset, self.cursor-position-byte-offset);
                                                 return reject;
                                             }
                                             edited() => {
@@ -966,10 +970,8 @@ export component EditorWindow inherits Window {
                                                     self.anchor-position-byte-offset, self.cursor-position-byte-offset);
                                             }
                                             cursor-position-changed(cursor) => {
-                                                // 行列上报（byte offset 由 TextInput 内部
-                                                // 属性读出，Rust 按 draft 文本换算）
-                                                root.editor-cursor-moved(
-                                                    edit-input.cursor-position_byte-offset);
+                                                root.editor-cursor-moved(self.text,
+                                                    self.anchor-position-byte-offset, self.cursor-position-byte-offset);
                                                 edit-scroll.caret-x = cursor.x;
                                                 edit-scroll.caret-y = cursor.y;
                                                 edit-scroll.reveal-cursor();

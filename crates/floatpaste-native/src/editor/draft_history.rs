@@ -38,6 +38,7 @@ impl Edit {
 #[derive(Default)]
 pub(super) struct DraftHistory {
     text: SharedString,
+    selection: Selection,
     undo: VecDeque<Edit>,
     redo: Vec<Edit>,
     bytes: usize,
@@ -57,7 +58,14 @@ impl DraftHistory {
         }
     }
 
+    pub fn observe_selection(&mut self, text: &str, selection: Selection) {
+        if self.text.as_str() == text {
+            self.selection = selection;
+        }
+    }
+
     pub fn record_input(&mut self, text: SharedString, after: Selection) {
+        let before = std::mem::replace(&mut self.selection, after);
         if self.text == text {
             return;
         }
@@ -83,7 +91,7 @@ impl DraftHistory {
             start,
             removed: old[start..].into(),
             inserted: new[start..].into(),
-            before: Selection::caret(old.len()),
+            before,
             after,
             cleanup: false,
         };
@@ -118,6 +126,7 @@ impl DraftHistory {
         let mut updated = self.text.to_string();
         updated.replace_range(range, replacement);
         self.text = updated.into();
+        self.selection = after;
         self.push(edit);
         (self.text.clone(), after)
     }
@@ -176,6 +185,7 @@ impl DraftHistory {
         let mut text = self.text.to_string();
         text.replace_range(edit.start..edit.start + from.len(), to);
         self.text = text.into();
+        self.selection = selection;
         if redo {
             self.undo.push_back(edit);
         } else {
