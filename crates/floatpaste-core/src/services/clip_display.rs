@@ -101,6 +101,18 @@ pub fn clip_type_label(item: &ClipItemSummary) -> String {
     }
 }
 
+/// file_count 包含文件夹，展示时分别统计。
+pub fn file_count_label(item: &ClipItemSummary) -> Option<String> {
+    let total = item.file_count.max(0);
+    let directories = item.directory_count.clamp(0, total);
+    match (total - directories, directories) {
+        (0, 0) => None,
+        (0, directories) => Some(format!("{directories} 个文件夹")),
+        (files, 0) => Some(format!("{files} 个文件")),
+        (files, directories) => Some(format!("{files} 个文件 · {directories} 个文件夹")),
+    }
+}
+
 /// 元信息行：内容特征、时间优先，长来源在末端省略，避免挤掉尺寸与文件数量。
 pub fn build_meta(item: &ClipItemSummary) -> String {
     let mut parts = Vec::new();
@@ -113,11 +125,8 @@ pub fn build_meta(item: &ClipItemSummary) -> String {
         parts.push(label);
     }
     if item.r#type == "file" {
-        if item.file_count > 0 {
-            parts.push(format!("{} 个文件", item.file_count));
-        }
-        if item.directory_count > 0 {
-            parts.push(format!("{} 个文件夹", item.directory_count));
+        if let Some(counts) = file_count_label(item) {
+            parts.push(counts);
         }
     }
     if item.has_html {
@@ -333,7 +342,7 @@ mod tests {
 
     #[test]
     fn build_meta_appends_file_and_directory_counts() {
-        let mut item = item_of("file", 2, 1);
+        let mut item = item_of("file", 3, 1);
         item.source_app = Some("资源管理器".into());
         item.created_at = chrono::Local::now().to_rfc3339();
         assert_eq!(

@@ -18,7 +18,9 @@ use floatpaste_core::platform::windows::picker_position::{
     primary_monitor_work_area, work_area_from_point, ScreenPoint, ScreenRect,
 };
 use floatpaste_core::platform::windows::window_control;
-use floatpaste_core::services::clip_display::{clip_type_label, format_file_size};
+use floatpaste_core::services::clip_display::{
+    clip_type_label, file_count_label, format_file_size,
+};
 use floatpaste_core::services::time_format::format_relative_time_or_unused;
 
 use crate::app::App;
@@ -816,20 +818,10 @@ fn build_badges(item: &ClipItemSummary) -> Vec<TooltipMetaBadge> {
             });
         }
     } else if item.r#type == "file" {
-        let total = item.file_count.max(0);
-        let directories = item.directory_count.clamp(0, total);
-        let files = total - directories;
-        let mut counts = Vec::new();
-        if files > 0 {
-            counts.push(format!("{files} 个文件"));
-        }
-        if directories > 0 {
-            counts.push(format!("{directories} 个文件夹"));
-        }
-        if !counts.is_empty() {
+        if let Some(counts) = file_count_label(item) {
             badges.push(TooltipMetaBadge {
                 kind: 1,
-                text: counts.join(" · ").into(),
+                text: counts.into(),
             });
         }
     }

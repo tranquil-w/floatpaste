@@ -1083,8 +1083,7 @@ fn resolve_file_clip_fields(
     };
 
     ResolvedFileClipFields {
-        content_preview: (!file_paths.is_empty())
-            .then(|| build_file_preview(file_paths, file_count, directory_count, total_size)),
+        content_preview: (!file_paths.is_empty()).then(|| build_file_preview(file_paths)),
         file_count,
         directory_count,
         total_size,
@@ -1221,7 +1220,7 @@ CREATE TABLE IF NOT EXISTS excluded_apps (
             .unwrap();
         for summary in [&recent[0], &results.items[0]] {
             assert_eq!(summary.id, item.id);
-            assert_eq!(summary.content_preview, "1 个文件，1 个文件夹 · report.txt");
+            assert_eq!(summary.content_preview, "report.txt\n文档");
         }
         let detail = repository.get_item_detail(&item.id).unwrap();
         assert_eq!(detail.file_paths, paths);
