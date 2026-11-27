@@ -37,6 +37,7 @@
 | [无焦点速贴指南](no-focus-picker.md) | 窗口生命周期、焦点、定位、快捷键设置与升级、外部操作退出、更多操作与单条删除、悬浮气泡预览与元信息、Win32 防坑 |
 | [主题系统](theme-system.md) | 色彩 token、对比度、材质消费约束与新增预设 |
 | [编辑窗口规格](editor-window.md) | 工作区与工具栏、标签面板、编辑滚动、首帧显示、保存与关闭行为 |
+| [选区翻译评估](editor-translation-evaluation.md) | 翻译来源与语言范围、外发确认设计、可复现演示 |
 | [测试体系](testing.md) | 测试分工、覆盖边界、隔离驱动与失败排查 |
 | [发布流程](release/process.md) | tag 发布、安装升级与卸载行为、自动验收、说明生成与失败恢复 |
 | [发布说明模板](release/notes-template.md) / [使用说明模板](release/usage-template.md) | 流水线引用的对外交付模板 |
