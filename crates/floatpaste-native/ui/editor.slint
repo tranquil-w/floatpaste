@@ -10,6 +10,8 @@
 import { Theme, Metrics, Motion, SoftShadow } from "theme.slint";
 import { Kbd, WindowTitleBar } from "common.slint";
 
+export enum EditorCleanup { join-lines, remove-line-breaks, trim, power-shell }
+
 // 标签建议项：0=match（既有命中）1=create（新建）2=exists（已添加）
 export struct EditorTagSuggestion {
     kind: int,
@@ -282,13 +284,26 @@ export component EditorWindow inherits Window {
     }
     in-out property <bool> wrap-text: true;
     in-out property <bool> monospace: false;
-    in-out property <int> undo-seq: 0;
-    in-out property <int> redo-seq: 0;
     in-out property <int> select-all-seq: 0;
     in-out property <int> wrap-toggle-seq: 0;
+    in property <int> restore-anchor;
+    in property <int> restore-cursor;
+    in property <int> restore-selection-seq;
+    private property <int> cleanup-seq;
+    private property <int> cleanup-session-seq;
+    private property <EditorCleanup> cleanup-action;
+    private property <int> cleanup-highlight;
+    private property <[{ label: string, action: EditorCleanup }]> cleanup-options: [
+        { label: "合并为单行", action: EditorCleanup.join-lines },
+        { label: "去除换行", action: EditorCleanup.remove-line-breaks },
+        { label: "修剪首尾空白", action: EditorCleanup.trim },
+        { label: "合并 PowerShell 续行", action: EditorCleanup.power-shell },
+    ];
 
     // ── 回调（Rust 接管）──
-    callback text-edited(string);
+    callback text-edited(string, int, int);
+    callback draft-history-step(bool);
+    callback cleanup-requested(EditorCleanup, int, int);
     callback editor-cursor-moved(int); // 光标移动（UTF-8 byte offset），Rust 算行列
     callback open-externally(string);  // 系统默认程序打开路径
     callback open-file-path-at(int);   // 按索引打开文件条目路径
@@ -321,6 +336,23 @@ export component EditorWindow inherits Window {
     public function open-tag-panel() {
         root.tag-open = true;
         panel-input.focus();
+    }
+
+    function open-cleanup-menu() {
+        root.button-hint-left();
+        root.cleanup-highlight = 0;
+        root.cleanup-session-seq = root.session-seq;
+        cleanup-menu.show();
+    }
+
+    public function close-cleanup-menu() {
+        cleanup-menu.close();
+    }
+
+    function choose-cleanup(index: int) {
+        cleanup-menu.close();
+        root.cleanup-action = root.cleanup-options[index].action;
+        root.cleanup-seq += 1;
     }
 
     // 窗口级键盘（capture 先于输入框；对齐旧版 window keydown capture）。
@@ -708,7 +740,7 @@ export component EditorWindow inherits Window {
                                     label: "撤销";
                                     icon: "M 9 5 L 4 10 L 9 15 M 4 10 L 14 10 C 21 10 21 20 14 20";
                                     tip: "撤销（Ctrl+Z）";
-                                    clicked => { root.undo-seq += 1; }
+                                    clicked => { root.focus-body-seq += 1; root.draft-history-step(false); }
                                     hint(text, x, y) => { root.button-hint(text, x, y); }
                                     hint-left => { root.button-hint-left(); }
                                 }
@@ -716,7 +748,7 @@ export component EditorWindow inherits Window {
                                     label: "重做";
                                     icon: "M 15 5 L 20 10 L 15 15 M 20 10 L 10 10 C 3 10 3 20 10 20";
                                     tip: "重做（Ctrl+Y）";
-                                    clicked => { root.redo-seq += 1; }
+                                    clicked => { root.focus-body-seq += 1; root.draft-history-step(true); }
                                     hint(text, x, y) => { root.button-hint(text, x, y); }
                                     hint-left => { root.button-hint-left(); }
                                 }
@@ -745,6 +777,14 @@ export component EditorWindow inherits Window {
                                     hint(text, x, y) => { root.button-hint(text, x, y); }
                                     hint-left => { root.button-hint-left(); }
                                 }
+                                EditorTool {
+                                    label: "整理 ⌄";
+                                    width: 60px;
+                                    tip: "整理文本（Ctrl+Shift+T）";
+                                    clicked => { root.open-cleanup-menu(); }
+                                    hint(text, x, y) => { root.button-hint(text, x, y); }
+                                    hint-left => { root.button-hint-left(); }
+                                }
                             }
                         }
 
@@ -765,15 +805,23 @@ export component EditorWindow inherits Window {
                             height: 100%;
                             property <int> focus-trigger: root.session-seq;
                             property <int> body-focus-trigger: root.focus-body-seq;
-                            property <int> undo-trigger: root.undo-seq;
-                            property <int> redo-trigger: root.redo-seq;
                             property <int> select-all-trigger: root.select-all-seq;
                             property <int> wrap-trigger: root.wrap-toggle-seq;
+                            property <int> cleanup-trigger: root.cleanup-seq;
+                            property <int> restore-trigger: root.restore-selection-seq;
                             changed body-focus-trigger => { edit-input.focus(); }
-                            changed undo-trigger => { edit-input.undo(); edit-input.focus(); }
-                            changed redo-trigger => { edit-input.redo(); edit-input.focus(); }
                             changed select-all-trigger => { edit-input.focus(); edit-input.select-all(); }
                             changed wrap-trigger => { edit-scroll.scroll-x = 0px; edit-input.focus(); }
+                            changed cleanup-trigger => {
+                                if (root.cleanup-session-seq == root.session-seq) {
+                                    root.cleanup-requested(root.cleanup-action,
+                                        edit-input.anchor-position-byte-offset, edit-input.cursor-position-byte-offset);
+                                    edit-input.focus();
+                                }
+                            }
+                            changed restore-trigger => {
+                                edit-input.set-selection-offsets(root.restore-anchor, root.restore-cursor);
+                            }
                             background: transparent;
                             clip: true;
 
@@ -896,7 +944,27 @@ export component EditorWindow inherits Window {
                                             selection-foreground-color: Theme.selection-fg;
                                             selection-background-color: Theme.selection-bg;
                                             text <=> root.draft-text;
-                                            edited() => { root.text-edited(self.text); }
+                                            key-pressed(event) => {
+                                                if (event.modifiers.control && !event.modifiers.alt) {
+                                                    if (event.modifiers.shift && (event.text == "t" || event.text == "T")) {
+                                                        root.open-cleanup-menu();
+                                                        return accept;
+                                                    }
+                                                    if (event.text == "z" || event.text == "Z") {
+                                                        root.draft-history-step(event.modifiers.shift);
+                                                        return accept;
+                                                    }
+                                                    if (!event.modifiers.shift && (event.text == "y" || event.text == "Y")) {
+                                                        root.draft-history-step(true);
+                                                        return accept;
+                                                    }
+                                                }
+                                                return reject;
+                                            }
+                                            edited() => {
+                                                root.text-edited(self.text,
+                                                    self.anchor-position-byte-offset, self.cursor-position-byte-offset);
+                                            }
                                             cursor-position-changed(cursor) => {
                                                 // 行列上报（byte offset 由 TextInput 内部
                                                 // 属性读出，Rust 按 draft 文本换算）
@@ -1535,6 +1603,62 @@ export component EditorWindow inherits Window {
                         border-radius: 1.5px;
                         background: Theme.fg-subtle;
                         opacity: 0.4;
+                    }
+                }
+            }
+        }
+
+        cleanup-menu := PopupWindow {
+            x: root.width - self.width - 24px;
+            y: 70px;
+            width: 188px;
+            height: root.cleanup-options.length * 30px + 8px;
+            close-policy: close-on-click-outside;
+            forward-focus: cleanup-keys;
+            cleanup-keys := FocusScope {
+                key-pressed(event) => {
+                    if (event.text == Key.Escape) {
+                        cleanup-menu.close();
+                    } else if (event.text == Key.Return || event.text == " ") {
+                        root.choose-cleanup(root.cleanup-highlight);
+                    } else if (event.text == Key.DownArrow) {
+                        root.cleanup-highlight = min(root.cleanup-options.length - 1, root.cleanup-highlight + 1);
+                    } else if (event.text == Key.UpArrow) {
+                        root.cleanup-highlight = max(0, root.cleanup-highlight - 1);
+                    } else {
+                        return reject;
+                    }
+                    return accept;
+                }
+                Rectangle {
+                    background: Theme.surface;
+                    border-radius: Metrics.radius-md;
+                    border-width: 1px;
+                    border-color: Theme.border-muted;
+                    VerticalLayout {
+                        padding: 4px;
+                        for option[index] in root.cleanup-options: Rectangle {
+                            height: 30px;
+                            border-radius: Metrics.radius-sm;
+                            background: cleanup-touch.has-hover ? Theme.hover-bg
+                                : (root.cleanup-highlight == index ? Theme.selected-bg : transparent);
+                            accessible-role: button;
+                            accessible-label: option.label;
+                            accessible-action-default => { root.choose-cleanup(index); }
+                            Text {
+                                x: 8px;
+                                width: parent.width - 16px;
+                                height: 100%;
+                                text: option.label;
+                                color: Theme.fg-default;
+                                font-size: Metrics.text-sm;
+                                vertical-alignment: center;
+                            }
+                            cleanup-touch := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.choose-cleanup(index); }
+                            }
+                        }
                     }
                 }
             }

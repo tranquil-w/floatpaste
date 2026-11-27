@@ -7,6 +7,9 @@
 //! - 文本保存走 ClipService::update_text（归一化 + 落库 + FTS 同步）
 //! - 标签全量替换走 TagService::set_item_tags（NOCASE 去重与规范对齐）
 
+mod draft_history;
+mod text_cleanup;
+
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
@@ -36,7 +39,8 @@ use crate::search;
 use crate::thumbnails;
 use crate::tooltip::HoverHost;
 use crate::win32_ext;
-use crate::{EditorTagSuggestion, EditorWindow};
+use crate::{EditorCleanup, EditorTagSuggestion, EditorWindow};
+use draft_history::{DraftHistory, Selection};
 
 const NOTICE_TIMEOUT_MS: u64 = 3000;
 const DELETE_ARM_TIMEOUT_MS: u64 = 3000;
@@ -48,6 +52,7 @@ const EDITOR_LOGICAL_HEIGHT: f32 = 600.0;
 const REVEAL_DELAY_MS: u64 = if cfg!(debug_assertions) { 200 } else { 50 };
 
 thread_local! {
+    static DRAFT_HISTORY: RefCell<DraftHistory> = RefCell::default();
     static NOTICE_TOKEN: Cell<u64> = const { Cell::new(0) };
     static DELETE_TOKEN: Cell<u64> = const { Cell::new(0) };
     static DELETE_ARMED: Cell<bool> = const { Cell::new(false) };
@@ -268,6 +273,8 @@ fn cancel_reveal() {
 
 /// 载入条目详情并填充界面（同步读库：单条查询延迟可忽略，省去加载态）
 fn load_session(app: &App, win: &EditorWindow, item_id: &str) {
+    win.invoke_close_cleanup_menu();
+    DRAFT_HISTORY.with(|history| history.borrow_mut().reset("".into()));
     win.set_is_text(false);
     win.set_has_html(false);
     win.set_draft_text("".into());
@@ -314,7 +321,9 @@ fn load_session(app: &App, win: &EditorWindow, item_id: &str) {
         // set-selection-offsets 要 UTF-8 字节偏移（Slint 内置语义），
         // Slint 侧拿不到字节长度（只有 character-count），由这里供给
         win.set_draft_byte_len(full.len() as i32);
-        win.set_draft_text(full.clone().into());
+        let draft: slint::SharedString = full.as_str().into();
+        DRAFT_HISTORY.with(|history| history.borrow_mut().reset(draft.clone()));
+        win.set_draft_text(draft);
         win.set_saved_text(full.into());
     } else {
         // 非文本条目：预览区只读，无草稿
@@ -424,6 +433,47 @@ pub fn text_edited(app: &App, text: &str) {
     }
 }
 
+fn apply_draft(app: &App, win: &EditorWindow, text: slint::SharedString, selection: Selection) {
+    text_edited(app, text.as_str());
+    win.set_draft_text(text);
+    win.set_restore_anchor(selection.anchor);
+    win.set_restore_cursor(selection.cursor);
+    win.set_restore_selection_seq(win.get_restore_selection_seq() + 1);
+}
+
+fn cleanup_draft(app: &App, action: EditorCleanup, selection: Selection) {
+    let Some(win) = app.editor.upgrade() else {
+        return;
+    };
+    if !win.get_is_text() || app.state.editor_session().is_none() || win.get_close_confirm_open() {
+        return;
+    }
+    let draft = win.get_draft_text();
+    let selected = selection.anchor != selection.cursor;
+    let range = if selected {
+        selection.anchor.min(selection.cursor) as usize
+            ..selection.anchor.max(selection.cursor) as usize
+    } else {
+        0..draft.len()
+    };
+    let Some(text) = draft.get(range.clone()) else {
+        return;
+    };
+    let Some(replacement) = text_cleanup::clean(action, text) else {
+        show_notice(app, "无法合并这些 PowerShell 续行，请检查反引号和引号");
+        return;
+    };
+    if replacement == text {
+        return;
+    }
+    let (text, selection) = DRAFT_HISTORY.with(|history| {
+        let mut history = history.borrow_mut();
+        history.sync(draft.clone());
+        history.replace(range, &replacement, selection, selected)
+    });
+    apply_draft(app, &win, text, selection);
+}
+
 /// 光标移动（含载入置尾触发）：按 UTF-8 byte offset 计算行列写回底栏。
 /// offset 由 Slint 侧从 TextInput 内部属性读出，异常值按边界钳制
 pub fn cursor_moved(app: &App, byte_offset: i32) {
@@ -483,9 +533,11 @@ pub fn editor_is_active(app: &App) -> bool {
 
 pub(crate) fn discard_history_view(app: &App) {
     cancel_reveal();
+    DRAFT_HISTORY.with(|history| history.borrow_mut().reset("".into()));
     app.state.set_editor_session(None);
     if let Some(win) = app.editor.upgrade() {
         win.set_has_session(false);
+        win.invoke_close_cleanup_menu();
         win.set_draft_text("".into());
         win.set_saved_text("".into());
         win.set_image_path("".into());
@@ -583,6 +635,7 @@ pub fn cancel_confirm(app: &App) {
 pub fn close_editor(app: &App, source: &str) {
     let preparing = REVEAL_TIMER.with(|timer| timer.borrow().running());
     cancel_reveal();
+    DRAFT_HISTORY.with(|history| history.borrow_mut().reset("".into()));
     let Some(win) = app.editor.upgrade() else {
         return;
     };
@@ -594,6 +647,7 @@ pub fn close_editor(app: &App, source: &str) {
         "关闭 Editor"
     );
     win.set_close_confirm_open(false);
+    win.invoke_close_cleanup_menu();
     win.set_error_text("".into());
     // 位置记忆须在停屏前读取
     let position = win.window().position();
@@ -1021,8 +1075,31 @@ pub fn wire(app: &App) {
     });
 
     let app_cb = app.clone();
-    win.on_text_edited(move |text| {
+    win.on_text_edited(move |text, anchor, cursor| {
         text_edited(&app_cb, text.as_str());
+        DRAFT_HISTORY.with(|history| {
+            history
+                .borrow_mut()
+                .record_input(text, Selection { anchor, cursor });
+        });
+    });
+    let app_cb = app.clone();
+    win.on_cleanup_requested(move |action, anchor, cursor| {
+        cleanup_draft(&app_cb, action, Selection { anchor, cursor });
+    });
+    let app_cb = app.clone();
+    win.on_draft_history_step(move |redo| {
+        let Some(win) = app_cb.editor.upgrade() else {
+            return;
+        };
+        let step = DRAFT_HISTORY.with(|history| {
+            let mut history = history.borrow_mut();
+            history.sync(win.get_draft_text());
+            history.step(redo)
+        });
+        if let Some((text, selection)) = step {
+            apply_draft(&app_cb, &win, text, selection);
+        }
     });
     let app_cb = app.clone();
     win.on_editor_cursor_moved(move |offset| {
@@ -1465,6 +1542,7 @@ pub(crate) mod load_error_tests {
         }
         win.set_saved_text(sample.into());
         win.set_draft_text(sample.into());
+        DRAFT_HISTORY.with(|history| history.borrow_mut().reset(sample.into()));
         resize(800.0, 600.0);
         // 标签行空白处同样可打开面板：chips 的实际宽度随字体度量变化，
         // 固定坐标只有在整行可点时才在任何环境都落在标签行上。
@@ -1510,19 +1588,19 @@ pub(crate) mod load_error_tests {
         );
         assert!(win.get_is_dirty());
         // 坐标由单行整合工作栏量测；走实际指针命中，不能只调用编辑回调。
-        click(618.0, 53.0);
+        click(556.0, 53.0);
         assert_eq!(win.get_draft_text(), sample, "撤销恢复输入前的正文");
         assert!(!win.get_is_dirty());
-        click(648.0, 53.0);
+        click(586.0, 53.0);
         assert_eq!(win.get_draft_text(), format!("{sample}!"), "重做恢复编辑");
-        click(678.0, 53.0);
+        click(616.0, 53.0);
         key("替换😀".into());
         assert_eq!(win.get_draft_text(), "替换😀", "全选后输入替换全文");
         assert_eq!(win.get_char_count(), 3);
         assert_eq!(win.get_cursor_col(), 4);
-        click(712.0, 53.0);
+        click(650.0, 53.0);
         assert!(!win.get_wrap_text(), "工具栏切换换行");
-        click(754.0, 53.0);
+        click(692.0, 53.0);
         assert!(win.get_monospace(), "工具栏切换等宽字体");
         assert_eq!(win.get_draft_text(), "替换😀", "显示切换不得改正文");
         let long_line = format!("START 中文😀 {} END", "abcdefghij".repeat(60));
@@ -1542,6 +1620,112 @@ pub(crate) mod load_error_tests {
         win.set_wrap_text(true);
         win.set_monospace(false);
         commit_tags(app, original_tags);
+
+        let original = "前缀😀\n  中文  甲\r\n\r\n  乙\n后缀";
+        let entry =
+            floatpaste_core::services::history_service::HistoryService::ingest_text_formats(
+                app.core(),
+                original,
+                None,
+                None,
+            )
+            .unwrap()
+            .unwrap();
+        let reopen = || {
+            app.state.set_editor_session(Some(EditorSession {
+                item_id: entry.id.clone(),
+                ..Default::default()
+            }));
+            load_session(app, win, &entry.id);
+            pump();
+        };
+        let modifier = |text: slint::SharedString, pressed| {
+            win.window().dispatch_event(if pressed {
+                WindowEvent::KeyPressed { text }
+            } else {
+                WindowEvent::KeyReleased { text }
+            });
+        };
+        let control_key = |text: &str, shift: bool| {
+            use slint::platform::Key;
+            modifier(Key::Control.into(), true);
+            if shift {
+                modifier(Key::Shift.into(), true);
+            }
+            key(text.into());
+            if shift {
+                modifier(Key::Shift.into(), false);
+            }
+            modifier(Key::Control.into(), false);
+        };
+        reopen();
+        let start = "前缀😀\n".len();
+        let end = original.len() - "\n后缀".len();
+        win.set_restore_anchor(end as i32);
+        win.set_restore_cursor(start as i32);
+        win.set_restore_selection_seq(win.get_restore_selection_seq() + 1);
+        pump();
+        click(744.0, 53.0);
+        pump();
+        key(slint::platform::Key::Escape.into());
+        assert!(app.state.editor_session().is_some(), "Esc 先关闭整理菜单");
+        assert_eq!(win.get_draft_text(), original);
+
+        control_key("T", true);
+        pump();
+        if std::env::var_os("FLOATPASTE_UI_SNAPSHOTS").is_some() {
+            let dir =
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.artifacts/snapshot");
+            std::fs::create_dir_all(&dir).unwrap();
+            let pixels = win.window().take_snapshot().unwrap();
+            image::save_buffer(
+                dir.join(format!(
+                    "editor-cleanup-menu-{}.png",
+                    (win.window().scale_factor() * 100.0).round() as u32
+                )),
+                pixels.as_bytes(),
+                pixels.width(),
+                pixels.height(),
+                image::ColorType::Rgba8,
+            )
+            .unwrap();
+        }
+        click(670.0, 89.0);
+        pump();
+        let joined = "前缀😀\n中文  甲 乙\n后缀";
+        assert_eq!(win.get_draft_text(), joined, "指针选择菜单项只整理反向选区");
+        assert!(win.get_is_dirty());
+        control_key("z", false);
+        pump();
+        assert_eq!(win.get_draft_text(), original, "一次撤销完整恢复");
+        assert!(!win.get_is_dirty());
+        control_key("y", false);
+        pump();
+        assert_eq!(win.get_draft_text(), joined);
+        control_key("s", false);
+        assert!(!win.get_is_dirty());
+        key(slint::platform::Key::Escape.into());
+        assert!(app.state.editor_session().is_none());
+        reopen();
+        assert_eq!(win.get_draft_text(), joined, "保存后重新打开显示整理结果");
+
+        control_key("T", true);
+        pump();
+        key(slint::platform::Key::DownArrow.into());
+        key(slint::platform::Key::Return.into());
+        pump();
+        assert_eq!(win.get_draft_text(), "前缀😀中文  甲 乙后缀");
+        key(slint::platform::Key::Escape.into());
+        assert!(win.get_close_confirm_open());
+        win.invoke_close_discard();
+        reopen();
+        assert_eq!(win.get_draft_text(), joined, "放弃后仍读取已保存的正文");
+        control_key("z", false);
+        assert_eq!(win.get_draft_text(), joined, "重开后撤销栈随会话重置");
+        app.state.set_editor_session(Some(EditorSession {
+            item_id: item_id.into(),
+            ..Default::default()
+        }));
         if std::env::var_os("FLOATPASTE_UI_SNAPSHOTS").is_some() {
             let paths = vec![
                 format!(r"D:\{}报告🦀.pdf", "long-directory\\".repeat(8)),
