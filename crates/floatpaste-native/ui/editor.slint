@@ -1088,13 +1088,14 @@ export component EditorWindow inherits Window {
                             y: 16px;
                             width: parent.width - 32px;
                             height: parent.height - 32px;
+                            content-width: self.width;
                             // false=点击透传（行可点打开），滚轮仍可滚
                             interactive: false;
                             VerticalLayout {
                                 spacing: 4px;
                                 alignment: start;
                                 for path[i] in root.file-paths: Rectangle {
-                                    height: 32px;
+                                    height: max(32px, path-label.height + 12px);
                                     border-radius: Metrics.radius-md;
                                     border-width: 1px;
                                     // hover 描边 + 文字提亮提示可点（行底色与
@@ -1106,27 +1107,26 @@ export component EditorWindow inherits Window {
                                         mouse-cursor: pointer;
                                         clicked => { root.open-file-path-at(i); }
                                     }
-                                    HorizontalLayout {
-                                        padding-left: 12px;
-                                        padding-right: 12px;
-                                        spacing: 8px;
-                                        Path {
-                                            width: 14px;
-                                            height: 14px;
-                                            y: (parent.height - self.height) / 2;
-                                            viewbox-width: 24;
-                                            viewbox-height: 24;
-                                            stroke: path-ta.has-hover ? Theme.accent-fg : Theme.fg-subtle;
-                                            stroke-width: 1.2px;
-                                            commands: "M 14 2 L 6 2 C 4.9 2 4 2.9 4 4 L 4 20 C 4 21.1 4.9 22 6 22 L 18 22 C 19.1 22 20 21.1 20 20 L 20 8 Z M 14 2 L 14 8 L 20 8";
-                                        }
-                                        Text {
-                                            text: path;
-                                            color: path-ta.has-hover ? Theme.fg-default : Theme.fg-muted;
-                                            font-size: Metrics.text-body;
-                                            vertical-alignment: center;
-                                            overflow: elide;
-                                        }
+                                    Path {
+                                        x: 12px;
+                                        width: 14px;
+                                        height: 14px;
+                                        y: (parent.height - self.height) / 2;
+                                        viewbox-width: 24;
+                                        viewbox-height: 24;
+                                        stroke: path-ta.has-hover ? Theme.accent-fg : Theme.fg-subtle;
+                                        stroke-width: 1.2px;
+                                        commands: "M 14 2 L 6 2 C 4.9 2 4 2.9 4 4 L 4 20 C 4 21.1 4.9 22 6 22 L 18 22 C 19.1 22 20 21.1 20 20 L 20 8 Z M 14 2 L 14 8 L 20 8";
+                                    }
+                                    path-label := Text {
+                                        x: 34px;
+                                        y: (parent.height - self.height) / 2;
+                                        width: max(0px, parent.width - self.x - 12px);
+                                        text: path;
+                                        color: path-ta.has-hover ? Theme.fg-default : Theme.fg-muted;
+                                        font-size: Metrics.text-body;
+                                        vertical-alignment: center;
+                                        wrap: char-wrap;
                                     }
                                 }
                             }

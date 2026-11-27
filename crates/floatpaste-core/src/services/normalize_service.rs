@@ -153,19 +153,22 @@ pub fn build_file_preview(
             .unwrap_or_else(|| label.to_string());
     }
 
-    if directory_count == file_count {
-        return format!("{file_count} 个文件夹");
-    }
-
-    if directory_count > 0 {
+    let mut summary = if directory_count == file_count {
+        format!("{file_count} 个文件夹")
+    } else if directory_count > 0 {
         let file_only_count = file_count - directory_count;
-        return format!("{file_only_count} 个文件，{directory_count} 个文件夹");
+        format!("{file_only_count} 个文件，{directory_count} 个文件夹")
+    } else {
+        format!("{file_count} 个文件")
+    };
+    if let Some(path) = file_paths.first() {
+        summary.push_str(" · ");
+        summary.push_str(&extract_filename(path));
     }
-
-    total_size
-        .map(format_bytes)
-        .map(|size| format!("{file_count} 个文件 ({size})"))
-        .unwrap_or_else(|| format!("{file_count} 个文件"))
+    if let Some(size) = total_size.filter(|_| directory_count == 0) {
+        summary.push_str(&format!(" ({})", format_bytes(size)));
+    }
+    summary
 }
 
 /// 判断字符是否属于 CJK 统一表意文字区段。
@@ -341,7 +344,7 @@ mod tests {
 
         assert_eq!(item.normalized.file_count, 2);
         assert_eq!(item.normalized.directory_count, 0);
-        assert_eq!(item.normalized.preview_text, "2 个文件 (2.0 KB)");
+        assert_eq!(item.normalized.preview_text, "2 个文件 · a.txt (2.0 KB)");
         assert_eq!(item.normalized.search_text, "a.txt b.txt");
     }
 
@@ -372,7 +375,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(item.normalized.preview_text, "1 个文件，1 个文件夹");
+        assert_eq!(item.normalized.preview_text, "1 个文件，1 个文件夹 · a.txt");
     }
 
     #[test]
