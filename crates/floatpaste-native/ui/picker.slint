@@ -258,6 +258,7 @@ export struct ClipRow {
     id: string,
     preview: string,
     is-code: bool,
+    is-file: bool,
     type-label: string,
     source-app: string,
     time-text: string,
@@ -470,9 +471,9 @@ component ClipRowCard inherits Rectangle {
                         font-size: Metrics.text-sm;
                         font-family: data.is-code ? Metrics.font-code : "";
                         line-height-factor: PanelGeometry.preview-line-height-factor;
-                        // 预览串由 Rust 按当前宽高裁排并加省略号
+                        // 文件名称按源行显示，每行独立省略。其余预览由 Rust 裁排。
                         font-weight: selected ? Metrics.weight-semibold : Metrics.weight-normal;
-                        wrap: word-wrap;
+                        wrap: data.is-file ? no-wrap : word-wrap;
                         overflow: elide;
                         // 宽度显式固定（实例化处按 preview-width-* 传入），
                         // 不给布局按首选宽分配的机会

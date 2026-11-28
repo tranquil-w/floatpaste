@@ -3,7 +3,7 @@
 //   宽度固定 780，高度由 Rust 按内容棘轮同步（min(620, chrome+列表)）
 // - 头部：放大镜 + 输入框（17px/24px 行高）+ 清除按钮 + 条目计数，背景可拖拽移动
 // - 筛选行：类型 chips（全部/收藏/文本/图片/文件）+ 标签 chips（多选 AND）
-// - 列表：单行省略恒定行高，选中仅高亮/左条/操作条浮层（不展开全文与大图）
+// - 列表：文件名逐行省略，其他摘要单行省略；选中只改变高亮与操作条浮层
 // - 键盘：根 FocusScope capture-key-pressed 先于输入框拦截会话键
 //   （↑↓/Enter/Ctrl+Enter/Ctrl+D/Ctrl+E/Del/Esc），其余按键放行输入框
 // - 挂起态（键盘交给速贴面板）：输入框失焦
@@ -13,8 +13,9 @@ import { ListScrollBar, PasteActionItem, PasteActionMenu, PasteMenuGeometry } fr
 
 export struct SearchRow {
     id: string,
-    // 单行省略形态（换行已由 Rust 折为空格）。行高恒定不随选中变化
+    // 普通摘要单行，文件摘要最多两行。行高不随选中变化。
     preview: string,
+    preview-two-lines: bool,
     kind: int, // 0=text 1=image 2=file
     has-html: bool,
     is-code: bool,
@@ -272,7 +273,7 @@ component SearchRowCard inherits Rectangle {
     property <bool> is-selected: selected;
     // 右列纵向排布链。行高恒定（不随选中展开）：切换选中时下方行
     // 才不会被推挤跳动（选中只换高亮/左条/操作条浮层）
-    property <length> preview-h: 24px;
+    property <length> preview-h: data.preview-two-lines ? 42px : 24px;
     property <length> meta-y: root.preview-h + 6px;
     property <length> meta-h: meta-ruler.height;
     property <bool> tags-shown: data.tags.length > 0;
@@ -392,12 +393,12 @@ component SearchRowCard inherits Rectangle {
         width: root.col-w;
         height: root.col-height;
 
-            // 单行省略（旧版 truncate pr-1）；选中切 semibold——前景
+            // 每行独立省略；选中切 semibold——前景
             // 通道与底色无关，任何桌面亮度下都可辨（速贴选中同款语言）
             Text {
                 x: 0;
                 y: 0;
-                height: 24px;
+                height: root.preview-h;
                 width: root.col-w - 4px - root.bar-reserve;
                 text: data.preview;
                 color: Theme.fg-default;

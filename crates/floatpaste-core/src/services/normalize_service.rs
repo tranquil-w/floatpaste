@@ -109,7 +109,7 @@ impl NormalizeService {
 
         let file_count = file_paths.len() as i32;
         let directory_count = directory_count.clamp(0, file_count);
-        let preview = build_file_preview(&file_paths, file_count, directory_count, total_size);
+        let preview = build_file_preview(&file_paths);
 
         let search_text = file_paths
             .iter()
@@ -135,40 +135,13 @@ impl NormalizeService {
     }
 }
 
-pub fn build_file_preview(
-    file_paths: &[String],
-    file_count: i32,
-    directory_count: i32,
-    total_size: Option<i64>,
-) -> String {
-    if file_count <= 1 {
-        let label = if directory_count > 0 {
-            "文件夹"
-        } else {
-            "文件"
-        };
-        return file_paths
-            .first()
-            .map(|path| format!("{label}: {}", extract_filename(path)))
-            .unwrap_or_else(|| label.to_string());
-    }
-
-    let mut summary = if directory_count == file_count {
-        format!("{file_count} 个文件夹")
-    } else if directory_count > 0 {
-        let file_only_count = file_count - directory_count;
-        format!("{file_only_count} 个文件，{directory_count} 个文件夹")
-    } else {
-        format!("{file_count} 个文件")
-    };
-    if let Some(path) = file_paths.first() {
-        summary.push_str(" · ");
-        summary.push_str(&extract_filename(path));
-    }
-    if let Some(size) = total_size.filter(|_| directory_count == 0) {
-        summary.push_str(&format!(" ({})", format_bytes(size)));
-    }
-    summary
+pub fn build_file_preview(file_paths: &[String]) -> String {
+    file_paths
+        .iter()
+        .take(2)
+        .map(|path| extract_filename(path))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// 判断字符是否属于 CJK 统一表意文字区段。
@@ -344,7 +317,7 @@ mod tests {
 
         assert_eq!(item.normalized.file_count, 2);
         assert_eq!(item.normalized.directory_count, 0);
-        assert_eq!(item.normalized.preview_text, "2 个文件 · a.txt (2.0 KB)");
+        assert_eq!(item.normalized.preview_text, "a.txt\nb.txt");
         assert_eq!(item.normalized.search_text, "a.txt b.txt");
     }
 
@@ -358,7 +331,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(item.normalized.preview_text, "文件夹: 项目资料");
+        assert_eq!(item.normalized.preview_text, "项目资料");
         assert_eq!(item.normalized.directory_count, 1);
     }
 
@@ -375,7 +348,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(item.normalized.preview_text, "1 个文件，1 个文件夹 · a.txt");
+        assert_eq!(item.normalized.preview_text, "a.txt\n设计稿");
     }
 
     #[test]

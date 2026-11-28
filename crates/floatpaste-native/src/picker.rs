@@ -33,7 +33,7 @@ use floatpaste_core::platform::windows::start_menu;
 use floatpaste_core::platform::windows::window_control::{self, GestureMode, ResizeDirection};
 use floatpaste_core::platform::windows::{mouse_monitor, picker_dismiss, session_keyboard};
 use floatpaste_core::services::clip_display::{
-    clip_type_label, paste_action_summaries, PasteActionSummary,
+    clip_type_label, file_count_label, paste_action_summaries, PasteActionSummary,
 };
 use floatpaste_core::services::clip_service::ClipService;
 use floatpaste_core::services::list_navigation::next_navigation_index;
@@ -929,28 +929,39 @@ fn build_rows(app: &App, win: &QuickPasteWindow, items: &[ClipItemSummary]) {
             let thumb = thumbnails::cached(&item.id);
             let has_thumb = thumb.is_some();
             // 预览达到入库截断上限即认为原文更长，行末始终要有省略号
-            let source_truncated = item.content_preview.chars().count() >= PREVIEW_SOURCE_LIMIT;
+            let source_truncated = item.r#type == "text"
+                && item.content_preview.chars().count() >= PREVIEW_SOURCE_LIMIT;
             let preview_started = Instant::now();
             let is_code = item.r#type == "text" && item.text_kind == TextKind::Code;
-            let preview = clamp_preview(
-                win,
-                &item.content_preview,
-                (if has_thumb {
-                    avail_with_thumb
-                } else {
-                    avail_no_thumb
-                } - action_reserve)
-                    .max(40.0),
-                source_truncated,
-                available_height,
-                is_code,
-            );
+            let is_file = item.r#type == "file";
+            let preview = if is_file {
+                item.content_preview.clone()
+            } else {
+                clamp_preview(
+                    win,
+                    &item.content_preview,
+                    (if has_thumb {
+                        avail_with_thumb
+                    } else {
+                        avail_no_thumb
+                    } - action_reserve)
+                        .max(40.0),
+                    source_truncated,
+                    available_height,
+                    is_code,
+                )
+            };
             preview_time += preview_started.elapsed();
             ClipRow {
                 id: item.id.clone().into(),
                 preview: preview.into(),
                 is_code,
-                type_label: clip_type_label(item).into(),
+                is_file,
+                type_label: (is_file && item.file_count > 1)
+                    .then(|| file_count_label(item))
+                    .flatten()
+                    .unwrap_or_else(|| clip_type_label(item))
+                    .into(),
                 source_app: item
                     .source_app
                     .clone()
@@ -2394,6 +2405,7 @@ pub(crate) mod action_sheet_tests {
         pointer_actions_button(&app, &win);
         equal_height_cards(&app, &win);
         header_hint_visibility(&app, &win);
+        file_summary_cards(&app, &win);
         deletion_interactions(&app, &win);
 
         let _ =
@@ -2713,6 +2725,94 @@ pub(crate) mod action_sheet_tests {
         request_delete(app, 0);
         assert_eq!(win.get_delete_armed_row(), -1, "空列表不能进入确认");
         app.state.end_picker_activation();
+    }
+
+    fn file_summary_cards(app: &App, win: &QuickPasteWindow) {
+        use floatpaste_core::services::normalize_service::NormalizeService;
+        use slint::Model;
+
+        let samples = [
+            (
+                vec![r"D:\agents", r"D:\commands", r"D:\skills"],
+                3,
+                "agents\ncommands",
+                "3 个文件夹",
+            ),
+            (vec![r"D:\SKILL.md"], 0, "SKILL.md", "文件"),
+            (
+                vec![r"D:\SKILL.md", r"D:\references", r"D:\examples"],
+                2,
+                "SKILL.md\nreferences",
+                "1 个文件 · 2 个文件夹",
+            ),
+        ];
+        let settings = app.state.current_settings();
+        let items: Vec<_> = samples
+            .iter()
+            .enumerate()
+            .map(|(index, (paths, directories, _, _))| {
+                let file = NormalizeService::normalize_files(
+                    paths.iter().copied().map(str::to_owned).collect(),
+                    *directories,
+                    None,
+                    Some("explorer.exe".into()),
+                )
+                .unwrap();
+                ClipItemSummary {
+                    id: format!("sheet-file-{index}"),
+                    content_preview: file.normalized.preview_text,
+                    source_app: file.source_app,
+                    file_count: file.normalized.file_count,
+                    directory_count: file.normalized.directory_count,
+                    ..file_summary()
+                }
+            })
+            .collect();
+
+        win.window().set_size(slint::LogicalSize::new(360.0, 400.0));
+        win.set_selected(0);
+        build_rows(app, win, &items);
+        for (index, (_, _, title, badge)) in samples.iter().enumerate() {
+            let row = win.get_rows().row_data(index).unwrap();
+            assert_eq!(row.preview.as_str(), *title);
+            assert_eq!(row.type_label.as_str(), *badge);
+            let search = crate::search::make_row(
+                &items[index],
+                &settings.session_keys,
+                &settings.secondary_paste,
+            );
+            assert_eq!(search.preview.as_str(), *title);
+            assert!(search
+                .meta
+                .starts_with(if index == 1 { "1 个文件" } else { badge }));
+        }
+        if std::env::var_os("FLOATPASTE_UI_SNAPSHOTS").is_some() {
+            let dir =
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.artifacts/snapshot");
+            std::fs::create_dir_all(&dir).unwrap();
+            for (name, mode) in [
+                ("light", theme::ResolvedTheme::Light),
+                ("dark", theme::ResolvedTheme::Dark),
+            ] {
+                theme_bridge::reapply_theme(app, &theme::derive_tokens("default", "", mode));
+                slint::Timer::single_shot(Duration::from_millis(180), || {
+                    slint::quit_event_loop().unwrap()
+                });
+                slint::run_event_loop_until_quit().unwrap();
+                let pixels = win.window().take_snapshot().unwrap();
+                image::save_buffer(
+                    dir.join(format!(
+                        "picker-file-summary-{name}-{}.png",
+                        (win.window().scale_factor() * 100.0).round() as u32
+                    )),
+                    pixels.as_bytes(),
+                    pixels.width(),
+                    pixels.height(),
+                    image::ColorType::Rgba8,
+                )
+                .unwrap();
+            }
+        }
     }
 
     fn equal_height_cards(app: &App, win: &QuickPasteWindow) {

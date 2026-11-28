@@ -1096,7 +1096,12 @@ pub(crate) fn make_row(
 ) -> SearchRow {
     let thumb = thumbnails::cached(&item.id);
     let has_thumb = thumb.is_some();
-    let normal_preview = flatten_preview_newlines(&item.content_preview);
+    let is_file = item.r#type == "file";
+    let preview = if is_file {
+        item.content_preview.clone()
+    } else {
+        flatten_preview_newlines(&item.content_preview)
+    };
 
     SearchRow {
         has_html: item.has_html,
@@ -1114,7 +1119,8 @@ pub(crate) fn make_row(
         }
         .into(),
         id: item.id.clone().into(),
-        preview: normal_preview.into(),
+        preview_two_lines: is_file && preview.contains('\n'),
+        preview: preview.into(),
         kind: match item.r#type.as_str() {
             "image" => 1,
             "file" => 2,
@@ -2249,6 +2255,7 @@ pub(crate) mod scroll_reset_tests {
             .map(|index| SearchRow {
                 id: format!("row-{index}").into(),
                 preview: format!("条目 {index}").into(),
+                preview_two_lines: false,
                 kind: 0,
                 has_html: false,
                 is_code: false,
@@ -3081,8 +3088,8 @@ pub(crate) mod action_menu_tests {
             ("text", "https://example.com/docs/floatpaste/very-long-path?language=zh-CN&view=preview", TextKind::Link),
             ("text", "C:\\Users\\设计师\\Documents\\FloatPaste\\release\\2026\\界面验收说明与交付清单.md", TextKind::Path),
             ("text", "fn main() {\n    println!(\"Hello, 浮贴 😀\");\n}", TextKind::Code),
+            ("file", "SKILL.md\nreferences", TextKind::Plain),
             ("image", "FloatPaste 图标 · 512 × 512 · PNG", TextKind::Plain),
-            ("file", "界面验收说明.md、主题对比.png 等 3 个文件", TextKind::Plain),
         ] {
             let mut item = summary(kind, false);
             item.id = format!("sample-{}", items.len());
@@ -3092,20 +3099,23 @@ pub(crate) mod action_menu_tests {
             item.created_at = "2026-10-24T08:00:00+08:00".into();
             item.tags = vec!["一个需要省略的长标签名称".into(), "工作".into(), "常用".into(), "验收".into()];
             item.is_favorited = items.len() == 2;
-            if kind == "file" { item.file_count = 3; }
+            if kind == "file" {
+                item.file_count = 3;
+                item.directory_count = 2;
+            }
             items.push(item);
         }
         app.state.set_search_items(items);
         build_rows(app);
         let rows = win.get_rows();
-        let mut image_row = rows.row_data(5).unwrap();
+        let mut image_row = rows.row_data(6).unwrap();
         image_row.has_thumb = true;
         image_row.thumb = slint::Image::load_from_path(std::path::Path::new(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/assets/icon-512.png"
         )))
         .unwrap();
-        rows.set_row_data(5, image_row);
+        rows.set_row_data(6, image_row);
         win.set_result_count(7);
         win.set_result_total(7);
         win.window().set_size(slint::LogicalSize::new(780.0, 620.0));
